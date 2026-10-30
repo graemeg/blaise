@@ -77,7 +77,7 @@ var
   no '.' are returned unchanged.  Uses StrAt (0-based) per house style. }
 function StripUnitQualifier(const AName: string): string;
 var
-  I, LastDot: Integer;
+  I, LastDot: Int;
 begin
   LastDot := -1;
   for I := 0 to Length(AName) - 1 do
@@ -107,9 +107,9 @@ end;
 function ResolveInlineTypeName(const ATypeName: string;
                                ATable: TSymbolTable): TTypeDesc;
 var
-  DotDot, OfPos: Integer;
+  DotDot, OfPos: Int;
   LowStr, HighStr, ElemName: string;
-  Lo, Hi: Integer;
+  Lo, Hi: Int;
   ElemSym: TSymbol;
   BaseSym: TSymbol;
   ElemType: TTypeDesc;
@@ -267,7 +267,7 @@ var
   EnumDef:  TEnumTypeDef;
   EnumDesc: TEnumTypeDesc;
   Sym: TSymbol;
-  K: Integer;
+  K: Int;
   MName: string;
 begin
   EnumDef  := TEnumTypeDef(AEntry.Def);
@@ -294,8 +294,8 @@ var
   BaseSym:  TSymbol;
   SetDesc:  TSetTypeDesc;
   Sym:      TSymbol;
-  DDotPos:  Integer;
-  Hi:       Integer;
+  DDotPos:  Int;
+  Hi:       Int;
 begin
   SetDef := TSetTypeDef(AEntry.Def);
   { Integer-subrange base ('set of lo..hi'): rebuild a Byte-backed ordinal set
@@ -424,7 +424,7 @@ procedure RegisterImportedTypeConsts(const ATypeName: string;
                                      ATable: TSymbolTable;
                                      const AUnitName: string);
 var
-  J:   Integer;
+  J:   Int;
   CD:  TConstDecl;
   Par: TTypeDesc;
   Sym: TSymbol;
@@ -499,7 +499,7 @@ procedure RegisterImportedNestedTypes(const ATypeName: string;
                                       ATable: TSymbolTable;
                                       const AUnitName: string);
 var
-  J, K, L:  Integer;
+  J, K, L:  Int;
   ND:       TTypeDecl;
   RD:       TRecordTypeDef;
   AD:       TTypeAliasDef;
@@ -617,7 +617,7 @@ end;
   string built in AnalyseTypeDecls pass-2 for interfaces. }
 function ParamVarFlags(AMethod: TMethodDecl): string;
 var
-  K: Integer;
+  K: Int;
   P: TMethodParam;
 begin
   Result := '';
@@ -635,7 +635,7 @@ end;
 function ImportIntfParamInfos(AMethod: TMethodDecl;
   ATable: TSymbolTable): TObjectList;
 var
-  K: Integer;
+  K: Int;
   P: TMethodParam;
   Info: TIntfParamInfo;
 begin
@@ -659,7 +659,7 @@ end;
   case-sensitive at link time. }
 function DeclaredMethodCaseOf(AMethods: TObjectList; const AName: string): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := AName;
   if AMethods = nil then Exit;
@@ -676,7 +676,7 @@ var
   Sym:      TSymbol;
   ParentSym: TSymbol;
   M:        TMethodDecl;
-  I:        Integer;
+  I:        Int;
   PropDecl: TPropertyDecl;
   PropInfo: TPropertyInfo;
   PropSym:  TSymbol;
@@ -778,7 +778,7 @@ end;
 procedure ImportProperties(RT: TRecordTypeDesc; AProps, AMethods: TObjectList;
   ATable: TSymbolTable; const AUnitName, ATypeName: string);
 var
-  I:        Integer;
+  I:        Int;
   PropDecl: TPropertyDecl;
   PropInfo: TPropertyInfo;
   FldSym:   TSymbol;
@@ -849,7 +849,7 @@ var
   FldType:  TTypeDesc;
   FldInfo:  TFieldInfo;
   MDecl:    TMethodDecl;
-  I, J:     Integer;
+  I, J:     Int;
   SavedOwner: string;
 begin
   ClassDef := TClassTypeDef(AEntry.Def);
@@ -1028,7 +1028,7 @@ var
   RecDef:   TRecordTypeDef;
   RecDesc:  TRecordTypeDesc;
   Sym:      TSymbol;
-  I, J:     Integer;
+  I, J:     Int;
   FldDecl:  TFieldDecl;
   FldType:  TTypeDesc;
   MDecl:    TMethodDecl;
@@ -1124,7 +1124,7 @@ var
   Def:       TProceduralTypeDef;
   ProcDesc:  TProceduralTypeDesc;
   Sym:       TSymbol;
-  K:         Integer;
+  K:         Int;
   MParam:    TMethodParam;
   ParamInfo: TProcParamInfo;
   TSym:      TSymbol;
@@ -1170,7 +1170,7 @@ var
   AliasDesc:  TTypeDesc;
   Sym:        TSymbol;
   SubEnum:    TEnumTypeDesc;
-  K:          Integer;
+  K:          Int;
 begin
   AliasDef  := TTypeAliasDef(AEntry.Def);
   AliasName := AliasDef.TypeName;
@@ -1226,7 +1226,7 @@ end;
 procedure RegisterTypes(AIface: TUnitInterface; ATable: TSymbolTable;
                         ASemantic: TSemanticAnalyser = nil);
 var
-  I: Integer;
+  I: Int;
   Entry: TTypeEntry;
   Sym: TSymbol;
   PrevUnit: string;
@@ -1309,7 +1309,7 @@ end;
 procedure RegisterConsts(AIface: TUnitInterface; ATable: TSymbolTable;
                          ASemantic: TSemanticAnalyser);
 var
-  I, J: Integer;
+  I, J: Int;
   Entry: TConstEntry;
   Sym: TSymbol;
   TypeDesc: TTypeDesc;
@@ -1375,7 +1375,7 @@ end;
 procedure RegisterVars(AIface: TUnitInterface; ATable: TSymbolTable;
                        ASemantic: TSemanticAnalyser);
 var
-  I: Integer;
+  I: Int;
   Entry: TVarEntry;
   Sym: TSymbol;
   TypeDesc: TTypeDesc;
@@ -1457,7 +1457,7 @@ function SynthesiseMethodDecl(ASig: TRoutineSig;
                               ATable: TSymbolTable;
                               ASemantic: TSemanticAnalyser = nil): TMethodDecl;
 var
-  J:     Integer;
+  J:     Int;
   Param: TMethodParam;
   PSyn:  TMethodParam;
 begin
@@ -1531,7 +1531,7 @@ end;
 procedure RegisterRoutines(AIface: TUnitInterface; ATable: TSymbolTable;
                            ASemantic: TSemanticAnalyser);
 var
-  I, J: Integer;
+  I, J: Int;
   Sig: TRoutineSig;
   Sym: TSymbol;
   RetType: TTypeDesc;
@@ -1591,7 +1591,7 @@ end;
 
 procedure RegisterGenericRoutines(AIface: TUnitInterface; ATable: TSymbolTable);
 var
-  I: Integer;
+  I: Int;
   G: TGenericBody;
   PrevUnit: string;
 begin

@@ -112,15 +112,15 @@ type
     { True byte size of a value: 1 for Byte/Boolean, 4 for Integer/Single, 8
       for pointer/string/Int64/Double, sum-of-fields for records (with natural
       alignment padding).  Currently identical to RawSize. }
-    function ByteSize: Integer;
+    function ByteSize: Int;
     { Natural alignment requirement: 1 for Byte/Boolean, 4 for Integer, 8 for
       pointer/string/Int64.  Used to pad field offsets inside records and to
       align stack slots. }
-    function AllocAlign: Integer;
+    function AllocAlign: Int;
     { Same as ByteSize.  Retained for call sites that semantically want
       "storage footprint of a single value" — e.g. static-array element
       stride. }
-    function RawSize: Integer;
+    function RawSize: Int;
   end;
 
   { Typed or untyped pointer descriptor.
@@ -161,8 +161,8 @@ type
   TStaticArrayTypeDesc = class(TTypeDesc)
   public
     [Unretained] ElementType: TTypeDesc;  { not owned }
-    LowBound:    Integer;
-    HighBound:   Integer;
+    LowBound:    Int;
+    HighBound:   Int;
   end;
 
   { Enum type descriptor.  Members are ordered; ordinal values are 0..N-1.
@@ -181,17 +181,17 @@ type
     destructor  Destroy; override;
     { Append a member with its ordinal.  Use this in preference to
       Members.Add (which would box ordinal 0) so explicit ordinals survive. }
-    procedure   AddMember(const AMember: string; AOrdinal: Integer);
+    procedure   AddMember(const AMember: string; AOrdinal: Int);
     { Ordinal stored for the member at position AIndex. }
-    function    OrdinalAt(AIndex: Integer): Integer;
+    function    OrdinalAt(AIndex: Int): Int;
     { Ordinal of a member by name, or -1 if not a member.  Returns the stored
       ordinal (which may differ from the positional index for an
       explicit-ordinal enum), NOT the index. }
-    function    OrdinalOf(const AMember: string): Integer;
+    function    OrdinalOf(const AMember: string): Int;
     { Max / min stored ordinal — what High(TE) / Low(TE) must fold to.  Both
       return 0 for an empty enum (never occurs — every enum has >= 1 member). }
-    function    MaxOrdinal: Integer;
-    function    MinOrdinal: Integer;
+    function    MaxOrdinal: Int;
+    function    MinOrdinal: Int;
   end;
 
   { Set type descriptor.  BaseType is the element type (enum or ordinal such
@@ -207,13 +207,13 @@ type
   TSetTypeDesc = class(TTypeDesc)
   public
     [Unretained] BaseType: TTypeDesc;  { not owned — enum or ordinal type }
-    BitCount: Integer;
+    BitCount: Int;
     { True when this set is too wide for a single 64-bit register and must use
       the inline byte-array (aggregate) representation + _Set* RTL helpers. }
     function IsJumbo: Boolean;
     { Number of bitmap bytes for the jumbo representation = ceil(BitCount/8).
       Only meaningful when IsJumbo; <= 32 for the 256-member ceiling. }
-    function RawByteSize: Integer;
+    function RawByteSize: Int;
   end;
 
   { One parameter of a procedural type signature. }
@@ -262,7 +262,7 @@ type
   public
     Name:     string;
     [Unretained] TypeDesc: TTypeDesc;  { not owned }
-    Offset:   Integer;    { byte offset from record base }
+    Offset:   Int;    { byte offset from record base }
     IsWeak:   Boolean;    { set when the class field was declared [Weak];
                             field cleanup emits _WeakClear for weak fields
                             and field assignment bypasses addref/release. }
@@ -285,7 +285,7 @@ type
   { One entry in a class vtable — tracks slot index and implementing method. }
   TVTableEntry = class
   public
-    Slot:       Integer;  { index in vtable }
+    Slot:       Int;  { index in vtable }
     MethName:   string;   { unqualified method name }
     ImplName:   string;   { fully-qualified label, e.g. TDog_Speak }
     IsAbstract: Boolean;  { True = slot has no implementation; codegen emits abort stub }
@@ -343,20 +343,20 @@ type
                         const AParamIsVar: string = '';
                         AParams: TObjectList = nil);
     function  HasMethod(const AName: string): Boolean;
-    function  MethodCount: Integer;
-    function  MethodName(AIndex: Integer): string;
-    function  MethodReturnTypeName(AIndex: Integer): string;
-    function  MethodIndex(const AName: string): Integer;
-    function  MethodParamIsVar(AMethodIndex: Integer; AParamIndex: Integer): Boolean;
-    function  MethodParamVarFlagsStr(AMethodIndex: Integer): string;
+    function  MethodCount: Int;
+    function  MethodName(AIndex: Int): string;
+    function  MethodReturnTypeName(AIndex: Int): string;
+    function  MethodIndex(const AName: string): Int;
+    function  MethodParamIsVar(AMethodIndex: Int; AParamIndex: Int): Boolean;
+    function  MethodParamVarFlagsStr(AMethodIndex: Int): string;
     { the declared parameters of a method (TIntfParamInfo), nil if unknown }
-    function  MethodParams(AMethodIndex: Integer): TObjectList;
+    function  MethodParams(AMethodIndex: Int): TObjectList;
     { a fresh owned copy of MethodParams, for a child interface inheriting
       the method; nil when unknown }
-    function  CloneMethodParams(AMethodIndex: Integer): TObjectList;
+    function  CloneMethodParams(AMethodIndex: Int): TObjectList;
     { number of methods registered under AName (an inherited method that is
       redeclared appears twice) }
-    function  MethodNameCount(const AName: string): Integer;
+    function  MethodNameCount(const AName: string): Int;
     procedure AddProperty(AInfo: TPropertyInfo);
     { Walks the parent chain — a child interface sees inherited properties. }
     function  FindProperty(const AName: string): TPropertyInfo;
@@ -401,34 +401,34 @@ type
     destructor Destroy; override;
     procedure AddField(const AName: string; AType: TTypeDesc);
     function  FindField(const AName: string): TFieldInfo;
-    function  PackedSize: Integer;
-    function  TotalSize: Integer;
-    function  MaxAlign: Integer;
-    function  FieldAlign(AType: TTypeDesc): Integer;
+    function  PackedSize: Int;
+    function  TotalSize: Int;
+    function  MaxAlign: Int;
+    function  FieldAlign(AType: TTypeDesc): Int;
 
     { Vtable management }
     function  HasVTable: Boolean;
-    function  VTableCount: Integer;
-    function  VTableEntryAt(ASlot: Integer): TVTableEntry;
+    function  VTableCount: Int;
+    function  VTableEntryAt(ASlot: Int): TVTableEntry;
     { Record / look up the symbol a method's body is emitted under.  Empty
       result means this class does not declare AName (walk to Parent). }
     procedure AddMethodSym(const AName, AEmitName: string);
     function  FindMethodSym(const AName: string): string;
-    function  FindVTableSlot(const AMethodName: string): Integer;
-    function  AddVTableSlot(const AMethodName, AImplName: string): Integer;
-    procedure OverrideVTableSlot(ASlot: Integer; const AImplName: string);
+    function  FindVTableSlot(const AMethodName: string): Int;
+    function  AddVTableSlot(const AMethodName, AImplName: string): Int;
+    procedure OverrideVTableSlot(ASlot: Int; const AImplName: string);
     { Place a method at an explicit slot index, growing the table with
       placeholder entries if necessary.  Used by the cached-unit importer,
       which knows each method's authoritative slot from the .bif rather than
       relying on registration order. }
-    procedure SetVTableSlotAt(ASlot: Integer;
+    procedure SetVTableSlotAt(ASlot: Int;
                               const AMethodName, AImplName: string);
     procedure CopyVTableFrom(AParent: TRecordTypeDesc);
 
     { Interface implements tracking }
     procedure AddImplements(AIntf: TInterfaceTypeDesc);
-    function  ImplementsCount: Integer;
-    function  ImplementsIntfAt(AIndex: Integer): TInterfaceTypeDesc;
+    function  ImplementsCount: Int;
+    function  ImplementsIntfAt(AIndex: Int): TInterfaceTypeDesc;
 
     { Property tracking }
     procedure AddProperty(AProp: TPropertyInfo);
@@ -438,8 +438,8 @@ type
 
     { Custom attribute tracking }
     procedure AddClassAttribute(const AName: string);
-    function  ClassAttributeCount: Integer;
-    function  ClassAttributeAt(AIndex: Integer): string;
+    function  ClassAttributeCount: Int;
+    function  ClassAttributeAt(AIndex: Int): string;
 
     property  Fields:      TObjectList read FFields;
     property  Properties: TObjectList read FProperties;
@@ -581,8 +581,8 @@ type
       parent walk).  Used by the analyser to harvest unit-imported
       symbols into per-unit caches without threading semantic
       references through every Register* helper. }
-    function SymbolCount: Integer;
-    function SymbolAt(AIdx: Integer): TSymbol;
+    function SymbolCount: Int;
+    function SymbolAt(AIdx: Int): TSymbol;
     { Detach a directly-defined symbol from this scope WITHOUT freeing
       it (FSymbols owns, so Extract not Remove).  Returns the detached
       symbol, or nil if not present.  Caller takes responsibility for
@@ -721,10 +721,10 @@ type
     { Generic view (see SetGenericView).  FGenericViewFloor is the scope-stack
       depth at which the instantiation was entered; 0 when no view is active. }
     FGenericViewUnit: string;
-    FGenericViewFloor: Integer;
+    FGenericViewFloor: Int;
     [Unretained] FGenericViewPins: TStringList;  { type-argument spelling ->
                                                    TSymbol, owned by the analyser }
-    FSuppressVisibility: Integer;  { > 0: GH #248 visibility not enforced }
+    FSuppressVisibility: Int;  { > 0: GH #248 visibility not enforced }
 
     { The last plain name Lookup refused because its owning unit is not
       visible (GH #248); lets the analyser's error say which unit to use. }
@@ -760,7 +760,7 @@ type
                                        so those symbols stay unit-private. }
 
     function GetCurrentScope: TScope;
-    function GetScopeDepth: Integer;
+    function GetScopeDepth: Int;
     function ThreadView: TSymbolTableView;
     function GetDefineOwningUnit: string;
     procedure SetDefineOwningUnit(const AValue: string);
@@ -782,7 +782,7 @@ type
     function  PushScope: TScope;
     procedure PopScope;
     property  CurrentScope: TScope read GetCurrentScope;
-    property  ScopeDepth: Integer read GetScopeDepth;
+    property  ScopeDepth: Int read GetScopeDepth;
     function  GlobalScope: TScope;
 
     { Symbol management — owns ASymbol on success; caller must free on False }
@@ -837,16 +837,16 @@ type
       which a body reaches through its type arguments' names.  Without the
       view a consumer's same-named declaration silently replaced the one the
       body was written against.  AFloor = 0 clears the view. }
-    procedure SetGenericView(const AUnit: string; AFloor: Integer;
+    procedure SetGenericView(const AUnit: string; AFloor: Int;
                              APins: TStringList);
     property GenericViewUnit: string read FGenericViewUnit;
-    property GenericViewFloor: Integer read FGenericViewFloor;
+    property GenericViewFloor: Int read FGenericViewFloor;
     property GenericViewPins: TStringList read FGenericViewPins;
 
     { While > 0, names of units outside the uses chain resolve as before GH
       #248.  Used when re-resolving the type arguments of an instance that a
       cached unit wrote -- that unit already checked them. }
-    property SuppressVisibility: Integer read FSuppressVisibility
+    property SuppressVisibility: Int read FSuppressVisibility
                                          write FSuppressVisibility;
 
     { See FLastHiddenName.  ClearLastHidden forgets it. }
@@ -890,7 +890,7 @@ type
     function NewEnumType(const AName: string): TEnumTypeDesc;
     function NewSetType(const AName: string; ABase: TEnumTypeDesc): TSetTypeDesc;
     function NewOrdinalSetType(const AName: string; ABase: TTypeDesc;
-      ABitCount: Integer): TSetTypeDesc;
+      ABitCount: Int): TSetTypeDesc;
     function NewProceduralType(const AName: string): TProceduralTypeDesc;
 
     { Creates an open-array type descriptor for element type AElementType.
@@ -907,7 +907,7 @@ type
 
     { Creates a static array type descriptor. Registered in FAllTypes. }
     function NewStaticArrayType(AElementType: TTypeDesc;
-      ALow, AHigh: Integer): TStaticArrayTypeDesc;
+      ALow, AHigh: Int): TStaticArrayTypeDesc;
 
     { Creates a dynamic array type descriptor. Registered in FAllTypes. }
     function NewDynArrayType(AElementType: TTypeDesc): TDynArrayTypeDesc;
@@ -1041,7 +1041,7 @@ end;
 
 function TTypeDesc.HasManagedContent: Boolean;
 var
-  I: Integer;
+  I: Int;
   RT: TRecordTypeDesc;
 begin
   Result := False;
@@ -1079,12 +1079,12 @@ begin
   Result := BitCount > 64;
 end;
 
-function TSetTypeDesc.RawByteSize: Integer;
+function TSetTypeDesc.RawByteSize: Int;
 begin
   Result := (BitCount + 7) div 8;
 end;
 
-function TTypeDesc.RawSize: Integer;
+function TTypeDesc.RawSize: Int;
 begin
   case Kind of
     tyByte, tyInt8, tyBoolean: Result := 1;
@@ -1111,7 +1111,7 @@ begin
   end;
 end;
 
-function TTypeDesc.ByteSize: Integer;
+function TTypeDesc.ByteSize: Int;
 begin
   case Kind of
     tyInteger, tyUInt32, tyEnum: Result := 4;
@@ -1141,7 +1141,7 @@ begin
   end;
 end;
 
-function TTypeDesc.AllocAlign: Integer;
+function TTypeDesc.AllocAlign: Int;
 begin
   case Kind of
     tyInteger, tyUInt32, tyEnum: Result := 4;
@@ -1198,7 +1198,7 @@ end;
   dynamic array), which must remain at their natural alignment because the
   runtime helpers (`_StringRelease`, `_ClassRelease`, etc.) perform 64-bit
   loads through the field pointer. }
-function TRecordTypeDesc.FieldAlign(AType: TTypeDesc): Integer;
+function TRecordTypeDesc.FieldAlign(AType: TTypeDesc): Int;
 begin
   Result := AType.AllocAlign();
   if not FIsPacked then Exit;
@@ -1212,9 +1212,9 @@ end;
 { Cumulative byte position immediately after the last field (or after the
   vptr if no fields have been added yet).  Excludes the record's tail
   padding — that is only applied in TotalSize. }
-function TRecordTypeDesc.PackedSize: Integer;
+function TRecordTypeDesc.PackedSize: Int;
 var
-  I, A: Integer;
+  I, A: Int;
   FT:   TTypeDesc;
 begin
   if HasVTable() then
@@ -1234,8 +1234,8 @@ end;
 procedure TRecordTypeDesc.AddField(const AName: string; AType: TTypeDesc);
 var
   Info:   TFieldInfo;
-  Offset: Integer;
-  A:      Integer;
+  Offset: Int;
+  A:      Int;
 begin
   Offset := PackedSize();
   A      := FieldAlign(AType);
@@ -1259,9 +1259,9 @@ begin
     Result := nil;
 end;
 
-function TRecordTypeDesc.TotalSize: Integer;
+function TRecordTypeDesc.TotalSize: Int;
 var
-  Algn: Integer;
+  Algn: Int;
 begin
   Result := PackedSize();
   { Tail-pad records up to their own alignment so that arrays of records
@@ -1277,9 +1277,9 @@ begin
     Inc(Result, Algn - Result mod Algn);
 end;
 
-function TRecordTypeDesc.MaxAlign: Integer;
+function TRecordTypeDesc.MaxAlign: Int;
 var
-  I, A: Integer;
+  I, A: Int;
   FT:   TTypeDesc;
 begin
   Result := 1;
@@ -1302,7 +1302,7 @@ begin
   Result := (FVTable <> nil) and (FVTable.Count > 0);
 end;
 
-function TRecordTypeDesc.VTableCount: Integer;
+function TRecordTypeDesc.VTableCount: Int;
 begin
   if FVTable = nil then
     Result := 0
@@ -1310,7 +1310,7 @@ begin
     Result := FVTable.Count;
 end;
 
-function TRecordTypeDesc.VTableEntryAt(ASlot: Integer): TVTableEntry;
+function TRecordTypeDesc.VTableEntryAt(ASlot: Int): TVTableEntry;
 begin
   if (FVTable = nil) or (ASlot < 0) or (ASlot >= FVTable.Count) then
     Result := nil
@@ -1318,9 +1318,9 @@ begin
     Result := TVTableEntry(FVTable.Items[ASlot]);
 end;
 
-function TRecordTypeDesc.FindVTableSlot(const AMethodName: string): Integer;
+function TRecordTypeDesc.FindVTableSlot(const AMethodName: string): Int;
 var
-  I: Integer;
+  I: Int;
   E: TVTableEntry;
 begin
   Result := -1;
@@ -1335,7 +1335,7 @@ begin
   end;
 end;
 
-function TRecordTypeDesc.AddVTableSlot(const AMethodName, AImplName: string): Integer;
+function TRecordTypeDesc.AddVTableSlot(const AMethodName, AImplName: string): Int;
 var
   E: TVTableEntry;
 begin
@@ -1349,7 +1349,7 @@ begin
   Result := E.Slot;
 end;
 
-procedure TRecordTypeDesc.OverrideVTableSlot(ASlot: Integer; const AImplName: string);
+procedure TRecordTypeDesc.OverrideVTableSlot(ASlot: Int; const AImplName: string);
 begin
   if (FVTable <> nil) and (ASlot >= 0) and (ASlot < FVTable.Count) then
     TVTableEntry(FVTable.Items[ASlot]).ImplName := AImplName;
@@ -1360,17 +1360,17 @@ begin
   FImplements.Add(AIntf);
 end;
 
-function TRecordTypeDesc.ImplementsCount: Integer;
+function TRecordTypeDesc.ImplementsCount: Int;
 begin
   Result := FImplements.Count;
 end;
 
-function TRecordTypeDesc.ImplementsIntfAt(AIndex: Integer): TInterfaceTypeDesc;
+function TRecordTypeDesc.ImplementsIntfAt(AIndex: Int): TInterfaceTypeDesc;
 begin
   Result := TInterfaceTypeDesc(FImplements.Items[AIndex]);
 end;
 
-procedure TRecordTypeDesc.SetVTableSlotAt(ASlot: Integer;
+procedure TRecordTypeDesc.SetVTableSlotAt(ASlot: Int;
   const AMethodName, AImplName: string);
 var
   E: TVTableEntry;
@@ -1415,7 +1415,7 @@ end;
 
 procedure TRecordTypeDesc.CopyVTableFrom(AParent: TRecordTypeDesc);
 var
-  I: Integer;
+  I: Int;
   Src, Dst: TVTableEntry;
 begin
   if (AParent = nil) or (AParent.VTableCount() = 0) then Exit;
@@ -1444,7 +1444,7 @@ end;
 
 function TRecordTypeDesc.FindProperty(const AName: string): TPropertyInfo;
 var
-  I:    Integer;
+  I:    Int;
   Walk: TRecordTypeDesc;
 begin
   Walk := Self;
@@ -1462,7 +1462,7 @@ end;
 
 function TRecordTypeDesc.FindIndexedProperty: TPropertyInfo;
 var
-  I:    Integer;
+  I:    Int;
   P:    TPropertyInfo;
   Walk: TRecordTypeDesc;
 begin
@@ -1486,7 +1486,7 @@ function TRecordTypeDesc.FindDefaultProperty: TPropertyInfo;
 { Returns the property marked `default` (Obj[I] sugar), walking the inheritance
   chain; nil if the class has no default property. }
 var
-  I:    Integer;
+  I:    Int;
   P:    TPropertyInfo;
   Walk: TRecordTypeDesc;
 begin
@@ -1508,12 +1508,12 @@ begin
   FClassAttributes.Add(AName);
 end;
 
-function TRecordTypeDesc.ClassAttributeCount: Integer;
+function TRecordTypeDesc.ClassAttributeCount: Int;
 begin
   Result := FClassAttributes.Count;
 end;
 
-function TRecordTypeDesc.ClassAttributeAt(AIndex: Integer): string;
+function TRecordTypeDesc.ClassAttributeAt(AIndex: Int): string;
 begin
   Result := FClassAttributes.Strings[AIndex];
 end;
@@ -1549,7 +1549,7 @@ end;
 
 function TInterfaceTypeDesc.FindProperty(const AName: string): TPropertyInfo;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FProperties.Count - 1 do
   begin
@@ -1566,7 +1566,7 @@ function TInterfaceTypeDesc.FindDefaultProperty: TPropertyInfo;
 { the property marked `default` (I[K] sugar), own then inherited; nil if
   the interface has none }
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FProperties.Count - 1 do
   begin
@@ -1599,17 +1599,17 @@ begin
   FParamInfos.Add(AParams);
 end;
 
-function TInterfaceTypeDesc.MethodParams(AMethodIndex: Integer): TObjectList;
+function TInterfaceTypeDesc.MethodParams(AMethodIndex: Int): TObjectList;
 begin
   Result := nil;
   if (AMethodIndex >= 0) and (AMethodIndex < FParamInfos.Count) then
     Result := TObjectList(FParamInfos.Items[AMethodIndex]);
 end;
 
-function TInterfaceTypeDesc.CloneMethodParams(AMethodIndex: Integer): TObjectList;
+function TInterfaceTypeDesc.CloneMethodParams(AMethodIndex: Int): TObjectList;
 var
   Src: TObjectList;
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   Src := Self.MethodParams(AMethodIndex);
@@ -1620,9 +1620,9 @@ begin
     Result.Add(TIntfParamInfo(Src.Items[I]).Clone());
 end;
 
-function TInterfaceTypeDesc.MethodNameCount(const AName: string): Integer;
+function TInterfaceTypeDesc.MethodNameCount(const AName: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := 0;
   for I := 0 to FMethods.Count - 1 do
@@ -1635,32 +1635,32 @@ begin
   Result := FMethods.IndexOf(AName) >= 0;
 end;
 
-function TInterfaceTypeDesc.MethodCount: Integer;
+function TInterfaceTypeDesc.MethodCount: Int;
 begin
   Result := FMethods.Count;
 end;
 
-function TInterfaceTypeDesc.MethodName(AIndex: Integer): string;
+function TInterfaceTypeDesc.MethodName(AIndex: Int): string;
 begin
   Result := FMethods.Strings[AIndex];
 end;
 
-function TInterfaceTypeDesc.MethodReturnTypeName(AIndex: Integer): string;
+function TInterfaceTypeDesc.MethodReturnTypeName(AIndex: Int): string;
 begin
   Result := FReturnTypes.Strings[AIndex];
 end;
 
-function TInterfaceTypeDesc.MethodIndex(const AName: string): Integer;
+function TInterfaceTypeDesc.MethodIndex(const AName: string): Int;
 begin
   Result := FMethods.IndexOf(AName);
 end;
 
-function TInterfaceTypeDesc.MethodParamIsVar(AMethodIndex: Integer;
-  AParamIndex: Integer): Boolean;
+function TInterfaceTypeDesc.MethodParamIsVar(AMethodIndex: Int;
+  AParamIndex: Int): Boolean;
 var
   Flags:  string;
-  Idx:    Integer;
-  CurPar: Integer;
+  Idx:    Int;
+  CurPar: Int;
 begin
   Result := False;
   if (AMethodIndex < 0) or (AMethodIndex >= FParamIsVar.Count) then Exit;
@@ -1683,7 +1683,7 @@ begin
   end;
 end;
 
-function TInterfaceTypeDesc.MethodParamVarFlagsStr(AMethodIndex: Integer): string;
+function TInterfaceTypeDesc.MethodParamVarFlagsStr(AMethodIndex: Int): string;
 begin
   if (AMethodIndex >= 0) and (AMethodIndex < FParamIsVar.Count) then
     Result := FParamIsVar.Strings[AMethodIndex]
@@ -1801,12 +1801,12 @@ begin
   Result := nil;
 end;
 
-function TScope.SymbolCount: Integer;
+function TScope.SymbolCount: Int;
 begin
   Result := FSymbols.Count;
 end;
 
-function TScope.SymbolAt(AIdx: Integer): TSymbol;
+function TScope.SymbolAt(AIdx: Int): TSymbol;
 begin
   Result := TSymbol(FSymbols.Items[AIdx]);
 end;
@@ -1829,19 +1829,19 @@ begin
   inherited Destroy();
 end;
 
-procedure TEnumTypeDesc.AddMember(const AMember: string; AOrdinal: Integer);
+procedure TEnumTypeDesc.AddMember(const AMember: string; AOrdinal: Int);
 begin
   Members.AddObject(AMember, TObject(Pointer(UInt(AOrdinal))));
 end;
 
-function TEnumTypeDesc.OrdinalAt(AIndex: Integer): Integer;
+function TEnumTypeDesc.OrdinalAt(AIndex: Int): Int;
 begin
-  Result := Integer(UInt(Pointer(Members.Objects[AIndex])));
+  Result := Int(UInt(Pointer(Members.Objects[AIndex])));
 end;
 
-function TEnumTypeDesc.OrdinalOf(const AMember: string): Integer;
+function TEnumTypeDesc.OrdinalOf(const AMember: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Members.Count - 1 do
     if SameText(Members.Strings[I], AMember) then
@@ -1851,9 +1851,9 @@ begin
   Result := -1;
 end;
 
-function TEnumTypeDesc.MaxOrdinal: Integer;
+function TEnumTypeDesc.MaxOrdinal: Int;
 var
-  I, V: Integer;
+  I, V: Int;
 begin
   if Members.Count = 0 then
     Exit(0);
@@ -1866,9 +1866,9 @@ begin
   end;
 end;
 
-function TEnumTypeDesc.MinOrdinal: Integer;
+function TEnumTypeDesc.MinOrdinal: Int;
 var
-  I, V: Integer;
+  I, V: Int;
 begin
   if Members.Count = 0 then
     Exit(0);
@@ -1918,7 +1918,7 @@ end;
 
 function TProceduralTypeDesc.IsCompatibleWith(AOther: TProceduralTypeDesc): Boolean;
 var
-  I: Integer;
+  I: Int;
   PA, PB: TProcParamInfo;
 begin
   Result := False;
@@ -1946,7 +1946,7 @@ function TProceduralTypeDesc.SignatureMatches(AOther: TProceduralTypeDesc): Bool
   a method pointer becomes a closure whose Env is the strong-retained
   receiver, so only the CALLABLE shape has to agree. }
 var
-  I: Integer;
+  I: Int;
   PA, PB: TProcParamInfo;
 begin
   Result := False;
@@ -2098,7 +2098,7 @@ begin
 end;
 
 function TSymbolTable.NewOrdinalSetType(const AName: string; ABase: TTypeDesc;
-  ABitCount: Integer): TSetTypeDesc;
+  ABitCount: Int): TSetTypeDesc;
 begin
   Result          := TSetTypeDesc.Create();
   Result.Kind     := tySet;
@@ -2133,7 +2133,7 @@ begin
 end;
 
 function TSymbolTable.NewStaticArrayType(AElementType: TTypeDesc;
-  ALow, AHigh: Integer): TStaticArrayTypeDesc;
+  ALow, AHigh: Int): TStaticArrayTypeDesc;
 begin
   Result             := TStaticArrayTypeDesc.Create();
   Result.Kind        := tyStaticArray;
@@ -2156,7 +2156,7 @@ end;
 function TSymbolTable.RegisterGeneric(const AName: string; ATempl: TObject;
                                       const ADeclUnit: string): string;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Result := '';
   Idx := FGenerics.IndexOf(AName);
@@ -2174,7 +2174,7 @@ end;
 
 function TSymbolTable.FindGeneric(const AName: string): TObject;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FGenerics.IndexOf(AName);
   if Idx >= 0 then
@@ -2185,7 +2185,7 @@ end;
 
 function TSymbolTable.GenericDeclUnit(const AName: string): string;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Result := '';
   Idx := FGenerics.IndexOf(AName);
@@ -2196,7 +2196,7 @@ end;
 function TSymbolTable.RegisterGenericRoutine(const AName: string; ATempl: TObject;
                                              const ADeclUnit: string): string;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Result := '';
   Idx := FGenericRoutines.IndexOf(AName);
@@ -2220,7 +2220,7 @@ end;
 
 function TSymbolTable.FindGenericRoutine(const AName: string): TObject;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FGenericRoutines.IndexOf(AName);
   if Idx >= 0 then
@@ -2231,7 +2231,7 @@ end;
 
 function TSymbolTable.GenericRoutineDeclUnit(const AName: string): string;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FGenericRoutines.IndexOf(AName);
   if Idx >= 0 then
@@ -2252,7 +2252,7 @@ var
   CanonName: string;
   Sym:       TSymbol;
   PT:        TTypeDesc;
-  I:         Integer;
+  I:         Int;
 begin
   CanonName := '^' + ABase.Name;
   Sym := TScope(FScopeStack.Items[0]).LookupLocal(CanonName);
@@ -2707,7 +2707,7 @@ begin
   Result := TScope(FScopeStack.Items[FScopeStack.Count - 1]);
 end;
 
-function TSymbolTable.GetScopeDepth: Integer;
+function TSymbolTable.GetScopeDepth: Int;
 begin
   Result := FScopeStack.Count;
 end;
@@ -2756,8 +2756,8 @@ function IsPlainIdentName(const AName: string): Boolean; forward;
 
 function TSymbolTable.Lookup(const AName: string): TSymbol;
 var
-  I: Integer;
-  Top: Integer;
+  I: Int;
+  Top: Int;
   Sym: TSymbol;
   DOU: string;
   Bypass: Boolean;
@@ -2956,7 +2956,7 @@ end;
   one is not a dependency on that unit. }
 function IsPlainIdentName(const AName: string): Boolean;
 var
-  I, B: Integer;
+  I, B: Int;
 begin
   Result := AName <> '';
   for I := 0 to Length(AName) - 1 do
@@ -2970,7 +2970,7 @@ begin
   end;
 end;
 
-procedure TSymbolTable.SetGenericView(const AUnit: string; AFloor: Integer;
+procedure TSymbolTable.SetGenericView(const AUnit: string; AFloor: Int;
                                       APins: TStringList);
 begin
   FGenericViewUnit := AUnit;
@@ -2992,7 +2992,7 @@ end;
 
 procedure TSymbolTable.LeakedDepsOf(const AUnit: string; ADest: TStringList);
 var
-  I, Sep: Integer;
+  I, Sep: Int;
   E: string;
 begin
   for I := 0 to FLeakedDeps.Count - 1 do
@@ -3013,8 +3013,8 @@ end;
   those untouched for the on-demand resolver. }
 function UnitQualifierTail(const AName: string): string;
 var
-  I, LastDot: Integer;
-  B: Integer;
+  I, LastDot: Int;
+  B: Int;
 begin
   Result  := '';
   LastDot := -1;
@@ -3040,7 +3040,7 @@ end;
   divides. }
 function TSymbolTable.QualifierNamesAType(const AName: string): Boolean;
 var
-  I, LastDot: Integer;
+  I, LastDot: Int;
   Sym: TSymbol;
 begin
   Result  := False;
@@ -3101,7 +3101,7 @@ end;
 
 function MangleUnitPrefix(const AUnitName: string): string;
 var
-  I:  Integer;
+  I:  Int;
   Ch: string;
 begin
   if IsUnmangledUnit(AUnitName) then

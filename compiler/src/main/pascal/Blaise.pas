@@ -49,7 +49,7 @@ const
 function BackendUsageLine: string;
 var
   Names: TStringList;
-  I: Integer;
+  I: Int;
   K: TBackendKind;
 begin
   Result := '';
@@ -76,7 +76,7 @@ var
   DriverLines: TStringList;
   K: TBackendKind;
   D: TBackendDriver;
-  I: Integer;
+  I: Int;
 begin
   WriteLn('Blaise Compiler v', Version);
   WriteLn('Copyright (c) 2026 Graeme Geldenhuys');
@@ -188,7 +188,7 @@ end;
 function ParseArgs(AFront: TFrontEndOpts; AOpts: TBackendOpts;
   APendingFlags, APendingArgs: TStringList): Boolean;
 var
-  I: Integer;
+  I: Int;
   Arg, NextArg: string;
   EnvBackend: string;
 begin
@@ -501,7 +501,7 @@ var
   HasInit: TStringList;   { parallel flags, '1'/'0' }
   HasFini: TStringList;
   Emitted: TStringList;
-  I, J:    Integer;
+  I, J:    Int;
   Progress: Boolean;
   Ready:   Boolean;
   DepList: TStringList;
@@ -511,7 +511,7 @@ var
   procedure AddEntry(const AName: string; AInit, AFini: Boolean;
                      AIfaceUses, AImplUses: TStringList);
   var
-    K: Integer;
+    K: Int;
     L: TStringList;
   begin
     if Names.IndexOf(LowerCase(AName)) >= 0 then Exit;
@@ -634,7 +634,7 @@ var
   WSource: TStringList;
   WFacts: TDbgFacts;
   WOPDF: TOPDFEmitter;
-  WI: Integer;
+  WI: Int;
 begin
   Self.Error := '';
   try
@@ -776,7 +776,7 @@ var
   RTLSrc:    string;          { RTL source dir added to the loader search path }
   PendingFlags: TStringList;  { deferred unknown flags (driver-private) }
   PendingArgs:  TStringList;  { lookahead token per pending flag ('' if none) }
-  PendIdx:   Integer;         { drain cursor over the pending lists }
+  PendIdx:   Int;         { drain cursor over the pending lists }
   PendFlag:  string;
   WorkerDriver: TBackendDriver;  { driver for the incremental worker pool }
   OE:        TOPDFEmitter;
@@ -792,8 +792,8 @@ var
                                isn't queried yet — building it surfaces
                                any ExportUnitInterface bugs against real
                                codebases. }
-  I:        Integer;
-  J:        Integer;
+  I:        Int;
+  J:        Int;
   IR:       string;
   IRFile:   string;
   LinkErr:  string;      { Driver.LinkProgram result ('' on success) }

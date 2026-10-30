@@ -78,7 +78,7 @@ end;
   ASrc is the analysed source list, AClone its parallel copy. }
 procedure CanonicaliseFieldTypes(ASrc, AClone: TObjectList);
 var
-  I: Integer;
+  I: Int;
 begin
   if (ASrc = nil) or (AClone = nil) or (ASrc.Count <> AClone.Count) then Exit;
   for I := 0 to ASrc.Count - 1 do
@@ -104,7 +104,7 @@ function ResolveTypeRef(const ATypeName: string;
                         ADeps:           TObjectList)
                         : TQualTypeRef;
 var
-  I: Integer;
+  I: Int;
 begin
   if ATypeName = '' then
   begin
@@ -143,7 +143,7 @@ procedure PopulateClassEntry(AEntry:       TTypeEntry;
                              ADeps:        TObjectList;
                              ASymbolTable: TSymbolTable);
 var
-  I:        Integer;
+  I:        Int;
   M:        TMethodDecl;
   Sig:      TRoutineSig;
   IRef:     TQualTypeRef;
@@ -191,7 +191,7 @@ procedure PopulateRecordMethods(AEntry: TTypeEntry;
                                 AIface: TUnitInterface;
                                 ADeps:  TObjectList);
 var
-  I:   Integer;
+  I:   Int;
   M:   TMethodDecl;
   Sig: TRoutineSig;
 begin
@@ -214,7 +214,7 @@ function FindEnumMemberOwner(AIface: TUnitInterface;
                              out ATypeName: string;
                              out AOrdinal: Int64): Boolean;
 var
-  I, J: Integer;
+  I, J: Int;
   E:    TTypeEntry;
   ED:   TEnumTypeDef;
 begin
@@ -375,7 +375,7 @@ end;
   decls (which carry no body) with their implementation. }
 function FindImplBody(AUnit: TUnit; const AName: string): TMethodDecl;
 var
-  I: Integer;
+  I: Int;
   M: TMethodDecl;
 begin
   Result := nil;
@@ -396,7 +396,7 @@ function BuildRoutineSig(ASrc:        TMethodDecl;
                          ADeps: TObjectList)
                          : TRoutineSig;
 var
-  I:      Integer;
+  I:      Int;
   PSrc:   TMethodParam;
   PCopy:  TMethodParam;
 begin
@@ -461,7 +461,7 @@ end;
 function FindImplClassCompletion(AUnit: TUnit;
                                  const AName: string): TClassTypeDef;
 var
-  I: Integer;
+  I: Int;
   D: TTypeDecl;
 begin
   Result := nil;
@@ -488,7 +488,7 @@ procedure ExportTypes(AUnit:        TUnit;
                       ADeps:        TObjectList;
                       ASymbolTable: TSymbolTable);
 var
-  I:        Integer;
+  I:        Int;
   Decl:     TTypeDecl;
   ClassDef: TClassTypeDef;
   ImplDef:  TClassTypeDef;
@@ -526,7 +526,7 @@ procedure ExportVars(AUnit:  TUnit;
                      AIface: TUnitInterface;
                      ADeps:  TObjectList);
 var
-  I, J:  Integer;
+  I, J:  Int;
   Decl:  TVarDecl;
   Entry: TVarEntry;
 begin
@@ -550,7 +550,7 @@ procedure ExportConsts(AUnit:       TUnit;
                        AIface:      TUnitInterface;
                        ADeps: TObjectList);
 var
-  I:    Integer;
+  I:    Int;
   Decl: TConstDecl;
 begin
   if AUnit.IntfBlock = nil then Exit;
@@ -565,7 +565,7 @@ procedure ExportRoutines(AUnit:       TUnit;
                          AIface:      TUnitInterface;
                          ADeps: TObjectList);
 var
-  I:    Integer;
+  I:    Int;
   Decl: TMethodDecl;
 begin
   if AUnit.IntfBlock = nil then Exit;
@@ -585,7 +585,7 @@ end;
   and stash the cloned Block as a TInlineBody. }
 procedure ExportInlineBodies(AUnit: TUnit; AIface: TUnitInterface);
 var
-  I:        Integer;
+  I:        Int;
   Decl:     TMethodDecl;
   ImplDecl: TMethodDecl;
   Body:     TInlineBody;
@@ -613,13 +613,13 @@ end;
   (whose Def is TGenericTypeDef). }
 procedure ExportGenericBodies(AUnit: TUnit; AIface: TUnitInterface);
 var
-  I:        Integer;
+  I:        Int;
   Decl:     TMethodDecl;
   ImplDecl: TMethodDecl;
   TDecl:    TTypeDecl;
   GenDef:   TGenericTypeDef;
   GBody:    TGenericBody;
-  J:        Integer;
+  J:        Int;
 begin
   if AUnit.IntfBlock = nil then Exit;
 
@@ -678,7 +678,7 @@ end;
 
 procedure CopyUsedUnits(AUnit: TUnit; AIface: TUnitInterface);
 var
-  I: Integer;
+  I: Int;
 begin
   if AUnit.UsedUnits <> nil then
     for I := 0 to AUnit.UsedUnits.Count - 1 do
@@ -710,7 +710,7 @@ procedure CopyImplicitDeps(AUnit: TUnit; AIface: TUnitInterface;
                            ASymbolTable: TSymbolTable);
 var
   Leaked: TStringList;
-  I: Integer;
+  I: Int;
   Dep: string;
 begin
   Leaked := TStringList.Create();

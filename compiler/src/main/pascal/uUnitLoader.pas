@@ -156,11 +156,11 @@ end;
 
 function TUnitLoader.LocateWithExt(const AName, AExt: string): string;
 var
-  I:            Integer;
+  I:            Int;
   Base, Path:   string;
   Target, Ents: string;
   Ent:          string;
-  NL, Start:    Integer;
+  NL, Start:    Int;
 begin
   Result := '';
   if AName = '' then Exit;
@@ -212,7 +212,7 @@ end;
 
 { The object-container kind a file's magic identifies: 0 = ELF, 1 = Mach-O
   64-bit, 2 = COFF x86-64, -1 = unknown or unreadable. }
-function ObjectContainerKind(const APath: string): Integer;
+function ObjectContainerKind(const APath: string): Int;
 var
   S: string;
 begin
@@ -235,7 +235,7 @@ end;
 
 function TUnitLoader.LocateObject(const AName: string): string;
 var
-  Want, Have: Integer;
+  Want, Have: Int;
 begin
   Result := LocateWithExt(AName, '.o');
   if Result = '' then Exit;
@@ -407,7 +407,7 @@ procedure TUnitLoader.CollectLinkOnlyObject(const AName: string);
 var
   ObjPath: string;
   Iface:   TUnitInterface;
-  I:       Integer;
+  I:       Int;
 begin
   if IsBuiltin(AName) then Exit;
   { Already loaded the normal way → its object is already linked. }
@@ -508,7 +508,7 @@ end;
 
 function TUnitLoader.DependsOnSourceLoaded(AIface: TUnitInterface): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := True;
   for I := 0 to AIface.UsedUnits.Count - 1 do
@@ -557,7 +557,7 @@ end;
 
 function TUnitLoader.SourceHashOf(const AName: string): string;
 var
-  Idx:     Integer;
+  Idx:     Int;
   SrcPath: string;
 begin
   for Idx := 0 to FHashMemo.Count - 1 do
@@ -582,7 +582,7 @@ end;
 
 function TUnitLoader.GenericDepChanged(AIface: TUnitInterface): Boolean;
 var
-  I:       Integer;
+  I:       Int;
   DepName: string;
   WasHash: string;
   NowHash: string;
@@ -656,7 +656,7 @@ var
   ObjPath:    string;
   Iface:      TUnitInterface;
   U:          TUnit;
-  I:          Integer;
+  I:          Int;
   SavedChain: TStringList;
 begin
   if IsBuiltin(AName) then Exit;
@@ -884,7 +884,7 @@ end;
 
 function TUnitLoader.LoadAll(const AUnitNames: TStringList): TObjectList;
 var
-  I: Integer;
+  I: Int;
 begin
   Result  := TObjectList.Create(True);  { owns TUnit items }
   FResult := Result;
@@ -929,7 +929,7 @@ var
   SortedPaths: TStringList;
   Placed:      TStringList;
   Progress:    Boolean;
-  I, J:        Integer;
+  I, J:        Int;
   Iface:       TUnitInterface;
   Ready:       Boolean;
   DepName:     string;
@@ -939,7 +939,7 @@ var
     FPrebuiltIfaces (builtins, source-compiled deps) never block. }
   function StillPending(const ADep: string): Boolean;
   var
-    K: Integer;
+    K: Int;
   begin
     Result := False;
     for K := 0 to FPrebuiltIfaces.Count - 1 do

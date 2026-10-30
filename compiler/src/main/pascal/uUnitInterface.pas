@@ -75,7 +75,7 @@ type
     IsVarArgs:    Boolean;       { C-variadic external ('varargs' directive) }
     ExternalName: string;
     CallingConv:  string;        { 'cdecl', 'stdcall', '' }
-    VTableSlot:   Integer;       { -1 = static; >= 0 = vtable index.
+    VTableSlot:   Int;       { -1 = static; >= 0 = vtable index.
                                    Populated by ExportUnitInterface
                                    only when AnalyseUnitForExport has
                                    run first.  Pre-semantic stays -1. }
@@ -561,7 +561,7 @@ end;
 
 function TUnitInterface.FindType(const AName: string): TTypeEntry;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FTypeIndex.IndexOf(AName);
   if Idx >= 0 then Result := TTypeEntry(FTypeIndex.Objects[Idx])
@@ -570,7 +570,7 @@ end;
 
 function TUnitInterface.FindConst(const AName: string): TConstEntry;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FConstIndex.IndexOf(AName);
   if Idx >= 0 then Result := TConstEntry(FConstIndex.Objects[Idx])
@@ -579,7 +579,7 @@ end;
 
 function TUnitInterface.FindRoutine(const AName: string): TRoutineSig;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FRoutineIndex.IndexOf(AName);
   if Idx >= 0 then Result := TRoutineSig(FRoutineIndex.Objects[Idx])
@@ -588,7 +588,7 @@ end;
 
 function TUnitInterface.FindInlineBody(const ARoutineName: string): TInlineBody;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FInlineIndex.IndexOf(ARoutineName);
   if Idx >= 0 then Result := TInlineBody(FInlineIndex.Objects[Idx])
@@ -597,7 +597,7 @@ end;
 
 function TUnitInterface.FindGeneric(const AName: string): TGenericBody;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FGenericIndex.IndexOf(AName);
   if Idx >= 0 then Result := TGenericBody(FGenericIndex.Objects[Idx])
@@ -606,7 +606,7 @@ end;
 
 function TUnitInterface.HasSymbol(const AName: string): Boolean;
 var
-  I, J: Integer;
+  I, J: Int;
   T:    TTypeEntry;
   V:    TVarEntry;
   EnumDef: TEnumTypeDef;
@@ -649,7 +649,7 @@ end;
 
 function TUnitInterface.HasGenericBodies: Boolean;
 var
-  I: Integer;
+  I: Int;
   T: TTypeEntry;
 begin
   Result := True;

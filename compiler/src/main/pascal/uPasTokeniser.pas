@@ -45,20 +45,20 @@ type
 
   TFpgPasToken = record
     Kind: TFpgPasTokenKind;
-    Line: Integer;       { 1-based line number }
-    Column: Integer;     { 1-based column }
-    Len: Integer;        { character length in source }
-    TextStart: Integer;  { 1-based index into source string }
+    Line: Int;       { 1-based line number }
+    Column: Int;     { 1-based column }
+    Len: Int;        { character length in source }
+    TextStart: Int;  { 1-based index into source string }
   end;
 
   TFpgPascalTokeniser = class(TObject)
     FSource: string;
-    FPos: Integer;
-    FLine: Integer;
-    FLineStart: Integer;
+    FPos: Int;
+    FLine: Int;
+    FLineStart: Int;
     FToken: TFpgPasToken;
-    function Peek: Integer;
-    function PeekAt(AOffset: Integer): Integer;
+    function Peek: Int;
+    function PeekAt(AOffset: Int): Int;
     procedure Advance;
     procedure AdvanceLine;
     procedure ReadWhitespace;
@@ -90,12 +90,12 @@ implementation
   tokeniser's FPos convention).  Blaise strings are 0-based, so subtract 1
   before indexing. }
 
-function PosOrd(const S: string; I: Integer): Integer;
+function PosOrd(const S: string; I: Int): Int;
 begin
   Result := OrdAt(S, I - 1);
 end;
 
-function PosSubstr(const S: string; I, Len: Integer): string;
+function PosSubstr(const S: string; I, Len: Int): string;
 begin
   Result := Copy(S, I - 1, Len);
 end;
@@ -180,7 +180,7 @@ begin
   FToken.TextStart := 1
 end;
 
-function TFpgPascalTokeniser.Peek: Integer;
+function TFpgPascalTokeniser.Peek: Int;
 begin
   if FPos <= Length(FSource) then
     Result := PosOrd(FSource, FPos)
@@ -188,9 +188,9 @@ begin
     Result := 0
 end;
 
-function TFpgPascalTokeniser.PeekAt(AOffset: Integer): Integer;
+function TFpgPascalTokeniser.PeekAt(AOffset: Int): Int;
 var
-  P: Integer;
+  P: Int;
 begin
   P := FPos + AOffset;
   if (P >= 1) and (P <= Length(FSource)) then
@@ -231,7 +231,7 @@ end;
 
 procedure TFpgPascalTokeniser.ReadIdentifierOrKeyword;
 var
-  C: Integer;
+  C: Int;
 begin
   while FPos <= Length(FSource) do
   begin
@@ -250,7 +250,7 @@ end;
 
 procedure TFpgPascalTokeniser.ReadNumber;
 var
-  C: Integer;
+  C: Int;
 begin
   FToken.Kind := fptkNumber;
   C := PosOrd(FSource, FPos);
@@ -324,7 +324,7 @@ end;
 
 procedure TFpgPascalTokeniser.ReadString;
 var
-  C: Integer;
+  C: Int;
 begin
   FToken.Kind := fptkString;
   while True do
@@ -507,7 +507,7 @@ end;
 
 procedure TFpgPascalTokeniser.ReadSymbol;
 var
-  C, C2: Integer;
+  C, C2: Int;
 begin
   FToken.Kind := fptkSymbol;
   C := PosOrd(FSource, FPos);
@@ -526,7 +526,7 @@ end;
 
 function TFpgPascalTokeniser.NextToken: TFpgPasToken;
 var
-  C, C2: Integer;
+  C, C2: Int;
 begin
   if FPos > Length(FSource) then
   begin

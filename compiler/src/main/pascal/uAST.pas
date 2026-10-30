@@ -17,8 +17,8 @@ type
   { Base node — all AST nodes carry source position. }
   TASTNode = class
   public
-    Line: Integer;
-    Col:  Integer;
+    Line: Int;
+    Col:  Int;
   end;
 
   { ------------------------------------------------------------------ }
@@ -50,7 +50,7 @@ type
   public
     Value: string;
     IsCharCoerce: Boolean;  { set by uSemantic when used as Byte in a comparison }
-    CharOrdValue: Integer;  { OrdAt(Value, 0) — valid only when IsCharCoerce = True }
+    CharOrdValue: Int32;  { OrdAt(Value, 0) — valid only when IsCharCoerce = True }
   end;
 
   TStringSubscriptExpr = class(TASTExpr)
@@ -164,7 +164,7 @@ type
                                           PropOwnerType names, so codegen need not
                                           re-resolve the name (a program type with
                                           the same name as a unit's would win) }
-    PropAccessorVSlot: Integer;       { set by uSemantic — getter vtable slot, -1 = static call }
+    PropAccessorVSlot: Int;       { set by uSemantic — getter vtable slot, -1 = static call }
     [Unretained] PropReadDecl: TObject; { TMethodDecl of the getter — not owned; set by
                                           uSemantic so codegen can sret a record-returning
                                           property read via the record-method-call path }
@@ -402,8 +402,8 @@ type
     [Unretained] CurrentDecl:          TObject;    { TMethodDecl getter — not owned }
     { Static-array iteration path (IsArrayIter = True) }
     IdxVarName:           string;     { synthetic index slot — shared with string/dynarray path }
-    ArrayLow:             Integer;    { compile-time lower bound }
-    ArrayHigh:            Integer;    { compile-time upper bound }
+    ArrayLow:             Int;    { compile-time lower bound }
+    ArrayHigh:            Int;    { compile-time upper bound }
     { Dynamic-array iteration path (IsDynArrayIter = True) }
     IsDynArrayIter:       Boolean;
     { Open-array parameter iteration path (IsOpenArrayIter = True): the
@@ -417,7 +417,7 @@ type
     AdvVarName:           string;    { synthetic slot for byte-advance count }
     { Set iteration path (IsSetIter = True) }
     IsSetIter:            Boolean;
-    SetBitCount:          Integer;   { number of bits in the set (= enum member count) }
+    SetBitCount:          Int;   { number of bits in the set (= enum member count) }
     SetMaskVarName:       string;    { synthetic slot: holds the evaluated set mask
                                        (small set), or the set's ADDRESS (jumbo) }
     SetIsJumbo:           Boolean;   { True when the set is >64 members: the slot
@@ -527,7 +527,7 @@ type
     [Unretained] PropWriteInfo: TPropertyInfo;  { non-owned — set by semantic when PropIndexExpr is set }
     PropOwnerType: string;  { owner class name for setter call; valid when PropIndexExpr set }
     [Unretained] PropOwnerDesc: TTypeDesc;  { not owned; the class PropOwnerType names }
-    PropAccessorVSlot: Integer;  { set by uSemantic — setter vtable slot, -1 = static call }
+    PropAccessorVSlot: Int;  { set by uSemantic — setter vtable slot, -1 = static call }
     IsElemWrite: Boolean;   { set by uSemantic — FieldName is an array-typed field and
                               PropIndexExpr selects the element to store into }
     IsClassVarWrite: Boolean; { set by uSemantic — qualified STATIC (class-level)
@@ -577,7 +577,7 @@ type
     [Unretained] PropWriteInfo: TObject;  { TPropertyInfo — non-owned; nil = plain array write }
     PropOwnerType:     string;  { declaring class of the setter }
     [Unretained] PropOwnerDesc: TTypeDesc; { not owned; the class PropOwnerType names }
-    PropAccessorVSlot: Integer; { setter vtable slot, -1 = static call }
+    PropAccessorVSlot: Int; { setter vtable slot, -1 = static call }
     { A class-receiver SETTER write lowered by uSemantic to the ordinary
       method-call statement Recv.SetX([Index,] Value) -- with the already
       analysed value and index as its arguments -- so every value kind
@@ -814,8 +814,8 @@ type
     ArrayElemType:  string;   { element type name, e.g. 'string', 'Integer' }
     ArrayElements:  TStringList; { ordered list of raw element values (strings or int literals) }
     ArrayIsRangeIndexed: Boolean; { True when index is Low..High integer range }
-    ArrayLowBound:  Integer;
-    ArrayHighBound: Integer;
+    ArrayLowBound:  Int;
+    ArrayHighBound: Int;
     { True when the declaration was written 'array of T' with no explicit
       bounds, so the parser derived 0..Count-1 from the value list.  Set by
       the EMBED path, where the length is the embedded file's size.  Recorded
@@ -973,8 +973,8 @@ type
     Members: TStringList;  { owned — ordered member names; Objects[I] = ordinal }
     constructor Create;
     destructor Destroy; override;
-    procedure AddMember(const AName: string; AValue: Integer);
-    function OrdinalAt(AIndex: Integer): Integer;
+    procedure AddMember(const AName: string; AValue: Int);
+    function OrdinalAt(AIndex: Int): Int;
   end;
 
   TFieldDecl = class(TASTNode)
@@ -1179,7 +1179,7 @@ type
                                        calls a routine that does.  A call from
                                        outside generic bodies is then an error
                                        naming the reason. }
-    VTableSlot:         Integer;     { -1 = static; >=0 = vtable index (set by uSemantic) }
+    VTableSlot:         Int;     { -1 = static; >=0 = vtable index (set by uSemantic) }
     TypeParams:         TStringList; { non-nil = generic function template; owns param names }
     TypeParamConstraints: TStringList; { parallel to TypeParams; '' = unconstrained,
                                          'class', 'record', or a concrete type name }
@@ -1591,7 +1591,7 @@ function IsComparisonOp(AOp: TBinaryOp): Boolean;
     OperatorKindArity     — 2 for binary, 1 for unary/conversion. }
 function OperatorKindFromName(const AName: string): TOperatorKind;
 function OperatorKindName(AKind: TOperatorKind): string;
-function OperatorKindArity(AKind: TOperatorKind): Integer;
+function OperatorKindArity(AKind: TOperatorKind): Int;
 function BinaryOpToOperatorKind(AOp: TBinaryOp): TOperatorKind;
 
 { Deep-clone helpers for generic-instance method body re-analysis.
@@ -1690,7 +1690,7 @@ begin
   end;
 end;
 
-function OperatorKindArity(AKind: TOperatorKind): Integer;
+function OperatorKindArity(AKind: TOperatorKind): Int;
 begin
   if AKind in [okNegative, okImplicit, okExplicit] then
     Result := 1
@@ -2159,7 +2159,7 @@ end;
 function TMethodDecl.CapturedParam(const AName: string): TMethodParam;
 var
   D: TMethodDecl;
-  I, J: Integer;
+  I, J: Int;
   VD: TVarDecl;
 begin
   Result := nil;
@@ -2429,14 +2429,14 @@ begin
   inherited Destroy();
 end;
 
-procedure TEnumTypeDef.AddMember(const AName: string; AValue: Integer);
+procedure TEnumTypeDef.AddMember(const AName: string; AValue: Int);
 begin
   Members.AddObject(AName, TObject(Pointer(UInt(AValue))));
 end;
 
-function TEnumTypeDef.OrdinalAt(AIndex: Integer): Integer;
+function TEnumTypeDef.OrdinalAt(AIndex: Int): Int;
 begin
-  Result := Integer(UInt(Pointer(Members.Objects[AIndex])));
+  Result := Int(UInt(Pointer(Members.Objects[AIndex])));
 end;
 
 { TCaseBranch }
@@ -2551,7 +2551,7 @@ end;
 
 function CloneExprList(ASrc: TObjectList): TObjectList;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TObjectList.Create(True);
   for I := 0 to ASrc.Count - 1 do
@@ -2570,7 +2570,7 @@ var
   FA:  TFieldAccessExpr;
   IsE: TIsExpr;
   InhE: TInheritedCallExpr;
-  CloneI: Integer;
+  CloneI: Int;
   AsE: TAsExpr;
   SuE: TSupportsExpr;
   BE:  TBinaryExpr;
@@ -2581,7 +2581,7 @@ var
   AoE: TAddrOfExpr;
   MCE: TMethodCallExpr;
   AME: TAnonMethodExpr;
-  I:   Integer;
+  I:   Int;
 begin
   if AExpr = nil then
   begin Result := nil; Exit; end;
@@ -2750,7 +2750,7 @@ end;
 
 function CloneCompound(ASrc: TCompoundStmt): TCompoundStmt;
 var
-  I: Integer;
+  I: Int;
 begin
   if ASrc = nil then
   begin Result := nil; Exit; end;
@@ -2770,7 +2770,7 @@ end;
 
 function CloneCaseBranch(ASrc: TCaseBranch): TCaseBranch;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TCaseBranch.Create();
   for I := 0 to ASrc.Values.Count - 1 do
@@ -2799,7 +2799,7 @@ var
   ECS_: TExprCallStmt;
   MCS_: TMethodCallStmt;
   ICS_: TInheritedCallStmt;
-  I:    Integer;
+  I:    Int;
 begin
   if AStmt = nil then
   begin Result := nil; Exit; end;
@@ -2971,7 +2971,7 @@ end;
 
 function CloneVarDecl(ASrc: TVarDecl): TVarDecl;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TVarDecl.Create();
   Result.Line     := ASrc.Line;
@@ -2987,7 +2987,7 @@ end;
 
 function CloneFieldDecl(ASrc: TFieldDecl): TFieldDecl;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TFieldDecl.Create();
   Result.Line     := ASrc.Line;
@@ -3042,7 +3042,7 @@ end;
 
 function CloneConstDecl(ASrc: TConstDecl): TConstDecl;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TConstDecl.Create();
   Result.Line     := ASrc.Line;
@@ -3130,7 +3130,7 @@ end;
 
 function CloneAttributeUse(ASrc: TAttributeUse): TAttributeUse;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TAttributeUse.Create();
   Result.Line := ASrc.Line;
@@ -3144,7 +3144,7 @@ end;
 
 function CloneMethodDecl(ASrc: TMethodDecl): TMethodDecl;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TMethodDecl.Create();
   Result.Line           := ASrc.Line;
@@ -3210,7 +3210,7 @@ var
   TA: TTypeAliasDef;
   ST: TSetTypeDef;
   ET: TEnumTypeDef;
-  I:  Integer;
+  I:  Int;
 begin
   if ASrc = nil then
   begin Result := nil; Exit; end;
@@ -3282,7 +3282,7 @@ end;
 
 function CloneClassTypeDef(ASrc: TClassTypeDef): TClassTypeDef;
 var
-  I: Integer;
+  I: Int;
 begin
   if ASrc = nil then begin Result := nil; Exit; end;
   Result := TClassTypeDef.Create();
@@ -3311,7 +3311,7 @@ end;
 
 function CloneRecordTypeDef(ASrc: TRecordTypeDef): TRecordTypeDef;
 var
-  I: Integer;
+  I: Int;
 begin
   { Deep-clone a record body.  Factored out of CloneTypeDef because
     CloneGenericRecordDef needs exactly the same walk for the template body —
@@ -3339,7 +3339,7 @@ end;
 
 function CloneGenericRecordDef(ASrc: TGenericRecordDef): TGenericRecordDef;
 var
-  I: Integer;
+  I: Int;
 begin
   { Mirrors CloneGenericTypeDef exactly — same parallel ParamNames /
     ParamConstraints walk, same replace-the-autoctor's-blank-body step — with
@@ -3364,7 +3364,7 @@ end;
 
 function CloneGenericTypeDef(ASrc: TGenericTypeDef): TGenericTypeDef;
 var
-  I: Integer;
+  I: Int;
 begin
   if ASrc = nil then begin Result := nil; Exit; end;
   Result := TGenericTypeDef.Create();
@@ -3383,7 +3383,7 @@ end;
 
 function CloneInterfaceTypeDef(ASrc: TInterfaceTypeDef): TInterfaceTypeDef;
 var
-  I: Integer;
+  I: Int;
 begin
   if ASrc = nil then begin Result := nil; Exit; end;
   Result := TInterfaceTypeDef.Create();
@@ -3397,7 +3397,7 @@ end;
 
 function CloneGenericInterfaceDef(ASrc: TGenericInterfaceDef): TGenericInterfaceDef;
 var
-  I: Integer;
+  I: Int;
 begin
   if ASrc = nil then begin Result := nil; Exit; end;
   Result := TGenericInterfaceDef.Create();
@@ -3424,7 +3424,7 @@ end;
 
 function CloneProceduralTypeDef(ASrc: TProceduralTypeDef): TProceduralTypeDef;
 var
-  I: Integer;
+  I: Int;
 begin
   if ASrc = nil then begin Result := nil; Exit; end;
   Result := TProceduralTypeDef.Create();
@@ -3438,7 +3438,7 @@ end;
 
 function CloneBlock(ABlock: TBlock): TBlock;
 var
-  I: Integer;
+  I: Int;
 begin
   if ABlock = nil then
   begin Result := nil; Exit; end;

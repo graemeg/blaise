@@ -124,8 +124,8 @@ type
   TToken = record
     Kind:  TTokenKind;
     Value: string;   { parsed value: ident text, int digits, unescaped string }
-    Line:  Integer;
-    Col:   Integer;
+    Line:  Int;
+    Col:   Int;
   end;
 
   { One synthetic token queued by an EMBED/EMBEDSTR expansion.  A class
@@ -135,8 +135,8 @@ type
   public
     Kind:  TTokenKind;
     Value: string;
-    Line:  Integer;
-    Col:   Integer;
+    Line:  Int;
+    Col:   Int;
   end;
 
   TLexer = class
@@ -149,25 +149,25 @@ type
       embedded file reaches the parser as the tokens a hand-written
       initialiser would have produced. }
     FPending:      TObjectList;
-    FPendingIdx:   Integer;
+    FPendingIdx:   Int;
     { Files embedded while lexing this unit, in encounter order.  Folded
       into the unit's source hash so editing an asset invalidates the
       cached .o exactly as editing the source does. }
     FEmbedded:     TStringList;
     function MapKeyword(const AUpper: string): TTokenKind;
-    function CodepointToUtf8(ACodepoint: Integer): string;
+    function CodepointToUtf8(ACodepoint: Int32): string;
     function UnescapeString(const ARaw: string): string;
     function ProcessTextBlock(const ARaw: string): string;
     function DirectiveName(const AText: string): string;
     function DirectiveArg(const AText: string): string;
     function DirectiveRawArg(const AText: string): string;
     function ResolveEmbedPath(const APath: string): string;
-    function ReadEmbedFile(const APath: string; ALine, ACol: Integer;
+    function ReadEmbedFile(const APath: string; ALine, ACol: Int;
                            const ADirective: string): string;
     procedure QueueToken(AKind: TTokenKind; const AValue: string;
-                         ALine, ACol: Integer);
-    procedure ExpandEmbed(const AText: string; ALine, ACol: Integer);
-    procedure ExpandEmbedStr(const AText: string; ALine, ACol: Integer);
+                         ALine, ACol: Int);
+    procedure ExpandEmbed(const AText: string; ALine, ACol: Int);
+    procedure ExpandEmbedStr(const AText: string; ALine, ACol: Int);
     function IsDefined(const ASym: string): Boolean;
     procedure DefineSymbol(const ASym: string);
     procedure UndefSymbol(const ASym: string);
@@ -209,9 +209,9 @@ implementation
   body under FPC and the self-hosted compiler. The migration tool strips
   this declaration; self-hosted builds resolve OrdAt to the builtin.
   I is 0-based; under FPC we convert to FPC's 1-based string indexing. }
-function OrdAt(const S: string; I: Integer): Integer;
+function OrdAt(const S: string; I: Int): Int32;
 begin
-  Result := Ord(S[I + 1]);
+  Result := Int32(Ord(S[I + 1]));
 end;
 
 constructor TLexer.Create(const ASource: string; const AFilename: string = '');
@@ -291,7 +291,7 @@ end;
 
 procedure TLexer.UndefSymbol(const ASym: string);
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FDefines.IndexOf(ASym);
   if Idx >= 0 then
@@ -342,7 +342,7 @@ end;
 
 procedure TLexer.ApplyDefines(ADefines: TStringList);
 var
-  I:      Integer;
+  I:      Int;
   HasOS:  Boolean;
   HasCPU: Boolean;
 begin
@@ -427,14 +427,14 @@ begin
     Result := tkIdent;  { keyword outside Phase 1 grammar treated as ident }
 end;
 
-function TLexer.CodepointToUtf8(ACodepoint: Integer): string;
+function TLexer.CodepointToUtf8(ACodepoint: Int32): string;
 { Encode a Unicode scalar value as its UTF-8 byte sequence.  A `#nnnn` / `#$hhhh`
   literal denotes a codepoint (NOT a raw byte), so the string it contributes is
   that codepoint's UTF-8 encoding: #65 -> 'A' (1 byte), #$20AC -> 3 bytes,
   #$1F600 -> 4 bytes.  Rejects values outside 0..U+10FFFF and the surrogate
   range U+D800..U+DFFF, which are not valid scalar values. }
 var
-  N: Integer;
+  N: Int;
 begin
   N := ACodepoint;
   if (N < 0) or (N > $10FFFF) or ((N >= $D800) and (N <= $DFFF)) then
@@ -463,7 +463,7 @@ function TLexer.UnescapeString(const ARaw: string): string;
   and concatenated runs like 'abc'#13#10'def'. Uses OrdAt (0-based) so the body
   parses under both FPC and the self-hosted Blaise compiler. }
 var
-  I, Len, N, C: Integer;
+  I, Len, N, C: Int;
 begin
   Result := '';
   Len := Length(ARaw);
@@ -533,7 +533,7 @@ end;
 
 function TLexer.ProcessTextBlock(const ARaw: string): string;
 var
-  Len, I, C, Margin, Skip: Integer;
+  Len, I, C, Margin, Skip: Int;
   Body: string;
 begin
   Len := Length(ARaw);
@@ -623,7 +623,7 @@ end;
 // (angle brackets used in comment to avoid premature brace-comment closure)
 function TLexer.DirectiveName(const AText: string): string;
 var
-  I, C: Integer;
+  I, C: Int;
 begin
   Result := '';
   I := 2;  // 0-based: skip opening '{$' at indices 0 and 1
@@ -641,7 +641,7 @@ end;
   whitespace.  Returns '' when there is no argument. }
 function TLexer.DirectiveArg(const AText: string): string;
 var
-  I, C: Integer;
+  I, C: Int;
 begin
   Result := '';
   I := 2;  { skip '{$' }
@@ -673,7 +673,7 @@ end;
   single quotes if present. }
 function TLexer.DirectiveRawArg(const AText: string): string;
 var
-  I, C, Last: Integer;
+  I, C, Last: Int;
 begin
   Result := '';
   I := 2;  { skip the opening brace and the dollar }
@@ -731,14 +731,14 @@ end;
 { Read an embedded file whole, as raw bytes.  Deliberately NOT via
   TStringList, which would normalise line endings and drop a trailing
   newline -- an embedded asset must arrive byte-for-byte. }
-function TLexer.ReadEmbedFile(const APath: string; ALine, ACol: Integer;
+function TLexer.ReadEmbedFile(const APath: string; ALine, ACol: Int;
                               const ADirective: string): string;
 var
   Full:  string;
   FIn:   TFileInputStream;
-  N:     Integer;
-  Got:   Integer;
-  Chunk: Integer;
+  N:     Int;
+  Got:   Int;
+  Chunk: Int;
 begin
   Result := '';
   Full := Self.ResolveEmbedPath(APath);
@@ -749,7 +749,7 @@ begin
   try
     FIn := TFileInputStream.Create(Full);
     try
-      N := Integer(FIn.Size());
+      N := Int(FIn.Size());
       SetLength(Result, N);
       { Read until N: a single read(2) may legally return fewer bytes than
         asked for, and ignoring that would silently zero-fill the tail of the
@@ -783,7 +783,7 @@ end;
 
 { Append one synthetic token to the pending queue. }
 procedure TLexer.QueueToken(AKind: TTokenKind; const AValue: string;
-                            ALine, ACol: Integer);
+                            ALine, ACol: Int);
 var
   PT: TPendingToken;
 begin
@@ -808,10 +808,10 @@ end;
   Bytes are emitted unsigned (0..255).  Masking matters: a high byte that
   round-trips through a signed path is the classic way this expansion turns
   200 into -56. }
-procedure TLexer.ExpandEmbed(const AText: string; ALine, ACol: Integer);
+procedure TLexer.ExpandEmbed(const AText: string; ALine, ACol: Int);
 var
   Data: string;
-  I, N: Integer;
+  I, N: Int;
 begin
   Data := Self.ReadEmbedFile(DirectiveRawArg(AText), ALine, ACol, 'EMBED');
   N := Length(Data);
@@ -828,7 +828,7 @@ end;
 { Expand EMBEDSTR into a single string literal carrying the file's bytes
   verbatim -- no encoding conversion, no newline translation, no BOM
   stripping.  Blaise strings are length-counted, so a NUL byte survives. }
-procedure TLexer.ExpandEmbedStr(const AText: string; ALine, ACol: Integer);
+procedure TLexer.ExpandEmbedStr(const AText: string; ALine, ACol: Int);
 var
   Data: string;
 begin
@@ -841,7 +841,7 @@ end;
 procedure TLexer.SkipToElseOrEndif;
 var
   raw:   TFpgPasToken;
-  depth: Integer;
+  depth: Int;
   dname: string;
 begin
   depth := 1;
@@ -869,7 +869,7 @@ end;
 procedure TLexer.SkipToEndif;
 var
   raw:   TFpgPasToken;
-  depth: Integer;
+  depth: Int;
   dname: string;
 begin
   depth := 1;
@@ -898,8 +898,8 @@ end;
 function TLexer.ReadAsmBody: string;
 var
   raw:        TFpgPasToken;
-  BlockStart: Integer;   { 1-based source index of the first char after 'asm' }
-  EndStart:   Integer;   { 1-based source index of the terminating 'end' }
+  BlockStart: Int;   { 1-based source index of the first char after 'asm' }
+  EndStart:   Int;   { 1-based source index of the terminating 'end' }
 begin
   { FTok.Token is the 'asm' keyword; the body begins right after it. }
   BlockStart := FTok.Token.TextStart + FTok.Token.Len;

@@ -358,7 +358,7 @@ end;
 
 function EncodeFlags(AIsString, AIsFloat: Boolean): string;
 var
-  B: Integer;
+  B: Int;
 begin
   B := 0;
   if AIsString then B := B or 1;
@@ -392,7 +392,7 @@ end;
 
 function WriteConsts(AIface: TUnitInterface): string;
 var
-  I:  Integer;
+  I:  Int;
   C:  TConstEntry;
   SB: TStringBuilder;
 begin
@@ -419,7 +419,7 @@ end;
 
 function WriteVars(AIface: TUnitInterface): string;
 var
-  I:  Integer;
+  I:  Int;
   V:  TVarEntry;
   SB: TStringBuilder;
 begin
@@ -448,7 +448,7 @@ end;
   '<name>=<ord>,<name>=<ord>,…' inside the outer lpstr. }
 function EncodeEnumMembers(AEnum: TEnumTypeDef): string;
 var
-  I:    Integer;
+  I:    Int;
   Acc:  string;
 begin
   Acc := '';
@@ -489,7 +489,7 @@ end;
   implements, fields, methods) are emitted as a count lpstr
   followed by `count` records. }
 
-function EncodeCount(N: Integer): string;
+function EncodeCount(N: Int): string;
 begin
   Result := EncodeLpstr(IntToStr(N));
 end;
@@ -502,7 +502,7 @@ end;
 
 function EncodeStringList(ASL: TStringList): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := EncodeCount(ASL.Count);
   for I := 0 to ASL.Count - 1 do
@@ -511,9 +511,9 @@ end;
 
 function EncodeFieldList(AFields: TObjectList): string;
 var
-  I, J: Integer;
+  I, J: Int;
   F:    TFieldDecl;
-  TotalNames: Integer;
+  TotalNames: Int;
 begin
   { TFieldDecl carries Names: TStringList (multi-name fields like
     'X, Y: Integer').  Flatten to one record per name for symmetry
@@ -552,7 +552,7 @@ end;
   static const members are scalar in the current language surface. }
 function EncodeConstDeclList(AConsts: TObjectList): string;
 var
-  I: Integer;
+  I: Int;
   C: TConstDecl;
 begin
   Result := EncodeCount(AConsts.Count);
@@ -586,7 +586,7 @@ end;
   half-encoded; the cold path rejects those forms already. }
 function EncodeNestedTypeList(ANested: TObjectList): string;
 var
-  I, Kept: Integer;
+  I, Kept: Int;
   ND: TTypeDecl;
   AD: TTypeAliasDef;
 begin
@@ -637,7 +637,7 @@ end;
   class + interface payloads. }
 function EncodeMethodSig(AR: TRoutineSig): string;
 var
-  J: Integer;
+  J: Int;
   P: TMethodParam;
 begin
   Result :=
@@ -684,7 +684,7 @@ end;
 
 function EncodeMethodList(AMethods: TObjectList): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := EncodeCount(AMethods.Count);
   for I := 0 to AMethods.Count - 1 do
@@ -693,7 +693,7 @@ end;
 
 function EncodePropertyList(AList: TObjectList): string;
 var
-  I: Integer;
+  I: Int;
   P: TPropertyDecl;
 begin
   Result := EncodeCount(AList.Count);
@@ -760,7 +760,7 @@ end;
   Def.Methods) symmetric. }
 function EncodeMethodDecl(AM: TMethodDecl): string;
 var
-  J: Integer;
+  J: Int;
   P: TMethodParam;
 begin
   Result :=
@@ -798,7 +798,7 @@ end;
 
 function EncodeMethodDeclList(AList: TObjectList): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := EncodeCount(AList.Count);
   for I := 0 to AList.Count - 1 do
@@ -809,7 +809,7 @@ end;
   by both generic-class and generic-interface payloads. }
 function EncodeTypeParamList(ANames, AConstraints: TStringList): string;
 var
-  I: Integer;
+  I: Int;
   Constraint: string;
 begin
   Result := EncodeCount(ANames.Count);
@@ -827,7 +827,7 @@ function WriteGenericRecordPayload(AEntry: TTypeEntry): string;
 var
   Def:       TGenericRecordDef;
   RecordDef: TRecordTypeDef;
-  J:         Integer;
+  J:         Int;
   M:         TMethodDecl;
 begin
   { Simpler than the generic-class payload: a record has no parent, no
@@ -870,7 +870,7 @@ function WriteGenericClassPayload(AEntry: TTypeEntry): string;
 var
   Def:      TGenericTypeDef;
   ClassDef: TClassTypeDef;
-  J:        Integer;
+  J:        Int;
   M:        TMethodDecl;
 begin
   Def := TGenericTypeDef(AEntry.Def);
@@ -936,7 +936,7 @@ end;
 function WriteGenericProcPayload(AEntry: TTypeEntry): string;
 var
   Def: TGenericProcDef;
-  J:   Integer;
+  J:   Int;
   P:   TMethodParam;
 begin
   Def := TGenericProcDef(AEntry.Def);
@@ -959,7 +959,7 @@ end;
 function WriteProcPayload(AEntry: TTypeEntry): string;
 var
   Def: TProceduralTypeDef;
-  J:   Integer;
+  J:   Int;
   P:   TMethodParam;
 begin
   Def := TProceduralTypeDef(AEntry.Def);
@@ -992,7 +992,7 @@ end;
 
 function WriteTypes(AIface: TUnitInterface): string;
 var
-  I:      Integer;
+  I:      Int;
   E:      TTypeEntry;
   SB:     TStringBuilder;
   Kind:   string;
@@ -1073,7 +1073,7 @@ end;
   rest of the format. }
 function EncodeParamFlags(AParam: TMethodParam): string;
 var
-  B: Integer;
+  B: Int;
 begin
   B := 0;
   if AParam.IsVarParam   then B := B or 1;
@@ -1089,7 +1089,7 @@ end;
 
 function WriteRoutines(AIface: TUnitInterface): string;
 var
-  I, J:   Integer;
+  I, J:   Int;
   R:      TRoutineSig;
   P:      TMethodParam;
   SB:     TStringBuilder;
@@ -1186,7 +1186,7 @@ function EncodeBlock(AB: TBlock): string; forward;
 
 function EncodeExprList(AList: TObjectList): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := EncodeCount(AList.Count);
   for I := 0 to AList.Count - 1 do
@@ -1195,7 +1195,7 @@ end;
 
 function EncodeStmtList(AList: TObjectList): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := EncodeCount(AList.Count);
   for I := 0 to AList.Count - 1 do
@@ -1330,7 +1330,7 @@ end;
 
 function EncodeStmt(AStmt: TASTStmt): string;
 var
-  I: Integer;
+  I: Int;
   TES: TTryExceptStmt;
   CS:  TCaseStmt;
 begin
@@ -1472,9 +1472,9 @@ end;
   TVarDecl is emitted flattened: one record per name. }
 function EncodeBlockVarDecls(AB: TBlock): string;
 var
-  I, J:  Integer;
+  I, J:  Int;
   VD:    TVarDecl;
-  Total: Integer;
+  Total: Int;
 begin
   Total := 0;
   for I := 0 to AB.Decls.Count - 1 do
@@ -1507,7 +1507,7 @@ end;
   signature-only. }
 function WriteGenericRoutines(AIface: TUnitInterface): string;
 var
-  I:   Integer;
+  I:   Int;
   G:   TGenericBody;
   SB:  TStringBuilder;
   Eligible: TObjectList;
@@ -1540,7 +1540,7 @@ end;
 
 function WriteInlineBodies(AIface: TUnitInterface): string;
 var
-  I:  Integer;
+  I:  Int;
   B:  TInlineBody;
   SB: TStringBuilder;
 begin
@@ -1582,17 +1582,17 @@ end;
 { Char-classification on integer ordinals — Blaise lacks a Char
   type and S[i] returns a 1-byte string, so route through Ord() to
   get scalar Integer comparisons. }
-function IsWhitespaceOrd(C: Integer): Boolean;
+function IsWhitespaceOrd(C: Int): Boolean;
 begin
   Result := (C = 32) or (C = 9) or (C = 10) or (C = 13);
 end;
 
-function IsUpperOrd(C: Integer): Boolean;
+function IsUpperOrd(C: Int): Boolean;
 begin
   Result := (C >= Ord('A')) and (C <= Ord('Z'));
 end;
 
-function IsDigitOrd(C: Integer): Boolean;
+function IsDigitOrd(C: Int): Boolean;
 begin
   Result := (C >= Ord('0')) and (C <= Ord('9'));
 end;
@@ -1603,16 +1603,16 @@ end;
   returns 0-based offset or -1 for not found.  APos cursor is
   0-based. }
 
-procedure SkipWhitespace(const AText: string; var APos: Integer);
+procedure SkipWhitespace(const AText: string; var APos: Int);
 begin
   while (APos < Length(AText)) and IsWhitespaceOrd(Ord(AText[APos])) do
     Inc(APos);
 end;
 
-function ReadLpstrAt(const AText: string; var APos: Integer): string;
+function ReadLpstrAt(const AText: string; var APos: Int): string;
 var
-  ColonPos: Integer;
-  Len:      Integer;
+  ColonPos: Int;
+  Len:      Int;
   LenStr:   string;
 begin
   SkipWhitespace(AText, APos);
@@ -1630,15 +1630,15 @@ begin
   APos   := ColonPos + 1 + Len;
 end;
 
-function ReadInt64At(const AText: string; var APos: Integer): Int64;
+function ReadInt64At(const AText: string; var APos: Int): Int64;
 begin
   Result := StrToInt64(ReadLpstrAt(AText, APos));
 end;
 
-function ReadFlagsAt(const AText: string; var APos: Integer;
-                     out AIsString, AIsFloat: Boolean): Integer;
+function ReadFlagsAt(const AText: string; var APos: Int;
+                     out AIsString, AIsFloat: Boolean): Int;
 var
-  B: Integer;
+  B: Int;
 begin
   SkipWhitespace(AText, APos);
   if APos >= Length(AText) then
@@ -1655,7 +1655,7 @@ end;
   uSemanticImport.ResolveRef. }
 procedure DecodeQualRef(const ASrc: string; var AUnit, AType: string);
 var
-  I, LastDot, PfxLen: Integer;
+  I, LastDot, PfxLen: Int;
   Pfx: string;
 begin
   { Blaise Pos and Copy are 0-based.  Split at the LAST '.', not the first:
@@ -1700,9 +1700,9 @@ end;
 { Read an unterminated keyword (letters only) at the current cursor;
   consume it and advance past trailing whitespace.  Used for record
   tags ('CONST', 'END', etc.). }
-function ReadTag(const AText: string; var APos: Integer): string;
+function ReadTag(const AText: string; var APos: Int): string;
 var
-  Start: Integer;
+  Start: Int;
 begin
   SkipWhitespace(AText, APos);
   Start := APos;
@@ -1711,9 +1711,9 @@ begin
   Result := Copy(AText, Start, APos - Start);
 end;
 
-function ReadDecimalAt(const AText: string; var APos: Integer): Integer;
+function ReadDecimalAt(const AText: string; var APos: Int): Int;
 var
-  Start: Integer;
+  Start: Int;
 begin
   SkipWhitespace(AText, APos);
   Start := APos;
@@ -1724,10 +1724,10 @@ begin
   Result := StrToInt(Copy(AText, Start, APos - Start));
 end;
 
-procedure ReadHeader(const AText: string; var APos: Integer);
+procedure ReadHeader(const AText: string; var APos: Int);
 var
-  MagicPos: Integer;
-  Ver:      Integer;
+  MagicPos: Int;
+  Ver:      Int;
 begin
   SkipWhitespace(AText, APos);
   { Blaise Pos: 0-based result, -1 = not found.  Match at the
@@ -1748,11 +1748,11 @@ begin
       [Ver, IFACE_VERSION]));
 end;
 
-procedure ReadConsts(const AText: string; var APos: Integer;
+procedure ReadConsts(const AText: string; var APos: Int;
                      AIface: TUnitInterface);
 var
-  Count:    Integer;
-  I:        Integer;
+  Count:    Int;
+  I:        Int;
   Entry:    TConstEntry;
   Name:     string;
   RefStr:   string;
@@ -1798,11 +1798,11 @@ begin
     raise EIfaceFormatError.Create('CONST block: missing END marker');
 end;
 
-procedure ReadVars(const AText: string; var APos: Integer;
+procedure ReadVars(const AText: string; var APos: Int;
                    AIface: TUnitInterface);
 var
-  Count:   Integer;
-  I:       Integer;
+  Count:   Int;
+  I:       Int;
   Entry:   TVarEntry;
   RefStr:  string;
   RefUnit: string;
@@ -1828,7 +1828,7 @@ end;
 procedure SplitMembers(const ASrc: string; ATarget: TStringList);
 var
   Cur: string;
-  P:   Integer;
+  P:   Int;
 begin
   Cur := ASrc;
   P   := Pos(',', Cur);
@@ -1847,11 +1847,11 @@ end;
 procedure LoadEnumMembers(const ASrc: string; AEnum: TEnumTypeDef);
 var
   Pairs: TStringList;
-  I:     Integer;
+  I:     Int;
   Pair:  string;
-  Eq:    Integer;
+  Eq:    Int;
   NameP: string;
-  OrdP:  Integer;
+  OrdP:  Int;
 begin
   Pairs := TStringList.Create();
   try
@@ -1878,30 +1878,30 @@ begin
   end;
 end;
 
-function ReadExpr(const AText: string; var APos: Integer): TASTExpr; forward;
-function ReadStmt(const AText: string; var APos: Integer): TASTStmt; forward;
-function ReadBlock(const AText: string; var APos: Integer): TBlock; forward;
-function ReadMethodDecl(const AText: string; var APos: Integer): TMethodDecl; forward;
+function ReadExpr(const AText: string; var APos: Int): TASTExpr; forward;
+function ReadStmt(const AText: string; var APos: Int): TASTStmt; forward;
+function ReadBlock(const AText: string; var APos: Int): TBlock; forward;
+function ReadMethodDecl(const AText: string; var APos: Int): TMethodDecl; forward;
 
-procedure ReadExprList(const AText: string; var APos: Integer;
+procedure ReadExprList(const AText: string; var APos: Int;
                        ATarget: TObjectList);
 var
-  C, I: Integer;
+  C, I: Int;
 begin
   C := StrToInt(ReadLpstrAt(AText, APos));
   for I := 1 to C do ATarget.Add(ReadExpr(AText, APos));
 end;
 
-procedure ReadStmtList(const AText: string; var APos: Integer;
+procedure ReadStmtList(const AText: string; var APos: Int;
                        ATarget: TObjectList);
 var
-  C, I: Integer;
+  C, I: Int;
 begin
   C := StrToInt(ReadLpstrAt(AText, APos));
   for I := 1 to C do ATarget.Add(ReadStmt(AText, APos));
 end;
 
-function ReadExceptHandler(const AText: string; var APos: Integer):
+function ReadExceptHandler(const AText: string; var APos: Int):
   TExceptHandlerClause;
 var
   Body: TASTStmt;
@@ -1921,14 +1921,14 @@ begin
   end;
 end;
 
-function ReadCaseBranch(const AText: string; var APos: Integer): TCaseBranch;
+function ReadCaseBranch(const AText: string; var APos: Int): TCaseBranch;
 begin
   Result := TCaseBranch.Create();
   ReadExprList(AText, APos, Result.Values);
   Result.Stmt := ReadStmt(AText, APos);
 end;
 
-function ReadExpr(const AText: string; var APos: Integer): TASTExpr;
+function ReadExpr(const AText: string; var APos: Int): TASTExpr;
 var
   Kind: string;
   IL:   TIntLiteral;
@@ -2124,7 +2124,7 @@ begin
       'ReadExpr: unknown expression kind ''' + Kind + '''');
 end;
 
-function ReadStmt(const AText: string; var APos: Integer): TASTStmt;
+function ReadStmt(const AText: string; var APos: Int): TASTStmt;
 var
   Kind: string;
   ASn:  TAssignment;
@@ -2148,7 +2148,7 @@ var
   ECSn: TExprCallStmt;
   ICSn: TInheritedCallStmt;
   ASMn: TAsmStmt;
-  C, I: Integer;
+  C, I: Int;
   Body: TASTStmt;
 begin
   Kind := ReadLpstrAt(AText, APos);
@@ -2344,10 +2344,10 @@ begin
       'ReadStmt: unknown statement kind ''' + Kind + '''');
 end;
 
-function ReadBlock(const AText: string; var APos: Integer): TBlock;
+function ReadBlock(const AText: string; var APos: Int): TBlock;
 var
   Kind:    string;
-  C, I:    Integer;
+  C, I:    Int;
   VarName: string;
   VarType: string;
   VD:      TVarDecl;
@@ -2371,20 +2371,20 @@ begin
   end;
 end;
 
-function DecodeCount(const AText: string; var APos: Integer): Integer;
+function DecodeCount(const AText: string; var APos: Int): Int;
 begin
   Result := StrToInt(ReadLpstrAt(AText, APos));
 end;
 
-function DecodeBool(const AText: string; var APos: Integer): Boolean;
+function DecodeBool(const AText: string; var APos: Int): Boolean;
 begin
   Result := ReadLpstrAt(AText, APos) = '1';
 end;
 
-procedure ReadStringListBlock(const AText: string; var APos: Integer;
+procedure ReadStringListBlock(const AText: string; var APos: Int;
                               ATarget: TStringList);
 var
-  C, I: Integer;
+  C, I: Int;
 begin
   C := DecodeCount(AText, APos);
   for I := 1 to C do ATarget.Add(ReadLpstrAt(AText, APos));
@@ -2393,16 +2393,16 @@ end;
 { Read a flattened field list into a TRecordTypeDef's Fields list.
   Each field is emitted with a single Name (the writer flattened
   multi-name decls); the reader rebuilds one TFieldDecl per name. }
-procedure ReadFieldList(const AText: string; var APos: Integer;
+procedure ReadFieldList(const AText: string; var APos: Int;
                         ATarget: TObjectList);
 var
-  C, I:        Integer;
+  C, I:        Int;
   FldName:     string;
   FldType:     string;
   IsWeak:      Boolean;
   IsClassVar:  Boolean;
   ClassVarEmit: string;
-  Vis:         Integer;
+  Vis:         Int;
   F:           TFieldDecl;
 begin
   C := DecodeCount(AText, APos);
@@ -2430,13 +2430,13 @@ end;
 { Inverse of EncodeNestedTypeList — rebuild a type's nested `type` section.
   Order must mirror the writer exactly: name, kind, visibility, then the
   per-kind payload (GH #175). }
-procedure ReadNestedTypeList(const AText: string; var APos: Integer;
+procedure ReadNestedTypeList(const AText: string; var APos: Int;
                              ATarget: TObjectList);
 var
-  C, I: Integer;
+  C, I: Int;
   Nm:   string;
   Kind: string;
-  Vis:  Integer;
+  Vis:  Int;
   ND:   TTypeDecl;
   RD:   TRecordTypeDef;
   AD:   TTypeAliasDef;
@@ -2478,10 +2478,10 @@ end;
 { Inverse of EncodeConstDeclList — rebuild record/class `static const`
   decls.  Mirrors the writer's six-field scalar shape exactly (the sixth,
   Visibility, was added for GH #175 Stage 0). }
-procedure ReadConstDeclList(const AText: string; var APos: Integer;
+procedure ReadConstDeclList(const AText: string; var APos: Int;
                             ATarget: TObjectList);
 var
-  C, I:     Integer;
+  C, I:     Int;
   CD:       TConstDecl;
   IsString: Boolean;
   IsFloat:  Boolean;
@@ -2504,12 +2504,12 @@ end;
 
 { Inverse of EncodeMethodSig — builds a TRoutineSig from the
   per-method payload. }
-function ReadMethodSig(const AText: string; var APos: Integer): TRoutineSig;
+function ReadMethodSig(const AText: string; var APos: Int): TRoutineSig;
 var
   RefStr:   string;
   RefUnit:  string;
   RefType:  string;
-  Pc, J:    Integer;
+  Pc, J:    Int;
   Param:    TMethodParam;
   FlagsStr: string;
 begin
@@ -2556,16 +2556,16 @@ begin
   end;
 end;
 
-procedure ReadMethodList(const AText: string; var APos: Integer;
+procedure ReadMethodList(const AText: string; var APos: Int;
                          ATarget: TObjectList);
 var
-  C, I: Integer;
+  C, I: Int;
 begin
   C := DecodeCount(AText, APos);
   for I := 1 to C do ATarget.Add(ReadMethodSig(AText, APos));
 end;
 
-procedure ReadRecordPayload(const AText: string; var APos: Integer;
+procedure ReadRecordPayload(const AText: string; var APos: Int;
                             AEntry: TTypeEntry);
 var
   Def: TRecordTypeDef;
@@ -2580,7 +2580,7 @@ begin
   AEntry.Def := Def;
 end;
 
-procedure ReadClassPayload(const AText: string; var APos: Integer;
+procedure ReadClassPayload(const AText: string; var APos: Int;
                            AEntry: TTypeEntry);
 var
   Def:     TClassTypeDef;
@@ -2605,10 +2605,10 @@ begin
   AEntry.Def     := Def;
 end;
 
-function ReadMethodDecl(const AText: string; var APos: Integer): TMethodDecl;
+function ReadMethodDecl(const AText: string; var APos: Int): TMethodDecl;
 var
   HasReturn: Boolean;
-  Pc, J:     Integer;
+  Pc, J:     Int;
   Param:     TMethodParam;
   FlagsStr:  string;
 begin
@@ -2637,19 +2637,19 @@ begin
   end;
 end;
 
-procedure ReadMethodDeclList(const AText: string; var APos: Integer;
+procedure ReadMethodDeclList(const AText: string; var APos: Int;
                              ATarget: TObjectList);
 var
-  C, I: Integer;
+  C, I: Int;
 begin
   C := DecodeCount(AText, APos);
   for I := 1 to C do ATarget.Add(ReadMethodDecl(AText, APos));
 end;
 
-procedure ReadPropertyList(const AText: string; var APos: Integer;
+procedure ReadPropertyList(const AText: string; var APos: Int;
                            ATarget: TObjectList);
 var
-  C, I: Integer;
+  C, I: Int;
   P:    TPropertyDecl;
 begin
   C := DecodeCount(AText, APos);
@@ -2671,10 +2671,10 @@ begin
   end;
 end;
 
-procedure ReadInlineBodies(const AText: string; var APos: Integer;
+procedure ReadInlineBodies(const AText: string; var APos: Int;
                            AIface: TUnitInterface);
 var
-  Count, I: Integer;
+  Count, I: Int;
   B:        TInlineBody;
 begin
   Count := ReadDecimalAt(AText, APos);
@@ -2689,10 +2689,10 @@ begin
     raise EIfaceFormatError.Create('INLINE block: missing END marker');
 end;
 
-procedure ReadGenericRoutines(const AText: string; var APos: Integer;
+procedure ReadGenericRoutines(const AText: string; var APos: Int;
                               AIface: TUnitInterface);
 var
-  Count, I, J: Integer;
+  Count, I, J: Int;
   G:           TGenericBody;
   Name:        string;
   MD:          TMethodDecl;
@@ -2722,10 +2722,10 @@ begin
     raise EIfaceFormatError.Create('GENROUT block: missing END marker');
 end;
 
-procedure ReadMeta(const AText: string; var APos: Integer;
+procedure ReadMeta(const AText: string; var APos: Int;
                    AIface: TUnitInterface);
 var
-  C, I: Integer;
+  C, I: Int;
 begin
   AIface.SourceFile    := ReadLpstrAt(AText, APos);
   AIface.SourceHash    := ReadLpstrAt(AText, APos);
@@ -2753,10 +2753,10 @@ begin
     raise EIfaceFormatError.Create('META block: missing END marker');
 end;
 
-procedure ReadTypeParamList(const AText: string; var APos: Integer;
+procedure ReadTypeParamList(const AText: string; var APos: Int;
                             ANames, AConstraints: TStringList);
 var
-  C, I: Integer;
+  C, I: Int;
 begin
   C := DecodeCount(AText, APos);
   for I := 1 to C do
@@ -2776,11 +2776,11 @@ end;
   the two used to differ only in which list they appended to, and a second copy
   of this walk would drift (every field carried here was added because dropping
   it caused a real bug: IsStatic, Visibility, IsOutParam, HasDefault...). }
-procedure ReadTemplateMethodDecls(const AText: string; var APos: Integer;
+procedure ReadTemplateMethodDecls(const AText: string; var APos: Int;
                                   AEntry: TTypeEntry; ATarget: TObjectList;
                                   const AUnitName: string);
 var
-  J, K:   Integer;
+  J, K:   Int;
   Sig:    TRoutineSig;
   MD:     TMethodDecl;
   SrcPar: TMethodParam;
@@ -2849,7 +2849,7 @@ begin
   end;
 end;
 
-procedure ReadGenericClassPayload(const AText: string; var APos: Integer;
+procedure ReadGenericClassPayload(const AText: string; var APos: Int;
                                   AEntry: TTypeEntry;
                                   const AUnitName: string);
 var
@@ -2890,7 +2890,7 @@ begin
   AEntry.Def       := Def;
 end;
 
-procedure ReadGenericRecordPayload(const AText: string; var APos: Integer;
+procedure ReadGenericRecordPayload(const AText: string; var APos: Int;
                                    AEntry: TTypeEntry;
                                    const AUnitName: string);
 var
@@ -2927,7 +2927,7 @@ begin
   AEntry.Def       := Def;
 end;
 
-procedure ReadGenericInterfacePayload(const AText: string; var APos: Integer;
+procedure ReadGenericInterfacePayload(const AText: string; var APos: Int;
                                       AEntry: TTypeEntry);
 var
   Def:     TGenericInterfaceDef;
@@ -2945,11 +2945,11 @@ begin
   AEntry.Def       := Def;
 end;
 
-procedure ReadGenericProcPayload(const AText: string; var APos: Integer;
+procedure ReadGenericProcPayload(const AText: string; var APos: Int;
                                  AEntry: TTypeEntry);
 var
   Def:      TGenericProcDef;
-  Pc, J:    Integer;
+  Pc, J:    Int;
   Param:    TMethodParam;
   FlagsStr: string;
 begin
@@ -2973,11 +2973,11 @@ begin
   AEntry.Def := Def;
 end;
 
-procedure ReadProcPayload(const AText: string; var APos: Integer;
+procedure ReadProcPayload(const AText: string; var APos: Int;
                           AEntry: TTypeEntry);
 var
   Def:      TProceduralTypeDef;
-  Pc, J:    Integer;
+  Pc, J:    Int;
   Param:    TMethodParam;
   FlagsStr: string;
 begin
@@ -2999,7 +2999,7 @@ begin
   AEntry.Def := Def;
 end;
 
-procedure ReadInterfacePayload(const AText: string; var APos: Integer;
+procedure ReadInterfacePayload(const AText: string; var APos: Int;
                                AEntry: TTypeEntry);
 var
   Def: TInterfaceTypeDef;
@@ -3011,11 +3011,11 @@ begin
   AEntry.Def := Def;
 end;
 
-procedure ReadTypes(const AText: string; var APos: Integer;
+procedure ReadTypes(const AText: string; var APos: Int;
                     AIface: TUnitInterface);
 var
-  Count:    Integer;
-  I:        Integer;
+  Count:    Int;
+  I:        Int;
   Kind:     string;
   Name:     string;
   Payload:  string;
@@ -3084,7 +3084,7 @@ begin
 end;
 
 { Inverse of EncodeParamFlags. }
-procedure DecodeParamFlags(AFlags: Integer; AParam: TMethodParam);
+procedure DecodeParamFlags(AFlags: Int; AParam: TMethodParam);
 begin
   AParam.IsVarParam   := (AFlags and 1) <> 0;
   AParam.IsConstParam := (AFlags and 2) <> 0;
@@ -3093,12 +3093,12 @@ begin
   AParam.HasDefault   := (AFlags and 16) <> 0;
 end;
 
-procedure ReadRoutines(const AText: string; var APos: Integer;
+procedure ReadRoutines(const AText: string; var APos: Int;
                        AIface: TUnitInterface);
 var
-  Count:    Integer;
-  I, J:     Integer;
-  PCount:   Integer;
+  Count:    Int;
+  I, J:     Int;
+  PCount:   Int;
   R:        TRoutineSig;
   RefStr:   string;
   RefUnit:  string;
@@ -3141,7 +3141,7 @@ end;
 
 function ReadUnitInterface(const AText: string): TUnitInterface;
 var
-  Cur:    Integer;
+  Cur:    Int;
   UName:  string;
   Tag:    string;
 begin
@@ -3182,10 +3182,10 @@ end;
   >9.2e18 and doesn't fit. }
 function ContentHashFnv1a64(const AContent: string): string;
 var
-  I:    Integer;
+  I:    Int;
   B:    Byte;
   H:    UInt64;
-  Lo:   Integer;
+  Lo:   Int;
   FnvOffset: UInt64;
   FnvPrime:  UInt64;
 begin
@@ -3200,7 +3200,7 @@ begin
   Result := '';
   for I := 15 downto 0 do
   begin
-    Lo := Integer((H shr (I * 4)) and $f);
+    Lo := Int((H shr (I * 4)) and $f);
     if Lo < 10 then Result := Result + Chr(Ord('0') + Lo)
               else Result := Result + Chr(Ord('a') + Lo - 10);
   end;
@@ -3212,13 +3212,13 @@ var
   Lx:      TLexer;
   Tok:     TToken;
   Acc:     string;
-  I:       Integer;
+  I:       Int;
   Path:    string;
   FIn:     TFileInputStream;
   Blob:    string;
-  N:       Integer;
-  Got:     Integer;
-  I2:      Integer;
+  N:       Int;
+  Got:     Int;
+  I2:      Int;
 begin
   Acc := ASourceText;
   { Discover the embedded files by lexing.  The lexer records each file it
@@ -3248,7 +3248,7 @@ begin
       try
         FIn := TFileInputStream.Create(Path);
         try
-          N := Integer(FIn.Size());
+          N := Int(FIn.Size());
           SetLength(Blob, N);
           { Read until N: a single read(2) may legally return fewer bytes,
             which would leave the tail as zeros and hash a file that never
@@ -3282,13 +3282,13 @@ function SourceFileHash(const APath: string; ADefines: TStringList): string;
 var
   FIn:  TFileInputStream;
   Text: string;
-  N:    Integer;
-  Got:  Integer;
-  R:    Integer;
+  N:    Int;
+  Got:  Int;
+  R:    Int;
 begin
   FIn := TFileInputStream.Create(APath);
   try
-    N := Integer(FIn.Size());
+    N := Int(FIn.Size());
     SetLength(Text, N);
     { a single read(2) may return fewer bytes than asked }
     Got := 0;
@@ -3340,7 +3340,7 @@ begin
   try
     FIn := TFileInputStream.Create(ParamStr(0));
     try
-      SetLength(Bytes, Integer(FIn.Size()));
+      SetLength(Bytes, Int(FIn.Size()));
       if Length(Bytes) > 0 then
         FIn.Read(PChar(Bytes), Length(Bytes));
       Hash := ContentHashFnv1a64(Bytes);
@@ -3359,7 +3359,7 @@ end;
 
 function DepPairName(const AEntry: string): string;
 var
-  P: Integer;
+  P: Int;
 begin
   P := StrPos('=', AEntry);
   if P < 0 then
@@ -3370,7 +3370,7 @@ end;
 
 function DepPairHash(const AEntry: string): string;
 var
-  P: Integer;
+  P: Int;
 begin
   P := StrPos('=', AEntry);
   if P < 0 then
@@ -3381,7 +3381,7 @@ end;
 
 procedure RecordGenericDepNames(AIface: TUnitInterface; ANames: TStringList);
 var
-  I: Integer;
+  I: Int;
 begin
   if (AIface = nil) or (ANames = nil) then Exit;
   AIface.GenericDepHashes.Clear();
@@ -3398,7 +3398,7 @@ end;
   unavailable. }
 procedure FillGenericDepHashes(AIface: TUnitInterface; const ASourceDir: string);
 var
-  I, J:    Integer;
+  I, J:    Int;
   Base:    string;
   Entries: TStringList;
   DepName: string;
@@ -3503,7 +3503,7 @@ var
 begin
   FIn := TFileInputStream.Create(APath);
   try
-    SetLength(Bytes, Integer(FIn.Size()));
+    SetLength(Bytes, Int(FIn.Size()));
     if Length(Bytes) > 0 then
       FIn.Read(PChar(Bytes), Length(Bytes));
   finally

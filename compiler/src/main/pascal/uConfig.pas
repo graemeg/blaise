@@ -86,9 +86,9 @@ end;
 procedure ParseConfigLines(ALines: TStringList; const ABaseDir: string;
   APaths: TStringList; var ARtlSrc: string);
 var
-  I:     Integer;
+  I:     Int;
   Line:  string;
-  EqPos: Integer;
+  EqPos: Int;
   Key:   string;
   Value: string;
 begin

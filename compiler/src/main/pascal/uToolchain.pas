@@ -168,7 +168,7 @@ end;
 function WhichInPath(const ABaseName: string): string;
 var
   Path, Entry: string;
-  SepPos:      Integer;
+  SepPos:      Int;
   Hit:         string;
 begin
   Result := '';
@@ -248,7 +248,7 @@ function ResolveSpec(const ASpec: TToolSpec; const ATarget: TTargetDesc): string
 var
   Ext, EnvP, Pref, Hit: string;
   Cross: Boolean;
-  I: Integer;
+  I: Int;
 begin
   Ext   := HostExeExt();
   Cross := HostTarget().OS <> ATarget.OS;
@@ -330,7 +330,7 @@ end;
 function RTLSourceDir: string;
 var
   Cand, Up: string;
-  I: Integer;
+  I: Int;
 begin
   { The RTL units (runtime.*, rtl.platform.*) live in the compiler's own source
     tree.  Resolve the directory robustly across the ways the compiler is run:

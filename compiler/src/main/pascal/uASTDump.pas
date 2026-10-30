@@ -22,11 +22,11 @@ uses
   Classes, SysUtils, contnrs;
 
 var
-  IndentLevel: Integer;
+  IndentLevel: Int;
 
 procedure Indent;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 1 to IndentLevel do
     Write('  ');
@@ -101,7 +101,7 @@ end;
 
 procedure DumpExpr(AExpr: TASTExpr);
 var
-  I: Integer;
+  I: Int;
   Flags: string;
 begin
   if AExpr = nil then
@@ -382,7 +382,7 @@ end;
 
 procedure DumpStmt(AStmt: TASTStmt);
 var
-  I: Integer;
+  I: Int;
   Flags: string;
 begin
   if AStmt = nil then
@@ -730,7 +730,7 @@ end;
 
 procedure DumpMethodDecl(ADecl: TMethodDecl);
 var
-  I: Integer;
+  I: Int;
   Flags: string;
 begin
   Flags := '';
@@ -782,7 +782,7 @@ end;
 
 procedure DumpBlock(ABlock: TBlock);
 var
-  I: Integer;
+  I: Int;
 begin
   if ABlock = nil then
   begin

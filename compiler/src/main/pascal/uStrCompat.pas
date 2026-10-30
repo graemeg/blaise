@@ -24,19 +24,19 @@ unit uStrCompat;
 interface
 
 { StrAt: return ordinal of character at 0-based index I }
-function StrAt(const S: string; I: Integer): Integer;
+function StrAt(const S: string; I: Int): Int32;
 
 { StrCopyFrom: copy from 0-based position From, Count chars }
-function StrCopyFrom(const S: string; From, Count: Integer): string;
+function StrCopyFrom(const S: string; From, Count: Int): string;
 
 { StrCopyTail: copy from 0-based position From to end of string }
-function StrCopyTail(const S: string; From: Integer): string;
+function StrCopyTail(const S: string; From: Int): string;
 
 { StrHead: copy the first N characters (equivalent to Copy(s, 0, N)) }
-function StrHead(const S: string; N: Integer): string;
+function StrHead(const S: string; N: Int): string;
 
 { StrPos: find sub in s, return 0-based index; -1 if not found }
-function StrPos(const Sub, S: string): Integer;
+function StrPos(const Sub, S: string): Int;
 
 { StripUnderscores: return S with all '_' characters removed }
 function StripUnderscores(const S: string): string;
@@ -58,34 +58,34 @@ implementation
 uses
   SysUtils;   { EConvertError }
 
-function StrAt(const S: string; I: Integer): Integer;
+function StrAt(const S: string; I: Int): Int32;
 begin
   Result := OrdAt(S, I);
 end;
 
-function StrCopyFrom(const S: string; From, Count: Integer): string;
+function StrCopyFrom(const S: string; From, Count: Int): string;
 begin
   Result := Copy(S, From, Count);
 end;
 
-function StrCopyTail(const S: string; From: Integer): string;
+function StrCopyTail(const S: string; From: Int): string;
 begin
   Result := Copy(S, From, MaxInt);
 end;
 
-function StrHead(const S: string; N: Integer): string;
+function StrHead(const S: string; N: Int): string;
 begin
   Result := Copy(S, 0, N);
 end;
 
-function StrPos(const Sub, S: string): Integer;
+function StrPos(const Sub, S: string): Int;
 begin
   Result := Pos(Sub, S);
 end;
 
 function StripUnderscores(const S: string): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   for I := 0 to Length(S) - 1 do
@@ -96,11 +96,11 @@ end;
 procedure ParseIntOrUInt64Literal(const S: string;
   var AValue: Int64; var AIsUInt64: Boolean);
 var
-  I, Len:    Integer;
+  I, Len:    Int;
   Digits:    string;
-  C:         Integer;
-  Prefix:    Integer;
-  Digit:     Integer;
+  C:         Int;
+  Prefix:    Int;
+  Digit:     Int;
 begin
   AValue    := 0;
   AIsUInt64 := False;

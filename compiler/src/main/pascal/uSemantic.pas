@@ -34,7 +34,7 @@ type
   TEnumMemberRef = class
     EnumDesc: TEnumTypeDesc;
     Ordinal:  Int64;
-    Order:    Integer;
+    Order:    Int;
   end;
 
   { The nested routines an anonymous-method literal can call: those of every
@@ -95,7 +95,7 @@ type
     FPendingGenericRecordInstances: TObjectList; { TGenericRecordInstance — not owned }
     FPendingGenericIntfInstances:   TObjectList; { TGenericInterfaceInstance — not owned }
     FGenericFuncTemplates: TStringList;  { base name → TMethodDecl template (not owned) }
-    FHiddenExcVarCount:   Integer;       { names __excv_<n> -- see
+    FHiddenExcVarCount:   Int;       { names __excv_<n> -- see
                                            BindHandlersToHiddenVars }
     FAnonNestedRoutines:  TObjectList;   { owned TAnonNestedRoutines: per lifted
                                            thunk, the nested routines in scope
@@ -113,13 +113,13 @@ type
                                            nested routine; checked by
                                            CheckNestedRoutineAddrs once all
                                            capture lists are final (BUG-032) }
-    FEnvTypeCount:        Integer;       { per-compilation counter for
+    FEnvTypeCount:        Int;       { per-compilation counter for
                                             synthetic '__env_<n>' records }
-    FAnonMethodCount:     Integer;       { per-compilation counter for
+    FAnonMethodCount:     Int;       { per-compilation counter for
                                            '__closure_<n>' thunk names }
     FGenericMethodTemplates: TStringList; { 'OwnerType.Method' → TMethodDecl template (not owned) — generic methods with method-level <T> }
-    FLoopDepth:            Integer;      { depth of enclosing while/for — Break only legal if > 0 }
-    FScopeDepth:           Integer;      { mirrors FTable scope depth; used to detect main-level globals }
+    FLoopDepth:            Int;      { depth of enclosing while/for — Break only legal if > 0 }
+    FScopeDepth:           Int;      { mirrors FTable scope depth; used to detect main-level globals }
     FCurrentClass:         TRecordTypeDesc;  { class being analysed (set in AnalyseMethodDecl) }
     FCurrentBlockFirstSite: TObject;         { TVarDeclStmt — first block-scoped
                                                var declaration of the compound
@@ -184,9 +184,9 @@ type
     FWarnings:             TStringList;  { non-fatal diagnostics collected during analysis; each is
                                            also written to StdErr as it is raised (see SemanticWarning) }
     FCurrentLocalBlock:    TBlock;       { block currently being stmt-analysed; for-in injects synthetic TVarDecl here }
-    FForInCounter:         Integer;      { counter for generating unique __forin_N variable names }
-    FArrayConstCounter:    Integer;      { counter for generating unique array-const data labels }
-    FAnonEnumCounter:      Integer;      { counter for unique anonymous-enum type names (inline 'set of (a,b,c)') }
+    FForInCounter:         Int;      { counter for generating unique __forin_N variable names }
+    FArrayConstCounter:    Int;      { counter for generating unique array-const data labels }
+    FAnonEnumCounter:      Int;      { counter for unique anonymous-enum type names (inline 'set of (a,b,c)') }
     FCurrentUnitName:      string;       { name of the unit/program currently being analysed }
     FMethodOwnerHint:      string;       { receiver owning-unit hint for the NEXT
                                            ResolveMethodOverload call, consumed and
@@ -241,7 +241,7 @@ type
     FEnumMemberRefs:       TObjectList;  { owns the TEnumMemberRef holders pointed at by
                                            FEnumMemberIndex.Objects (TStringList does not
                                            own its Objects). }
-    FEnumOrderCounter:     Integer;      { monotonic rank stamped on each member as it is
+    FEnumOrderCounter:     Int;      { monotonic rank stamped on each member as it is
                                            registered; higher = declared later = wins the
                                            context-free ambiguity fallback. }
 
@@ -255,11 +255,11 @@ type
     { Like FProcIndex.IndexOf, but only matches a forward decl whose OwningUnit
       is AUnitName.  FProcIndex is global across all compiled units, so a bare
       IndexOf can return a same-named decl from an imported unit. }
-    function IndexOfProcInUnit(const AName, AUnitName: string): Integer;
+    function IndexOfProcInUnit(const AName, AUnitName: string): Int;
 
     { The FProcIndex entry of the current unit's body-less overloaded forward
       that ABody implements (same mangled signature), or -1. }
-    function IndexOfOverloadForward(ABody: TMethodDecl): Integer;
+    function IndexOfOverloadForward(ABody: TMethodDecl): Int;
 
     { The emitted/imported link symbol for a standalone routine: the
       `external name` for an external binding (defaulting to the Pascal name),
@@ -299,7 +299,7 @@ type
     procedure AddGroupEntry(AGroups: TStringList; const AKey: string;
                             ADecl: TMethodDecl);
     function  GroupOf(AGroups: TStringList; const AKey: string): TObjectList;
-    procedure ReplaceProcIndexObject(AIdx: Integer; ANew: TMethodDecl);
+    procedure ReplaceProcIndexObject(AIdx: Int; ANew: TMethodDecl);
 
     { Populates FCurrentUsesChain from a program/unit's UsedUnits list.
       Pure plumbing — no behavior change today; consumed by uses-chain
@@ -316,7 +316,7 @@ type
     { Resolves a parameter's type, handling both plain types and open arrays.
       For IsOpenArray params, creates and registers a TOpenArrayTypeDesc. }
     function  ResolveParamType(APar: TMethodParam;
-                ALoc: Integer; ACol: Integer): TTypeDesc;
+                ALoc: Int; ACol: Int): TTypeDesc;
     { Each Instantiate* runs its *Core inside the generic view of the
       template's declaring unit (see EnterGenericView). }
     function  InstantiateGeneric(const ATypeName: string): TRecordTypeDesc;
@@ -404,7 +404,7 @@ type
     function  ResolveSetConstValue(ACD: TConstDecl; AIsInterface: Boolean;
       AVarSet: TTypeDesc): TSetTypeDesc;
     function  ResolveSetMemberOrd(const AMember: string; ACD: TConstDecl;
-                                  var AEnumDesc: TEnumTypeDesc): Integer;
+                                  var AEnumDesc: TEnumTypeDesc): Int;
     procedure AnalyseArrayConstDecls(ABlock: TBlock; AIsInterface: Boolean = False);
     { Build the (possibly nested) static-array type for a range-indexed array
       const and validate that the flat row-major element count matches the
@@ -427,14 +427,14 @@ type
     { Truncate a folded constant to an ordinal type's width (GH #195). }
     function  TruncConstToOrdinal(AValue: Int64; ATypeDesc: TTypeDesc): Int64;
     function  FoldConstBitOpExpr(ATokens: TStringList;
-                                 ALine, ACol: Integer): Int64;
+                                 ALine, ACol: Int): Int64;
     { Fold a compile-time integer constant expression AST (literals, named
       constants, and the integer binary/unary operators with the precedence
       already encoded in the tree shape) to its Int64 value.  Named-constant
       references are resolved against the symbol table, so this must run after
       the referenced consts are declared. }
-    function  EvalConstIntExpr(AExpr: TASTExpr; ALine, ACol: Integer): Int64;
-    function  EvalConstFloatExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
+    function  EvalConstIntExpr(AExpr: TASTExpr; ALine, ACol: Int): Int64;
+    function  EvalConstFloatExpr(AExpr: TASTExpr; ALine, ACol: Int): string;
     function  IsFloatConstExpr(AExpr: TASTExpr): Boolean;
     function  LookupConstSym(const AName: string): TSymbol;
     function  CallsConstructor(AType: TTypeDesc; const AName: string): Boolean;
@@ -454,19 +454,19 @@ type
     function  ResolveMetaclassStaticExpr(AExpr: TMethodCallExpr;
       AMeta: TTypeDesc): TTypeDesc;
     function  MetaclassStaticDecl(AMeta: TTypeDesc; const AName: string;
-      AArgs: TObjectList; ALine, ACol: Integer): TMethodDecl;
+      AArgs: TObjectList; ALine, ACol: Int): TMethodDecl;
     { A constructor called as an ordinary method (no allocation) runs it
       again on a live object.  Only one constructor calling another on Self,
       directly inside a constructor, means that; anywhere else it is the
       `Obj.Create` slip for `Obj := TFoo.Create()`, so it is rejected. }
     procedure CheckCtorAsMethod(ADecl: TObject; AOnSelf: Boolean;
-      ALine, ACol: Integer);
+      ALine, ACol: Int);
     function  IsStringConstExpr(AExpr: TASTExpr): Boolean;
-    function  EvalConstStrExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
+    function  EvalConstStrExpr(AExpr: TASTExpr; ALine, ACol: Int): string;
     function  ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
     function  ConstExprAwaitsTypes(AExpr: TASTExpr): Boolean;
     function  ConstAwaitsTypes(CD: TConstDecl): Boolean;
-    procedure DefineScalarConst(ABlock: TBlock; AIndex: Integer;
+    procedure DefineScalarConst(ABlock: TBlock; AIndex: Int;
       CD: TConstDecl; TD: TTypeDesc);
     { Non-raising counterpart of EvalConstIntExpr: True (and AValue set) only
       when AExpr is a compile-time integer constant.  EvalConstIntExpr itself
@@ -484,7 +484,7 @@ type
     procedure CheckConstArrayIndexInRange(AIndexExpr: TASTExpr;
                                           AArrType: TTypeDesc;
                                           const ADescr: string;
-                                          ALine, ACol: Integer);
+                                          ALine, ACol: Int);
     { Reject a compile-time-constant value stored into a SUBRANGE or ENUM
       destination when it falls outside that type's range
       (BUG-20260921-no-compile-time-range-check).  Covers stores, value
@@ -494,45 +494,45 @@ type
       declared ordinal, so an interior hole in an explicitly-numbered enum
       stays legal.  A non-constant value is left alone. }
     procedure CheckConstValueInRange(ADestType: TTypeDesc; AExpr: TASTExpr;
-                                     ALine, ACol: Integer);
+                                     ALine, ACol: Int);
     { As CheckConstValueInRange but for a value already folded to an Int64
       (the global-variable initialiser path folds before any expression
       survives). }
     procedure CheckConstIntInRange(ADestType: TTypeDesc; AValue: Int64;
-                                   ALine, ACol: Integer);
+                                   ALine, ACol: Int);
     { The inclusive ordinal bounds an ENUM (or enum-subrange) index type
       spans when it indexes an array: MIN..MAX declared ordinal, matching
       Delphi and the min..max rule used for values and casts.  Five sites
       used to open-code `if IsSubrange then bounds else 0..Count-1`, and
       that duplication is how BUG-20260922-explicit-ordinal-enum-array-
       bounds drifted — every caller must use this. }
-    procedure EnumIndexBounds(AIdxType: TTypeDesc; out ALo, AHi: Integer);
+    procedure EnumIndexBounds(AIdxType: TTypeDesc; out ALo, AHi: Int);
     { The index range of ANY type that may index an array -- enum,
       enum or integer subrange, Boolean, or an 8-/16-bit integer type.
       False for a type that cannot.  The single-dimension array[T] branch
       and the multi-dimensional array[T1, T2] bounds both ask this, so the
       two forms accept the same index types. }
-    function  OrdinalIndexRange(AIdxType: TTypeDesc; out ALo, AHi: Integer): Boolean;
+    function  OrdinalIndexRange(AIdxType: TTypeDesc; out ALo, AHi: Int): Boolean;
     { Raise the error for AName (resolving to AIdxType, nil if unknown)
       used as an array index type when OrdinalIndexRange said no. }
     procedure RejectArrayIndexType(const AName: string; AIdxType: TTypeDesc);
-    procedure RejectCyclicIntfParent(AIntf: TInterfaceTypeDesc; ALine, ACol: Integer);
+    procedure RejectCyclicIntfParent(AIntf: TInterfaceTypeDesc; ALine, ACol: Int);
     { Warn when an enum's declared ordinals are so sparse that indexing an
       array by it allocates far more slots than the enum has members.  The
       span is correct but easy to reach unintentionally: (HTTP_OK = 200,
       HTTP_NOTFOUND = 404) would quietly allocate 205 elements. }
     procedure WarnIfEnumIndexSparse(AIdxType: TTypeDesc; const ADescr: string;
-                                    ALine, ACol: Integer);
+                                    ALine, ACol: Int);
     { Reject an enum that cannot be a set base.  A member's bit is its
       declared ORDINAL, so every ordinal must lie in 0..255 -- the ceiling
       'set of lo..hi' already enforces.  The single source of that rule for
       the named, inline, inferred-const and 'in [...]' set forms. }
     procedure CheckEnumSetBase(AEnum: TEnumTypeDesc; const AName: string;
-                               ALine, ACol: Integer);
-    function  ResolveArrayBound(const ABoundText: string): Integer;
+                               ALine, ACol: Int);
+    function  ResolveArrayBound(const ABoundText: string): Int;
     function  ResolveSubrangeSetType(const ASubrange: string): TSetTypeDesc;
     function  ResolveConstArrayElem(const AElem: string; AElemType: TTypeDesc;
-                                    ALine, ACol: Integer): string;
+                                    ALine, ACol: Int): string;
     procedure AnalyseTypeDecls(ABlock: TBlock);
     procedure LinkClassMethodImpls(ABlock: TBlock);
     procedure LinkGenericClassMethodImpls(ABlock: TBlock);
@@ -565,7 +565,7 @@ type
     function  IsInlineEligible(ADecl: TMethodDecl): Boolean;
     function  StmtRejectsInline(AStmt: TASTStmt;
                                  const ASelfDecl: TMethodDecl;
-                                 var AStmtCount: Integer): Boolean;
+                                 var AStmtCount: Int): Boolean;
     function  ExprRejectsInline(AExpr: TASTExpr;
                                  const ASelfDecl: TMethodDecl): Boolean;
     function  AssignmentTargetsParameter(const AName: string;
@@ -602,7 +602,7 @@ type
     { The index and value of a byte write S[I] := B into a string: a numeric
       index, and a byte -- a numeric ordinal, Chr(n) or a one-character
       string, the forms Blaise uses in place of a Char type. }
-    procedure AnalyseStrByteWrite(AIndex, AValue: TASTExpr; ALine, ACol: Integer);
+    procedure AnalyseStrByteWrite(AIndex, AValue: TASTExpr; ALine, ACol: Int);
     function  TryAnalyseFieldElemWrite(AAssign: TFieldAssignment;
       AFieldType: TTypeDesc): Boolean;
     { TypeName.StaticVar[I] read: the parser folds the subscript into
@@ -612,16 +612,16 @@ type
     function  TryLowerDefaultPropertyWrite(AAssign: TFieldAssignment;
       AMemberType: TTypeDesc): Boolean;
     function  FloatBuiltinArgType(const AName: string; AArgType: TTypeDesc;
-      ALine, ACol: Integer): TTypeDesc;
+      ALine, ACol: Int): TTypeDesc;
     procedure AnalyseProcCall(ACall: TProcCall);
     { Raw-memory intrinsics Move(Source, Dest, Count) and FillByte(Dest,
       Count, Value): validate, then rewrite the variable operands to their
       addresses so the backends lower a plain RTL call. }
-    procedure AnalyseRawMemOperand(ACall: TProcCall; AIndex: Integer;
+    procedure AnalyseRawMemOperand(ACall: TProcCall; AIndex: Int;
       const ARoutine, APosition, AVerb, ARemedy: string; AWritten: Boolean);
-    function  AnalyseIntegerArg(AArgs: TObjectList; AIndex: Integer;
-      const ARoutine, ARole: string; ALine, ACol: Integer): TTypeDesc;
-    function  AnalyseRawMemInteger(ACall: TProcCall; AIndex: Integer;
+    function  AnalyseIntegerArg(AArgs: TObjectList; AIndex: Int;
+      const ARoutine, ARole: string; ALine, ACol: Int): TTypeDesc;
+    function  AnalyseRawMemInteger(ACall: TProcCall; AIndex: Int;
       const ARoutine, ARole, AHint: string): TTypeDesc;
     procedure AnalyseMoveCall(ACall: TProcCall);
     procedure AnalyseFillByteCall(ACall: TProcCall);
@@ -635,8 +635,8 @@ type
     { AQualUnit: the unit of a qualified call, whose routines alone are
       candidates ('' = every visible routine of the name). }
     function  ResolveStandaloneOverload(const AName: string;
-      AArity: Integer; AArgs: TObjectList;
-      ALine, ACol: Integer; const AQualUnit: string = ''): TMethodDecl;
+      AArity: Int; AArgs: TObjectList;
+      ALine, ACol: Int; const AQualUnit: string = ''): TMethodDecl;
     { Class-method overload resolution.  Walks the inheritance chain
       starting at ATypeName, collecting candidates whose method name
       matches AMethodName.  Filters by arity, scores by argument type
@@ -645,7 +645,7 @@ type
       first-name-match (used by paths that need the decl before args
       are analysed, e.g. zero-arg lookups). }
     function  ResolveMethodOverload(const ATypeName, AMethodName: string;
-      AArgs: TObjectList; ALine, ACol: Integer): TMethodDecl;
+      AArgs: TObjectList; ALine, ACol: Int): TMethodDecl;
     { Score a pre-gathered arity-matched candidate list against AArgs and
       apply the tie-breakers (highest summed score, then fewer defaulted
       slots, then more exact matches).  Shared by ResolveMethodOverload and
@@ -662,7 +662,7 @@ type
       when the operand types declare no such operator. }
     function  ResolveOperatorOverload(AKind: TOperatorKind;
       ALType, ARType: TTypeDesc; AArgs: TObjectList;
-      ALine, ACol: Integer): TMethodDecl;
+      ALine, ACol: Int): TMethodDecl;
     { Append every `class operator` of AKind declared on ATypeName or an
       ancestor to ACandidates, skipping nodes already present. }
     procedure GatherOperatorCandidates(const ATypeName: string;
@@ -691,13 +691,13 @@ type
     procedure UnwrapLoweredOperator(var ASlot: TASTExpr);
     { AnalyseExprSlot for an element of an owned expression list (argument
       lists, array literals): the list slot cannot be passed as `var`. }
-    function  AnalyseListSlot(AList: TObjectList; AIdx: Integer): TTypeDesc;
+    function  AnalyseListSlot(AList: TObjectList; AIdx: Int): TTypeDesc;
     { Type-code suffix for a single parameter.  Phase B mangling. }
     function  MangleTypeCode(AType: TTypeDesc; AVarParam: Boolean): string;
     { Full mangled signature for a TMethodDecl: '$<code1><code2>…'.
       Empty parameter list yields '$' (lone dollar). }
     function  MangleParamSig(ADecl: TMethodDecl): string;
-    function  InstanceMethodKey(AMethods: TObjectList; AIndex: Integer): string;
+    function  InstanceMethodKey(AMethods: TObjectList; AIndex: Int): string;
     procedure CheckImplMatchesDecl(AImpl, ADecl: TMethodDecl;
       const AImplSig: string);
     function  ImplSpellingMatches(AImpl, ADecl: TMethodDecl): Boolean;
@@ -717,13 +717,13 @@ type
       change of signedness), Single to Double, and integer to float last.
       Breaks a tie between overloads that ArgMatchScore rates equally. }
     function  ArgWideningCost(AParam: TTypeDesc; AArg: TTypeDesc;
-                AArgExpr: TASTExpr): Integer;
+                AArgExpr: TASTExpr): Int;
     { The summed ArgWideningCost of ACand's first AN parameters against
       AArgs. }
     function  WideningCost(ACand: TMethodDecl; AArgs: TObjectList;
-                AN: Integer): Integer;
+                AN: Int): Int;
     function  ArgMatchScore(AParam: TTypeDesc; AArg: TTypeDesc;
-                AArgExpr: TASTExpr = nil): Integer;
+                AArgExpr: TASTExpr = nil): Int;
     { Shared enum of a bracket literal's elements, or nil (see impl). }
     function  SetLiteralBaseEnum(AExpr: TArrayLiteralExpr): TTypeDesc;
     { Re-type set-literal args to their `set of` param type post-overload. }
@@ -739,7 +739,7 @@ type
       or variable against its signature: arity, one hinted analysis per arg,
       var-arg l-values and per-arg type match. }
     procedure AnalyseProcTypeCallArgs(AArgs: TObjectList;
-      APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
+      APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Int);
     { Range-check every constant VALUE argument against its parameter's type,
       for a call whose overload has already been resolved.  Runs beside
       RetypeSetLiteralArgs because that is the one hook every call shape
@@ -747,7 +747,7 @@ type
       overload scoring swallows ESemanticError, so a check inside it would
       silently steer the choice instead of reporting. }
     procedure CheckConstArgsInRange(AArgs: TObjectList; AMDecl: TMethodDecl;
-                                    ALine, ACol: Integer);
+                                    ALine, ACol: Int);
     procedure AnalyseMethodCall(ACall: TMethodCallStmt);
     { Resolve the return type of an interface method for a statement-position
       itab dispatch; nil for procedures.  Codegen uses this to give discarded
@@ -763,9 +763,9 @@ type
     { A var/out argument must have its parameter's width: the callee
       writes the parameter's width through the address. }
     procedure CheckVarArgWidth(AFormal: TTypeDesc; AArg: TASTExpr;
-      AIndex: Integer; const AName: string; ALine, ACol: Integer);
+      AIndex: Int; const AName: string; ALine, ACol: Int);
     procedure WarnIfNarrowing(ADestType: TTypeDesc; AExpr: TASTExpr;
-      ALine, ACol: Integer);
+      ALine, ACol: Int);
     function  IsRecordTemporary(AExpr: TASTExpr): Boolean;
     { BUG-001: warn when a bare for-in loop variable is passed where the callee
       mutates it by reference (var/out parameter, Inc/Dec, SetLength, ...) —
@@ -781,15 +781,15 @@ type
       through the semantic pass and crashed codegen with 'var/out argument must
       be a variable or field' (BUG-011).  Call after AppendDefaultArgs. }
     procedure ValidateVarArgsExtras(AArgs: TObjectList; AMDecl: TMethodDecl;
-      const AName: string; ALine, ACol: Integer);
+      const AName: string; ALine, ACol: Int);
     procedure ValidateMethodVarArgs(AArgs: TObjectList; AMDecl: TMethodDecl;
-      const AName: string; ALine, ACol: Integer);
+      const AName: string; ALine, ACol: Int);
     { Interface-dispatch arm of the same check: no TMethodDecl is available at
       an interface call site, but the descriptor records per-param var flags,
       which is enough to enforce the lvalue constraint (types are not
       validated at interface-dispatch sites — Phase 3 limitation). }
     procedure ValidateIntfMethodVarArgs(AArgs: TObjectList;
-      AIntf: TInterfaceTypeDesc; const AName: string; ALine, ACol: Integer);
+      AIntf: TInterfaceTypeDesc; const AName: string; ALine, ACol: Int);
     function IntfParamInfosFor(AMethod: TMethodDecl;
       AParamNames, AArgs: TStringList): TObjectList;
     function ResolveIntfParam(AInfo: TIntfParamInfo): TTypeDesc;
@@ -813,12 +813,12 @@ type
     function  AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
       AFldType: TTypeDesc): TTypeDesc;
     function  LowerImplicitSelfProp(const APropName: string;
-      ALine, ACol: Integer): TASTExpr;
+      ALine, ACol: Int): TASTExpr;
     function  SelfMemberAccess(const AName: string;
-      ALine, ACol: Integer): TASTExpr;
+      ALine, ACol: Int): TASTExpr;
     function  AnalysedRecvIdent(const AName: string;
-      ALine, ACol: Integer): TASTExpr;
-    function  StorageName(ASym: TSymbol; ALine, ACol: Integer): string;
+      ALine, ACol: Int): TASTExpr;
+    function  StorageName(ASym: TSymbol; ALine, ACol: Int): string;
     function  IsStaticVarOf(const ATypeName, AName: string): Boolean;
     function  BuildStaticSetterCall(AOwner: TRecordTypeDesc; AProp: TPropertyInfo;
       AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
@@ -836,7 +836,7 @@ type
       AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
     function  BuildIndexedGetterCall(AAccess: TFieldAccessExpr): TASTExpr;
     procedure AnalyseIntfPropIndex(AProp: TPropertyInfo; AIndex: TASTExpr;
-      const AIntfName, APropName: string; ALine, ACol: Integer);
+      const AIntfName, APropName: string; ALine, ACol: Int);
     procedure LowerIntfPropWrite(AAssign: TFieldAssignment;
       AIntf: TInterfaceTypeDesc; ARecvSym: TSymbol);
     function  BuildIntfSetterCall(AObjExpr: TASTExpr; ARecvSym: TSymbol;
@@ -879,7 +879,7 @@ type
     procedure AnalyseArgOrDeferArrow(AExpr: TASTExpr);
     { AnalyseArgOrDeferArrow for an owned argument-list slot: rebinds the slot
       when the argument was a lowered overloaded operator. }
-    procedure AnalyseArgSlot(AList: TObjectList; AIdx: Integer);
+    procedure AnalyseArgSlot(AList: TObjectList; AIdx: Int);
     procedure ResolveDeferredArrowArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
     function  AnalyseAnonMethodExpr(AExpr: TAnonMethodExpr): TTypeDesc;
     procedure AnalyseVarDeclStmt(AStmt: TVarDeclStmt);
@@ -896,23 +896,23 @@ type
     procedure CheckNestedRoutineAddrs();
     procedure CoerceRoutineToTarget(var AExpr: TASTExpr; ATarget: TTypeDesc);
     function  GetterProcProp(ART: TRecordTypeDesc; const AName: string;
-      ALine, ACol: Integer): TPropertyInfo;
+      ALine, ACol: Int): TPropertyInfo;
     function  BuildGetterProcCall(ART: TRecordTypeDesc; AProp: TPropertyInfo;
       ARecv: TASTExpr; AArgs: TObjectList; ALine,
-      ACol: Integer): TIndirectFuncCallExpr;
+      ACol: Int): TIndirectFuncCallExpr;
     function  BuildGetterProcStmt(ART: TRecordTypeDesc; AProp: TPropertyInfo;
-      ARecv: TASTExpr; AArgs: TObjectList; ALine, ACol: Integer): TASTStmt;
+      ARecv: TASTExpr; AArgs: TObjectList; ALine, ACol: Int): TASTStmt;
     { A builtin function called as a statement, as the TExprCallStmt of its
       analysed expression form. }
     function  BuildBuiltinFuncStmt(ACall: TProcCall): TASTStmt;
     function  CallField(ART: TRecordTypeDesc; const AName: string;
-      ALine, ACol: Integer): TFieldInfo;
+      ALine, ACol: Int): TFieldInfo;
     function  IsRoutineAddr(AExpr: TASTExpr): Boolean;
     procedure ResolveProceduralTypeDef(ATD: TTypeDecl);
     { Resolve ADef's parameter and return types into ADesc (shared by named
       procedural types and inline ones; AName is used in diagnostics) }
     procedure FillProceduralTypeDesc(ADef: TProceduralTypeDef;
-      ADesc: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
+      ADesc: TProceduralTypeDesc; const AName: string; ALine, ACol: Int);
     { Inline procedural types (GH #222), encoded by
       TParser.ParseInlineProcTypeName }
     function  IsInlineProcTypeName(const AName: string): Boolean;
@@ -935,7 +935,7 @@ type
     { Overload score of a bracket literal against an array formal of element
       type AElem: 1 (a conversion) when every element fits, else 0. }
     function  ArrayLiteralScore(AElem: TTypeDesc;
-      ALit: TArrayLiteralExpr): Integer;
+      ALit: TArrayLiteralExpr): Int;
     { True when an element of ALit is an integer VARIABLE (or other
       non-constant) of a wider type than the integer element type AElem:
       an open-array literal does not narrow one implicitly (GH #233 -- a
@@ -947,13 +947,13 @@ type
       -- "No matching overload" says nothing useful about a routine that is
       not overloaded.  Raises in every case. }
     procedure RejectCallArgs(ACands: TObjectList; AArgs: TObjectList;
-      const AName: string; ALine, ACol: Integer);
+      const AName: string; ALine, ACol: Int);
     { Expand [lo..hi] range elements of a set literal into individual member
       idents (issue #105).  Constant ascending ranges only. }
     procedure ExpandSetRanges(AExpr: TArrayLiteralExpr; ABaseEnum: TEnumTypeDesc);
     procedure ExpandOrdinalSetRanges(AExpr: TArrayLiteralExpr; ASetType: TSetTypeDesc);
     function  SetRangeBoundOrdinal(ABound: TASTExpr; ABaseEnum: TEnumTypeDesc;
-                                   const AWhich: string): Integer;
+                                   const AWhich: string): Int;
     { Width (in bits) needed for the anonymous set type of an 'X in [a,b,c]'
       literal: largest listed member ordinal + 1 when every element is a
       compile-time enum constant; otherwise the full base-enum member count
@@ -961,7 +961,7 @@ type
     { The anonymous set of Byte for 'I in [...]' with an integer left operand. }
     function  AnalyseIntegerInLiteral(AExpr: TArrayLiteralExpr): TTypeDesc;
     function  SetLiteralBitCount(AExpr: TArrayLiteralExpr;
-                                 ABaseEnum: TEnumTypeDesc): Integer;
+                                 ABaseEnum: TEnumTypeDesc): Int;
     procedure CoerceToCharOrd(ALit: TStringLiteral);
     procedure AnalysePointerWriteStmt(AStmt: TPointerWriteStmt);
     procedure AnalyseStaticSubscriptAssign(AStmt: TStaticSubscriptAssign);
@@ -983,7 +983,7 @@ type
       the static receiver type ATypeName, or -1 when the accessor is not
       virtual (a static call).  A virtual accessor must dispatch through the
       vtable so an overridden getter/setter is reached. }
-    function  PropAccessorVSlot(const ATypeName, AMethodName: string): Integer;
+    function  PropAccessorVSlot(const ATypeName, AMethodName: string): Int;
     { Attribute helpers.  AttrMatches performs the Delphi-style suffix-drop
       lookup: [Weak] and [WeakAttribute] both resolve to the recognised
       attribute 'Weak'.  HasWeakAttribute scans an attribute list for
@@ -1007,15 +1007,15 @@ type
       literal/identifier so a call site can own its own argument node.
       AppendDefaultArgs fills a call's Args list from MDecl.Params for any
       missing trailing slots (Args.Count < Params.Count). }
-    function  MinArity(ADecl: TMethodDecl): Integer;
+    function  MinArity(ADecl: TMethodDecl): Int;
     procedure TransferDefaultValues(AFrom, AInto: TMethodDecl);
     procedure AnalyseDefaultValueExpr(APar: TMethodParam;
-      const AContext: string; ALine, ACol: Integer);
+      const AContext: string; ALine, ACol: Int);
     function  CloneDefaultExprNode(ASrc: TASTExpr): TASTExpr;
     procedure AppendDefaultArgs(AArgs: TObjectList; ADecl: TMethodDecl;
-      const AContext: string; ALine, ACol: Integer);
+      const AContext: string; ALine, ACol: Int);
 
-    procedure SemanticError(const AMsg: string; ALine, ACol: Integer);
+    procedure SemanticError(const AMsg: string; ALine, ACol: Int);
     { Register a generic template on FTable, rejecting a same-named template
       already registered by a DIFFERENT unit (bare instance symbols would
       silently alias at link time — see TSymbolTable.RegisterGeneric). }
@@ -1023,7 +1023,7 @@ type
     { Emit a non-fatal diagnostic to StdErr (compilation continues).  Includes
       the source position and, when known, the current unit name — mirroring
       SemanticError's message shape. }
-    procedure SemanticWarning(const AMsg: string; ALine, ACol: Integer);
+    procedure SemanticWarning(const AMsg: string; ALine, ACol: Int);
     procedure WarnIfUnsignedDowntoZero(AFor: TForStmt; AVarType: TTypeDesc);
     { True when ALit's value lies in AType's range (an integer type). }
     function LiteralFitsIntType(ALit: TIntLiteral; AType: TTypeDesc): Boolean;
@@ -1043,9 +1043,9 @@ type
     function RetypeHintedConst(AExpected: TTypeDesc; AExpr: TASTExpr;
       AActual: TTypeDesc): Boolean;
     procedure CheckValueMatches(AExpected: TTypeDesc; AExpr: TASTExpr;
-      AActual: TTypeDesc; const AContext: string; ALine, ACol: Integer);
+      AActual: TTypeDesc; const AContext: string; ALine, ACol: Int);
     procedure CheckTypesMatch(AExpected, AActual: TTypeDesc;
-      const AContext: string; ALine, ACol: Integer);
+      const AContext: string; ALine, ACol: Int);
     { Returns True if AActual is AExpected or a subclass of AExpected. }
     function  IsSubtypeOf(AActual, AExpected: TTypeDesc): Boolean;
     function  InterfaceInheritsFrom(
@@ -1153,7 +1153,7 @@ type
       in the per-unit cache so a qualified Unit.Var reference still reaches
       it) and this unit's symbol is installed as the flat winner.  Same-unit
       redeclaration and module-name markers stay hard errors. }
-    procedure DefineGlobalLastWins(ASym: TSymbol; ALine, ACol: Integer);
+    procedure DefineGlobalLastWins(ASym: TSymbol; ALine, ACol: Int);
 
     { The emit name a reference to module var ASym must use, or '' to keep its
       bare name.  A reference is rewritten to its owner-prefixed symbol (as a
@@ -1170,7 +1170,7 @@ type
       type as the flat winner; a same-unit redeclaration or a non-unit/module
       collision stays the hard 'Duplicate type name' error. }
     procedure DefineTypeLastWins(ASym: TSymbol; ATypeDecl: TTypeDecl;
-                                 ALine, ACol: Integer);
+                                 ALine, ACol: Int);
 
     { Record one enum member in the reverse index (FEnumMemberIndex).
       Called once per member as its enum type is analysed.  Enum members
@@ -1207,7 +1207,7 @@ type
 
     { How many enums declare a member of this name.  >1 means a bare,
       context-free reference is ambiguous and must be qualified. }
-    function EnumMemberCandidateCount(const AName: string): Integer;
+    function EnumMemberCandidateCount(const AName: string): Int;
 
     { Comma-separated names of every enum that declares a member AName, in
       declaration order — used to spell out an ambiguity in diagnostics. }
@@ -1223,14 +1223,14 @@ type
     { The enum a single parameter would accept for a bare member: the param's
       enum (or set-of-enum base) when it declares AMember and the decl can take
       AArity actuals; nil otherwise. }
-    function EnumOfParamAccepting(ADecl: TMethodDecl; AArity, APos: Integer;
+    function EnumOfParamAccepting(ADecl: TMethodDecl; AArity, APos: Int;
                                  const AMember: string): TTypeDesc;
-    function EnumArgHint(const AName: string; AArity, APos: Integer;
+    function EnumArgHint(const AName: string; AArity, APos: Int;
                          const AMember: string): TTypeDesc;
     { Like EnumArgHint but walks the method overload set up the inheritance
       chain of ATypeName (mirrors ResolveMethodOverload's candidate walk). }
     function EnumMethodArgHint(const ATypeName, AMethodName: string;
-                               AArity, APos: Integer;
+                               AArity, APos: Int;
                                const AMember: string): TTypeDesc;
     { True if AArg is a bare identifier that names an enum member and is not a
       real symbol — i.e. a candidate for context-directed enum resolution. }
@@ -1304,7 +1304,7 @@ type
     procedure AssertMemberVisible(const AMemberOwningUnit: string;
                                   AClassContext: TRecordTypeDesc;
                                   const AMemberName: string;
-                                  ALine, ACol: Integer);
+                                  ALine, ACol: Int);
 
     { True when '<ATypeName>.<AMemberName>' names a registered const member.
       Lets a qualified member-const read be told apart from a constructor
@@ -1354,7 +1354,7 @@ type
     procedure AssertMemberVisibleV(AVisibility: TMemberVisibility;
                                    const ADeclaringUnit, ADeclaringType: string;
                                    const AMemberName: string;
-                                   ALine, ACol: Integer);
+                                   ALine, ACol: Int);
 
     { Visibility enforcement for a STATIC (class-level) variable access.  Like
       AssertMemberVisibleV but treats the current method's declaring type as the
@@ -1364,13 +1364,13 @@ type
     procedure AssertStaticVarVisible(AVisibility: TMemberVisibility;
                                      const ADeclaringUnit, ADeclaringType: string;
                                      const AMemberName: string;
-                                     ALine, ACol: Integer);
+                                     ALine, ACol: Int);
 
     { Qualified instance/class method-call visibility enforcement.  AMDecl is
       the resolved TMethodDecl (via ResolveMethodOverload or FindMethodDecl);
       reads its Visibility / OwningUnit / OwnerTypeName.  No-op when AMDecl is
       nil.  Constructors are exempt (always reachable for instantiation). }
-    procedure EnforceMethodVisible(AMDecl: TObject; ALine, ACol: Integer);
+    procedure EnforceMethodVisible(AMDecl: TObject; ALine, ACol: Int);
 
     { Uses-chain lookup for *unqualified* identifiers.  Walks
       FCurrentUsesChain right-to-left ("last in uses wins"); for
@@ -1412,7 +1412,7 @@ type
   public
     SavedChain: TStringList;   { the context's uses chain (owned while saved) }
     SavedUnit:  string;        { the table's previous view unit }
-    SavedFloor: Integer;       { the table's previous view floor }
+    SavedFloor: Int;       { the table's previous view floor }
     SavedPins:  TStringList;   { the table's previous view pins (not owned) }
     Pins:       TStringList;   { this view's type-argument pins (owned) }
     PinSyms:    TObjectList;   { owns the pinned TSymbols }
@@ -1528,7 +1528,7 @@ end;
 constructor TSemanticAnalyser.Create;
 var
   Scope: TScope;
-  I:     Integer;
+  I:     Int;
 begin
   inherited Create();
   FTable                := TSymbolTable.Create();
@@ -1639,7 +1639,7 @@ begin
   inherited Destroy();
 end;
 
-procedure TSemanticAnalyser.SemanticError(const AMsg: string; ALine, ACol: Integer);
+procedure TSemanticAnalyser.SemanticError(const AMsg: string; ALine, ACol: Int);
 var
   Msg: string;
 begin
@@ -1714,7 +1714,7 @@ begin
     AFor.Line, AFor.Col);
 end;
 
-procedure TSemanticAnalyser.SemanticWarning(const AMsg: string; ALine, ACol: Integer);
+procedure TSemanticAnalyser.SemanticWarning(const AMsg: string; ALine, ACol: Int);
 var
   Full: string;
 begin
@@ -1749,10 +1749,10 @@ end;
 function TSemanticAnalyser.ResolveEnumMember(const AName: string;
                                              AExpectedType: TTypeDesc): TEnumMemberRef;
 var
-  I:        Integer;
+  I:        Int;
   Ref:      TEnumMemberRef;
   Best:     TEnumMemberRef;
-  Count:    Integer;
+  Count:    Int;
   WantEnum: TEnumTypeDesc;
 begin
   Result := nil;
@@ -1856,9 +1856,9 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.EnumMemberCandidateCount(const AName: string): Integer;
+function TSemanticAnalyser.EnumMemberCandidateCount(const AName: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := 0;
   for I := 0 to FEnumMemberIndex.Count - 1 do
@@ -1868,7 +1868,7 @@ end;
 
 function TSemanticAnalyser.EnumMemberOwners(const AName: string): string;
 var
-  I:   Integer;
+  I:   Int;
   Ref: TEnumMemberRef;
 begin
   Result := '';
@@ -1883,12 +1883,12 @@ begin
 end;
 
 function TSemanticAnalyser.EnumOfParamAccepting(ADecl: TMethodDecl;
-  AArity, APos: Integer; const AMember: string): TTypeDesc;
+  AArity, APos: Int; const AMember: string): TTypeDesc;
 var
   Par:  TMethodParam;
   PT:   TTypeDesc;
   Enum: TEnumTypeDesc;
-  M:    Integer;
+  M:    Int;
 begin
   Result := nil;
   if (ADecl = nil) or (APos < 0) or (APos >= ADecl.Params.Count) then Exit;
@@ -1911,9 +1911,9 @@ begin
 end;
 
 function TSemanticAnalyser.EnumArgHint(const AName: string;
-  AArity, APos: Integer; const AMember: string): TTypeDesc;
+  AArity, APos: Int; const AMember: string): TTypeDesc;
 var
-  I:     Integer;
+  I:     Int;
   Enum:  TTypeDesc;
   Found: TTypeDesc;
 begin
@@ -1934,13 +1934,13 @@ begin
 end;
 
 function TSemanticAnalyser.EnumMethodArgHint(const ATypeName, AMethodName: string;
-  AArity, APos: Integer; const AMember: string): TTypeDesc;
+  AArity, APos: Int; const AMember: string): TTypeDesc;
 var
   CurrName: string;
   Sym:      TSymbol;
   RT:       TRecordTypeDesc;
   Grp:      TObjectList;
-  K:        Integer;
+  K:        Int;
   Cand:     TMethodDecl;
   Enum:     TTypeDesc;
   Found:    TTypeDesc;
@@ -1996,7 +1996,7 @@ end;
 procedure TSemanticAnalyser.HintBareEnumArgs(const AName: string;
   AArgs: TObjectList);
 var
-  I:    Integer;
+  I:    Int;
   Arg:  TASTExpr;
   Hint: TTypeDesc;
 begin
@@ -2014,7 +2014,7 @@ end;
 procedure TSemanticAnalyser.HintBareEnumMethodArgs(const ATypeName,
   AMethodName: string; AArgs: TObjectList);
 var
-  I:    Integer;
+  I:    Int;
   Arg:  TASTExpr;
   Hint: TTypeDesc;
 begin
@@ -2048,7 +2048,7 @@ end;
 
 function TSemanticAnalyser.HasWeakAttribute(AAttrs: TStringList): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   if AAttrs = nil then
   begin
@@ -2064,7 +2064,7 @@ end;
 
 function TSemanticAnalyser.HasUnretainedAttribute(AAttrs: TStringList): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   if AAttrs = nil then
   begin
@@ -2143,7 +2143,7 @@ var
   MD:   TMethodDecl;
   Asn:  TAssignment;
   Call: TMethodCallExpr;
-  I:    Integer;
+  I:    Int;
 begin
   if AUse.ThunkDecl <> nil then Exit;
   if FCurrentUnit <> nil then
@@ -2182,7 +2182,7 @@ var
   ArgType:     TTypeDesc;
   ConstrType:  TTypeDesc;
   RT:          TRecordTypeDesc;
-  I:           Integer;
+  I:           Int;
   Implements:  Boolean;
 begin
   if AConstraint = '' then Exit;
@@ -2293,7 +2293,7 @@ function TSemanticAnalyser.ConvertsToInterface(AActual,
   AIntf: TTypeDesc): Boolean;
 var
   Walk: TRecordTypeDesc;
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   if (AActual = nil) or (AIntf = nil) or (AIntf.Kind <> tyInterface) then
@@ -2444,7 +2444,7 @@ function TSemanticAnalyser.ConstAdaptsTo(AExpected: TTypeDesc;
   AExpr: TASTExpr; AActual: TTypeDesc): Boolean;
 var
   V: Int64;
-  I: Integer;
+  I: Int;
 begin
   Result := (AExpected <> nil) and (AActual <> nil) and (AExpr <> nil) and
     (AExpected.Kind = tyUInt64) and (AActual.Kind = tyInt64) and
@@ -2474,7 +2474,7 @@ end;
 
 procedure TSemanticAnalyser.CheckValueMatches(AExpected: TTypeDesc;
   AExpr: TASTExpr; AActual: TTypeDesc; const AContext: string;
-  ALine, ACol: Integer);
+  ALine, ACol: Int);
 begin
   if Self.RetypeHintedConst(AExpected, AExpr, AActual) then Exit;
   if Self.ConstAdaptsTo(AExpected, AExpr, AActual) then
@@ -2506,7 +2506,7 @@ begin
 end;
 
 procedure TSemanticAnalyser.CheckTypesMatch(AExpected, AActual: TTypeDesc;
-  const AContext: string; ALine, ACol: Integer);
+  const AContext: string; ALine, ACol: Int);
 begin
   if AExpected = AActual then
     Exit;
@@ -2679,7 +2679,7 @@ end;
 procedure TSemanticAnalyser.AddGroupEntry(AGroups: TStringList;
   const AKey: string; ADecl: TMethodDecl);
 var
-  GIdx: Integer;
+  GIdx: Int;
   Grp:  TObjectList;
 begin
   GIdx := AGroups.IndexOf(AKey);
@@ -2697,7 +2697,7 @@ end;
 function TSemanticAnalyser.GroupOf(AGroups: TStringList;
   const AKey: string): TObjectList;
 var
-  GIdx: Integer;
+  GIdx: Int;
 begin
   GIdx := AGroups.IndexOf(AKey);
   if GIdx >= 0 then
@@ -2706,12 +2706,12 @@ begin
     Result := nil;
 end;
 
-procedure TSemanticAnalyser.ReplaceProcIndexObject(AIdx: Integer;
+procedure TSemanticAnalyser.ReplaceProcIndexObject(AIdx: Int;
   ANew: TMethodDecl);
 var
   Old: TMethodDecl;
   Grp: TObjectList;
-  K:   Integer;
+  K:   Int;
 begin
   Old := TMethodDecl(FProcIndex.Objects[AIdx]);
   FProcIndex.Objects[AIdx] := ANew;
@@ -2732,9 +2732,9 @@ begin
   AddGroupEntry(FProcGroups, AName, ADecl);
 end;
 
-function TSemanticAnalyser.IndexOfProcInUnit(const AName, AUnitName: string): Integer;
+function TSemanticAnalyser.IndexOfProcInUnit(const AName, AUnitName: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FProcIndex.Count - 1 do
     if SameText(FProcIndex.Strings[I], AName) and
@@ -2743,9 +2743,9 @@ begin
   Result := -1;
 end;
 
-function TSemanticAnalyser.IndexOfOverloadForward(ABody: TMethodDecl): Integer;
+function TSemanticAnalyser.IndexOfOverloadForward(ABody: TMethodDecl): Int;
 var
-  I:   Integer;
+  I:   Int;
   Fwd: TMethodDecl;
   Sig: string;
 begin
@@ -2805,7 +2805,7 @@ end;
 
 function TSemanticAnalyser.AllSameExternalDecl(AList: TObjectList): Boolean;
 var
-  I:     Integer;
+  I:     Int;
   First: TMethodDecl;
 begin
   Result := False;
@@ -2840,7 +2840,7 @@ end;
 
 procedure TSemanticAnalyser.BuildUsesChain(AUsedUnits: TStringList);
 var
-  I: Integer;
+  I: Int;
 begin
   FCurrentUsesChain.Clear();
   { Implicit `System` is always the first entry in every unit's
@@ -2869,7 +2869,7 @@ end;
 
 procedure TSemanticAnalyser.Analyse(AProg: TProgram);
 var
-  I: Integer;
+  I: Int;
 begin
   FProg := AProg;
   FlushPendingGenericInstances();
@@ -2911,10 +2911,10 @@ end;
 
 procedure TSemanticAnalyser.AnalyseUnit(AUnit: TUnit);
 var
-  I, J:     Integer;
+  I, J:     Int;
   MDecl:    TMethodDecl;
   ImplDecl: TMethodDecl;
-  ImplIdx:  Integer;
+  ImplIdx:  Int;
   Par:      TMethodParam;
   ParType:  TTypeDesc;
   Sym:      TSymbol;
@@ -3255,10 +3255,10 @@ end;
 
 procedure TSemanticAnalyser.AnalyseUnitForExport(AUnit: TUnit);
 var
-  I, J:     Integer;
+  I, J:     Int;
   MDecl:    TMethodDecl;
   ImplDecl: TMethodDecl;
-  ImplIdx:  Integer;
+  ImplIdx:  Int;
   Par:      TMethodParam;
   ParType:  TTypeDesc;
   Sym:      TSymbol;
@@ -3654,7 +3654,7 @@ end;
 
 procedure TSemanticAnalyser.RegisterUnitIface(AIface: TUnitInterface);
 var
-  Idx, I:  Integer;
+  Idx, I:  Int;
   Scope:   TScope;
   Sym:     TSymbol;
 begin
@@ -3683,7 +3683,7 @@ end;
 
 function TSemanticAnalyser.FindUnitIface(const AUnitName: string): TUnitInterface;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FUnitIfaces.IndexOf(AUnitName);
   if Idx >= 0 then
@@ -3706,7 +3706,7 @@ procedure TSemanticAnalyser.RegisterUnitSymbol(const AUnitName: string;
                                                ASym: TSymbol);
 var
   Key: string;
-  Idx: Integer;
+  Idx: Int;
 begin
   if (AUnitName = '') or (ASym = nil) then Exit;
   Key := AUnitName + #1 + ASym.Name;
@@ -3720,7 +3720,7 @@ end;
 function TSemanticAnalyser.FindUnitSymbol(const AUnitName,
                                           ASymName: string): TSymbol;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FUnitSymbols.IndexOf(AUnitName + #1 + ASymName);
   if Idx >= 0 then
@@ -3796,7 +3796,7 @@ end;
 
 function TSemanticAnalyser.LookupViaOuterChains(const AName: string): TSymbol;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := FGenericViews.Count - 1 downto 0 do
@@ -3808,7 +3808,7 @@ end;
 
 function TSemanticAnalyser.IsUnitVisible(const AUnit: string): Boolean;
 var
-  I: Integer;
+  I: Int;
   F: TGenericViewFrame;
 begin
   Result := SameText(AUnit, FCurrentUnitName)
@@ -3849,7 +3849,7 @@ procedure TSemanticAnalyser.RegisterUnitChain(const AUnit: string;
                                               AIntfUses, AImplUses: TStringList);
 var
   Chain: TStringList;
-  Idx, I: Integer;
+  Idx, I: Int;
 begin
   if AUnit = '' then Exit;
   { FUnitChains and FUnitChainLists are parallel: same index, same unit. }
@@ -3882,7 +3882,7 @@ function TSemanticAnalyser.EnterGenericView(const ADeclUnit, AInstName: string;
                                             AStrict: Boolean;
                                             out AHidden: Boolean): Boolean;
 var
-  Idx, I, BrOpen: Integer;
+  Idx, I, BrOpen: Int;
   F:        TGenericViewFrame;
   Src:      TStringList;
   Args:     TStringList;
@@ -3989,7 +3989,7 @@ end;
 
 procedure TSemanticAnalyser.BindTypeParams(AParamNames, AArgs: TStringList);
 var
-  K: Integer;
+  K: Int;
   Types: TObjectList;
 begin
   Types := TObjectList.Create(False);
@@ -4008,7 +4008,7 @@ end;
 function TSemanticAnalyser.LookupInChain(AChain: TStringList;
                                          const AName: string): TSymbol;
 var
-  I:        Integer;
+  I:        Int;
   UnitName: string;
   Iface:    TUnitInterface;
   Sym:      TSymbol;
@@ -4139,7 +4139,7 @@ end;
 procedure TSemanticAnalyser.AssertMemberVisible(const AMemberOwningUnit: string;
                                                 AClassContext: TRecordTypeDesc;
                                                 const AMemberName: string;
-                                                ALine, ACol: Integer);
+                                                ALine, ACol: Int);
 begin
   { Legacy unit-only assert — no per-member visibility available here, so it
     never rejects.  Retained for call sites that lack the descriptor; the
@@ -4152,7 +4152,7 @@ begin
 end;
 
 procedure TSemanticAnalyser.EnforceMethodVisible(AMDecl: TObject;
-                                                 ALine, ACol: Integer);
+                                                 ALine, ACol: Int);
 var
   M: TMethodDecl;
 begin
@@ -4174,7 +4174,7 @@ end;
 procedure TSemanticAnalyser.AssertMemberVisibleV(AVisibility: TMemberVisibility;
                                                  const ADeclaringUnit, ADeclaringType: string;
                                                  const AMemberName: string;
-                                                 ALine, ACol: Integer);
+                                                 ALine, ACol: Int);
 begin
   if not MemberVisibleTo(AVisibility, ADeclaringUnit, ADeclaringType,
                          FCurrentUnitName, FCurrentClass) then
@@ -4248,7 +4248,7 @@ end;
 procedure TSemanticAnalyser.AssertStaticVarVisible(AVisibility: TMemberVisibility;
                                                    const ADeclaringUnit, ADeclaringType: string;
                                                    const AMemberName: string;
-                                                   ALine, ACol: Integer);
+                                                   ALine, ACol: Int);
 var
   FromClass: TRecordTypeDesc;
 begin
@@ -4269,7 +4269,7 @@ end;
 
 procedure TSemanticAnalyser.LinkClassMethodImpls(ABlock: TBlock);
 var
-  I, J, K:  Integer;
+  I, J, K:  Int;
   Decl:     TMethodDecl;
   Key:      string;
   CD:       TMethodDecl;
@@ -4416,7 +4416,7 @@ end;
   is a promise of an implementation; diagnose the broken promise up front. }
 procedure TSemanticAnalyser.CheckClassMethodsImplemented(ABlock: TBlock);
 var
-  I, J:  Integer;
+  I, J:  Int;
   TD:    TTypeDecl;
   CD:    TClassTypeDef;
   MDecl: TMethodDecl;
@@ -4448,7 +4448,7 @@ end;
 
 procedure TSemanticAnalyser.LinkGenericClassMethodImpls(ABlock: TBlock);
 var
-  I, J, K: Integer;
+  I, J, K: Int;
   Decl: TMethodDecl;
   GenObj: TObject;
   Methods: TObjectList;
@@ -4506,7 +4506,7 @@ end;
 
 procedure TSemanticAnalyser.FlushPendingGenericInstances;
 var
-  I: Integer;
+  I: Int;
 begin
   if FCurrentUnit <> nil then
   begin
@@ -4540,14 +4540,14 @@ end;
 procedure TSemanticAnalyser.RepairEarlyGenericInstances;
 var
   Instances: TObjectList;
-  I, J, K, MIdx: Integer;
+  I, J, K, MIdx: Int;
   GRI:       TGenericRecordInstance;
   GI:        TGenericInstance;
   InstMDecl: TMethodDecl;
   TmplMDecl: TMethodDecl;
   BaseName:  string;
   ArgsStr:   string;
-  BracPos:   Integer;
+  BracPos:   Int;
   GenObj:    TObject;
   TmplMethods: TObjectList;
   Args:      TStringList;
@@ -4742,7 +4742,7 @@ end;
 function TSemanticAnalyser.NamedArrayConstType(CD: TConstDecl): TStaticArrayTypeDesc;
 var
   TD, ElemTD: TTypeDesc;
-  Expected: Integer;
+  Expected: Int;
 begin
   TD := FTable.FindType(CD.TypeName);
   if TD = nil then
@@ -4830,7 +4830,7 @@ end;
 
 function TSemanticAnalyser.ResolveScopeBoundTypeParams(const ATypeName: string): string;
 var
-  BrOpen, BrClose, I: Integer;
+  BrOpen, BrClose, I: Int;
   BasePart, ArgsPart, OutArgs, Arg: string;
   ArgList: TStringList;
   Sym: TSymbol;
@@ -4879,7 +4879,7 @@ end;
 
 function TSemanticAnalyser.CanonGenericArgs(const ATypeName: string): string;
 var
-  BrOpen, BrClose, I: Integer;
+  BrOpen, BrClose, I: Int;
   BasePart, ArgsPart, OutArgs, Arg: string;
   ArgList: TStringList;
   ArgType: TTypeDesc;
@@ -4944,7 +4944,7 @@ var
   EnumName: string;
   Cand:    TEnumTypeDesc;
   Matches: Boolean;
-  K, CPos, IxI: Integer;
+  K, CPos, IxI: Int;
 begin
   { Strip the surrounding parentheses and split on commas. }
   Inner := AMemberList;
@@ -5023,8 +5023,8 @@ const
     'reference to function', 'procedure of object', 'function of object',
     'procedure', 'function');
 var
-  I, K, Depth, SegStart, ColonPos, CloseParen: Integer;
-  C: Integer;
+  I, K, Depth, SegStart, ColonPos, CloseParen: Int;
+  C: Int;
   Seg, Head, TypeN: string;
 begin
   Result := False;
@@ -5104,7 +5104,7 @@ function TSemanticAnalyser.SubstInlineProcType(const AName: string;
 var
   Kind, Ret: string;
   Heads, Types: TStringList;
-  I: Integer;
+  I: Int;
 begin
   Heads := TStringList.Create();
   Types := TStringList.Create();
@@ -5155,7 +5155,7 @@ var
   Def: TProceduralTypeDef;
   Par: TMethodParam;
   ParTypes: TObjectList;  { not owning: the resolved TTypeDesc of each parameter }
-  I: Integer;
+  I: Int;
   TD: TTypeDesc;
   Cand: TProceduralTypeDesc;
   ProcDesc: TProceduralTypeDesc;
@@ -5287,14 +5287,14 @@ var
   BaseType: TTypeDesc;
   PT:       TPointerTypeDesc;
   Sym:      TSymbol;
-  DDotPos, RBrPos, OfPos: Integer;
+  DDotPos, RBrPos, OfPos: Int;
   LStr, HStr, ElemName, IdxName: string;
   CanonName: string;
-  LVal, HVal: Integer;
+  LVal, HVal: Int;
   IdxTD: TTypeDesc;
   SAT: TStaticArrayTypeDesc;
   DAT: TDynArrayTypeDesc;
-  I, LtPos, DotPos: Integer;
+  I, LtPos, DotPos: Int;
 begin
   { Inline procedural type 'procedure(...)' / 'function(...):T' (GH #222).
     First, because the encoding may hold '.' and '<' (qualified or generic
@@ -5584,7 +5584,7 @@ begin
 end;
 
 function TSemanticAnalyser.ResolveParamType(APar: TMethodParam;
-  ALoc: Integer; ACol: Integer): TTypeDesc;
+  ALoc: Int; ACol: Int): TTypeDesc;
 var
   ElemType: TTypeDesc;
 begin
@@ -5612,7 +5612,7 @@ end;
 function TSemanticAnalyser.SubstTypeParam(const ATypeName: string;
   AParamNames, AArgs: TStringList): string;
 var
-  I, BrOpen, BrClose: Integer;
+  I, BrOpen, BrClose: Int;
   BasePart, ArgsPart, OutArgs, Arg: string;
   ArgList: TStringList;
 begin
@@ -5691,7 +5691,7 @@ end;
 { The unit that declares generic type ATypeName ('TBox<Integer>' -> TBox's). }
 function GenericTypeBaseName(const ATypeName: string): string;
 var
-  BracPos: Integer;
+  BracPos: Int;
 begin
   BracPos := StrPos('<', ATypeName);
   if BracPos < 0 then
@@ -5782,7 +5782,7 @@ function TSemanticAnalyser.InstantiateGenericMethod(
   const AOwnerType, AInstName: string): TMethodDecl;
 var
   Viewed, Hidden: Boolean;
-  TemplIdx: Integer;
+  TemplIdx: Int;
   DeclUnit: string;
 begin
   DeclUnit := '';
@@ -5803,13 +5803,13 @@ end;
 
 function TSemanticAnalyser.InstantiateGenericCore(const ATypeName: string): TRecordTypeDesc;
 var
-  BracPos:  Integer;
+  BracPos:  Int;
   BaseName: string;
   ArgsStr:  string;
   Args:     TStringList;
   Templ:    TGenericTypeDef;
   ClonedCD: TClassTypeDef;
-  I, J, K:  Integer;
+  I, J, K:  Int;
   FDecl:    TFieldDecl;
   NewFDecl: TFieldDecl;
   MDecl:    TMethodDecl;
@@ -6284,13 +6284,13 @@ var
   RPDecl:   TPropertyDecl;
   RPInfo:   TPropertyInfo;
   RPType:   TTypeDesc;
-  BracPos:  Integer;
+  BracPos:  Int;
   BaseName: string;
   ArgsStr:  string;
   Args:     TStringList;
   Templ:    TGenericRecordDef;
   ClonedRD: TRecordTypeDef;
-  I, J, K:  Integer;
+  I, J, K:  Int;
   FDecl:    TFieldDecl;
   NewFDecl: TFieldDecl;
   MDecl:    TMethodDecl;
@@ -6549,13 +6549,13 @@ end;
 
 function TSemanticAnalyser.InstantiateGenericInterfaceCore(const ATypeName: string): TInterfaceTypeDesc;
 var
-  BracPos:     Integer;
+  BracPos:     Int;
   BaseName:    string;
   ArgsStr:     string;
   Args:        TStringList;
   Templ:       TGenericInterfaceDef;
   TemplObj:    TObject;
-  I, K:        Integer;
+  I, K:        Int;
   MDecl:       TMethodDecl;
   Par:         TMethodParam;
   Sym:         TSymbol;
@@ -6680,14 +6680,14 @@ end;
 function TSemanticAnalyser.InstantiateGenericProcTypeCore(
   const ATypeName: string): TProceduralTypeDesc;
 var
-  BracPos:  Integer;
+  BracPos:  Int;
   BaseName: string;
   ArgsStr:  string;
   Args:     TStringList;
   Templ:    TGenericProcDef;
   ProcDesc: TProceduralTypeDesc;
   Sym:      TSymbol;
-  K:        Integer;
+  K:        Int;
   MParam:   TMethodParam;
   ProcParam: TProcParamInfo;
   SubstName: string;
@@ -6773,19 +6773,19 @@ end;
 
 function TSemanticAnalyser.InstantiateGenericFuncCore(const AInstName: string): TMethodDecl;
 var
-  BracPos:     Integer;
+  BracPos:     Int;
   BaseName:    string;
   ArgsStr:     string;
   Args:        TStringList;
   Templ:       TMethodDecl;
-  TemplIdx:    Integer;
+  TemplIdx:    Int;
   NewMDecl:    TMethodDecl;
   NewPar:      TMethodParam;
   OldPar:      TMethodParam;
   ParTypeName: string;
   RetTypeName: string;
   SubstType:   TTypeDesc;
-  I: Integer;
+  I: Int;
   Sym:         TSymbol;
   GFI:         TGenericFuncInstance;
   Instances:   TObjectList;
@@ -6978,8 +6978,8 @@ function TSemanticAnalyser.InstantiateGenericMethodCore(
 var
   BaseName:    string;
   ArgsStr:     string;
-  TemplIdx:    Integer;
-  BracPos:     Integer;
+  TemplIdx:    Int;
+  BracPos:     Int;
   Templ:       TMethodDecl;
   Args:        TStringList;
   NewMDecl:    TMethodDecl;
@@ -6991,7 +6991,7 @@ var
   OwnerSym:    TSymbol;
   OwnerRT:     TRecordTypeDesc;
   GMI:         TGenericMethodInstance;
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   BracPos := StrPos('<', AInstName);
@@ -7155,7 +7155,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseBlock(ABlock: TBlock; AIsProgramTop: Boolean = False);
 var
-  I: Integer;
+  I: Int;
   TD: TTypeDecl;
 begin
   { A routine's own type section may declare records, enums, aliases and
@@ -7239,9 +7239,9 @@ end;
   Idents must resolve to integer-typed constants in the current scope.
   Left-to-right associativity (no precedence between bit ops). }
 function TSemanticAnalyser.FoldConstBitOpExpr(ATokens: TStringList;
-                                              ALine, ACol: Integer): Int64;
+                                              ALine, ACol: Int): Int64;
 var
-  I:       Integer;
+  I:       Int;
   Op:      string;
   Operand: Int64;
   RefSym:  TSymbol;
@@ -7314,7 +7314,7 @@ begin
 end;
 
 function TSemanticAnalyser.EvalConstIntExpr(AExpr: TASTExpr;
-                                            ALine, ACol: Integer): Int64;
+                                            ALine, ACol: Int): Int64;
 var
   Bin:     TBinaryExpr;
   IdSym:   TSymbol;
@@ -7463,7 +7463,7 @@ procedure TSemanticAnalyser.ResolveMetaclassCtorStmt(ACall: TMethodCallStmt;
 var
   RT: TRecordTypeDesc;
   MDecl: TMethodDecl;
-  I: Integer;
+  I: Int;
 begin
   RT := TRecordTypeDesc(TMetaClassTypeDesc(AMeta).BaseClass);
   HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
@@ -7494,7 +7494,7 @@ function TSemanticAnalyser.ResolveMetaclassCtorExpr(AExpr: TMethodCallExpr;
 var
   RT: TRecordTypeDesc;
   MDecl: TMethodDecl;
-  I: Integer;
+  I: Int;
 begin
   RT := TRecordTypeDesc(TMetaClassTypeDesc(AMeta).BaseClass);
   HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
@@ -7519,7 +7519,7 @@ begin
 end;
 
 procedure TSemanticAnalyser.CheckCtorAsMethod(ADecl: TObject;
-  AOnSelf: Boolean; ALine, ACol: Integer);
+  AOnSelf: Boolean; ALine, ACol: Int);
 var
   MD: TMethodDecl;
 begin
@@ -7539,7 +7539,7 @@ begin
 end;
 
 function TSemanticAnalyser.MetaclassStaticDecl(AMeta: TTypeDesc;
-  const AName: string; AArgs: TObjectList; ALine, ACol: Integer): TMethodDecl;
+  const AName: string; AArgs: TObjectList; ALine, ACol: Int): TMethodDecl;
 var
   RT: TRecordTypeDesc;
 begin
@@ -7565,7 +7565,7 @@ procedure TSemanticAnalyser.ResolveMetaclassStaticStmt(ACall: TMethodCallStmt;
   AMeta: TTypeDesc);
 var
   MDecl: TMethodDecl;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to ACall.Args.Count - 1 do
     Self.AnalyseArgSlot(ACall.Args, I);
@@ -7582,7 +7582,7 @@ function TSemanticAnalyser.ResolveMetaclassStaticExpr(AExpr: TMethodCallExpr;
   AMeta: TTypeDesc): TTypeDesc;
 var
   MDecl: TMethodDecl;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to AExpr.Args.Count - 1 do
     Self.AnalyseListSlot(AExpr.Args, I);
@@ -7632,7 +7632,7 @@ end;
 { A string constant expression: literals and named string constants joined
   by '+'. }
 function TSemanticAnalyser.EvalConstStrExpr(AExpr: TASTExpr;
-  ALine, ACol: Integer): string;
+  ALine, ACol: Int): string;
 var
   Sym: TSymbol;
 begin
@@ -7694,7 +7694,7 @@ end;
   so the constant must wait for the second pass. }
 function TSemanticAnalyser.ConstExprAwaitsTypes(AExpr: TASTExpr): Boolean;
 var
-  I: Integer;
+  I: Int;
   Sym: TSymbol;
 begin
   Result := False;
@@ -7848,7 +7848,7 @@ end;
 procedure TSemanticAnalyser.CheckConstArrayIndexInRange(AIndexExpr: TASTExpr;
                                                         AArrType: TTypeDesc;
                                                         const ADescr: string;
-                                                        ALine, ACol: Integer);
+                                                        ALine, ACol: Int);
 var
   Idx:  Int64;
   Arr:  TStaticArrayTypeDesc;
@@ -7875,7 +7875,7 @@ begin
 end;
 
 procedure TSemanticAnalyser.EnumIndexBounds(AIdxType: TTypeDesc;
-                                            out ALo, AHi: Integer);
+                                            out ALo, AHi: Int);
 begin
   ALo := 0;
   AHi := 0;
@@ -7899,7 +7899,7 @@ begin
 end;
 
 function TSemanticAnalyser.OrdinalIndexRange(AIdxType: TTypeDesc;
-                                             out ALo, AHi: Integer): Boolean;
+                                             out ALo, AHi: Int): Boolean;
 begin
   ALo := 0;
   AHi := 0;
@@ -7940,7 +7940,7 @@ end;
   later walk up the Parent chain spun forever
   (BUG-20260920-cyclic-intf-inheritance-hangs). }
 procedure TSemanticAnalyser.RejectCyclicIntfParent(AIntf: TInterfaceTypeDesc;
-  ALine, ACol: Integer);
+  ALine, ACol: Int);
 var
   P:     TInterfaceTypeDesc;
   Chain: string;
@@ -7958,11 +7958,11 @@ begin
 end;
 
 procedure TSemanticAnalyser.WarnIfEnumIndexSparse(AIdxType: TTypeDesc;
-  const ADescr: string; ALine, ACol: Integer);
+  const ADescr: string; ALine, ACol: Int);
 var
-  Lo, Hi: Integer;
-  Slots:  Integer;
-  Members: Integer;
+  Lo, Hi: Int;
+  Slots:  Int;
+  Members: Int;
 begin
   if (AIdxType = nil) or AIdxType.IsSubrange or
      (AIdxType.Kind <> tyEnum) or (not (AIdxType is TEnumTypeDesc)) then
@@ -7990,9 +7990,9 @@ begin
 end;
 
 procedure TSemanticAnalyser.CheckEnumSetBase(AEnum: TEnumTypeDesc;
-  const AName: string; ALine, ACol: Integer);
+  const AName: string; ALine, ACol: Int);
 var
-  Lo, Hi: Integer;
+  Lo, Hi: Int;
 begin
   if AEnum.Members.Count > 256 then
     SemanticError(Format(
@@ -8010,7 +8010,7 @@ end;
 
 procedure TSemanticAnalyser.CheckConstIntInRange(ADestType: TTypeDesc;
                                                  AValue: Int64;
-                                                 ALine, ACol: Integer);
+                                                 ALine, ACol: Int);
 var
   Lo, Hi: Int64;
 begin
@@ -8041,7 +8041,7 @@ end;
   and is not reported; a widening and a change of signedness at the same
   width are not narrowings. }
 procedure TSemanticAnalyser.WarnIfNarrowing(ADestType: TTypeDesc;
-  AExpr: TASTExpr; ALine, ACol: Integer);
+  AExpr: TASTExpr; ALine, ACol: Int);
 var
   Actual: TTypeDesc;
   V: Int64;
@@ -8059,7 +8059,7 @@ end;
 
 procedure TSemanticAnalyser.CheckConstValueInRange(ADestType: TTypeDesc;
                                                    AExpr: TASTExpr;
-                                                   ALine, ACol: Integer);
+                                                   ALine, ACol: Int);
 var
   V: Int64;
   Lo, Hi: Int64;
@@ -8101,7 +8101,7 @@ begin
 end;
 
 function TSemanticAnalyser.EvalConstFloatExpr(AExpr: TASTExpr;
-                                               ALine, ACol: Integer): string;
+                                               ALine, ACol: Int): string;
 var
   Bin:   TBinaryExpr;
   IdSym: TSymbol;
@@ -8189,7 +8189,7 @@ end;
 
 function IsPlainInt(const S: string): Boolean;
 var
-  I, Start: Integer;
+  I, Start: Int;
 begin
   Result := False;
   if Length(S) = 0 then Exit;
@@ -8203,9 +8203,9 @@ begin
   Result := True;
 end;
 
-function TSemanticAnalyser.ResolveArrayBound(const ABoundText: string): Integer;
+function TSemanticAnalyser.ResolveArrayBound(const ABoundText: string): Int;
 var
-  ELo, EHi: Integer;
+  ELo, EHi: Int;
   Src: string;
   Lx: TLexer;
   Px: TParser;
@@ -8218,7 +8218,7 @@ var
   IdxType: TTypeDesc;
 begin
   if IsPlainInt(ABoundText) then
-    Exit(Integer(StrToInt(ABoundText)));
+    Exit(Int(StrToInt(ABoundText)));
   { Enum-type dimension markers (see ReadConstArrayDim): '@L:TEnum' / '@H:TEnum'
     are the low / high bounds of an enum-typed array dimension.  BOTH a full
     enum and an ENUM-SUBRANGE span their MIN..MAX declared ordinal, so the low
@@ -8245,7 +8245,7 @@ begin
   end;
   Sym := FTable.Lookup(ABoundText);
   if (Sym <> nil) and (Sym.Kind = skConstant) then
-    Exit(Integer(Sym.ConstValue));
+    Exit(Int(Sym.ConstValue));
   { Enum-member bound: an INLINE enum-subrange array index —
     array[ptWhitePawn..ptKing] — supplies its bounds as bare enum-member
     names, which live in the reverse enum-member index, NOT the main symbol
@@ -8267,7 +8267,7 @@ begin
         'is declared by %s, and there is no type context here to choose. ' +
         'Declare a named subrange type (type TSub = Lo..Hi) and index by that',
         [ABoundText, EnumMemberOwners(ABoundText)]), 0, 0);
-    Exit(Integer(EnumRef.Ordinal));
+    Exit(Int(EnumRef.Ordinal));
   end;
   Src := 'program _ab; const _ab_val = ' + ABoundText + '; begin end.';
   Lx := TLexer.Create(Src);
@@ -8282,10 +8282,10 @@ begin
       if CD.IntValueExpr <> nil then
       begin
         Expr := CD.IntValueExpr;
-        Result := Integer(EvalConstIntExpr(Expr, 0, 0));
+        Result := Int(EvalConstIntExpr(Expr, 0, 0));
       end
       else if CD.IntExprTokens <> nil then
-        Result := Integer(FoldConstBitOpExpr(CD.IntExprTokens, 0, 0))
+        Result := Int(FoldConstBitOpExpr(CD.IntExprTokens, 0, 0))
       else
         raise ESemanticError.Create(
           Format('Cannot resolve array bound ''%s''', [ABoundText]));
@@ -8305,7 +8305,7 @@ function TSemanticAnalyser.ResolveSubrangeSetType(const ASubrange: string): TSet
   bound (bits 0..hi), reusing the Byte-backed ordinal-set machinery — a low bound
   > 0 simply leaves the lower bits unused, matching FPC. }
 var
-  DDotPos, Lo, Hi: Integer;
+  DDotPos, Lo, Hi: Int;
   LStr, HStr, CanonName: string;
 begin
   DDotPos := StrPos('..', ASubrange);
@@ -8333,7 +8333,7 @@ begin
 end;
 
 function TSemanticAnalyser.ResolveConstArrayElem(const AElem: string;
-  AElemType: TTypeDesc; ALine, ACol: Integer): string;
+  AElemType: TTypeDesc; ALine, ACol: Int): string;
 { Resolve one array-const element to the numeric string codegen needs.  The
   parser stores identifiers verbatim because it does not yet know the element
   type; with the type now known, fold bare identifiers — Boolean True/False,
@@ -8386,7 +8386,7 @@ begin
 end;
 
 function TSemanticAnalyser.ResolveSetMemberOrd(const AMember: string;
-  ACD: TConstDecl; var AEnumDesc: TEnumTypeDesc): Integer;
+  ACD: TConstDecl; var AEnumDesc: TEnumTypeDesc): Int;
 { Resolve one set-constant member (an integer literal, an enum constant, or a
   named integer constant) to its ordinal.  Enum members must all share one base
   enum, tracked through AEnumDesc; integer members do not set it (the set's base
@@ -8396,11 +8396,11 @@ var
   Ref: TEnumMemberRef;
 begin
   if IsPlainInt(AMember) then
-    Exit(Integer(StrToInt(AMember)));
+    Exit(Int(StrToInt(AMember)));
   { A named integer/ordinal constant (enum members are no longer symbols). }
   Sym := FTable.Lookup(AMember);
   if (Sym <> nil) and (Sym.Kind = skConstant) then
-    Exit(Integer(Sym.ConstValue));
+    Exit(Int(Sym.ConstValue));
   { Bare enum member via the reverse index.  The first enum member seen pins
     the set's base enum; later members resolve against it (so an ambiguous
     name follows the set), and a member outside it is a genuine mix error. }
@@ -8418,7 +8418,7 @@ begin
     SemanticError(Format(
       'Set constant ''%s'' mixes members of ''%s'' and ''%s''',
       [ACD.Name, AEnumDesc.Name, Ref.EnumDesc.Name]), ACD.Line, ACD.Col);
-  Result := Integer(Ref.Ordinal);
+  Result := Int(Ref.Ordinal);
 end;
 
 { The value of set literal ACD: resolve its members, settle its set type --
@@ -8430,7 +8430,7 @@ end;
 function TSemanticAnalyser.ResolveSetConstValue(ACD: TConstDecl;
   AIsInterface: Boolean; AVarSet: TTypeDesc): TSetTypeDesc;
 var
-  I:         Integer;
+  I:         Int;
   Mask:      Int64;
   MemName:   string;
   EnumDesc:  TEnumTypeDesc;
@@ -8439,8 +8439,8 @@ var
   CanonName: string;
   ExistTD:   TTypeDesc;
   Ords:      TStringList;
-  Ord, BIdx, NB, BVal: Integer;
-  DotPos, Lo, Hi: Integer;
+  Ord, BIdx, NB, BVal: Int;
+  DotPos, Lo, Hi: Int;
   LoStr, HiStr: string;
 begin
   Result   := nil;
@@ -8564,7 +8564,7 @@ procedure TSemanticAnalyser.AnalyseSetConstDecl(ACD: TConstDecl; AIsInterface: B
 var
   SetDesc: TSetTypeDesc;
   Sym:     TSymbol;
-  I:       Integer;
+  I:       Int;
 begin
   SetDesc := Self.ResolveSetConstValue(ACD, AIsInterface, nil);
   if SetDesc = nil then
@@ -8593,7 +8593,7 @@ end;
 
 function TSemanticAnalyser.FoldScalarConst(CD: TConstDecl): TTypeDesc;
 var
-  J:        Integer;
+  J:        Int;
   RefSym:   TSymbol;
   Resolved: string;
   OrdType:  TTypeDesc;
@@ -8677,7 +8677,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseConstDecls(ABlock: TBlock);
 var
-  I:  Integer;
+  I:  Int;
   CD: TConstDecl;
   TD: TTypeDesc;
 begin
@@ -8702,10 +8702,10 @@ end;
 
 { Define the folded scalar constant CD (the AIndex-th of ABlock) with type TD:
   a same-block duplicate is an error, a cross-unit collision last-wins. }
-procedure TSemanticAnalyser.DefineScalarConst(ABlock: TBlock; AIndex: Integer;
+procedure TSemanticAnalyser.DefineScalarConst(ABlock: TBlock; AIndex: Int;
   CD: TConstDecl; TD: TTypeDesc);
 var
-  I, J:   Integer;
+  I, J:   Int;
   Sym:    TSymbol;
   RefSym: TSymbol;
   Prev:   TSymbol;
@@ -8766,7 +8766,7 @@ begin
 end;
 
 procedure TSemanticAnalyser.DefineGlobalLastWins(ASym: TSymbol;
-  ALine, ACol: Integer);
+  ALine, ACol: Int);
 var
   RefSym: TSymbol;
   Prev:   TSymbol;
@@ -8893,7 +8893,7 @@ begin
 end;
 
 procedure TSemanticAnalyser.DefineTypeLastWins(ASym: TSymbol;
-  ATypeDecl: TTypeDecl; ALine, ACol: Integer);
+  ATypeDecl: TTypeDecl; ALine, ACol: Int);
 var
   RefSym: TSymbol;
   Prev:   TSymbol;
@@ -8947,8 +8947,8 @@ end;
 function TSemanticAnalyser.BuildConstArrayType(ACD: TConstDecl;
   AElemTD: TTypeDesc): TStaticArrayTypeDesc;
 var
-  D, Lo, Hi: Integer;
-  Expected:  Integer;
+  D, Lo, Hi: Int;
+  Expected:  Int;
   Inner:     TTypeDesc;
 begin
   { Multi-dimensional: build the nested type innermost-first and require the
@@ -9016,8 +9016,8 @@ procedure TSemanticAnalyser.AnalyseArrayConstDecls(ABlock: TBlock;
 { Second-pass constant analysis for array-typed constants.
   Called after AnalyseTypeDecls so that enum index types are in scope. }
 var
-  ELo, EHi: Integer;
-  I, J:     Integer;
+  ELo, EHi: Int;
+  I, J:     Int;
   CD:       TConstDecl;
   Sym:      TSymbol;
   RefSym:   TSymbol;
@@ -9025,7 +9025,7 @@ var
   IdxTD:    TTypeDesc;
   ArrTD:    TStaticArrayTypeDesc;
   EnumDesc: TEnumTypeDesc;
-  Expected: Integer;
+  Expected: Int;
 begin
   for I := 0 to ABlock.ConstDecls.Count - 1 do
   begin
@@ -9167,7 +9167,7 @@ end;
   at link time, while Pascal name resolution is not. }
 function DeclaredMethodCase(AMethods: TObjectList; const AName: string): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := AName;
   if AMethods = nil then Exit;
@@ -9190,9 +9190,9 @@ var
   FDecl:      TFieldDecl;
   FldType:    TTypeDesc;
   QName:      string;
-  I, J, K:    Integer;
+  I, J, K:    Int;
   Progress:   Boolean;
-  Pending:    Integer;
+  Pending:    Int;
 begin
   { The two-branch selector is deliberate: gating this on TClassTypeDef alone
     is the Stage 0 bug, which left record consts never registered at all. }
@@ -9348,9 +9348,9 @@ end;
 
 procedure TSemanticAnalyser.AnalyseTypeDecls(ABlock: TBlock);
 var
-  ELo, EHi: Integer;
-  I, J, K:    Integer;
-  L:          Integer;
+  ELo, EHi: Int;
+  I, J, K:    Int;
+  L:          Int;
   TD:         TTypeDecl;
   FieldList:  TObjectList;
   ConstList:  TObjectList;   { const members of the class/record being registered }
@@ -9389,13 +9389,13 @@ var
   SetDesc:    TSetTypeDesc;
   SetSubDesc: TSetTypeDesc;
   SetDef:     TSetTypeDef;
-  AttrIdx:    Integer;
+  AttrIdx:    Int;
   RawAttr:    string;
   Resolved:   string;
   AttrUse:    TAttributeUse;
   BaseSym:    TSymbol;
   MName:      string;
-  Slot:       Integer;
+  Slot:       Int;
   CD:         TConstDecl;
   AliasDef:   TTypeAliasDef;
   AliasName:  string;
@@ -9407,10 +9407,10 @@ var
   ElemTD:     TTypeDesc;
   IdxTD:      TTypeDesc;
   ArrTD:      TStaticArrayTypeDesc;
-  Expected:   Integer;
+  Expected:   Int;
   ForwardDecls: TStringList;  { names of bare forward class/interface decls still
                                awaiting their completing full declaration }
-  FwdIdx:     Integer;
+  FwdIdx:     Int;
   FwdType:    TTypeDesc;
 begin
   { Forward declarations (`TFoo = class;` / `IFoo = interface;`) register a
@@ -10594,7 +10594,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseMethodBodies(ABlock: TBlock);
 var
-  I, J:    Integer;
+  I, J:    Int;
   TD:      TTypeDecl;
   CD:      TClassTypeDef;
   RD:      TRecordTypeDef;
@@ -10633,7 +10633,7 @@ end;
 procedure TSemanticAnalyser.AnalyseMethodDecl(
   AMethod: TMethodDecl; AClassType: TRecordTypeDesc);
 var
-  I:          Integer;
+  I:          Int;
   Par:        TMethodParam;
   Sym:        TSymbol;
   SavedClass: TRecordTypeDesc;
@@ -10744,7 +10744,7 @@ function TSemanticAnalyser.FindMethodDecl(
   const ATypeName, AMethodName: string): TMethodDecl;
 var
   CurrName: string;
-  Idx, K:   Integer;
+  Idx, K:   Int;
   Key:      string;
   Sym:      TSymbol;
   RT:       TRecordTypeDesc;
@@ -10856,7 +10856,7 @@ begin
 end;
 
 function TSemanticAnalyser.PropAccessorVSlot(
-  const ATypeName, AMethodName: string): Integer;
+  const ATypeName, AMethodName: string): Int;
 var
   TDesc: TTypeDesc;
 begin
@@ -10868,7 +10868,7 @@ end;
 
 function TSemanticAnalyser.ResolveMethodOverload(
   const ATypeName, AMethodName: string;
-  AArgs: TObjectList; ALine, ACol: Integer): TMethodDecl;
+  AArgs: TObjectList; ALine, ACol: Int): TMethodDecl;
 var
   CurrName:    string;
   Sym:         TSymbol;
@@ -10878,11 +10878,11 @@ var
   Cand:        TMethodDecl;
   Grp:         TObjectList;
   ArityMatch:  TObjectList;
-  K:           Integer;
+  K:           Int;
   Best:        TMethodDecl;
   Ambiguous:   Boolean;
-  TotalCnt:    Integer;
-  Arity:       Integer;
+  TotalCnt:    Int;
+  Arity:       Int;
   SawHiding:   Boolean;
   LevelSym:    TSymbol;
   LevelOwner:  string;
@@ -11004,21 +11004,21 @@ end;
 function TSemanticAnalyser.PickBestCandidate(ACandidates, AArgs: TObjectList;
   out AAmbiguous: Boolean): TMethodDecl;
 var
-  J, K:      Integer;
-  Arity:     Integer;
+  J, K:      Int;
+  Arity:     Int;
   Cand:      TMethodDecl;
   Par:       TMethodParam;
   Arg:       TASTExpr;
-  Score:     Integer;
-  ArgScore:  Integer;
-  BestScore: Integer;
-  BestCount: Integer;
+  Score:     Int;
+  ArgScore:  Int;
+  BestScore: Int;
+  BestCount: Int;
   Best:      TMethodDecl;
-  ExactNew:  Integer;
-  ExactBest: Integer;
-  CostNew: Integer;
-  CostBest: Integer;
-  S1, S2:    Integer;
+  ExactNew:  Int;
+  ExactBest: Int;
+  CostNew: Int;
+  CostBest: Int;
+  S1, S2:    Int;
 begin
   AAmbiguous := False;
   Result     := nil;
@@ -11105,7 +11105,7 @@ var
   Sym:      TSymbol;
   RT:       TRecordTypeDesc;
   Cand:     TMethodDecl;
-  I, K:     Integer;
+  I, K:     Int;
   Dup:      Boolean;
 begin
   CurrName := ATypeName;
@@ -11148,7 +11148,7 @@ end;
 
 function TSemanticAnalyser.ResolveOperatorOverload(AKind: TOperatorKind;
   ALType, ARType: TTypeDesc; AArgs: TObjectList;
-  ALine, ACol: Integer): TMethodDecl;
+  ALine, ACol: Int): TMethodDecl;
 var
   Cands:     TObjectList;
   Ambiguous: Boolean;
@@ -11179,7 +11179,7 @@ begin
 end;
 
 function TSemanticAnalyser.LowerImplicitSelfProp(const APropName: string;
-  ALine, ACol: Integer): TASTExpr;
+  ALine, ACol: Int): TASTExpr;
 var
   FA: TFieldAccessExpr;
 begin
@@ -11194,7 +11194,7 @@ begin
 end;
 
 function TSemanticAnalyser.SelfMemberAccess(const AName: string;
-  ALine, ACol: Integer): TASTExpr;
+  ALine, ACol: Int): TASTExpr;
 var
   FA: TFieldAccessExpr;
 begin
@@ -11209,7 +11209,7 @@ begin
 end;
 
 function TSemanticAnalyser.AnalysedRecvIdent(const AName: string;
-  ALine, ACol: Integer): TASTExpr;
+  ALine, ACol: Int): TASTExpr;
 var
   IE: TIdentExpr;
 begin
@@ -11230,7 +11230,7 @@ end;
   the declared name bound to no symbol at all -- an undefined-symbol link
   error on macOS, a libc lookup and a crash on Linux.  Visibility is enforced
   as for the bare form.  Any other variable keeps its declared name. }
-function TSemanticAnalyser.StorageName(ASym: TSymbol; ALine, ACol: Integer): string;
+function TSemanticAnalyser.StorageName(ASym: TSymbol; ALine, ACol: Int): string;
 begin
   Result := ASym.Name;
   if ASym.IsClassVar and (ASym.GlobalEmitName <> '') then
@@ -11497,7 +11497,7 @@ end;
   on an indexed one, is an error -- the itab arms dispatched the accessor
   with whatever arguments were written, the index silently dropped. }
 procedure TSemanticAnalyser.AnalyseIntfPropIndex(AProp: TPropertyInfo;
-  AIndex: TASTExpr; const AIntfName, APropName: string; ALine, ACol: Integer);
+  AIndex: TASTExpr; const AIntfName, APropName: string; ALine, ACol: Int);
 var
   IdxType: TTypeDesc;
 begin
@@ -11846,7 +11846,7 @@ begin
 end;
 
 function TSemanticAnalyser.AnalyseListSlot(AList: TObjectList;
-  AIdx: Integer): TTypeDesc;
+  AIdx: Int): TTypeDesc;
 var
   Slot: TASTExpr;
 begin
@@ -11930,7 +11930,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseStandaloneDecls(ABlock: TBlock);
 var
-  I, J:    Integer;
+  I, J:    Int;
   ADecl:   TMethodDecl;
   Par:     TMethodParam;
   RetType: TTypeDesc;
@@ -12073,7 +12073,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseStandaloneDecl(ADecl: TMethodDecl);
 var
-  I:           Integer;
+  I:           Int;
   Par:         TMethodParam;
   Sym:         TSymbol;
   SavedEncl:   TMethodDecl;
@@ -12186,7 +12186,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseStandaloneBodies(ABlock: TBlock);
 var
-  I:     Integer;
+  I:     Int;
   ADecl: TMethodDecl;
   SavedClass:       TRecordTypeDesc;
   SavedMethodOwner: TRecordTypeDesc;
@@ -12250,7 +12250,7 @@ end;
 function TSemanticAnalyser.FrameOwnsName(ADecl: TMethodDecl;
   const AName: string): Boolean;
 var
-  I: Integer;
+  I: Int;
   PName: string;
 begin
   Result := True;
@@ -12273,7 +12273,7 @@ function TSemanticAnalyser.CapturingNestedCallee(ADecl: TMethodDecl;
   AResolved: TObject; const AName: string): TMethodDecl;
 var
   Nested: TObjectList;
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   if AResolved is TMethodDecl then
@@ -12304,7 +12304,7 @@ procedure TSemanticAnalyser.CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMet
 var
   OuterVars: TStringList;
   OpenArrs:  TStringList;
-  I, J, K:   Integer;
+  I, J, K:   Int;
   VDecl:     TVarDecl;
   VName:     string;
   TodoExprs: TObjectList;
@@ -12749,7 +12749,7 @@ end;
 function TSemanticAnalyser.AssignmentTargetsParameter(const AName: string;
                                                        const ADecl: TMethodDecl): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   if ADecl = nil then Exit;
@@ -12765,7 +12765,7 @@ function TSemanticAnalyser.ExprRejectsInline(AExpr: TASTExpr;
 var
   FC:  TFuncCallExpr;
   Bin: TBinaryExpr;
-  I:   Integer;
+  I:   Int;
 begin
   Result := False;
   if AExpr = nil then Exit;
@@ -12801,9 +12801,9 @@ end;
 
 function TSemanticAnalyser.StmtRejectsInline(AStmt: TASTStmt;
                                               const ASelfDecl: TMethodDecl;
-                                              var AStmtCount: Integer): Boolean;
+                                              var AStmtCount: Int): Boolean;
 var
-  I, J: Integer;
+  I, J: Int;
   Cmp:  TCompoundStmt;
   Asg:  TAssignment;
   Ifs:  TIfStmt;
@@ -12904,10 +12904,10 @@ function TSemanticAnalyser.IsInlineEligible(ADecl: TMethodDecl): Boolean;
 const
   MAX_STMTS = 24;
 var
-  I:   Integer;
+  I:   Int;
   Par: TMethodParam;
   K:   TTypeKind;
-  Cnt: Integer;
+  Cnt: Int;
 begin
   Result := False;
   if ADecl = nil then Exit;
@@ -12960,7 +12960,7 @@ end;
 
 procedure TSemanticAnalyser.MarkInlineCandidates(ABlock: TBlock);
 var
-  I:     Integer;
+  I:     Int;
   ADecl: TMethodDecl;
 begin
   for I := 0 to ABlock.ProcDecls.Count - 1 do
@@ -12972,7 +12972,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseVarDecls(ABlock: TBlock);
 var
-  I, J, K: Integer;
+  I, J, K: Int;
   Decl:    TVarDecl;
   Typ:     TTypeDesc;
   VarName: string;
@@ -13099,7 +13099,7 @@ var
   CD:     TConstDecl;
   Typ:    TTypeDesc;
   SAT:    TStaticArrayTypeDesc;
-  J:      Integer;
+  J:      Int;
 begin
   CD  := ADecl.InitConst;
   Typ := ADecl.ResolvedType;
@@ -13238,7 +13238,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseCompoundBody(ABody: TCompoundStmt);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to ABody.Stmts.Count - 1 do
     AnalyseStmt(TASTStmt(ABody.Stmts.Items[I]));
@@ -13246,7 +13246,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseStmts(ABlock: TBlock);
 var
-  I:         Integer;
+  I:         Int;
   PrevBlock: TBlock;
 begin
   PrevBlock := FCurrentLocalBlock;
@@ -13265,7 +13265,7 @@ var
   EnumType:   TTypeDesc;
   GetE:       TMethodDecl;
   Intf:       TInterfaceTypeDesc;
-  Idx:        Integer;
+  Idx:        Int;
   EnumName:   string;
   SynthDecl:  TVarDecl;
   Sym:        TSymbol;
@@ -13436,7 +13436,7 @@ end;
 
 procedure TSemanticAnalyser.PropagateUnavailable;
 var
-  I:       Integer;
+  I:       Int;
   Changed: Boolean;
   Caller:  TMethodDecl;
   Callee:  TMethodDecl;
@@ -13544,7 +13544,7 @@ var
   TES:    TTryExceptStmt;
   H:      TExceptHandlerClause;
   RaiseS: TRaiseStmt;
-  I:         Integer;
+  I:         Int;
   CondType:  TTypeDesc;
   VarSym:    TSymbol;
   StartType: TTypeDesc;
@@ -13562,8 +13562,8 @@ var
   ElemType:     TTypeDesc;
   SynthDecl:    TVarDecl;
   WalkRT:       TRecordTypeDesc;
-  K:            Integer;
-  L:            Integer;
+  K:            Int;
+  L:            Int;
   DupLocal:     Boolean;
 begin
   { Inline-assembler block: opaque to the front end — its content is assembly,
@@ -14205,7 +14205,7 @@ var
   ObjSym:  TSymbol;
   RT:      TRecordTypeDesc;
   MDecl:   TMethodDecl;
-  I:       Integer;
+  I:       Int;
   ObjType: TTypeDesc;
   FldInfo: TFieldInfo;
   RecvIdent: TIdentExpr;
@@ -14702,7 +14702,7 @@ procedure ResolveDiamond(AExpr: TASTExpr; ALhsType: TTypeDesc);
 var
   TypeName: string;
   BaseName: string;
-  BrPos: Integer;
+  BrPos: Int;
 begin
   if ALhsType = nil then Exit;
   if AExpr is TFieldAccessExpr then
@@ -14957,7 +14957,7 @@ var
   MDecl:      TMethodDecl;
   ArgType:    TTypeDesc;
   Par:        TMethodParam;
-  I:          Integer;
+  I:          Int;
 begin
   if FCurrentClass = nil then
     SemanticError('''inherited'' used outside a method body',
@@ -15048,7 +15048,7 @@ end;
   high half, a Byte had the three bytes after it overwritten.  An alias of
   the parameter's type shares its descriptor and passes. }
 procedure TSemanticAnalyser.CheckVarArgWidth(AFormal: TTypeDesc;
-  AArg: TASTExpr; AIndex: Integer; const AName: string; ALine, ACol: Integer);
+  AArg: TASTExpr; AIndex: Int; const AName: string; ALine, ACol: Int);
 var
   Actual: TTypeDesc;
 begin
@@ -15274,9 +15274,9 @@ begin
 end;
 
 procedure TSemanticAnalyser.ValidateMethodVarArgs(AArgs: TObjectList;
-  AMDecl: TMethodDecl; const AName: string; ALine, ACol: Integer);
+  AMDecl: TMethodDecl; const AName: string; ALine, ACol: Int);
 var
-  I: Integer;
+  I: Int;
   Par: TMethodParam;
 begin
   if AMDecl = nil then
@@ -15304,7 +15304,7 @@ end;
 function TSemanticAnalyser.IntfParamInfosFor(AMethod: TMethodDecl;
   AParamNames, AArgs: TStringList): TObjectList;
 var
-  K: Integer;
+  K: Int;
   Par: TMethodParam;
   Info: TIntfParamInfo;
 begin
@@ -15348,10 +15348,10 @@ begin
 end;
 
 procedure TSemanticAnalyser.ValidateIntfMethodVarArgs(AArgs: TObjectList;
-  AIntf: TInterfaceTypeDesc; const AName: string; ALine, ACol: Integer);
+  AIntf: TInterfaceTypeDesc; const AName: string; ALine, ACol: Int);
 var
-  I: Integer;
-  MIdx: Integer;
+  I: Int;
+  MIdx: Int;
   Params: TObjectList;
   Info: TIntfParamInfo;
   Slot: TASTExpr;
@@ -15429,7 +15429,7 @@ var
   MDecl:      TMethodDecl;
   ArgType:    TTypeDesc;
   Par:        TMethodParam;
-  I:          Integer;
+  I:          Int;
 begin
   { Mirrors AnalyseInheritedCall (the statement form) but the call is used as
     a VALUE, so the parent method must be a function (non-void return) and the
@@ -15503,7 +15503,7 @@ end;
   (FPC/Delphi semantics, consistent with Blaise's int→float assignment
   rule).  Anything else is an error. }
 function TSemanticAnalyser.FloatBuiltinArgType(const AName: string;
-  AArgType: TTypeDesc; ALine, ACol: Integer): TTypeDesc;
+  AArgType: TTypeDesc; ALine, ACol: Int): TTypeDesc;
 begin
   if AArgType.IsFloat() then
     Exit(AArgType);
@@ -15524,7 +15524,7 @@ end;
   the array type.  Returns False when there is no subscript to interpret;
   errors out when a subscript is applied to a non-array field. }
 procedure TSemanticAnalyser.AnalyseStrByteWrite(AIndex, AValue: TASTExpr;
-  ALine, ACol: Integer);
+  ALine, ACol: Int);
 var
   IdxType: TTypeDesc;
   ValType: TTypeDesc;
@@ -16175,7 +16175,7 @@ end;
 
 function TSemanticAnalyser.MangleParamSig(ADecl: TMethodDecl): string;
 var
-  I:   Integer;
+  I:   Int;
   Par: TMethodParam;
 begin
   Result := '';
@@ -16198,11 +16198,11 @@ end;
   valid and only a call is ambiguous, so the later sibling is told apart by
   its position; both bodies are then emitted under distinct symbols. }
 function TSemanticAnalyser.InstanceMethodKey(AMethods: TObjectList;
-  AIndex: Integer): string;
+  AIndex: Int): string;
 
   function KeyOf(ADecl: TMethodDecl): string;
   var
-    I:   Integer;
+    I:   Int;
     Par: TMethodParam;
   begin
     Result := ADecl.Name;
@@ -16217,7 +16217,7 @@ function TSemanticAnalyser.InstanceMethodKey(AMethods: TObjectList;
   end;
 
 var
-  I:    Integer;
+  I:    Int;
   Decl: TMethodDecl;
 begin
   Decl := TMethodDecl(AMethods.Items[AIndex]);
@@ -16245,7 +16245,7 @@ procedure TSemanticAnalyser.CheckImplMatchesDecl(AImpl, ADecl: TMethodDecl;
 
   function ParamList(AM: TMethodDecl): string;
   var
-    I: Integer;
+    I: Int;
     P: TMethodParam;
   begin
     Result := '';
@@ -16280,7 +16280,7 @@ var
   DeclSig, QualName: string;
   ImplRet, DeclRet: TTypeDesc;
   RetDiffers, ModeDiffers: Boolean;
-  I: Integer;
+  I: Int;
   PI, PD: TMethodParam;
 begin
   DeclSig := MangleParamSig(ADecl);
@@ -16333,7 +16333,7 @@ end;
 function TSemanticAnalyser.ImplSpellingMatches(AImpl,
   ADecl: TMethodDecl): Boolean;
 var
-  I: Integer;
+  I: Int;
   PI, PD: TMethodParam;
 begin
   Result := False;
@@ -16357,7 +16357,7 @@ procedure TSemanticAnalyser.ReportImplSpellingMismatch(AImpl,
 
   function Spelled(AM: TMethodDecl): string;
   var
-    I: Integer;
+    I: Int;
     P: TMethodParam;
   begin
     Result := '';
@@ -16406,7 +16406,7 @@ procedure TSemanticAnalyser.ReportDuplicateOverload(ADecl, APrev: TMethodDecl;
   const AQualName: string);
 var
   Msg: string;
-  I:   Integer;
+  I:   Int;
   PA:  TMethodParam;
   PB:  TMethodParam;
 begin
@@ -16431,7 +16431,7 @@ end;
 procedure TSemanticAnalyser.CheckOverloadUnique(ADecl: TMethodDecl);
 var
   Grp:   TObjectList;
-  K:     Integer;
+  K:     Int;
   Prev:  TMethodDecl;
   UName: string;
 begin
@@ -16456,9 +16456,9 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.MinArity(ADecl: TMethodDecl): Integer;
+function TSemanticAnalyser.MinArity(ADecl: TMethodDecl): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to ADecl.Params.Count - 1 do
     if (TMethodParam(ADecl.Params.Items[I]).DefaultValue <> nil) or
@@ -16471,7 +16471,7 @@ end;
 
 procedure TSemanticAnalyser.TransferDefaultValues(AFrom, AInto: TMethodDecl);
 var
-  I:    Integer;
+  I:    Int;
   PSrc: TMethodParam;
   PDst: TMethodParam;
 begin
@@ -16493,7 +16493,7 @@ begin
 end;
 
 procedure TSemanticAnalyser.AnalyseDefaultValueExpr(APar: TMethodParam;
-  const AContext: string; ALine, ACol: Integer);
+  const AContext: string; ALine, ACol: Int);
 var
   T: TTypeDesc;
 begin
@@ -16615,9 +16615,9 @@ end;
   explicit PChar() borrow, and a Single needs promotion to Double
   (C's default argument promotions — the callee reads a double). }
 procedure TSemanticAnalyser.ValidateVarArgsExtras(AArgs: TObjectList;
-  AMDecl: TMethodDecl; const AName: string; ALine, ACol: Integer);
+  AMDecl: TMethodDecl; const AName: string; ALine, ACol: Int);
 var
-  I: Integer;
+  I: Int;
   T: TTypeDesc;
 begin
   if AArgs.Count <= AMDecl.Params.Count then Exit;
@@ -16651,9 +16651,9 @@ begin
 end;
 
 procedure TSemanticAnalyser.AppendDefaultArgs(AArgs: TObjectList;
-  ADecl: TMethodDecl; const AContext: string; ALine, ACol: Integer);
+  ADecl: TMethodDecl; const AContext: string; ALine, ACol: Int);
 var
-  I:        Integer;
+  I:        Int;
   Par:      TMethodParam;
   CloneEx:  TASTExpr;
 begin
@@ -16678,10 +16678,10 @@ end;
   such argument's ResolvedType at the parameter's set type so codegen emits a
   bitmask (EmitArrayLiteralExpr dispatches on ResolvedType.Kind = tySet). }
 procedure TSemanticAnalyser.CheckConstArgsInRange(AArgs: TObjectList;
-  AMDecl: TMethodDecl; ALine, ACol: Integer);
+  AMDecl: TMethodDecl; ALine, ACol: Int);
 var
-  I:   Integer;
-  N:   Integer;
+  I:   Int;
+  N:   Int;
   Par: TMethodParam;
 begin
   if (AArgs = nil) or (AMDecl = nil) or (AMDecl.Params = nil) then
@@ -16703,8 +16703,8 @@ end;
 procedure TSemanticAnalyser.RetypeSetLiteralArgs(AArgs: TObjectList;
   AMDecl: TMethodDecl);
 var
-  I: Integer;
-  N: Integer;
+  I: Int;
+  N: Int;
 begin
   N := AArgs.Count;
   if AMDecl.Params.Count < N then
@@ -16716,7 +16716,7 @@ end;
 
 function TSemanticAnalyser.LiteralHasRange(AExpr: TArrayLiteralExpr): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   for I := 0 to AExpr.Elements.Count - 1 do
@@ -16733,7 +16733,7 @@ end;
 function TSemanticAnalyser.LiteralNarrowsToOpenArray(AExpr: TASTExpr;
   AParamType: TTypeDesc): Boolean;
 var
-  I: Integer;
+  I: Int;
   V: Int64;
   Elem: TTypeDesc;
   Slot: TASTExpr;
@@ -16770,7 +16770,7 @@ end;
 procedure TSemanticAnalyser.RetypeBracketLiteralArg(AArg: TASTExpr;
   AParamType: TTypeDesc);
 var
-  I:    Integer;
+  I:    Int;
   Elem: TASTExpr;
   V:    Int64;
 begin
@@ -16865,9 +16865,9 @@ end;
   (BUG-20260722-procfield-set-literal-arg) while hand-copied loops elsewhere
   did them. }
 procedure TSemanticAnalyser.AnalyseProcTypeCallArgs(AArgs: TObjectList;
-  APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
+  APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Int);
 var
-  I: Integer;
+  I: Int;
   PPar: TProcParamInfo;
   Slot: TASTExpr;
   ArgType: TTypeDesc;
@@ -16914,7 +16914,7 @@ end;
   literal returns nil (the caller treats [] as matching any set). }
 function TSemanticAnalyser.SetLiteralBaseEnum(AExpr: TArrayLiteralExpr): TTypeDesc;
 var
-  I:    Integer;
+  I:    Int;
   Elem: TASTExpr;
   Base: TTypeDesc;
 
@@ -16961,7 +16961,7 @@ end;
 function TSemanticAnalyser.LiteralNarrowsVariable(AElem: TTypeDesc;
   ALit: TArrayLiteralExpr): Boolean;
 var
-  I: Integer;
+  I: Int;
   V: Int64;
   Slot: TASTExpr;
 begin
@@ -16980,9 +16980,9 @@ begin
 end;
 
 function TSemanticAnalyser.ArrayLiteralScore(AElem: TTypeDesc;
-  ALit: TArrayLiteralExpr): Integer;
+  ALit: TArrayLiteralExpr): Int;
 var
-  I: Integer;
+  I: Int;
   Slot: TASTExpr;
 begin
   Result := 1;
@@ -16995,11 +16995,11 @@ begin
 end;
 
 function TSemanticAnalyser.ArgWideningCost(AParam: TTypeDesc;
-  AArg: TTypeDesc; AArgExpr: TASTExpr): Integer;
+  AArg: TTypeDesc; AArgExpr: TASTExpr): Int;
 var
   ArgInt:   Boolean;
   ParamInt: Boolean;
-  I:        Integer;
+  I:        Int;
 begin
   Result := 0;
   if (AParam = nil) or (AArg = nil) then Exit;
@@ -17048,9 +17048,9 @@ begin
 end;
 
 function TSemanticAnalyser.WideningCost(ACand: TMethodDecl;
-  AArgs: TObjectList; AN: Integer): Integer;
+  AArgs: TObjectList; AN: Int): Int;
 var
-  J: Integer;
+  J: Int;
 begin
   Result := 0;
   for J := 0 to AN - 1 do
@@ -17060,7 +17060,7 @@ begin
 end;
 
 function TSemanticAnalyser.ArgMatchScore(AParam: TTypeDesc;
-  AArg: TTypeDesc; AArgExpr: TASTExpr): Integer;
+  AArg: TTypeDesc; AArgExpr: TASTExpr): Int;
 begin
   Result := 0;
   if AParam = nil then Exit;
@@ -17258,12 +17258,12 @@ begin
 end;
 
 procedure TSemanticAnalyser.RejectCallArgs(ACands: TObjectList;
-  AArgs: TObjectList; const AName: string; ALine, ACol: Integer);
+  AArgs: TObjectList; const AName: string; ALine, ACol: Int);
 var
   Cand: TMethodDecl;
   Par:  TMethodParam;
   Arg:  TASTExpr;
-  J:    Integer;
+  J:    Int;
 begin
   if (ACands.Count = 1) and (AArgs <> nil) then
   begin
@@ -17290,28 +17290,28 @@ begin
 end;
 
 function TSemanticAnalyser.ResolveStandaloneOverload(const AName: string;
-  AArity: Integer; AArgs: TObjectList; ALine, ACol: Integer;
+  AArity: Int; AArgs: TObjectList; ALine, ACol: Int;
   const AQualUnit: string): TMethodDecl;
 var
-  I, J:        Integer;
+  I, J:        Int;
   Cand:        TMethodDecl;
   Grp:         TObjectList;
   ArityMatch:  TObjectList;
-  Score:       Integer;
-  ArgScore:    Integer;
+  Score:       Int;
+  ArgScore:    Int;
   Par:         TMethodParam;
   Arg:         TASTExpr;
-  BestScore:   Integer;
-  BestCount:   Integer;
+  BestScore:   Int;
+  BestCount:   Int;
   Best:        TMethodDecl;
-  TotalCnt:    Integer;
-  ExactNew:    Integer;
-  ExactBest:   Integer;
-  CostNew: Integer;
-  CostBest: Integer;
-  S1, S2:      Integer;
-  FixedN:      Integer;
-  DefaultedN:  Integer;
+  TotalCnt:    Int;
+  ExactNew:    Int;
+  ExactBest:   Int;
+  CostNew: Int;
+  CostBest: Int;
+  S1, S2:      Int;
+  FixedN:      Int;
+  DefaultedN:  Int;
   WinUnit:     string;
 begin
   Result    := nil;
@@ -17504,7 +17504,7 @@ end;
   safe alternative the message offers.  AWritten marks the operand the
   routine writes, for the for-in loop variable warning. }
 procedure TSemanticAnalyser.AnalyseRawMemOperand(ACall: TProcCall;
-  AIndex: Integer; const ARoutine, APosition, AVerb, ARemedy: string;
+  AIndex: Int; const ARoutine, APosition, AVerb, ARemedy: string;
   AWritten: Boolean);
 var
   Arg: TASTExpr;
@@ -17555,8 +17555,8 @@ end;
   float's bit pattern as the integer (Chr(D), SetLength(S, D)) or find no
   integer lowering for a float expression.  Returns its type. }
 function TSemanticAnalyser.AnalyseIntegerArg(AArgs: TObjectList;
-  AIndex: Integer; const ARoutine, ARole: string;
-  ALine, ACol: Integer): TTypeDesc;
+  AIndex: Int; const ARoutine, ARole: string;
+  ALine, ACol: Int): TTypeDesc;
 begin
   Result := Self.AnalyseListSlot(AArgs, AIndex);
   if (Result <> nil) and Result.IsFloat() then
@@ -17569,7 +17569,7 @@ end;
 
 { An integer-typed argument of a raw-memory intrinsic; returns its type. }
 function TSemanticAnalyser.AnalyseRawMemInteger(ACall: TProcCall;
-  AIndex: Integer; const ARoutine, ARole, AHint: string): TTypeDesc;
+  AIndex: Int; const ARoutine, ARole, AHint: string): TTypeDesc;
 begin
   Result := Self.AnalyseListSlot(ACall.Args, AIndex);
   if (Result = nil) or not (Result.Kind in [tyInteger, tyInt64, tyUInt32,
@@ -17627,8 +17627,8 @@ var
   MDecl:   TMethodDecl;
   Par:     TMethodParam;
   ArgType: TTypeDesc;
-  Idx:     Integer;
-  I:       Integer;
+  Idx:     Int;
+  I:       Int;
   PT:      TProceduralTypeDesc;
   FldInfo: TFieldInfo;
 begin
@@ -18192,8 +18192,8 @@ var
   MDecl:   TMethodDecl;
   Par:     TMethodParam;
   ArgType: TTypeDesc;
-  Idx:     Integer;
-  I:       Integer;
+  Idx:     Int;
+  I:       Int;
   PT:      TProceduralTypeDesc;
   FldInfo: TFieldInfo;
 begin
@@ -19408,7 +19408,7 @@ var
   MDecl:    TMethodDecl;
   Par:      TMethodParam;
   ArgType:  TTypeDesc;
-  I:        Integer;
+  I:        Int;
   IntfDesc: TInterfaceTypeDesc;
   ObjType:  TTypeDesc;
   ResolvedObjName: string;
@@ -20674,7 +20674,7 @@ var
   BaseType: TTypeDesc;
   IntfDesc: TInterfaceTypeDesc;
   MDecl:    TMethodDecl;
-  EnumOrd:  Integer;
+  EnumOrd:  Int;
   Inner:    TFieldAccessExpr;
 begin
   { Already lowered to a subscript of the property value (re-analysis of a
@@ -21498,8 +21498,8 @@ function TSemanticAnalyser.PromotedIntType(AExpr: TASTExpr): TTypeDesc;
 var
   V: Int64;
 begin
-  if Self.TryEvalConstIntExpr(AExpr, V) and (V >= Low(Integer)) and
-     (V <= High(Integer)) then
+  if Self.TryEvalConstIntExpr(AExpr, V) and (V >= Low(Int)) and
+     (V <= High(Int)) then
     Result := FTable.TypeInteger
   else
     Result := FTable.TypeInt64;
@@ -22138,7 +22138,7 @@ end;
 procedure TSemanticAnalyser.SubstTypeParamsInStmts(AStmts: TObjectList;
                                                    ANames, AArgs: TStringList);
 var
-  I: Integer;
+  I: Int;
 begin
   if AStmts = nil then Exit;
   for I := 0 to AStmts.Count - 1 do
@@ -22147,7 +22147,7 @@ end;
 
 procedure TSemanticAnalyser.SubstActiveTypeParamsInAnonDecl(ADecl: TMethodDecl);
 var
-  K:      Integer;
+  K:      Int;
   Names:  TStringList;
   Args:   TStringList;
   Sym:    TSymbol;
@@ -22196,7 +22196,7 @@ begin
             (AExpr.ResolvedType = nil);
 end;
 
-procedure TSemanticAnalyser.AnalyseArgSlot(AList: TObjectList; AIdx: Integer);
+procedure TSemanticAnalyser.AnalyseArgSlot(AList: TObjectList; AIdx: Int);
 var
   Slot: TASTExpr;
 begin
@@ -22215,7 +22215,7 @@ end;
 procedure TSemanticAnalyser.ResolveDeferredArrowArgs(AArgs: TObjectList;
   AMDecl: TMethodDecl);
 var
-  I:   Integer;
+  I:   Int;
   Par: TMethodParam;
   Arg: TASTExpr;
 begin
@@ -22255,7 +22255,7 @@ var
   MCS:   TMethodCallStmt;
   FCE:   TFuncCallExpr;
   MCE:   TMethodCallExpr;
-  I:     Integer;
+  I:     Int;
 begin
   if not (AExpr is TAnonMethodExpr) then Exit;
   AME := TAnonMethodExpr(AExpr);
@@ -22378,7 +22378,7 @@ var
   EnvPar:    TMethodParam;
   ProcParam: TProcParamInfo;
   ValVD:     TVarDecl;
-  I:         Integer;
+  I:         Int;
 begin
   if AExpr.ResolvedType <> nil then Exit(AExpr.ResolvedType);  { idempotent }
 
@@ -22582,7 +22582,7 @@ var
   BlockSite: TObject;
   HasFrameNames: Boolean;
   Site:  TVarDeclStmt;
-  I, J:  Integer;
+  I, J:  Int;
 begin
   Encl := FCurrentEnclosingDecl;
   InMethod := False;
@@ -22854,7 +22854,7 @@ procedure TSemanticAnalyser.CheckNestedRoutineAddrs();
 var
   AoE: TAddrOfExpr;
   MD:  TMethodDecl;
-  I:   Integer;
+  I:   Int;
 begin
   for I := 0 to FNestedRoutineAddrs.Count - 1 do
   begin
@@ -22883,7 +22883,7 @@ var
   Nested:  TObjectList;
   ND:      TMethodDecl;
   Sym:     TSymbol;
-  I:       Integer;
+  I:       Int;
 begin
   while FPendingAnonDecls.Count > 0 do
   begin
@@ -22958,7 +22958,7 @@ end;
 procedure TSemanticAnalyser.BindHandlersToHiddenVars(ATry: TTryExceptStmt);
 var
   H:    TExceptHandlerClause;
-  I:    Integer;
+  I:    Int;
   TFS:  TTryFinallyStmt;
   Asn:  TAssignment;
   Wrap: TCompoundStmt;
@@ -23042,7 +23042,7 @@ var
   E:     TMethodDecl;
   ND:    TMethodDecl;
   Seen:  TStringList;
-  I:     Integer;
+  I:     Int;
 begin
   Entry := nil;
   Seen := TStringList.Create();
@@ -23074,7 +23074,7 @@ end;
 
 function TSemanticAnalyser.AnonNestedRoutinesOf(AThunk: TMethodDecl): TObjectList;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FAnonNestedRoutines.Count - 1 do
     if TAnonNestedRoutines(FAnonNestedRoutines.Items[I]).Thunk = AThunk then
@@ -23115,7 +23115,7 @@ begin
 end;
 
 function TSemanticAnalyser.CallField(ART: TRecordTypeDesc;
-  const AName: string; ALine, ACol: Integer): TFieldInfo;
+  const AName: string; ALine, ACol: Int): TFieldInfo;
 var
   PI: TPropertyInfo;
 begin
@@ -23145,7 +23145,7 @@ end;
   static, no method of the name): the call is the getter's value called
   (Delphi's event idiom with an accessor).  Nil otherwise. }
 function TSemanticAnalyser.GetterProcProp(ART: TRecordTypeDesc;
-  const AName: string; ALine, ACol: Integer): TPropertyInfo;
+  const AName: string; ALine, ACol: Int): TPropertyInfo;
 begin
   Result := nil;
   if (ART = nil) or (ART.FindField(AName) <> nil) then
@@ -23169,11 +23169,11 @@ end;
   the original call node. }
 function TSemanticAnalyser.BuildGetterProcCall(ART: TRecordTypeDesc;
   AProp: TPropertyInfo; ARecv: TASTExpr; AArgs: TObjectList; ALine,
-  ACol: Integer): TIndirectFuncCallExpr;
+  ACol: Int): TIndirectFuncCallExpr;
 var
   FA: TFieldAccessExpr;
   PT: TProceduralTypeDesc;
-  I: Integer;
+  I: Int;
 begin
   FA := TFieldAccessExpr.Create();
   FA.Line := ALine;
@@ -23205,7 +23205,7 @@ end;
 { The statement form: a TExprCallStmt around BuildGetterProcCall. }
 function TSemanticAnalyser.BuildGetterProcStmt(ART: TRecordTypeDesc;
   AProp: TPropertyInfo; ARecv: TASTExpr; AArgs: TObjectList; ALine,
-  ACol: Integer): TASTStmt;
+  ACol: Int): TASTStmt;
 var
   S: TExprCallStmt;
 begin
@@ -23220,7 +23220,7 @@ function TSemanticAnalyser.BuildBuiltinFuncStmt(ACall: TProcCall): TASTStmt;
 var
   S: TExprCallStmt;
   Call: TFuncCallExpr;
-  I: Integer;
+  I: Int;
 begin
   { The statement Name(Args) as the expression-call statement of the
     expression Name(Args).  The argument nodes are shared, as in
@@ -23272,7 +23272,7 @@ var
   Asn:     TAssignment;
   Idn:     TIdentExpr;
   Par:     TMethodParam;
-  I:       Integer;
+  I:       Int;
 begin
   if not IsRefProcType(ATarget) or not IsRoutineAddr(AExpr) then Exit;
   Sym := FTable.Lookup(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
@@ -23348,7 +23348,7 @@ var
   MD: TMethodDecl;
   MParam: TMethodParam;
   BaseType: TTypeDesc;
-  Idx, K: Integer;
+  Idx, K: Int;
 begin
   { @FuncName / @ProcName — if the inner is a bare identifier that
     resolves to a standalone function or procedure, build a procedural
@@ -23571,9 +23571,9 @@ begin
 end;
 
 procedure TSemanticAnalyser.FillProceduralTypeDesc(ADef: TProceduralTypeDef;
-  ADesc: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
+  ADesc: TProceduralTypeDesc; const AName: string; ALine, ACol: Int);
 var
-  K: Integer;
+  K: Int;
   MParam: TMethodParam;
   ProcParam: TProcParamInfo;
   TD: TTypeDesc;
@@ -23782,7 +23782,7 @@ function TSemanticAnalyser.AnalyseIndirectFuncCallExpr(AExpr: TIndirectFuncCallE
 var
   CalleeType: TTypeDesc;
   ProcDesc:   TProceduralTypeDesc;
-  I:          Integer;
+  I:          Int;
 begin
   CalleeType := Self.AnalyseExprSlot(AExpr.CalleeExpr);
   if (CalleeType = nil) or (CalleeType.Kind <> tyProcedural) then
@@ -23821,7 +23821,7 @@ var
   SelType:  TTypeDesc;
   Branch:   TCaseBranch;
   ValType:  TTypeDesc;
-  I, J:     Integer;
+  I, J:     Int;
 begin
   SelType := Self.AnalyseExprSlot(AStmt.Selector);
   AStmt.IsStringCase := SelType.IsString();
@@ -24273,7 +24273,7 @@ function TSemanticAnalyser.AnalyseArrayLiteralExpr(AExpr: TArrayLiteralExpr): TT
 var
   ElemType: TTypeDesc;
   ActType:  TTypeDesc;
-  I:        Integer;
+  I:        Int;
 begin
   { An empty literal [] has no element type to infer.  It is only valid in a
     context that supplies the target type — a set assignment (handled before
@@ -24327,7 +24327,7 @@ var
   Elem:    TTypeDesc;
   ActType: TTypeDesc;
   Slot:    TASTExpr;
-  I:       Integer;
+  I:       Int;
   What:    string;
 begin
   if AArrType.Kind = tyOpenArray then
@@ -24381,7 +24381,7 @@ end;
 function TSemanticAnalyser.AnalyseIntegerInLiteral(AExpr: TArrayLiteralExpr): TTypeDesc;
 var
   TmpSet: TSetTypeDesc;
-  I:      Integer;
+  I:      Int;
   V, MaxOrd: Int64;
   AllConst:  Boolean;
 begin
@@ -24412,14 +24412,14 @@ begin
     if MaxOrd < 0 then
       TmpSet.BitCount := 1
     else
-      TmpSet.BitCount := Integer(MaxOrd) + 1;
+      TmpSet.BitCount := Int(MaxOrd) + 1;
   end;
 end;
 
 function TSemanticAnalyser.SetLiteralBitCount(AExpr: TArrayLiteralExpr;
-  ABaseEnum: TEnumTypeDesc): Integer;
+  ABaseEnum: TEnumTypeDesc): Int;
 var
-  I, MaxOrd: Integer;
+  I, MaxOrd: Int;
   Elem: TASTExpr;
 begin
   MaxOrd := -1;
@@ -24444,7 +24444,7 @@ begin
 end;
 
 function TSemanticAnalyser.SetRangeBoundOrdinal(ABound: TASTExpr;
-  ABaseEnum: TEnumTypeDesc; const AWhich: string): Integer;
+  ABaseEnum: TEnumTypeDesc; const AWhich: string): Int;
 { Resolve a set-range bound (lo or hi) to a compile-time ordinal of the
   base enum.  Rejects non-constant and wrong-type bounds.  Issue #105. }
 var
@@ -24477,11 +24477,11 @@ procedure TSemanticAnalyser.ExpandSetRanges(AExpr: TArrayLiteralExpr;
   element validation loop so the rest of the pipeline only ever sees plain
   member idents.  Issue #105. }
 var
-  I, J:      Integer;
+  I, J:      Int;
   Elem:      TASTExpr;
   Range:     TSetRangeExpr;
-  LoOrd:     Integer;
-  HiOrd:     Integer;
+  LoOrd:     Int;
+  HiOrd:     Int;
   NewList:   TObjectList;
   MemberId:  TIdentExpr;
 begin
@@ -24552,7 +24552,7 @@ end;
 procedure TSemanticAnalyser.ExpandOrdinalSetRanges(AExpr: TArrayLiteralExpr;
   ASetType: TSetTypeDesc);
 var
-  I, J:      Integer;
+  I, J:      Int;
   Elem:      TASTExpr;
   Range:     TSetRangeExpr;
   LoVal:     Int64;
@@ -24617,7 +24617,7 @@ function TSemanticAnalyser.AnalyseSetLiteralExpr(AExpr: TArrayLiteralExpr;
   ASetType: TSetTypeDesc): TTypeDesc;
 var
   ElemType: TTypeDesc;
-  I:        Integer;
+  I:        Int;
   IsOrdBase: Boolean;
 begin
   IsOrdBase := ASetType.BaseType.Kind in [tyByte, tyBoolean];

@@ -58,7 +58,7 @@ type
     FLinkLibs:   TObjectList; { non-owning ref to the current TUnit/TProgram.LinkLibs;
                                 external 'lib' decls append a TLinkLibDecl here as they
                                 are parsed (any section). nil outside a unit/program. }
-    FGenericTypeDepth: Integer; { > 0 while parsing the body of a generic record /
+    FGenericTypeDepth: Int; { > 0 while parsing the body of a generic record /
                                   class template.  `class operator` declarations
                                   are rejected there: operator resolution would
                                   need per-instantiation FMethodGroups keying and
@@ -66,24 +66,24 @@ type
                                   which is designed yet. }
 
     { Record a 'link library X' dependency on the unit/program being parsed. }
-    procedure AddLinkLib(const ALibName: string; ALine, ACol: Integer);
+    procedure AddLinkLib(const ALibName: string; ALine, ACol: Int);
     function  IsUsedUnit(const AName: string): Boolean;
     function  IsUnitPrefix(const AName: string): Boolean;
     { Unbounded lookahead, exposed as scalar accessors (0 = FCurrent).  A
       TToken-returning peek is deliberately avoided — TToken carries a managed
       string, and returning it by value would create transient managed records
       in the hot matcher path. }
-    procedure EnsureAhead(N: Integer);
-    function  PeekKindAt(N: Integer): TTokenKind;
-    function  PeekValueAt(N: Integer): string;
-    function  PeekLineAt(N: Integer): Integer;
-    function  PeekColAt(N: Integer): Integer;
+    procedure EnsureAhead(N: Int);
+    function  PeekKindAt(N: Int): TTokenKind;
+    function  PeekValueAt(N: Int): string;
+    function  PeekLineAt(N: Int): Int;
+    function  PeekColAt(N: Int): Int;
     { True when the '<' at lookahead position APos opens a generic
       type-argument list: well formed, closed by '>', and followed by '.' or
       '('.  Scans ahead without consuming anything. }
-    function  GenericArgsAhead(APos: Integer): Boolean;
+    function  GenericArgsAhead(APos: Int): Boolean;
     function  TryCollapseUnitQualifier(var AName: string;
-                                       var ALine, ACol: Integer;
+                                       var ALine, ACol: Int;
                                        out AUnit: string): Boolean;
     procedure Advance;
     function  PeekKind(): TTokenKind;
@@ -128,7 +128,7 @@ type
       same shape already used for fields (see the FieldIdx loop in
       ParseRecordDef).  Without this a `private const` loses its visibility at
       parse time and cannot be enforced downstream (GH #175 Stage 0). }
-    procedure StampConstVisibility(AList: TObjectList; AFromIdx: Integer;
+    procedure StampConstVisibility(AList: TObjectList; AFromIdx: Int;
                                    AVis: TMemberVisibility);
     procedure ParseConstArrayType(CD: TConstDecl);
     procedure ReadConstArrayDim(CD: TConstDecl);
@@ -205,14 +205,14 @@ type
       to lower. }
     function ParseCallArg(const ACallee: string): TASTExpr;
     procedure ParseMethodCallArgList(ACall: TMethodCallStmt);
-    function  ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Integer): TASTStmt;
-    function  CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
+    function  ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Int): TASTStmt;
+    function  CallChainStmt(AExpr: TASTExpr; ALine, ACol: Int): TASTStmt;
     function  ChainTailStmt(ABase: TASTExpr; const ARootName: string;
-      ALine, ACol: Integer): TASTStmt;
+      ALine, ACol: Int): TASTStmt;
     function  FoldFieldSubscript(ASub: TStringSubscriptExpr): TASTExpr;
     function  ParseIndexTail(ABase: TASTExpr): TASTExpr;
     function  FieldIndexChainStmt(AAssign: TFieldAssignment;
-      const ARootName: string; ALine, ACol: Integer): TASTStmt;
+      const ARootName: string; ALine, ACol: Int): TASTStmt;
   public
     constructor Create(ALexer: TLexer);
     destructor Destroy; override;
@@ -245,7 +245,7 @@ end;
 
 procedure TParser.Advance;
 var
-  I: Integer;
+  I: Int;
 begin
   FCurrent    := FLookahead;
   FLookahead  := FLookahead2;
@@ -276,7 +276,7 @@ end;
   index N (>= 3) maps to FAhead[N - 3].  Tokens are pulled from the lexer and
   held (FIFO) until consumed by Advance.  Lets the unit-qualifier matcher
   inspect a whole dotted chain of any depth before consuming any of it. }
-procedure TParser.EnsureAhead(N: Integer);
+procedure TParser.EnsureAhead(N: Int);
 var
   T: TToken;
 begin
@@ -290,7 +290,7 @@ end;
 
 { Kind of the token N positions ahead of FCurrent (0=FCurrent, 1=FLookahead,
   2=FLookahead2, 3+ from FAhead). }
-function TParser.PeekKindAt(N: Integer): TTokenKind;
+function TParser.PeekKindAt(N: Int): TTokenKind;
 begin
   case N of
     0: Exit(FCurrent.Kind);
@@ -302,7 +302,7 @@ begin
 end;
 
 { Value text of the token N positions ahead. }
-function TParser.PeekValueAt(N: Integer): string;
+function TParser.PeekValueAt(N: Int): string;
 begin
   case N of
     0: Exit(FCurrent.Value);
@@ -313,7 +313,7 @@ begin
   Result := FAhead[N - 3].Value;
 end;
 
-function TParser.PeekLineAt(N: Integer): Integer;
+function TParser.PeekLineAt(N: Int): Int;
 begin
   case N of
     0: Exit(FCurrent.Line);
@@ -324,7 +324,7 @@ begin
   Result := FAhead[N - 3].Line;
 end;
 
-function TParser.PeekColAt(N: Integer): Integer;
+function TParser.PeekColAt(N: Int): Int;
 begin
   case N of
     0: Exit(FCurrent.Col);
@@ -343,10 +343,10 @@ end;
   '('.  Anything else -- "A < B, C" or "A < B, 'x'" -- is a comparison.
   Peeking at a fixed two tokens (the previous rule) committed on "A < B,"
   and then failed (BUG-20261006-generic-lt-comma-parse). }
-function TParser.GenericArgsAhead(APos: Integer): Boolean;
+function TParser.GenericArgsAhead(APos: Int): Boolean;
 var
-  P: Integer;
-  Depth: Integer;
+  P: Int;
+  Depth: Int;
 begin
   Result := False;
   if PeekKindAt(APos) <> tkLessThan then Exit;
@@ -387,7 +387,7 @@ end;
 { Case-insensitive membership test against the parsed 'uses' names. }
 { Append a 'link library ALibName' dependency to the unit/program being parsed.
   Duplicates are tolerated — the exporter dedupes when building the .bif set. }
-procedure TParser.AddLinkLib(const ALibName: string; ALine, ACol: Integer);
+procedure TParser.AddLinkLib(const ALibName: string; ALine, ACol: Int);
 var
   LL: TLinkLibDecl;
 begin
@@ -401,7 +401,7 @@ end;
 
 function TParser.IsUsedUnit(const AName: string): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FUsedUnits.Count - 1 do
     if SameText(FUsedUnits.Strings[I], AName) then
@@ -414,7 +414,7 @@ end;
   the moment it can no longer complete any unit name. }
 function TParser.IsUnitPrefix(const AName: string): Boolean;
 var
-  I: Integer;
+  I: Int;
   U: string;
 begin
   for I := 0 to FUsedUnits.Count - 1 do
@@ -443,10 +443,10 @@ end;
   a same-prefixed record/field chain (My.Pkg := x) is left intact — the required
   trailing '.Symbol' is what distinguishes the two. }
 function TParser.TryCollapseUnitQualifier(var AName: string;
-  var ALine, ACol: Integer; out AUnit: string): Boolean;
+  var ALine, ACol: Int; out AUnit: string): Boolean;
 var
   Cand, BestUnit: string;
-  Comps, BestComps, J, DotIdx, IdentIdx: Integer;
+  Comps, BestComps, J, DotIdx, IdentIdx: Int;
 begin
   Result := False;
   AUnit  := '';
@@ -497,7 +497,7 @@ end;
 
 function TParser.ReadConstBoundText: string;
 var
-  Depth: Integer;
+  Depth: Int;
 begin
   Result := '';
   Depth := 0;
@@ -581,7 +581,7 @@ function TParser.ParseTypeName: string;
 var
   LStr, HStr, ElemTypeName: string;
   Lows, Highs: TStringList;
-  I: Integer;
+  I: Int;
 begin
   { Inline procedural type: 'procedure(...)', 'function(...): T', either with
     'of object', or 'reference to ...' (GH #222).  Encoded as a type-name
@@ -1128,8 +1128,8 @@ end;
 procedure TParser.ParseNestedTypeSection(AList: TObjectList;
                                          AVis: TMemberVisibility);
 var
-  FromIdx: Integer;
-  I:       Integer;
+  FromIdx: Int;
+  I:       Int;
 begin
   Expect(tkType);
   FromIdx := AList.Count;
@@ -1173,7 +1173,7 @@ var
   ClassAttrs:       TStringList;
   ClassAttrUses:    TObjectList;  { non-owning transfer list; the class def's
                                     owning AttrUses list adopts the items }
-  AUIdx:            Integer;
+  AUIdx:            Int;
   SubLo:            Int64;
   SubHi:            Int64;
 begin
@@ -1481,7 +1481,7 @@ end;
 function TParser.TryParseConstIntTypecast(out AValue: Int64): Boolean;
 var
   TypeName: string;
-  Width:    Integer;  { bit-width of the target type; 64 = no truncation }
+  Width:    Int;  { bit-width of the target type; 64 = no truncation }
   IsSigned: Boolean;
   Negate:   Boolean;
   Raw:      Int64;
@@ -1623,7 +1623,7 @@ function TParser.CollectConstBitOpExpr(const AFirstStr: string;
                                        AFirstIsIdent: Boolean): TStringList;
 var
   OpName:    string;
-  Sign:      Integer;
+  Sign:      Int;
   Raw:       Int64;
   CastVal:   Int64;
 begin
@@ -1674,10 +1674,10 @@ begin
   end;
 end;
 
-procedure TParser.StampConstVisibility(AList: TObjectList; AFromIdx: Integer;
+procedure TParser.StampConstVisibility(AList: TObjectList; AFromIdx: Int;
                                        AVis: TMemberVisibility);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := AFromIdx to AList.Count - 1 do
     TConstDecl(AList.Items[I]).Visibility := AVis;
@@ -2195,9 +2195,9 @@ end;
 function TParser.ParseEnumDef: TEnumTypeDef;
 var
   MName: string;
-  NextVal: Integer;
+  NextVal: Int;
   Negative: Boolean;
-  ExplicitVal: Integer;
+  ExplicitVal: Int;
 begin
   Result := TEnumTypeDef.Create();
   try
@@ -2310,9 +2310,9 @@ function TParser.ParseInlineProcTypeName: string;
 var
   Def: TProceduralTypeDef;
   IsRef: Boolean;
-  I: Integer;
+  I: Int;
   Par: TMethodParam;
-  Line, Col: Integer;
+  Line, Col: Int;
 begin
   { An inline procedural type has no declaration to hang a TProceduralTypeDef
     on, so it travels as an encoded type name, like 'set of (a,b)' or
@@ -2442,14 +2442,14 @@ end;
 function TParser.ParseRecordDef: TRecordTypeDef;
 var
   MethDecl:         TMethodDecl;
-  ConstIdx:         Integer;   { first const appended by this section's ParseConstBlock }
+  ConstIdx:         Int;   { first const appended by this section's ParseConstBlock }
   CurrStatic:       Boolean;   { current section's static (class-level) association }
   CurrStaticBlock:  Boolean;   { bare `static var`/`static const` block (see
                                  ParseClassDef; BUG-036) }
   CurrVisibility:   TMemberVisibility; { current section's visibility }
   LocalStatic:      Boolean;
-  FieldCountBefore: Integer;
-  FieldIdx:         Integer;
+  FieldCountBefore: Int;
+  FieldIdx:         Int;
   PropDecl:         TPropertyDecl;
 begin
   Result := TRecordTypeDef.Create();
@@ -2653,7 +2653,7 @@ end;
 function TParser.ParseClassDef: TClassTypeDef;
 var
   CurrPublished:    Boolean;
-  ConstIdx:         Integer;   { first const appended by this section's ParseConstBlock }
+  ConstIdx:         Int;   { first const appended by this section's ParseConstBlock }
   CurrVisibility:   TMemberVisibility; { current section's visibility }
   CurrStatic:       Boolean;   { current section's static (class-level) association }
   CurrStaticBlock:  Boolean;   { CurrStatic came from a bare `static var`/
@@ -2664,13 +2664,13 @@ var
   LocalStatic:      Boolean;   { effective static for the member being parsed }
   MethDecl:         TMethodDecl;
   PropDecl:         TPropertyDecl;
-  FieldCountBefore: Integer;
-  FieldIdx:         Integer;
+  FieldCountBefore: Int;
+  FieldIdx:         Int;
   PendAttrNames:    TStringList; { attribute list captured at the top of the
                                    member loop, attached to the next field or
                                    method declaration }
   PendAttrUses:     TObjectList; { non-owning; parallel TAttributeUse items }
-  AUIdx:            Integer;
+  AUIdx:            Int;
 begin
   PendAttrNames := TStringList.Create();
   PendAttrUses  := TObjectList.Create(False);
@@ -3002,11 +3002,11 @@ end;
 
 function TParser.ParseClassOperatorDecl(ACanHaveNestedProcs: Boolean): TMethodDecl;
 var
-  OpLine, OpCol: Integer;
+  OpLine, OpCol: Int;
   OpName:        string;
   Kind:          TOperatorKind;
-  WantArity:     Integer;
-  GotArity:      Integer;
+  WantArity:     Int;
+  GotArity:      Int;
 begin
   OpLine := FCurrent.Line;
   OpCol  := FCurrent.Col;
@@ -3363,7 +3363,7 @@ end;
 procedure TParser.ParseParamList(AParams: TObjectList);
 var
   Par:         TMethodParam;
-  I:           Integer;
+  I:           Int;
   Names:       TStringList;
   TypeN:       string;
   IsVarGrp:    Boolean;
@@ -3371,8 +3371,8 @@ var
   IsConstGrp:  Boolean;
   IsOpenArr:   Boolean;
   Default:     TASTExpr;
-  DefLine:     Integer;
-  DefCol:      Integer;
+  DefLine:     Int;
+  DefCol:      Int;
 begin
   repeat
     IsOutGrp   := Check(tkOut);
@@ -3760,8 +3760,8 @@ function TParser.ParseBlockVarDeclStmt: TASTStmt;
   statement executes. }
 var
   VS:   TVarDeclStmt;
-  Line: Integer;
-  Col:  Integer;
+  Line: Int;
+  Col:  Int;
 begin
   Line := FCurrent.Line;
   Col  := FCurrent.Col;
@@ -3808,7 +3808,7 @@ begin
   Result := VS;
 end;
 
-function TParser.ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Integer): TASTStmt;
+function TParser.ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Int): TASTStmt;
 { ACallee( args ) as a statement: the callee is the expression holding a
   procedural value (A[I], P^); FCurrent is the '('.  Takes ownership of
   ACallee. }
@@ -3839,7 +3839,7 @@ begin
 end;
 
 function TParser.ChainTailStmt(ABase: TASTExpr; const ARootName: string;
-  ALine, ACol: Integer): TASTStmt;
+  ALine, ACol: Int): TASTStmt;
 { The rest of a statement whose designator chain a hand-written arm of
   ParseStmt has built up to ABase but cannot continue (B.O.Arr[0].Y := V,
   B.O.Grid[0][1] := V, O.Handlers[1](X);): the remaining postfix links are
@@ -3987,7 +3987,7 @@ begin
 end;
 
 function TParser.FieldIndexChainStmt(AAssign: TFieldAssignment;
-  const ARootName: string; ALine, ACol: Integer): TASTStmt;
+  const ARootName: string; ALine, ACol: Int): TASTStmt;
 { A field statement whose bracket goes on past its first index
   (R.G[I, J] := V, O.Rows[I, J].Run();), the parser standing on the ','.
   AAssign holds the field (RecordName or ObjExpr) and the first index; the
@@ -4011,7 +4011,7 @@ begin
     ACol);
 end;
 
-function TParser.CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
+function TParser.CallChainStmt(AExpr: TASTExpr; ALine, ACol: Int): TASTStmt;
 { A statement made of a postfix chain (GetFn()(X); GetFn()(X).Run();): the
   last link must be a call -- a call through the value the chain yields, or
   a method call on it.  Takes ownership of AExpr. }
@@ -4053,7 +4053,7 @@ function TParser.ParseStmt: TASTStmt;
 var
   Name:        string;
   QualUnit:    string;  { matched unit from a 'Unit.Symbol' target; unused here }
-  Line, Col:   Integer;
+  Line, Col:   Int;
   Call:        TProcCall;
   Assign:      TAssignment;
   FldAssign:   TFieldAssignment;
@@ -5289,8 +5289,8 @@ end;
 
 function TParser.ParseForStmt: TASTStmt;
 var
-  SLine:    Integer;
-  SCol:     Integer;
+  SLine:    Int;
+  SCol:     Int;
   VarName:  string;
   ForS:     TForStmt;
   ForInS:   TForInStmt;
@@ -5383,7 +5383,7 @@ var
   ExceptBody:  TCompoundStmt;
   TFS:         TTryFinallyStmt;
   TES:         TTryExceptStmt;
-  Line, Col:   Integer;
+  Line, Col:   Int;
 begin
   Line := FCurrent.Line;
   Col  := FCurrent.Col;
@@ -6097,8 +6097,8 @@ var
   Node:     TBinaryExpr;
   IsNode:   TIsExpr;
   AsNode:   TAsExpr;
-  OpLine:   Integer;
-  OpCol:    Integer;
+  OpLine:   Int;
+  OpCol:    Int;
 begin
   Result := ParseAddSub();
 
@@ -6164,8 +6164,8 @@ var
   Right:  TASTExpr;
   Op:     TBinaryOp;
   Node:   TBinaryExpr;
-  OpLine: Integer;
-  OpCol:  Integer;
+  OpLine: Int;
+  OpCol:  Int;
 begin
   Result := ParseTerm();
   while Check(tkPlus) or Check(tkMinus) or Check(tkOr) do
@@ -6192,8 +6192,8 @@ var
   Right:  TASTExpr;
   Op:     TBinaryOp;
   Node:   TBinaryExpr;
-  OpLine: Integer;
-  OpCol:  Integer;
+  OpLine: Int;
+  OpCol:  Int;
 begin
   Result := ParseFactor();
   while Check(tkStar) or Check(tkSlash) or Check(tkDiv) or Check(tkMod)
@@ -6306,7 +6306,7 @@ end;
 
 function TParser.ArrowLambdaAhead: Boolean;
 var
-  N, Depth: Integer;
+  N, Depth: Int;
   K: TTokenKind;
 begin
   Result := False;
@@ -6335,7 +6335,7 @@ var
   MD:       TMethodDecl;
   Par:      TMethodParam;
   TypedAhead: Boolean;
-  N: Integer;
+  N: Int;
   K: TTokenKind;
 begin
   Result := TAnonMethodExpr.Create();
@@ -6438,7 +6438,7 @@ var
   Name:       string;
   SecondName: string;
   QualUnit:   string;
-  Line, Col:  Integer;
+  Line, Col:  Int;
   NegNode:    TNegExpr;
   ArrNode:       TArrayLiteralExpr;
   ParseIntV:    Int64;
