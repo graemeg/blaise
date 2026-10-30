@@ -96,6 +96,10 @@ begin
     'RTL source directory (default: beside the binary; or $BLAISE_RTL_SRC).'));
   WriteLn(FormatFlagLine('',
     'Needed when the binary is moved away from its source tree.'));
+  WriteLn(FormatFlagLine('--rtl-cache <dir>',
+    'Where the compiled RTL is cached (default: beside the binary;'));
+  WriteLn(FormatFlagLine('',
+    'or $BLAISE_RTL_CACHE; ~/.cache/blaise/rtl when that is read-only).'));
   WriteLn(FormatFlagLine('--define <sym> | -d <sym>',
     'Define a conditional-compilation symbol (repeatable)'));
   WriteLn(FormatFlagLine('--backend <id>', BackendUsageLine()));
@@ -154,9 +158,10 @@ begin
   WriteLn('');
   WriteLn('Configuration:');
   WriteLn('  blaise.cfg (next to the binary, then ~/.blaise.cfg) can set, one');
-  WriteLn('  per line: unit-path=<dir> (repeatable) and rtl-src=<dir>.  A relative');
-  WriteLn('  path is resolved against the config file''s directory; --rtl-src on');
-  WriteLn('  the command line overrides rtl-src= in the config, and every');
+  WriteLn('  per line: unit-path=<dir> (repeatable), rtl-src=<dir> and');
+  WriteLn('  rtl-cache=<dir>.  A relative path is resolved against the config');
+  WriteLn('  file''s directory; --rtl-src and --rtl-cache on the command line');
+  WriteLn('  override the config''s rtl-src= and rtl-cache=, and every');
   WriteLn('  --unit-path is searched before the config''s unit-paths.');
   WriteLn('');
   WriteLn('Environment:');
@@ -264,6 +269,11 @@ begin
     begin
       Inc(I);
       AOpts.RTLSrcDir := ParamStr(I);
+    end
+    else if (Arg = '--rtl-cache') and (I < ParamCount()) then
+    begin
+      Inc(I);
+      AOpts.RTLCacheDir := ParamStr(I);
     end
     else if ((Arg = '--lib-path') or (Arg = '-Fl')) and (I < ParamCount()) then
     begin
@@ -731,6 +741,7 @@ var
   SearchPaths: TStringList;
   ConfigPaths: TStringList;
   CfgRtlSrc:   string;
+  CfgRtlCache: string;
   SrcDir:      string;
   EmitAsm:     Boolean;
   DumpAST:     Boolean;
@@ -891,9 +902,12 @@ begin
       checkout's) shadow a worktree's own, and the dev-layout config's stdlib
       shadow the compiler sources when building the TestRunner. }
     CfgRtlSrc := Opts.RTLSrcDir;
-    LoadConfigPaths(ConfigPaths, CfgRtlSrc);
+    CfgRtlCache := Opts.RTLCacheDir;
+    LoadConfigPaths(ConfigPaths, CfgRtlSrc, CfgRtlCache);
     if Opts.RTLSrcDir = '' then
       Opts.RTLSrcDir := CfgRtlSrc;
+    if Opts.RTLCacheDir = '' then
+      Opts.RTLCacheDir := CfgRtlCache;
     for I := 0 to ConfigPaths.Count - 1 do
       SearchPaths.Add(ConfigPaths.Strings[I]);
   finally

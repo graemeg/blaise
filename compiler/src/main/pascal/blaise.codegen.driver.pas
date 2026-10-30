@@ -106,6 +106,11 @@ type
                                    Overrides the binary/CWD-relative lookup, for
                                    a relocated/release binary whose RTL source
                                    lives elsewhere (empty = use default lookup) }
+    RTLCacheDir: string;         { --rtl-cache DIR (or rtl-cache= in blaise.cfg):
+                                   where the compiled RTL objects are cached.
+                                   Empty = $BLAISE_RTL_CACHE, else beside the
+                                   binary when writable, else the per-user
+                                   cache (uToolchain.ChooseRTLCacheRoot) }
     LinkMode: TLinkMode;         { requested link mode: lmAuto (default) decides
                                    at link time; lmStatic = --static forces the
                                    freestanding, libc-free ELF (the kernel leaf
@@ -311,7 +316,7 @@ function BuildRTLUnitList(AStatic: Boolean;
   objects are built from.  No trailing delimiter.  Exposed for unit testing;
   EnsureRTLObjects is the only production caller. }
 function RTLObjectCacheDir(const ATarget: TTargetDesc;
-  const ASrcKey: string = ''): string;
+  const ASrcKey: string = ''; const ARoot: string = ''): string;
 
 { Short key identifying the RTL SOURCES a cached object set is built from: a
   content hash over the listed units' source text, in list order.
@@ -434,12 +439,41 @@ begin
 end;
 
 function RTLObjectCacheDir(const ATarget: TTargetDesc;
-  const ASrcKey: string): string;
+  const ASrcKey: string; const ARoot: string): string;
+var
+  Root: string;
 begin
-  Result := IncludeTrailingPathDelimiter(CompilerBinDir()) + 'rtl'
-    + '/' + TargetName(ATarget) + '-' + RTLCacheKey();
+  { ARoot is the cache root EnsureRTLObjects chose; '' is the default beside
+    the binary. }
+  Root := ARoot;
+  if Root = '' then
+    Root := IncludeTrailingPathDelimiter(CompilerBinDir()) + 'rtl';
+  Result := IncludeTrailingPathDelimiter(Root)
+    + TargetName(ATarget) + '-' + RTLCacheKey();
   if ASrcKey <> '' then
     Result := Result + '-' + ASrcKey;
+end;
+
+{ True when the compiler can create files in <ABinDir>rtl/, the default RTL
+  object cache; a root-owned install directory is not writable. }
+function BinDirCacheWritable(const ABinDir: string): Boolean;
+var
+  Dir, Probe: string;
+begin
+  Result := False;
+  Dir := IncludeTrailingPathDelimiter(ABinDir) + 'rtl';
+  ForceDirectories(Dir);
+  if not DirectoryExists(Dir) then
+    Exit;
+  Probe := Dir + '/.probe-' + IntToStr(_driver_getpid());
+  try
+    WriteFile(Probe, '');
+    Result := True;
+  except
+    Result := False;
+  end;
+  if Result then
+    DeleteFile(Probe);
 end;
 
 function RTLSourceKey(const ASrcDir: string; AUnits: TStringList): string;
@@ -722,6 +756,7 @@ function TBackendDriver.EnsureRTLObjects(AOpts: TBackendOpts;
   AAlreadyProvided, AObjPaths: TStringList): string;
 var
   SrcDir, CacheDir, BuildDir, BlaiseBin: string;
+  CacheRoot, CacheEnv: string;
   SrcFile, ObjFile, TmpObj: string;
   I, J, ExitCode: Int;
   NewestSrc: Int64;
@@ -792,12 +827,30 @@ begin
     served to a build against the very sources it was compiled from. }
   Units := BuildRTLUnitList(AStaticLink and AIncludeStartup,
     AOpts.Target.OS, AOpts.Target.CPU);
-  CacheDir := RTLObjectCacheDir(AOpts.Target, RTLSourceKey(SrcDir, Units));
+  { Where the objects are cached: --rtl-cache / rtl-cache= (AOpts.RTLCacheDir),
+    then $BLAISE_RTL_CACHE, then beside the binary when that is writable, then
+    the per-user cache -- so a root-owned install still compiles (GH #251). }
+  CacheEnv := GetEnvironmentVariable('BLAISE_RTL_CACHE');
+  CacheRoot := ChooseRTLCacheRoot(AOpts.RTLCacheDir, '', CacheEnv,
+    CompilerBinDir(),
+    (AOpts.RTLCacheDir = '') and (CacheEnv = '') and
+      BinDirCacheWritable(CompilerBinDir()),
+    GetEnvironmentVariable('XDG_CACHE_HOME'), GetEnvironmentVariable('HOME'));
+  if CacheRoot = '' then
+    Exit('cannot write the RTL object cache beside the compiler (' +
+      CompilerBinDir() + 'rtl) and $HOME is not set; pass --rtl-cache DIR ' +
+      'or set $BLAISE_RTL_CACHE');
+  CacheRoot := ExpandFileName(CacheRoot);
+  CacheDir := RTLObjectCacheDir(AOpts.Target, RTLSourceKey(SrcDir, Units),
+    CacheRoot);
   ForceDirectories(CacheDir);
+  if not DirectoryExists(CacheDir) then
+    Exit('cannot create the RTL object cache directory ' + CacheDir +
+      '; pass --rtl-cache DIR or set $BLAISE_RTL_CACHE to a writable directory');
   BuildDir := IncludeTrailingPathDelimiter(CacheDir) + 'build-' +
               IntToStr(_driver_getpid());
   ForceDirectories(BuildDir);
-  BlaiseBin := ParamStr(0);
+  BlaiseBin := ExecutablePath();
 
   { One threshold for the whole set, not each unit's own source — see
     NewestRTLSourceAge for the mis-linked-compiler this closes. }

@@ -13,6 +13,9 @@ interface
 uses
   Classes, SysUtils;
 
+{ blaise.cfg beside the compiler binary (its real location: a symlink or a
+  $PATH lookup leads back to the install directory), else ~/.blaise.cfg;
+  '' when neither exists. }
 function FindConfigFile: string;
 
 { Parse blaise.cfg lines.  Recognised keys (KEY=VALUE, '#' comments, blank lines
@@ -24,22 +27,30 @@ function FindConfigFile: string;
 procedure ParseConfigLines(ALines: TStringList; const ABaseDir: string;
   APaths: TStringList; var ARtlSrc: string); overload;
 
+{ As above, and `rtl-cache=<dir>` sets ARtlCache (left unchanged when absent). }
+procedure ParseConfigLines(ALines: TStringList; const ABaseDir: string;
+  APaths: TStringList; var ARtlSrc, ARtlCache: string); overload;
+
 { Convenience overload for callers that only want unit-paths (ignores rtl-src). }
 procedure ParseConfigLines(ALines: TStringList; const ABaseDir: string;
   APaths: TStringList); overload;
 
 { Load the resolved blaise.cfg: appends unit-path entries to APaths and returns
-  any rtl-src via ARtlSrc (unchanged if the file has none / no file). }
-procedure LoadConfigPaths(APaths: TStringList; var ARtlSrc: string);
+  any rtl-src via ARtlSrc and rtl-cache via ARtlCache (each unchanged if the
+  file has none / no file). }
+procedure LoadConfigPaths(APaths: TStringList; var ARtlSrc, ARtlCache: string);
 
 implementation
+
+uses
+  uToolchain;   { CompilerBinDir }
 
 function FindConfigFile: string;
 var
   BinDir: string;
   Home:   string;
 begin
-  BinDir := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0)));
+  BinDir := IncludeTrailingPathDelimiter(CompilerBinDir());
   Result := BinDir + 'blaise.cfg';
   if FileExists(Result) then
     Exit;
@@ -84,7 +95,7 @@ begin
 end;
 
 procedure ParseConfigLines(ALines: TStringList; const ABaseDir: string;
-  APaths: TStringList; var ARtlSrc: string);
+  APaths: TStringList; var ARtlSrc, ARtlCache: string);
 var
   I:     Int;
   Line:  string;
@@ -108,9 +119,20 @@ begin
       APaths.Add(ResolveCfgPath(Value, ABaseDir))
     else if SameText(Key, 'rtl-src') then
       ARtlSrc := ResolveCfgPath(Value, ABaseDir)
+    else if SameText(Key, 'rtl-cache') then
+      ARtlCache := ResolveCfgPath(Value, ABaseDir)
     else
       ; { silently skip unrecognised keys }
   end;
+end;
+
+procedure ParseConfigLines(ALines: TStringList; const ABaseDir: string;
+  APaths: TStringList; var ARtlSrc: string);
+var
+  IgnoredRtlCache: string;
+begin
+  IgnoredRtlCache := '';
+  ParseConfigLines(ALines, ABaseDir, APaths, ARtlSrc, IgnoredRtlCache);
 end;
 
 procedure ParseConfigLines(ALines: TStringList; const ABaseDir: string;
@@ -122,7 +144,7 @@ begin
   ParseConfigLines(ALines, ABaseDir, APaths, IgnoredRtlSrc);
 end;
 
-procedure LoadConfigPaths(APaths: TStringList; var ARtlSrc: string);
+procedure LoadConfigPaths(APaths: TStringList; var ARtlSrc, ARtlCache: string);
 var
   CfgFile: string;
   Lines:   TStringList;
@@ -135,7 +157,7 @@ begin
   try
     Lines.LoadFromFile(CfgFile);
     BaseDir := ExtractFilePath(CfgFile);
-    ParseConfigLines(Lines, BaseDir, APaths, ARtlSrc);
+    ParseConfigLines(Lines, BaseDir, APaths, ARtlSrc, ARtlCache);
   finally
     Lines.Free();
   end;

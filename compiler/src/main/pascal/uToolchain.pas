@@ -92,6 +92,21 @@ function ResolveLinker(const ATarget: TTargetDesc): TTool;
 { Directory containing the running compiler binary (ParamStr(0)). }
 function CompilerBinDir: string;
 
+{ The running compiler's own path: absolute, with symlinks resolved. }
+function ExecutablePath: string;
+
+{ AArgv0 as an absolute path with symlinks resolved.  A name without '/' is
+  looked up on APathList (':'-separated, as $PATH), and is '' when no entry
+  holds it; anything else is taken relative to ACwd. }
+function ResolveExecutablePath(const AArgv0, APathList, ACwd: string): string;
+
+{ The directory the compiled RTL objects are cached under.  In order: ACli
+  (--rtl-cache), ACfg (rtl-cache= in blaise.cfg), AEnv ($BLAISE_RTL_CACHE),
+  <ABinDir>rtl when ABinDirWritable, <AXdgCache>/blaise/rtl when AXdgCache
+  is absolute, <AHome>/.cache/blaise/rtl; '' when none applies. }
+function ChooseRTLCacheRoot(const ACli, ACfg, AEnv, ABinDir: string;
+  ABinDirWritable: Boolean; const AXdgCache, AHome: string): string;
+
 { RTL source directory (compiler/src/main/pascal), relative to the binary.
   The driver builds the RTL objects from here when linking; overridable via
   $BLAISE_RTL_SRC. }
@@ -165,7 +180,9 @@ begin
   Result := '';
 end;
 
-function WhichInPath(const ABaseName: string): string;
+{ WhichInPath over an explicit ':'-separated APathList; a relative entry is
+  taken relative to ACwd. }
+function WhichInPathList(const ABaseName, APathList, ACwd: string): string;
 var
   Path, Entry: string;
   SepPos:      Int;
@@ -173,7 +190,7 @@ var
 begin
   Result := '';
   if ABaseName = '' then Exit;
-  Path := GetEnvironmentVariable('PATH');
+  Path := APathList;
   while Length(Path) > 0 do
   begin
     { Blaise Pos/Copy are 0-based; -1 = not found.  Consume one PATH entry
@@ -190,12 +207,20 @@ begin
       Path  := '';
     end;
     if Entry = '' then Continue;
+    if Copy(Entry, 0, 1) <> '/' then
+      Entry := IncludeTrailingPathDelimiter(ACwd) + Entry;
     Hit := TrySingleName(Entry, ABaseName);
     if Hit <> '' then
     begin
       Exit(Hit);
     end;
   end;
+end;
+
+function WhichInPath(const ABaseName: string): string;
+begin
+  Result := WhichInPathList(ABaseName, GetEnvironmentVariable('PATH'),
+    GetCurrentDir());
 end;
 
 { ------------------------------------------------------------------ }
@@ -316,9 +341,105 @@ end;
 { Install-relative paths                                               }
 { ------------------------------------------------------------------ }
 
+function _tc_readlink(APath, ABuf: PChar; ASize: Int64): Int64; external name 'readlink';
+
+var
+  GExecutablePath: string = '';
+
+{ The target of the symlink APath, as stored (possibly relative); '' when
+  APath is not a symlink. }
+function ReadLinkTarget(const APath: string): string;
+var
+  Buf: array[0..4095] of Byte;
+  N:   Int64;
+begin
+  Result := '';
+  N := _tc_readlink(PChar(APath), PChar(@Buf[0]), 4095);
+  if N <= 0 then
+    Exit;
+  Buf[N] := 0;
+  Result := string(PChar(@Buf[0]));
+end;
+
+{ APath made absolute against ACwd, with '.' and '..' folded. }
+function AbsoluteFrom(const APath, ACwd: string): string;
+begin
+  if Copy(APath, 0, 1) = '/' then
+    Result := ExpandFileName(APath)
+  else
+    Result := ExpandFileName(IncludeTrailingPathDelimiter(ACwd) + APath);
+end;
+
+function ResolveExecutablePath(const AArgv0, APathList, ACwd: string): string;
+var
+  P, Target: string;
+  Hops:      Int;
+begin
+  Result := '';
+  if AArgv0 = '' then
+    Exit;
+  { A bare name is what the shell passes when it found the binary on $PATH,
+    so search the same list; a name with a '/' was given as a path. }
+  if Pos('/', AArgv0) < 0 then
+  begin
+    P := WhichInPathList(AArgv0, APathList, ACwd);
+    if P = '' then
+      Exit;
+  end
+  else
+    P := AbsoluteFrom(AArgv0, ACwd);
+  { Follow the link (and any chain of links) to the real binary, so that a
+    symlink in /usr/local/bin leads back to the install directory.  40 hops
+    is the kernel's own limit for a path walk. }
+  for Hops := 1 to 40 do
+  begin
+    Target := ReadLinkTarget(P);
+    if Target = '' then
+      Break;
+    P := AbsoluteFrom(Target, ExtractFilePath(P));
+  end;
+  Result := P;
+end;
+
+function ExecutablePath: string;
+begin
+  if GExecutablePath <> '' then
+    Exit(GExecutablePath);
+  {$IFDEF LINUX}
+  { The kernel's own record of the running binary: absolute, links resolved. }
+  GExecutablePath := ReadLinkTarget('/proc/self/exe');
+  {$ENDIF}
+  if GExecutablePath = '' then
+    GExecutablePath := ResolveExecutablePath(ParamStr(0),
+      GetEnvironmentVariable('PATH'), GetCurrentDir());
+  if GExecutablePath = '' then
+    GExecutablePath := ParamStr(0);
+  Result := GExecutablePath;
+end;
+
 function CompilerBinDir: string;
 begin
-  Result := ExtractFilePath(ParamStr(0));
+  Result := ExtractFilePath(ExecutablePath());
+end;
+
+function ChooseRTLCacheRoot(const ACli, ACfg, AEnv, ABinDir: string;
+  ABinDirWritable: Boolean; const AXdgCache, AHome: string): string;
+begin
+  if ACli <> '' then
+    Exit(ACli);
+  if ACfg <> '' then
+    Exit(ACfg);
+  if AEnv <> '' then
+    Exit(AEnv);
+  if ABinDirWritable then
+    Exit(IncludeTrailingPathDelimiter(ABinDir) + 'rtl');
+  { The XDG base-directory spec: a relative $XDG_CACHE_HOME is invalid and
+    must be ignored. }
+  if Copy(AXdgCache, 0, 1) = '/' then
+    Exit(IncludeTrailingPathDelimiter(AXdgCache) + 'blaise/rtl');
+  if AHome <> '' then
+    Exit(IncludeTrailingPathDelimiter(AHome) + '.cache/blaise/rtl');
+  Result := '';
 end;
 
 function RTLDirHasUnits(const ADir: string): Boolean;

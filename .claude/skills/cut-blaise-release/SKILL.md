@@ -331,10 +331,12 @@ blaise-v<X.Y.Z>-<os>-<cpu>/
   README.adoc  NOTICE  LICENSE
 ```
 
-`blaise.cfg` recognises `rtl-src=<dir>` and `unit-path=<dir>` (KEY=VALUE, `#`
-comments); relative values resolve against the file's directory, `~` expands
-to `$HOME`.  The compiler reads `<bindir>/blaise.cfg` first, then
-`~/.blaise.cfg`.
+`blaise.cfg` recognises `rtl-src=<dir>`, `unit-path=<dir>` and
+`rtl-cache=<dir>` (KEY=VALUE, `#` comments); relative values resolve against
+the file's directory, `~` expands to `$HOME`.  The compiler reads
+`<bindir>/blaise.cfg` first, then `~/.blaise.cfg`.  `<bindir>` is the real
+install directory even when `blaise` is started from `$PATH` or through a
+symlink.
 
 ```bash
 # make_tarball <binary-path> <os> <cpu>
@@ -362,8 +364,11 @@ PAS
 Blaise -- self-contained toolchain.  From this directory:
     ./blaise --source hello.pas --output hello && ./hello
 The bundled blaise.cfg supplies the RTL + stdlib source locations, so no extra
-flags are needed.  If you move `blaise`, keep blaise.cfg / rtl-src/ / stdlib-src/
-beside it, or pass --rtl-src DIR --unit-path DIR explicitly.  See README.adoc.
+flags are needed.  The directory can go on $PATH, or `blaise` can be
+symlinked into one (e.g. /usr/local/bin).  If you move `blaise` itself, keep
+blaise.cfg / rtl-src/ / stdlib-src/ beside it, or pass --rtl-src DIR
+--unit-path DIR explicitly.  The compiled RTL is cached in rtl/ here, or in
+~/.cache/blaise/rtl when this directory is read-only.  See README.adoc.
 TXT
   if [ "$OS" = macos ]; then
     cat >> "$D/USAGE.txt" <<'TXT'

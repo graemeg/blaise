@@ -403,7 +403,7 @@ end;
   silently bound to libSystem as __UpperCase). }
 function IsKnownLibSystemImport(const AName: string): Boolean;
 const
-  KNOWN: array[0..46] of string = (
+  KNOWN: array[0..47] of string = (
     'abort', 'chdir', 'chmod', 'clock_gettime', 'close', 'dup2',
     'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getenv',
     'getpid', 'gmtime_r', 'localtime_r', 'lseek', 'lstat', 'memcmp', 'memcpy',
@@ -411,7 +411,7 @@ const
     'nanosleep', 'open', 'pipe', 'pthread_create', 'pthread_join',
     'pthread_key_create', 'pthread_mutex_destroy', 'pthread_mutex_init',
     'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_setspecific',
-    'read', 'rename', 'rmdir', 'stat', 'strlen', 'sysconf', 'system',
+    'read', 'readlink', 'rename', 'rmdir', 'stat', 'strlen', 'sysconf', 'system',
     'time', 'unlink', 'waitpid');
 var
   I: Int;

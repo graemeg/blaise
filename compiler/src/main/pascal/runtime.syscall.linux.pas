@@ -56,6 +56,9 @@ function unlink(Path: PChar): Int32;
 function rename(OldPath, NewPath: PChar): Int32;
 function chdir(Path: PChar): Int32;
 function chmod(Path: PChar; Mode: Int32): Int32;
+{ readlink(path, buf, size): the symlink's target, unterminated; returns its
+  length, or -errno when Path is not a link. }
+function readlink(Path: PChar; Buf: PChar; Size: Int64): Int64;
 { getdirentries(fd, buf, nbytes, basep) — read directory entries from a fd
   opened on a directory.  Packs variable-length dirent records into Buf and
   returns the number of BYTES written (0 at end of directory, -errno on
@@ -177,6 +180,7 @@ const
   SYS_rename        = 82;
   SYS_mkdir         = 83;
   SYS_chmod         = 90;
+  SYS_readlink      = 89;
   SYS_rmdir         = 84;
   SYS_unlink        = 87;
   SYS_chdir         = 80;
@@ -291,6 +295,14 @@ function getdirentries(Fd: Int32; Buf: Pointer; Count: Int64;
   assembler; nostackframe;
 asm
     movq $217, %rax      { SYS_getdents64 }
+    syscall
+    ret
+end;
+
+function readlink(Path: PChar; Buf: PChar; Size: Int64): Int64;
+  assembler; nostackframe;
+asm
+    movq $89, %rax       { SYS_readlink }
     syscall
     ret
 end;

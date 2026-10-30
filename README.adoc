@@ -290,13 +290,21 @@ assembly and produces no binary.  Always build with
 `--output`, which lets the compiler own the whole pipeline.
 
 In particular, do **not** hand-assemble and link that output with `gcc`.  The compiler
-compiles the RTL from source on demand into a target-keyed object cache beside
-its own binary, so a manual link is both unnecessary and easy to get wrong (it
-was the cause of https://github.com/graemeg/blaise/issues/180[issue #180]).
+compiles the RTL from source on demand into a target-keyed object cache, so a
+manual link is both unnecessary and easy to get wrong (it was the cause of
+https://github.com/graemeg/blaise/issues/180[issue #180]).
 
 What the compiler *does* need is the RTL source to be reachable — via
 `--rtl-src DIR`, `$BLAISE_RTL_SRC`, or a `blaise.cfg` beside the binary (the
 release tarballs ship one, so an extracted release works with zero flags).
+The binary finds its own directory however it is started: by path, from
+`$PATH`, or through a symlink such as `/usr/local/bin/blaise`.
+
+The RTL object cache lives in an `rtl/` directory beside the binary.  When
+that directory is not writable (a root-owned install, say), the compiler uses
+`$XDG_CACHE_HOME/blaise/rtl`, or `~/.cache/blaise/rtl`, instead.
+`--rtl-cache DIR`, `rtl-cache=DIR` in `blaise.cfg` or `$BLAISE_RTL_CACHE`
+choose the location explicitly.
 ====
 
 == Examples

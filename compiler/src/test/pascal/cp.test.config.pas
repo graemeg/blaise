@@ -34,6 +34,9 @@ type
     procedure TestParseTildePath_ExpandsToHome;
     procedure TestParseRtlSrcTilde_ExpandsToHome;
     procedure TestFindConfigFile_NextToBinary;
+    { rtl-cache= names where the compiled RTL objects are kept (GH #251). }
+    procedure TestParseRtlCache_Relative_ResolvedAgainstBaseDir;
+    procedure TestParseRtlCache_Absent_LeavesSeedUnchanged;
   end;
 
 implementation
@@ -345,6 +348,47 @@ begin
     AssertTrue('no config found (acceptable in test env)', True)
   else
     AssertTrue('found config is a real file', FileExists(CfgPath));
+end;
+
+procedure TConfigTests.TestParseRtlCache_Relative_ResolvedAgainstBaseDir;
+var
+  Lines, Paths: TStringList;
+  Rtl, Cache: string;
+begin
+  Lines := TStringList.Create();
+  Paths := TStringList.Create();
+  try
+    Rtl := '';
+    Cache := '';
+    Lines.Add('rtl-src=/src');
+    Lines.Add('rtl-cache=cache/rtl');
+    ParseConfigLines(Lines, '/base/', Paths, Rtl, Cache);
+    AssertEquals('relative rtl-cache resolved against base dir',
+      '/base/cache/rtl', Cache);
+    AssertEquals('rtl-src still read beside it', '/src', Rtl);
+  finally
+    Lines.Free();
+    Paths.Free();
+  end;
+end;
+
+procedure TConfigTests.TestParseRtlCache_Absent_LeavesSeedUnchanged;
+var
+  Lines, Paths: TStringList;
+  Rtl, Cache: string;
+begin
+  Lines := TStringList.Create();
+  Paths := TStringList.Create();
+  try
+    Rtl := '';
+    Cache := '/seed';
+    Lines.Add('unit-path=/u');
+    ParseConfigLines(Lines, '/base/', Paths, Rtl, Cache);
+    AssertEquals('no rtl-cache line leaves the seed', '/seed', Cache);
+  finally
+    Lines.Free();
+    Paths.Free();
+  end;
 end;
 
 initialization

@@ -34,6 +34,12 @@ type
   TCLIContractTests = class(TTestCase)
   private
     FCompiler: string;
+    { Run a /bin/sh script; capture combined stdout+stderr. }
+    function RunShell(const AScript: string; out ACombined: string): Int;
+    { Lay out an install directory under a fresh scratch root: <root>inst/
+      holds the compiler and a blaise.cfg, <root>work/ a hello program and
+      <root>home/ is empty.  Returns <root>. }
+    function MakeInstall(const ATag: string): string;
     FRTLPath: string;
     FStdlibPath: string;
     FScratch: string;
@@ -149,6 +155,15 @@ type
       the parameter count was compared: a Byte implementation read the
       caller's Integer 300 as 300) }
     procedure TestUnitImplMismatch_RejectedWithBothLists;
+    { ---- an installed compiler finds itself (GH #251, discussion #245) ----
+      Each test lays out an install directory -- a copy of the compiler and a
+      blaise.cfg naming the RTL and stdlib sources -- and runs it from a
+      scratch working directory with an empty $HOME. }
+    procedure TestInstall_RunViaPath_FindsConfigAndCache;
+    procedure TestInstall_RunViaSymlink_UsesTheInstallDir;
+    procedure TestInstall_ReadOnlyInstall_CachesUnderHome;
+    procedure TestInstall_RtlCacheFlag_PlacesTheCache;
+    procedure TestInstall_RtlCacheEnv_PlacesTheCache;
   end;
 
 implementation
@@ -1303,6 +1318,162 @@ begin
   AssertEquals('compiles: ' + Out_, 0, EC);
   AssertEquals('runs', 0, RunBinary(Exe, Out_));
   AssertEquals('the --unit-path unit wins', 'cli', Trim(Out_));
+end;
+
+function TCLIContractTests.RunShell(const AScript: string;
+  out ACombined: string): Int;
+var
+  Proc: TProcess;
+  Chunk: string;
+begin
+  Proc := TProcess.Create(nil);
+  try
+    Proc.Executable := '/bin/sh';
+    Proc.Parameters.Add('-c');
+    Proc.Parameters.Add(AScript);
+    Proc.Execute();
+    ACombined := '';
+    repeat
+      Chunk := Proc.ReadOutput();
+      ACombined := ACombined + Chunk;
+    until (Chunk = '') and not Proc.Running;
+    Proc.WaitOnExit();
+    Result := Proc.ExitCode;
+  finally
+    Proc.Free();
+  end;
+end;
+
+function TCLIContractTests.MakeInstall(const ATag: string): string;
+var
+  Out_: string;
+begin
+  Result := FScratch + 'install_' + ATag + '/';
+  RunShell('chmod -R u+w ''' + Result + ''' 2>/dev/null; rm -rf ''' + Result +
+    '''', Out_);
+  ForceDirectories(Result + 'inst');
+  ForceDirectories(Result + 'work');
+  ForceDirectories(Result + 'home');
+  RunShell('cp ''' + FCompiler + ''' ''' + Result + 'inst/blaise''', Out_);
+  WriteFile(Result + 'inst/blaise.cfg',
+    'rtl-src=' + FRTLPath + LineEnding +
+    'unit-path=' + FStdlibPath + LineEnding);
+  WriteFile(Result + 'work/hello.pas',
+    'program hello; begin WriteLn(42) end.' + LineEnding);
+end;
+
+procedure TCLIContractTests.TestInstall_RunViaPath_FindsConfigAndCache;
+var
+  R, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  R := MakeInstall('path');
+  EC := RunShell('cd ''' + R + 'work'' && env -u BLAISE_RTL_SRC ' +
+    '-u BLAISE_RTL_CACHE -u XDG_CACHE_HOME HOME=''' + R + 'home'' ' +
+    'PATH=''' + R + 'inst'':/usr/bin:/bin blaise --source hello.pas ' +
+    '--output hello && ./hello', Out_);
+  AssertEquals('compiles and runs via PATH: ' + Out_, 0, EC);
+  AssertTrue('prints 42: ' + Out_, Pos('42', Out_) >= 0);
+  AssertTrue('RTL cached beside the installed binary',
+    DirectoryExists(R + 'inst/rtl'));
+end;
+
+procedure TCLIContractTests.TestInstall_RunViaSymlink_UsesTheInstallDir;
+var
+  R, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  R := MakeInstall('link');
+  ForceDirectories(R + 'bin');
+  RunShell('ln -s ''' + R + 'inst/blaise'' ''' + R + 'bin/blaise''', Out_);
+  EC := RunShell('cd ''' + R + 'work'' && env -u BLAISE_RTL_SRC ' +
+    '-u BLAISE_RTL_CACHE -u XDG_CACHE_HOME HOME=''' + R + 'home'' ' +
+    'PATH=''' + R + 'bin'':/usr/bin:/bin blaise --source hello.pas ' +
+    '--output hello && ./hello', Out_);
+  AssertEquals('compiles and runs via a symlink: ' + Out_, 0, EC);
+  AssertTrue('prints 42: ' + Out_, Pos('42', Out_) >= 0);
+  AssertTrue('RTL cached in the install directory',
+    DirectoryExists(R + 'inst/rtl'));
+  AssertFalse('nothing cached beside the link', DirectoryExists(R + 'bin/rtl'));
+end;
+
+procedure TCLIContractTests.TestInstall_ReadOnlyInstall_CachesUnderHome;
+var
+  R, Out_, Ignored: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  R := MakeInstall('ro');
+  RunShell('chmod a-w ''' + R + 'inst''', Ignored);
+  { root ignores the permission, so the case cannot arise there }
+  if RunShell('touch ''' + R + 'inst/probe'' 2>/dev/null', Ignored) = 0 then
+  begin
+    RunShell('chmod u+w ''' + R + 'inst''', Ignored);
+    Ignore('<install directory stays writable for this user>');
+    Exit;
+  end;
+  EC := RunShell('cd ''' + R + 'work'' && env -u BLAISE_RTL_SRC ' +
+    '-u BLAISE_RTL_CACHE -u XDG_CACHE_HOME HOME=''' + R + 'home'' ' +
+    'PATH=''' + R + 'inst'':/usr/bin:/bin blaise --source hello.pas ' +
+    '--output hello && ./hello', Out_);
+  RunShell('chmod u+w ''' + R + 'inst''', Ignored);
+  AssertEquals('compiles and runs from a read-only install: ' + Out_, 0, EC);
+  AssertTrue('prints 42: ' + Out_, Pos('42', Out_) >= 0);
+  AssertTrue('RTL cached under ~/.cache/blaise/rtl',
+    DirectoryExists(R + 'home/.cache/blaise/rtl'));
+end;
+
+procedure TCLIContractTests.TestInstall_RtlCacheFlag_PlacesTheCache;
+var
+  R, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  R := MakeInstall('flag');
+  EC := RunShell('cd ''' + R + 'work'' && env -u BLAISE_RTL_CACHE ' +
+    'HOME=''' + R + 'home'' ''' + R + 'inst/blaise'' --source hello.pas ' +
+    '--output hello --rtl-cache ''' + R + 'cache'' && ./hello', Out_);
+  AssertEquals('compiles and runs: ' + Out_, 0, EC);
+  AssertTrue('RTL cached where --rtl-cache says', DirectoryExists(R + 'cache'));
+  AssertFalse('nothing cached beside the binary', DirectoryExists(R + 'inst/rtl'));
+end;
+
+procedure TCLIContractTests.TestInstall_RtlCacheEnv_PlacesTheCache;
+var
+  R, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  R := MakeInstall('env');
+  EC := RunShell('cd ''' + R + 'work'' && BLAISE_RTL_CACHE=''' + R +
+    'cache'' HOME=''' + R + 'home'' ''' + R + 'inst/blaise'' --source ' +
+    'hello.pas --output hello && ./hello', Out_);
+  AssertEquals('compiles and runs: ' + Out_, 0, EC);
+  AssertTrue('RTL cached where $BLAISE_RTL_CACHE says',
+    DirectoryExists(R + 'cache'));
+  AssertFalse('nothing cached beside the binary', DirectoryExists(R + 'inst/rtl'));
 end;
 
 initialization
