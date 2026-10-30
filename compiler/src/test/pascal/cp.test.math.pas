@@ -276,7 +276,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Double', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -454,7 +454,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Double', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -499,7 +499,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Double', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -556,7 +556,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Double', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -579,7 +579,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Single', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Float32', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -632,7 +632,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Single', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Float32', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -779,7 +779,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Integer', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Int32', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();
@@ -817,7 +817,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Double', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();
@@ -1137,7 +1137,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('Y / X type', 'Double', Assign.Expr.ResolvedType.Name);
+    AssertEquals('Y / X type', 'Float64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -1178,8 +1178,8 @@ const
     end.
     ''';
 begin
-  AssertEquals('Double', '', AsmMissing(Src, #9'cvtsd2si %xmm0, %rax', #9'fcvtns x0, d0'));
-  AssertEquals('Single', '', AsmMissing(Src, #9'cvtss2si %xmm0, %rax', #9'fcvtns x0, d0'));
+  AssertEquals('Float64', '', AsmMissing(Src, #9'cvtsd2si %xmm0, %rax', #9'fcvtns x0, d0'));
+  AssertEquals('Float32', '', AsmMissing(Src, #9'cvtss2si %xmm0, %rax', #9'fcvtns x0, d0'));
   AssertTrue('x86-64: no half-away helper',
     Pos('_BlaiseRoundD', GenAsm(Src, TargetX86_64)) < 0);
   AssertTrue('arm64: no half-away helper',

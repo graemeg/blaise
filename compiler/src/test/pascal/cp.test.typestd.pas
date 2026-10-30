@@ -52,6 +52,8 @@ type
       of an unsigned ordinal) mixes with a UInt64 without a cast; Pos and
       High may be -1, and Ord of a signed value may be negative }
     procedure TestSem_MayBeNegativeInt_NeedsCastForUInt64;
+    { D11: the classic names are not builtins; using one names the fix. }
+    procedure TestSem_ClassicName_ErrorNamesTheFix;
     { Phase 4.5: the allocator takes an Int64 size, so GetMem of an Integer
       extends it (x86-64 passed its low 32 bits; arm64 its register as is) }
     procedure TestAsm_GetMemSize_Extended;
@@ -98,11 +100,11 @@ begin
     T := Prog.SymbolTable;
     Check('Int', 'Int64');
     Check('UInt', 'UInt64');
-    Check('Int32', 'Integer');
+    Check('Int32', 'Int32');
     Check('UInt8', 'Byte');
-    Check('Float', 'Double');
-    Check('Float32', 'Single');
-    Check('Float64', 'Double');
+    Check('Float', 'Float64');
+    Check('Float32', 'Float32');
+    Check('Float64', 'Float64');
   finally
     Prog.Free();
   end;
@@ -302,6 +304,30 @@ begin
   end;
 end;
 
+procedure TTypeStdTests.TestSem_ClassicName_ErrorNamesTheFix;
+const
+  Cases: array[0..3] of string = ('Integer', 'Double', 'Cardinal', 'Extended');
+  Fix: array[0..3] of string = ('use Int32 (or Int for counts and indices)',
+    'use Float64', 'use UInt32', 'use Float64');
+var
+  I:   Int;
+  Msg: string;
+begin
+  for I := 0 to High(Cases) do
+  begin
+    Msg := SemanticError('program P; var X: ' + Cases[I] + '; begin end.');
+    AssertTrue(Cases[I] + ' names its replacement: ' + Msg,
+      Pos('''' + Cases[I] + ''' is not a builtin type: ' + Fix[I], Msg) >= 0);
+    AssertTrue(Cases[I] + ' names ClassicPascalTypes: ' + Msg,
+      Pos('uses ClassicPascalTypes', Msg) >= 0);
+  end;
+  { a parameter and a generic argument say the same }
+  Msg := SemanticError('program P; procedure F(A: Integer); begin end; begin end.');
+  AssertTrue('parameter: ' + Msg, Pos('is not a builtin type', Msg) >= 0);
+  Msg := SemanticError('program P; type TB<T> = class V: T; end; var B: TB<Word>; begin end.');
+  AssertTrue('generic argument: ' + Msg, Pos('use UInt16', Msg) >= 0);
+end;
+
 procedure TTypeStdTests.TestSem_MayBeNegativeInt_NeedsCastForUInt64;
 
   function Probe(const AStmt: string): string;
@@ -314,7 +340,7 @@ procedure TTypeStdTests.TestSem_MayBeNegativeInt_NeedsCastForUInt64;
 begin
   AssertTrue('Pos', Pos('Cannot mix', Probe('H := H xor Pos(''a'', S)')) >= 0);
   AssertTrue('High', Probe('H := High(S)') <> '');
-  AssertTrue('Ord of an Integer', Probe('H := H + Ord(I)') <> '');
+  AssertTrue('Ord of an Int32', Probe('H := H + Ord(I)') <> '');
   AssertTrue('Ord of an enum with a negative ordinal',
     Probe('H := Ord(EN)') <> '');
   AssertTrue('Length - 1 may be negative', Probe('H := Length(S) - 1') <> '');
@@ -429,9 +455,9 @@ procedure TTypeStdTests.TestSem_WarnNarrowing_EveryStore;
 
 begin
   AssertTrue('message names both types', Pos(
-    'implicit narrowing from Int64 to Integer', NarrowWarnings('I := L')) >= 0);
-  Warns('Integer to Byte', 'B := I');
-  Warns('Length to Word', 'W := Length(S)');
+    'implicit narrowing from Int64 to Int32', NarrowWarnings('I := L')) >= 0);
+  Warns('Int32 to Byte', 'B := I');
+  Warns('Length to UInt16', 'W := Length(S)');
   Warns('field', 'K := TK.Create(0); K.F := L');
   Warns('static array element', 'SA[1] := L');
   Warns('dynamic array element', 'SetLength(DA, 2); DA[0] := L');

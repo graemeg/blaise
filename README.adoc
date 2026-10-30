@@ -22,7 +22,7 @@ This compiler takes a different approach:
 * *Type names that say what they mean.* `Int` / `UInt` are the machine's
   pointer-sized integers; `Int8` .. `Int64`, `UInt8` .. `UInt64`, `Float32` and
   `Float64` state their width, and `Float` is always `Float64`.  FPC's
-  `Integer` was frozen at 32 bits two decades ago; the classic names are being
+  `Integer` was frozen at 32 bits two decades ago; the classic names are
   retired to an opt-in `ClassicPascalTypes` unit (see
   link:docs/type-standardisation-design.adoc[the design]).
 * *One memory model.* Automatic reference counting applies uniformly to
@@ -138,7 +138,7 @@ full source-level debugging of incrementally-compiled multi-unit programs.
 
 | Classic integer and float names (`Integer`, `Cardinal`, `LongInt`,
   `SmallInt`, `Word`, `Double`, ...)
-| Being retired in favour of names that state their width (`Int32`, `UInt32`,
+| Retired in favour of names that state their width (`Int32`, `UInt32`,
   `Int16`, `UInt16`, `Float64`, ...) and the pointer-sized `Int` / `UInt`.
   They remain available through the opt-in `ClassicPascalTypes` unit;
   BlaiseGuard rule BL-2006 suggests each replacement.  `Byte` stays.

@@ -368,7 +368,7 @@ begin
   SA.Analyse(Prog);
   SA.Free();
   Ass := TAssignment(Prog.Block.Stmts[0]);
-  AssertEquals('ParamCount returns Integer',
+  AssertEquals('ParamCount returns Int32',
     Ord(tyInteger), Ord(Ass.Expr.ResolvedType.Kind));
   Prog.Free();
 end;

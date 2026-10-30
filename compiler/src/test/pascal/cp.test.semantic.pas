@@ -197,7 +197,7 @@ var
 begin
   Prog := Analyse('program P; var n: Int32; begin end.');
   try
-    AssertEquals('Integer kind',
+    AssertEquals('Int32 kind',
       Ord(tyInteger),
       Ord(TVarDecl(Prog.Block.Decls.Items[0]).ResolvedType.Kind));
   finally
@@ -228,7 +228,7 @@ begin
   try
     Decl := TVarDecl(Prog.Block.Decls.Items[0]);
     AssertNotNull('ResolvedType', Decl.ResolvedType);
-    AssertEquals('Integer', Ord(tyInteger), Ord(Decl.ResolvedType.Kind));
+    AssertEquals('Int32', Ord(tyInteger), Ord(Decl.ResolvedType.Kind));
   finally
     Prog.Free();
   end;
@@ -270,9 +270,9 @@ end;
 procedure TSemanticTests.TestVarDecl_ShadowsBuiltinType_RaisesError;
 begin
   { Unlike FPC, Blaise rejects a var that shadows a built-in type name —
-    `var Integer` is almost always a mistake and shadowing it silently
+    `var Int32` is almost always a mistake and shadowing it silently
     redefines the type for the rest of the scope. }
-  AnalyseExpectError('program P; var Integer: Int64; begin end.');
+  AnalyseExpectError('program P; var Int32: Int64; begin end.');
 end;
 
 procedure TSemanticTests.TestVarDecl_ShadowsOuterScopeType_RaisesError;
@@ -375,7 +375,7 @@ begin
   try
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNull('Expr type', Assign.Expr.ResolvedType);
-    AssertEquals('Integer',
+    AssertEquals('Int32',
       Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     Prog.Free();
@@ -408,7 +408,7 @@ begin
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertNotNull('Left type', Bin.Left.ResolvedType);
-    AssertEquals('x is Integer',
+    AssertEquals('x is Int32',
       Ord(tyInteger), Ord(Bin.Left.ResolvedType.Kind));
   finally
     Prog.Free();
@@ -817,7 +817,7 @@ const
     ''';
 begin
   AssertEquals('@S[N] is a ^Byte', '', SemanticError(SrcByte));
-  AssertTrue('not a ^Integer', SemanticError(SrcInt) <> '');
+  AssertTrue('not a ^Int32', SemanticError(SrcInt) <> '');
   AssertTrue('a byte of a temporary string is rejected',
     Pos('would dangle', SemanticError(SrcTemp)) >= 0);
 end;
@@ -923,15 +923,15 @@ const
     'D: Float64; S: Float32; E: TC; Ok: Boolean; begin ';
 begin
   AssertTrue('a float variable',
-    Pos('Illegal type conversion from ''Double'' to ''Integer''',
+    Pos('Illegal type conversion from ''Float64'' to ''Int32''',
       SemanticError(Pre + 'I := Int32(D) end.')) >= 0);
   AssertTrue('a float expression',
     Pos('use Trunc or Round',
       SemanticError(Pre + 'I := Int32(I / 2) end.')) >= 0);
   AssertTrue('a float literal',
     Pos('Illegal type conversion', SemanticError(Pre + 'B := Byte(2.5) end.')) >= 0);
-  AssertTrue('a Single into Int64',
-    Pos('from ''Single'' to ''Int64''',
+  AssertTrue('a Float32 into Int64',
+    Pos('from ''Float32'' to ''Int64''',
       SemanticError(Pre + 'WriteLn(Int64(S)) end.')) >= 0);
   AssertTrue('an enum target',
     Pos('Illegal type conversion', SemanticError(Pre + 'E := TC(D) end.')) >= 0);
@@ -945,7 +945,7 @@ end;
 procedure TSemanticTests.TestSemantic_OrdOfFloat_Rejected;
 begin
   AssertTrue('a float variable',
-    Pos('Ord expects an ordinal value, not ''Double''', SemanticError(
+    Pos('Ord expects an ordinal value, not ''Float64''', SemanticError(
       'program P; var D: Float64; begin WriteLn(Ord(D)) end.')) >= 0);
   AssertTrue('a float expression',
     Pos('Ord expects an ordinal value', SemanticError(

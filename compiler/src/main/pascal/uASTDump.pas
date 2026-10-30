@@ -44,16 +44,16 @@ begin
     Exit('<nil>');
   Result := T.Name;
   case T.Kind of
-    tyInteger:    Result := Result + ':Integer';
+    tyInteger:    Result := Result + ':Int32';
     tyInt64:      Result := Result + ':Int64';
     tyUInt32:     Result := Result + ':UInt32';
     tyUInt64:     Result := Result + ':UInt64';
-    tySmallInt:   Result := Result + ':SmallInt';
+    tySmallInt:   Result := Result + ':Int16';
     tyInt8:       Result := Result + ':Int8';
-    tyWord:       Result := Result + ':Word';
+    tyWord:       Result := Result + ':UInt16';
     tyByte:       Result := Result + ':Byte';
     tyBoolean:    Result := Result + ':Boolean';
-    tyDouble:     Result := Result + ':Double';
+    tyDouble:     Result := Result + ':Float64';
     tyString:     Result := Result + ':String';
     tyPointer:    Result := Result + ':Pointer';
     tyNil:        Result := Result + ':nil';

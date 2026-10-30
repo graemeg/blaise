@@ -62,7 +62,7 @@ type
     procedure TestCodegen_GenericClass_ByValStringParam_HasARC;
     { a generic function instance called a second time is the same instance
       (the second call instantiated it again and reported "Ambiguous
-      overload of 'Twice<Integer>'") }
+      overload of 'Twice<Int32>'") }
     procedure TestSemantic_GenericFunc_SecondCallReusesInstance;
     { The type parameter is bound inside the function BODY, not only in the
       signature and local var declarations: TBox<T>.Create() instantiated
@@ -570,8 +570,8 @@ begin
     Names := '';
     for I := 0 to Prog.GenericInstances.Count - 1 do
       Names := Names + TGenericInstance(Prog.GenericInstances.Items[I]).TypeName + ' ';
-    AssertTrue('TPtrBox<Integer> is instantiated: ' + Names,
-      Pos('TPtrBox<Integer>', Names) >= 0);
+    AssertTrue('TPtrBox<Int32> is instantiated: ' + Names,
+      Pos('TPtrBox<Int32>', Names) >= 0);
     AssertTrue('no instance over the bare type parameter: ' + Names,
       Pos('TPtrBox<T>', Names) < 0);
   finally

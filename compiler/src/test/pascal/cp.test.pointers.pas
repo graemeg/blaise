@@ -324,7 +324,7 @@ begin
     Decl    := TVarDecl(Prog.Block.Decls[0]);
     PtrDesc := TPointerTypeDesc(Decl.ResolvedType);
     AssertNotNull('Typed pointer should have BaseType', PtrDesc.BaseType);
-    AssertEquals('BaseType should be Integer', 'Integer', PtrDesc.BaseType.Name);
+    AssertEquals('BaseType should be Int32', 'Int32', PtrDesc.BaseType.Name);
   finally
     Prog.Free();
   end;
@@ -336,18 +336,18 @@ const
     '''
     program P;
     var
-      A: PInteger; B: PCardinal; C: PByte; D: PWord; E: PSmallInt;
-      F: PInt64; G: PUInt64; H: PQWord; I: PBoolean; J: PDouble;
-      K: PSingle; L: PPointer; M: PInt8; N: PInt16; O: PInt32;
-      Q: PUInt8; R: PUInt16; S: PUInt32; T: PPChar; U: PPtrUInt;
+      A: PInt32; B: PUInt32; C: PByte; D: PUInt16; E: PInt16;
+      F: PInt64; G: PUInt64; H: PUInt64; I: PBoolean; J: PFloat64;
+      K: PFloat32; L: PPointer; M: PInt8; N: PInt16; O: PInt32;
+      Q: PUInt8; R: PUInt16; S: PUInt32; T: PPChar; U: PUInt;
       V: PInt; W: PUInt; X: PFloat; Y: PFloat32; Z: PFloat64;
     begin
     end.
     ''';
-  Bases: array[0..24] of string = ('Integer', 'UInt32', 'Byte', 'Word',
-    'SmallInt', 'Int64', 'UInt64', 'UInt64', 'Boolean', 'Double', 'Single',
-    'Pointer', 'Int8', 'SmallInt', 'Integer', 'Byte', 'Word', 'UInt32',
-    'PChar', 'UInt64', 'Int64', 'UInt64', 'Double', 'Single', 'Double');
+  Bases: array[0..24] of string = ('Int32', 'UInt32', 'Byte', 'UInt16',
+    'Int16', 'Int64', 'UInt64', 'UInt64', 'Boolean', 'Float64', 'Float32',
+    'Pointer', 'Int8', 'Int16', 'Int32', 'Byte', 'UInt16', 'UInt32',
+    'PChar', 'UInt64', 'Int64', 'UInt64', 'Float64', 'Float32', 'Float64');
 var
   Prog: TProgram;
   Decl: TVarDecl;
@@ -374,9 +374,9 @@ const
     '''
     program P;
     var
-      A: PInteger;
+      A: PInt32;
       B: ^Int32;
-      C: PCardinal;
+      C: PUInt32;
       D: PUInt32;
     begin
       A := B;
@@ -389,10 +389,10 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertTrue('PInteger and ^Int are one type',
+    AssertTrue('PInt32 and ^Int are one type',
       TVarDecl(Prog.Block.Decls[0]).ResolvedType =
       TVarDecl(Prog.Block.Decls[1]).ResolvedType);
-    AssertTrue('PCardinal and PUInt32 are one type',
+    AssertTrue('PUInt32 and PUInt32 are one type',
       TVarDecl(Prog.Block.Decls[2]).ResolvedType =
       TVarDecl(Prog.Block.Decls[3]).ResolvedType);
   finally
@@ -419,7 +419,7 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertEquals('own PByte wins', 'Integer',
+    AssertEquals('own PByte wins', 'Int32',
       TPointerTypeDesc(TVarDecl(Prog.Block.Decls[1]).ResolvedType).BaseType.Name);
   finally
     Prog.Free();
@@ -476,7 +476,7 @@ begin
   try
     PtrWrite := TPointerWriteStmt(Prog.Block.Stmts[0]);
     AssertNotNull('PointerWrite BaseTy should be set', PtrWrite.BaseTy);
-    AssertEquals('BaseTy should be Integer', 'Integer', PtrWrite.BaseTy.Name);
+    AssertEquals('BaseTy should be Int32', 'Int32', PtrWrite.BaseTy.Name);
   finally
     Prog.Free();
   end;
@@ -872,7 +872,7 @@ procedure TPointerTests.TestSemantic_Move_DynArray_Rejected;
 begin
   MoveRejectsManaged(Self,
     'type TInts = array of Int32;' + #10 + 'var A, B: TInts;',
-    'A, B, 8', 'array of Integer');
+    'A, B, 8', 'array of Int32');
 end;
 
 procedure TPointerTests.TestSemantic_Move_RecordWithString_Rejected;
@@ -916,7 +916,7 @@ const
 var
   Msg: string;
 begin
-  AssertEquals('Integer instance is fine', '', SemanticError(Generic + '''
+  AssertEquals('Int32 instance is fine', '', SemanticError(Generic + '''
     var I: TBox<Int32>;
     begin
       I := TBox<Int32>.Create();

@@ -486,7 +486,7 @@ begin
     Assign := TAssignment(Prog.Block.Stmts[0]);
     AssertTrue('rhs is TMethodCallExpr', Assign.Expr is TMethodCallExpr);
     MC := TMethodCallExpr(Assign.Expr);
-    AssertEquals('object name is TBox<Integer>', 'TBox<Int32>', MC.ObjectName);
+    AssertEquals('object name is TBox<Int32>', 'TBox<Int32>', MC.ObjectName);
     AssertEquals('method is Create', 'Create', MC.Name);
   finally
     Prog.Free();
@@ -529,8 +529,8 @@ var
 begin
   Prog := AnalyseSrc(SrcGenericVarInteger);
   try
-    AssertNotNull('TBox<Integer> instantiated',
-      Prog.SymbolTable.FindType('TBox<Integer>'));
+    AssertNotNull('TBox<Int32> instantiated',
+      Prog.SymbolTable.FindType('TBox<Int32>'));
   finally
     Prog.Free();
   end;
@@ -544,7 +544,7 @@ var
 begin
   Prog := AnalyseSrc(SrcGenericVarInteger);
   try
-    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TBox<Integer>'));
+    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TBox<Int32>'));
     FI := RT.FindField('FValue');
     AssertNotNull('FValue field exists', FI);
     AssertEquals('FValue type is tyInteger', Ord(tyInteger), Ord(FI.TypeDesc.Kind));
@@ -580,8 +580,8 @@ var
 begin
   Prog := AnalyseSrc(SrcGenericTwoParamVar);
   try
-    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TPair<string,Integer>'));
-    AssertNotNull('TPair<string,Integer> instantiated', RT);
+    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TPair<string,Int32>'));
+    AssertNotNull('TPair<string,Int32> instantiated', RT);
     FKey := RT.FindField('FKey');
     FVal := RT.FindField('FVal');
     AssertNotNull('FKey field', FKey);
@@ -624,8 +624,8 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertNotNull('tbox<Integer> resolves to the TBox template',
-      Prog.SymbolTable.FindType('TBox<Integer>'));
+    AssertNotNull('tbox<Int32> resolves to the TBox template',
+      Prog.SymbolTable.FindType('TBox<Int32>'));
   finally
     Prog.Free();
   end;
@@ -649,8 +649,8 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertNotNull('TBOX<Integer> resolves to the TBox template',
-      Prog.SymbolTable.FindType('TBox<Integer>'));
+    AssertNotNull('TBOX<Int32> resolves to the TBox template',
+      Prog.SymbolTable.FindType('TBox<Int32>'));
   finally
     Prog.Free();
   end;
@@ -678,7 +678,7 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertNotNull('alias to tbox<Integer> resolves',
+    AssertNotNull('alias to tbox<Int32> resolves',
       Prog.SymbolTable.FindType('TIntBox'));
   finally
     Prog.Free();
@@ -719,12 +719,12 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    TA := Prog.SymbolTable.FindType('TBox<Integer>');
-    AssertNotNull('TBox<Integer> instantiated', TA);
-    TB := Prog.SymbolTable.FindType('tbox<Integer>');
-    TC := Prog.SymbolTable.FindType('TBOX<Integer>');
-    AssertSame('tbox<Integer> is the same instance', TA, TB);
-    AssertSame('TBOX<Integer> is the same instance', TA, TC);
+    TA := Prog.SymbolTable.FindType('TBox<Int32>');
+    AssertNotNull('TBox<Int32> instantiated', TA);
+    TB := Prog.SymbolTable.FindType('tbox<Int32>');
+    TC := Prog.SymbolTable.FindType('TBOX<Int32>');
+    AssertSame('tbox<Int32> is the same instance', TA, TB);
+    AssertSame('TBOX<Int32> is the same instance', TA, TC);
   finally
     Prog.Free();
   end;
@@ -743,7 +743,7 @@ begin
     AssertEquals('interface var count', 1, U.IntfBlock.Decls.Count);
     AssertTrue('resolved type not nil',
       TVarDecl(U.IntfBlock.Decls.Items[0]).ResolvedType <> nil);
-    AssertEquals('resolved type name', 'TBox<Integer>',
+    AssertEquals('resolved type name', 'TBox<Int32>',
       TVarDecl(U.IntfBlock.Decls.Items[0]).ResolvedType.Name);
   finally
     U.Free();
@@ -784,11 +784,11 @@ begin
   X86 := GenAsmWithUnit(SrcUnitIntfGenericVar, Prog, TargetX86_64);
   AssertTrue('x86-64: global U_G defined', Pos(#10 + 'U_G:', X86) >= 0);
   AssertTrue('x86-64: weak instance typeinfo',
-    Pos('.weak typeinfo_TBox_Integer', X86) >= 0);
+    Pos('.weak typeinfo_TBox_Int32', X86) >= 0);
   A64 := GenAsmWithUnit(SrcUnitIntfGenericVar, Prog, TargetArm64);
   AssertTrue('arm64: global g_U_G defined', Pos(#10 + '_g_U_G:', A64) >= 0);
   AssertTrue('arm64: weak instance typeinfo',
-    Pos('.weak_definition _typeinfo_TBox_Integer', A64) >= 0);
+    Pos('.weak_definition _typeinfo_TBox_Int32', A64) >= 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -873,9 +873,9 @@ end;
 
 procedure TGenericsTests.TestCodegen_UnitGeneric_InstanceSymbolsBareAndWeak;
 const
-  Syms: array[0..3] of string = ('TPair_Integer_Integer_Create',
-    '_FieldCleanup_TPair_Integer_Integer', 'typeinfo_TPair_Integer_Integer',
-    'vtable_TPair_Integer_Integer');
+  Syms: array[0..3] of string = ('TPair_Int32_Int32_Create',
+    '_FieldCleanup_TPair_Int32_Int32', 'typeinfo_TPair_Int32_Int32',
+    'vtable_TPair_Int32_Int32');
 var
   X86, A64: string;
   I: Int;
@@ -903,9 +903,9 @@ begin
       Pos('.weak_definition _' + Syms[I], A64) >= 0);
   end;
   AssertTrue('x86-64: no unit-prefixed instance constructor',
-    Pos('UPair_TPair_Integer_Integer_Create', X86) < 0);
+    Pos('UPair_TPair_Int32_Int32_Create', X86) < 0);
   AssertTrue('arm64: no unit-prefixed instance constructor',
-    Pos('UPair_TPair_Integer_Integer_Create', A64) < 0);
+    Pos('UPair_TPair_Int32_Int32_Create', A64) < 0);
   AssertTrue('x86-64: no raw angle-bracket symbol', not AngleBracketSymbol(X86));
   AssertTrue('arm64: no raw angle-bracket symbol', not AngleBracketSymbol(A64));
 end;
@@ -939,7 +939,7 @@ const
     var B: TBox;
     begin
       B := TBox.Create();
-      WriteLn(Twice<Int32>(1), Twice<Integer>(2), Twice<Int>(3), Twice<Int64>(4));
+      WriteLn(Twice<Int32>(1), Twice<Int32>(2), Twice<Int>(3), Twice<Int64>(4));
       WriteLn(B.Wrap<Int>(5), B.Wrap<Int64>(6))
     end.
     ''';
@@ -952,7 +952,7 @@ begin
     if T = 0 then Code := GenAsm(Src, TargetX86_64)
     else Code := GenAsm(Src, TargetArm64);
     AssertEquals('one 32-bit Twice instance', 1,
-      CountAsmOccurrences(Code, 'Twice_Integer:') + CountAsmOccurrences(Code, 'Twice_Int32:'));
+      CountAsmOccurrences(Code, 'Twice_Int32:'));
     AssertEquals('one 64-bit Twice instance', 1,
       CountAsmOccurrences(Code, 'Twice_Int64:') + CountAsmOccurrences(Code, 'Twice_Int:'));
     AssertEquals('one Wrap instance', 1,
@@ -989,10 +989,10 @@ begin
     define the instance label once. }
   X86 := GenAsmWithUnit(UnitSrc, ProgSrc, TargetX86_64);
   A64 := GenAsmWithUnit(UnitSrc, ProgSrc, TargetArm64);
-  AssertEquals('x86-64: Twice<Integer> defined once', 1,
-    CountAsmOccurrences(X86, #10 + 'Twice_Integer:'));
-  AssertEquals('arm64: Twice<Integer> defined once', 1,
-    CountAsmOccurrences(A64, #10 + '_Twice_Integer:'));
+  AssertEquals('x86-64: Twice<Int32> defined once', 1,
+    CountAsmOccurrences(X86, #10 + 'Twice_Int32:'));
+  AssertEquals('arm64: Twice<Int32> defined once', 1,
+    CountAsmOccurrences(A64, #10 + '_Twice_Int32:'));
 end;
 
 procedure TGenericsTests.TestSem_RecordAndFuncInstances_RecordDeclaringUnit;
@@ -1150,7 +1150,7 @@ const
             end;
           end;
         var
-          A: TBox<Integer>;
+          A: TBox<Int32>;
           B: TBox<String>;
         begin end.
         ''';
@@ -1178,8 +1178,8 @@ var
 begin
   Prog := AnalyseSrc(SrcTwoInstancesSameGeneric);
   try
-    AssertNotNull('TBox<Integer> instantiated',
-      Prog.SymbolTable.FindType('TBox<Integer>'));
+    AssertNotNull('TBox<Int32> instantiated',
+      Prog.SymbolTable.FindType('TBox<Int32>'));
     AssertNotNull('TBox<string> instantiated',
       Prog.SymbolTable.FindType('TBox<string>'));
   finally
@@ -1196,18 +1196,18 @@ var
 begin
   Prog := AnalyseSrc(SrcTwoInstancesPointerField);
   try
-    CI := TRecordTypeDesc(Prog.SymbolTable.FindType('TCell<Integer>'));
+    CI := TRecordTypeDesc(Prog.SymbolTable.FindType('TCell<Int32>'));
     CS := TRecordTypeDesc(Prog.SymbolTable.FindType('TCell<string>'));
-    AssertNotNull('TCell<Integer> instantiated', CI);
+    AssertNotNull('TCell<Int32> instantiated', CI);
     AssertNotNull('TCell<string>  instantiated', CS);
     FI := CI.FindField('FData');
     FS := CS.FindField('FData');
-    AssertNotNull('FData on TCell<Integer>', FI);
+    AssertNotNull('FData on TCell<Int32>', FI);
     AssertNotNull('FData on TCell<string>',  FS);
     { The two FData fields must resolve to distinct pointer types — '^T'
       must NOT be shared across instances. }
     AssertEquals('FData<Int> base type',
-      '^Integer', FI.TypeDesc.Name);
+      '^Int32', FI.TypeDesc.Name);
     AssertEquals('FData<string>  base type',
       '^string',  FS.TypeDesc.Name);
   finally
@@ -1227,7 +1227,7 @@ const
     sees two divergent instantiations.  Previously one path kept the alias
     spelling (TInner<TIntAlias>) while the other resolved it (TInner<Integer>),
     so the internal assignment 'Result := TInner<T>.Create()' failed with
-    "Type mismatch ... expected 'TInner<TIntAlias>' but got 'TInner<Integer>'".
+    "Type mismatch ... expected 'TInner<TIntAlias>' but got 'TInner<Int32>'".
     The two instantiation paths must now agree. }
   SrcGenericInstantiatedWithAlias =
     '''
@@ -1263,8 +1263,8 @@ begin
   try
     { The alias and underlying-type forms must collapse onto one canonical
       instantiation keyed by the underlying type name (Integer). }
-    Inner := TRecordTypeDesc(Prog.SymbolTable.FindType('TInner<Integer>'));
-    AssertNotNull('TInner<Integer> is the canonical instantiation', Inner);
+    Inner := TRecordTypeDesc(Prog.SymbolTable.FindType('TInner<Int32>'));
+    AssertNotNull('TInner<Int32> is the canonical instantiation', Inner);
     AssertNull('no separate TInner<TIntAlias> instantiation exists',
       Prog.SymbolTable.FindType('TInner<TIntAlias>'));
   finally
@@ -1362,7 +1362,7 @@ begin
     AssertTrue('stmt 0 is assignment', Prog.Block.Stmts[0] is TAssignment);
     Assign := TAssignment(Prog.Block.Stmts[0]);
     MC := TMethodCallExpr(Assign.Expr);
-    AssertEquals('diamond resolved to TBox<Integer>', 'TBox<Integer>', MC.ObjectName);
+    AssertEquals('diamond resolved to TBox<Int32>', 'TBox<Int32>', MC.ObjectName);
     AssertTrue('marked constructor', MC.IsConstructorCall);
   finally
     Prog.Free();
@@ -1380,8 +1380,8 @@ begin
     AssertTrue('stmt 0 is assignment', Prog.Block.Stmts[0] is TAssignment);
     Assign := TAssignment(Prog.Block.Stmts[0]);
     MC := TMethodCallExpr(Assign.Expr);
-    AssertEquals('diamond resolved to TPair<string,Integer> (no space after comma)',
-      'TPair<string,Integer>', MC.ObjectName);
+    AssertEquals('diamond resolved to TPair<string,Int32> (no space after comma)',
+      'TPair<string,Int32>', MC.ObjectName);
     AssertTrue('marked constructor', MC.IsConstructorCall);
   finally
     Prog.Free();
@@ -1479,8 +1479,8 @@ begin
   AsmX := GenAsm(Src, TargetX86_64);
   AsmA := GenAsm(Src, TargetArm64);
   AssertEquals('the instance symbols use the mangled argument', '',
-    AsmMissing(Src, 'TBox_array_m1_3_of_Integer_Put:',
-      'TBox_array_m1_3_of_Integer_Put:'));
+    AsmMissing(Src, 'TBox_array_m1_3_of_Int32_Put:',
+      'TBox_array_m1_3_of_Int32_Put:'));
   AssertTrue('no bracket in an x86-64 symbol',
     Pos('TBox_array[', AsmX) < 0);
   AssertTrue('no bracket in an arm64 symbol',
@@ -1508,11 +1508,11 @@ const
     ''';
 begin
   AssertEquals('two-argument overload', '',
-    AsmMissing(Src, 'TBox_Integer_Put_D_ii:', 'TBox_Integer_Put_D_ii:'));
+    AsmMissing(Src, 'TBox_Int32_Put_D_ii:', 'TBox_Int32_Put_D_ii:'));
   AssertEquals('one-argument overload', '',
-    AsmMissing(Src, 'TBox_Integer_Put_D_i:', 'TBox_Integer_Put_D_i:'));
+    AsmMissing(Src, 'TBox_Int32_Put_D_i:', 'TBox_Int32_Put_D_i:'));
   AssertEquals('the overload identical after substitution', '',
-    AsmMissing(Src, 'TBox_Integer_Put_D_i_D_2:', 'TBox_Integer_Put_D_i_D_2:'));
+    AsmMissing(Src, 'TBox_Int32_Put_D_i_D_2:', 'TBox_Int32_Put_D_i_D_2:'));
 end;
 
 procedure TGenericsTests.TestSem_InstanceOverrideOfOverload_NeedsOverload;

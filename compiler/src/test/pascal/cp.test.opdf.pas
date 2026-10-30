@@ -206,8 +206,8 @@ var
   IR: string;
 begin
   IR := GenOPDF('program P; var X: Int32; begin end.');
-  AssertTrue('recPrimitive Integer comment', Contains(IR, '# recPrimitive: Integer'));
-  AssertTrue('Integer name emitted', Contains(IR, '.ascii "Integer"'));
+  AssertTrue('recPrimitive Int32 comment', Contains(IR, '# recPrimitive: Int32'));
+  AssertTrue('Int32 name emitted', Contains(IR, '.ascii "Int32"'));
 end;
 
 procedure TOPDFTests.TestOPDF_Primitive_Boolean;
@@ -251,14 +251,14 @@ var
   P:  Int;
 begin
   IR := GenOPDF('program P; var D: Float64; begin D := 1.5 end.');
-  AssertTrue('recPrimitive Double comment', Contains(IR, '# recPrimitive: Double'));
-  AssertTrue('Double name emitted', Contains(IR, '.ascii "Double"'));
-  P := Pos('# recPrimitive: Double', IR);
-  AssertTrue('Double recPrimitive present', P >= 0);
+  AssertTrue('recPrimitive Float64 comment', Contains(IR, '# recPrimitive: Float64'));
+  AssertTrue('Float64 name emitted', Contains(IR, '.ascii "Float64"'));
+  P := Pos('# recPrimitive: Float64', IR);
+  AssertTrue('Float64 recPrimitive present', P >= 0);
   { SubKind must be SK_FLOAT (4) and size 8, in the Double record's payload. }
-  AssertTrue('Double SubKind = 4 (skFloat)',
+  AssertTrue('Float64 SubKind = 4 (skFloat)',
     Pos('.byte 4  # SubKind', Copy(IR, P, 220)) >= 0);
-  AssertTrue('Double SizeInBytes = 8',
+  AssertTrue('Float64 SizeInBytes = 8',
     Pos('.byte 8  # SizeInBytes', Copy(IR, P, 220)) >= 0);
 end;
 
@@ -269,12 +269,12 @@ var
   P:  Int;
 begin
   IR := GenOPDF('program P; var S: Float32; begin S := 1.5 end.');
-  AssertTrue('recPrimitive Single comment', Contains(IR, '# recPrimitive: Single'));
-  P := Pos('# recPrimitive: Single', IR);
-  AssertTrue('Single recPrimitive present', P >= 0);
-  AssertTrue('Single SubKind = 4 (skFloat)',
+  AssertTrue('recPrimitive Float32 comment', Contains(IR, '# recPrimitive: Float32'));
+  P := Pos('# recPrimitive: Float32', IR);
+  AssertTrue('Float32 recPrimitive present', P >= 0);
+  AssertTrue('Float32 SubKind = 4 (skFloat)',
     Pos('.byte 4  # SubKind', Copy(IR, P, 220)) >= 0);
-  AssertTrue('Single SizeInBytes = 4',
+  AssertTrue('Float32 SizeInBytes = 4',
     Pos('.byte 4  # SizeInBytes', Copy(IR, P, 220)) >= 0);
 end;
 
@@ -599,7 +599,7 @@ begin
         end;
         begin end.
         ''');
-  AssertTrue('recPointer comment', Contains(IR, '# recPointer: ^Integer'));
+  AssertTrue('recPointer comment', Contains(IR, '# recPointer: ^Int32'));
 end;
 
 procedure TOPDFTests.TestOPDF_Array_Static_RecType;
@@ -614,7 +614,7 @@ begin
         begin end.
         ''');
   AssertTrue('recArray comment',
-    Contains(IR, '# recArray (static): array[1..5] of Integer'));
+    Contains(IR, '# recArray (static): array[1..5] of Int32'));
 end;
 
 procedure TOPDFTests.TestOPDF_Array_Static_IsDynamic;
@@ -646,9 +646,9 @@ begin
         begin end.
         ''');
   AssertTrue('outer recArray emitted',
-    Contains(IR, '# recArray (static): array[0..1] of array[0..2] of Integer'));
+    Contains(IR, '# recArray (static): array[0..1] of array[0..2] of Int32'));
   AssertTrue('inner recArray emitted',
-    Contains(IR, '# recArray (static): array[0..2] of Integer'));
+    Contains(IR, '# recArray (static): array[0..2] of Int32'));
 end;
 
 procedure TOPDFTests.TestOPDF_Array_OpenArray_ArrayKind;
@@ -667,7 +667,7 @@ begin
         ''');
   AssertTrue('ArrayKind=2 for open array', Contains(IR, '.byte 2  # ArrayKind'));
   AssertTrue('open array is not flagged dynamic',
-    not Contains(IR, 'array of Integer' + #10 + '    .byte 1  # ArrayKind'));
+    not Contains(IR, 'array of Int32' + #10 + '    .byte 1  # ArrayKind'));
 end;
 
 procedure TOPDFTests.TestOPDF_OpenArray_CompanionLocation;

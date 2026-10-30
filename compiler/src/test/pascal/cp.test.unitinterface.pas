@@ -496,7 +496,7 @@ begin
                  True, Iface.FindType('TColor').Def is TEnumTypeDef);
     AssertEquals('TPoint is record',
                  True, Iface.FindType('TPoint').Def is TRecordTypeDef);
-    { TPoint declares 'X, Y: Integer' — one TFieldDecl carrying two names. }
+    { TPoint declares 'X, Y: Int32' — one TFieldDecl carrying two names. }
     AssertEquals('TPoint field-decl count', 1,
                  TRecordTypeDef(Iface.FindType('TPoint').Def).Fields.Count);
     AssertEquals('TPoint name count', 2,
@@ -768,7 +768,7 @@ begin
   Result.Decl.Name    := AName;
   Result.Decl.StrVal  := AText;        { raw float text }
   Result.Decl.IsFloat := True;
-  Result.TypeRef := MakeBuiltinRef('Double');
+  Result.TypeRef := MakeBuiltinRef('Float64');
 end;
 
 procedure TConstRoundTripTests.TestIntegerConst_ValuePreserved;
@@ -874,7 +874,7 @@ begin
     Decl := TConstDecl.Create();
     Decl.Name                := 'Primes';
     Decl.IsArrayConst        := True;
-    Decl.ArrayElemType       := 'Integer';
+    Decl.ArrayElemType       := 'Int32';
     Decl.ArrayIsRangeIndexed := True;
     Decl.ArrayLowBound       := 0;
     Decl.ArrayHighBound      := 4;
@@ -892,7 +892,7 @@ begin
     E := U.FindConst('Primes');
     AssertEquals('found', True, E <> nil);
     AssertEquals('is array',     True, E.Decl.IsArrayConst);
-    AssertEquals('elem type',    'Integer', E.Decl.ArrayElemType);
+    AssertEquals('elem type',    'Int32', E.Decl.ArrayElemType);
     AssertEquals('range indexed', True, E.Decl.ArrayIsRangeIndexed);
     AssertEquals('low',  0, E.Decl.ArrayLowBound);
     AssertEquals('high', 4, E.Decl.ArrayHighBound);
@@ -2136,7 +2136,7 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'type TMyInt = Integer;' + #10 +
+    'type TMyInt = Int32;' + #10 +
     'implementation' + #10 +
     'end.' + #10;
 var
@@ -2150,7 +2150,7 @@ begin
     ImportUnitInterface(Iface, Tab);
     TyDesc := Tab.FindType('TMyInt');
     AssertTrue('TMyInt defined', TyDesc <> nil);
-    AssertTrue('Aliases to Integer', TyDesc = Tab.FindType('Integer'));
+    AssertTrue('Aliases to Int32', TyDesc = Tab.FindType('Int32'));
   finally
     Tab.Free();
     Iface.Free();
@@ -2180,7 +2180,7 @@ begin
     AssertTrue('skProcedure', Sym.Kind = skProcedure);
     AssertEquals('one param', 1, Sym.Params.Count);
     AssertTrue('param type Integer',
-      TParamDesc(Sym.Params.Items[0]).TypeDesc = Tab.FindType('Integer'));
+      TParamDesc(Sym.Params.Items[0]).TypeDesc = Tab.FindType('Int32'));
   finally
     Tab.Free();
     Iface.Free();
@@ -2208,7 +2208,7 @@ begin
     Sym := Tab.Lookup('Sum');
     AssertTrue('Sum defined', Sym <> nil);
     AssertTrue('skFunction', Sym.Kind = skFunction);
-    AssertTrue('returns Integer', Sym.TypeDesc = Tab.FindType('Integer'));
+    AssertTrue('returns Int32', Sym.TypeDesc = Tab.FindType('Int32'));
     AssertEquals('two params', 2, Sym.Params.Count);
   finally
     Tab.Free();
@@ -2246,7 +2246,7 @@ begin
     AssertTrue('Y found', Fy <> nil);
     AssertEquals('X offset', 0, Fx.Offset);
     AssertEquals('Y offset', 4, Fy.Offset);
-    AssertTrue('X type Integer', Fx.TypeDesc = Tab.FindType('Integer'));
+    AssertTrue('X type Integer', Fx.TypeDesc = Tab.FindType('Int32'));
   finally
     Tab.Free();
     Iface.Free();
@@ -2287,11 +2287,11 @@ begin
   Tab   := FreshTableWithBuiltins();
   try
     ImportUnitInterface(Iface, Tab);
-    Check('TB', 'array[0..1] of Integer');
-    Check('TE', 'array[0..2] of Integer');
-    Check('TY', 'array[0..255] of Word');
+    Check('TB', 'array[0..1] of Int32');
+    Check('TE', 'array[0..2] of Int32');
+    Check('TY', 'array[0..255] of UInt16');
     Check('TL', 'array[0..1] of Int64');
-    Check('TM', 'array[0..1] of array[0..1] of Integer');
+    Check('TM', 'array[0..1] of array[0..1] of Int32');
   finally
     Tab.Free();
     Iface.Free();
@@ -2348,7 +2348,7 @@ begin
     AssertTrue('PNode points at TNode',
       TPointerTypeDesc(P).BaseType = Node);
     AssertTrue('PP aliases PNode', PP = P);
-    AssertTrue('TCount aliases Integer', Cnt = Tab.FindType('Integer'));
+    AssertTrue('TCount aliases Int32', Cnt = Tab.FindType('Int32'));
   finally
     Tab.Free();
     Iface.Free();
@@ -2385,11 +2385,11 @@ begin
     AssertEquals('CC offset', 4, Fld.Offset);
     Fld := Rec.FindField('M');
     AssertTrue('M imported with a type', (Fld <> nil) and (Fld.TypeDesc <> nil));
-    AssertEquals('M spelling', 'array[1..8] of array[0..2] of Integer',
+    AssertEquals('M spelling', 'array[1..8] of array[0..2] of Int32',
       Fld.TypeDesc.Name);
     Sym := Tab.Lookup('G');
     AssertTrue('G imported with a type', (Sym <> nil) and (Sym.TypeDesc <> nil));
-    AssertEquals('G spelling', 'array[-1..4] of Word', Sym.TypeDesc.Name);
+    AssertEquals('G spelling', 'array[-1..4] of UInt16', Sym.TypeDesc.Name);
   finally
     Tab.Free();
     Iface.Free();
@@ -2880,7 +2880,7 @@ begin
     AssertTrue('Counter defined', Sym <> nil);
     AssertTrue('skVariable', Sym.Kind = skVariable);
     AssertTrue('IsGlobal', Sym.IsGlobal);
-    AssertTrue('type Integer', Sym.TypeDesc = Tab.FindType('Integer'));
+    AssertTrue('type Integer', Sym.TypeDesc = Tab.FindType('Int32'));
   finally
     Tab.Free();
     Iface.Free();
@@ -2898,7 +2898,7 @@ begin
   C.Decl := TConstDecl.Create();
   C.Decl.Name   := 'MaxBuf';
   C.Decl.IntVal := 4096;
-  C.TypeRef     := MakeBuiltinRef('Integer');
+  C.TypeRef     := MakeBuiltinRef('Int32');
   Result.AddConst(C);
 end;
 
@@ -3079,7 +3079,7 @@ begin
       AssertTrue('MaxBuf present', C <> nil);
       AssertEquals('value',  Int64(4096), C.Decl.IntVal);
       AssertEquals('type ref unit', '$builtin', C.TypeRef.UnitName);
-      AssertEquals('type ref name', 'Integer',  C.TypeRef.TypeName);
+      AssertEquals('type ref name', 'Int32',  C.TypeRef.TypeName);
     finally
       Dst.Free();
     end;
@@ -3105,12 +3105,12 @@ begin
     C.Decl := TConstDecl.Create();
     C.Decl.Name := 'Grid';
     C.Decl.IsArrayConst := True;
-    C.Decl.ResolvedArrayType := 'array[0..1] of array[0..2] of Integer';
+    C.Decl.ResolvedArrayType := 'array[0..1] of array[0..2] of Int32';
     C.Decl.ResolvedEmitName := '__bac_Grid';
     C.Decl.ArrayElements := TStringList.Create();
     C.Decl.ArrayElements.Add('1');
     C.Decl.ArrayElements.Add('-2');
-    C.TypeRef := MakeBuiltinRef('Integer');
+    C.TypeRef := MakeBuiltinRef('Int32');
     Src.AddConst(C);
     Buf := WriteUnitInterface(Src);
     Dst := ReadUnitInterface(Buf);
@@ -3118,7 +3118,7 @@ begin
       C := Dst.FindConst('Grid');
       AssertTrue('Grid present', C <> nil);
       AssertTrue('is an array const', C.Decl.IsArrayConst);
-      AssertEquals('resolved type', 'array[0..1] of array[0..2] of Integer',
+      AssertEquals('resolved type', 'array[0..1] of array[0..2] of Int32',
         C.Decl.ResolvedArrayType);
       AssertEquals('data label', '__bac_Grid', C.Decl.ResolvedEmitName);
       AssertEquals('element count', 2, C.Decl.ArrayElements.Count);
@@ -3269,7 +3269,7 @@ const
     'type' + #10 +
     '  TColor  = (Red, Green, Blue);' + #10 +
     '  TColors = set of TColor;' + #10 +
-    '  TMyInt  = Integer;' + #10 +
+    '  TMyInt  = Int32;' + #10 +
     'function Add(A, B: Int): Int;' + #10 +
     'implementation' + #10 +
     'function Add(A, B: Int): Int; begin Result := A + B; end;' + #10 +
@@ -3358,7 +3358,7 @@ begin
       AssertTrue('TPoint present', E <> nil);
       AssertTrue('is record', E.Def is TRecordTypeDef);
       Def := TRecordTypeDef(E.Def);
-      { Multi-name decl 'X, Y: Integer' was flattened to one
+      { Multi-name decl 'X, Y: Int32' was flattened to one
         TFieldDecl per name on the wire — reader produces two
         single-name TFieldDecls in order. }
       AssertEquals('2 fields', 2, Def.Fields.Count);

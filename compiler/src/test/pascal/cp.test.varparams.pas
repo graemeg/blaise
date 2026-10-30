@@ -389,7 +389,7 @@ begin
     'var b: TBox; r: Int;' + #10 +
     'begin' + #10 +
     '  b := TBox.Create();' + #10 +
-    '  r := b.Pick<Integer>(GetVal())' + #10 +
+    '  r := b.Pick<Int32>(GetVal())' + #10 +
     'end.');
 end;
 
@@ -576,7 +576,7 @@ begin
   Rejects('Int64 into var Integer', 'SetI(L)');
   Rejects('Byte into var Integer', 'SetI(B)');
   Rejects('Integer into var Int64', 'SetL(I)');
-  Rejects('Int64 into out Integer', 'OutI(L)');
+  Rejects('Int64 into out Int32', 'OutI(L)');
   Rejects('function in an expression', 'I := GetI(L)');
   Rejects('method', 'K := TK.Create; K.Put(L)');
   Rejects('interface method', 'IntfK := TK.Create; IntfK.Put(L)');

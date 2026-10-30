@@ -824,7 +824,7 @@ const
     type
       TGetter<T> = reference to function(): T;
     var
-      GI: TGetter<Integer>;
+      GI: TGetter<Int32>;
       GS: TGetter<string>;
     begin
     end.
@@ -900,13 +900,13 @@ var
 begin
   Prog := AnalyseSrc(Phase6AliasSrc);
   try
-    TD := Prog.SymbolTable.FindType('TGetter<Integer>');
-    AssertNotNull('TGetter<Integer> instantiated', TD);
+    TD := Prog.SymbolTable.FindType('TGetter<Int32>');
+    AssertNotNull('TGetter<Int32> instantiated', TD);
     AssertTrue('is procedural', TD is TProceduralTypeDesc);
     PD := TProceduralTypeDesc(TD);
     AssertTrue('IsReference set', PD.IsReference);
     AssertNotNull('return type resolved', PD.ReturnType);
-    AssertEquals('return type is Integer', 'Integer', PD.ReturnType.Name)
+    AssertEquals('return type is Int32', 'Int32', PD.ReturnType.Name)
   finally
     Prog.Free()
   end

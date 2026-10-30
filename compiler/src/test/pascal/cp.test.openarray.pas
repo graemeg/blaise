@@ -88,7 +88,7 @@ type
     procedure TestSemantic_StaticArrayToOpenArray_Accepted;
     procedure TestSemantic_StaticArrayToOpenArray_NonZeroBase_Accepted;
     { [0, 4] passed to an 'array of Byte' failed with "No matching overload":
-      the literal was typed 'array of Integer' from its first element, and
+      the literal was typed 'array of Int32' from its first element, and
       no rule let constant integers convert to the formal's element type
       (found via GH #233). }
     procedure TestSemantic_IntLiteralToByteOpenArray_Accepted;
@@ -531,7 +531,7 @@ begin
     on E: ESemanticError do
       Raised := True;
   end;
-  AssertTrue('an Integer variable element is not narrowed', Raised);
+  AssertTrue('an Int32 variable element is not narrowed', Raised);
 end;
 
 procedure TOpenArrayTests.TestCodegen_IntLiteralToByteOpenArray_ByteStores;
@@ -773,9 +773,9 @@ const
     end.
     ''';
 begin
-  AssertEquals('Double elements stored from the float register', '',
+  AssertEquals('Float64 elements stored from the float register', '',
     AsmMissing(Src, #9'movsd %xmm0, 8(%rsp)', #9'str d0, [x9]'));
-  AssertEquals('Single elements narrowed and stored 4 bytes wide', '',
+  AssertEquals('Float32 elements narrowed and stored 4 bytes wide', '',
     AsmMissing(Src, #9'movss %xmm0, 0(%rsp)',
       #9'fcvt s0, d0'#10#9'str s0, [x9]'));
 end;
@@ -899,7 +899,7 @@ begin
         (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyDynArray));
     end;
     Arg := TASTExpr(TProcCall(Prog.Block.Stmts[4]).Args.Items[0]);
-    AssertTrue('an Integer literal keeps its block',
+    AssertTrue('an Int32 literal keeps its block',
       (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyOpenArray));
   finally
     Prog.Free();

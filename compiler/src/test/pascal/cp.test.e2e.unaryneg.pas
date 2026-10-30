@@ -190,11 +190,11 @@ const
     program P;
     procedure Show(X: Float32); overload;
     begin
-      WriteLn('Single ', X)
+      WriteLn('Float32 ', X)
     end;
     procedure Show(X: Float64); overload;
     begin
-      WriteLn('Double ', X)
+      WriteLn('Float64 ', X)
     end;
     var
       S: Float32;
@@ -208,7 +208,7 @@ const
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, 'Single -1.5' + LE + 'Double -2.5' + LE, 0);
+  AssertRunsOnAll(Src, 'Float32 -1.5' + LE + 'Float64 -2.5' + LE, 0);
 end;
 
 procedure TE2EUnaryNegTests.TestRun_Neg_IntegerMatrix;

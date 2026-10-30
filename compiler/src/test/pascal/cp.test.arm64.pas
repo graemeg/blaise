@@ -915,9 +915,9 @@ begin
   { leg 30: a numeric type-cast Single(X)/Double(X) in a float context is a
     TFuncCallExpr with ResolvedDecl=nil (the name resolves to a TYPE).  It must
     lower to a REAL conversion (fcvt / scvtf), never a bl _to a routine named
-    'Single'/'Double' and never a bit copy.  Was NotYet'd as 'this call form in
+    'Float32'/'Float64' and never a bit copy.  Was NotYet'd as 'this call form in
     float context' (the compiler's own blaise.assembler.x86_64.pas:3088
-    'FVal := Single(DVal)'). }
+    'FVal := Float32(DVal)'). }
   AsmT := GenAsm(
     '''
     program P;
@@ -935,10 +935,10 @@ begin
   AssertTrue('single narrow (fcvt s0, d0)', Pos(#9'fcvt s0, d0', AsmT) >= 0);
   AssertTrue('single widen (fcvt d0, s0)', Pos(#9'fcvt d0, s0', AsmT) >= 0);
   AssertTrue('int to float (scvtf d0, x0)', Pos(#9'scvtf d0, x0', AsmT) >= 0);
-  AssertTrue('cast is not a call to Single',
-    Pos(#9'bl _Single', AsmT) < 0);
-  AssertTrue('cast is not a call to Double',
-    Pos(#9'bl _Double', AsmT) < 0);
+  AssertTrue('cast is not a call to Float32',
+    Pos(#9'bl _Float32', AsmT) < 0);
+  AssertTrue('cast is not a call to Float64',
+    Pos(#9'bl _Float64', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestFloat_CallAbi_IndependentSequences;
@@ -1586,7 +1586,7 @@ begin
     ''', TargetArm64);
   P := Pos('_main:', AsmT);
   Main := Copy(AsmT, P, Pos(#9'bl _printf', AsmT) - P);
-  AssertTrue('no 4-byte packing of a variadic Integer',
+  AssertTrue('no 4-byte packing of a variadic Int32',
     Pos(#9'str w9, [sp', Main) < 0);
   N := 0;
   P := Pos(#9'str x9, [sp, #', Main);
@@ -1596,7 +1596,7 @@ begin
     Main := Copy(Main, P + 1, Length(Main) - P - 1);
     P := Pos(#9'str x9, [sp, #', Main);
   end;
-  AssertEquals('one 8-byte stack slot per variadic Integer', 3, N);
+  AssertEquals('one 8-byte stack slot per variadic Int32', 3, N);
 end;
 
 procedure TArm64BackendTests.TestFieldOfIndexedRecordGetterOnClassField_CallsGetter;
@@ -1718,7 +1718,7 @@ const
     end.
     ''';
 begin
-  AssertEquals('the Single result is widened right after the call', '',
+  AssertEquals('the Float32 result is widened right after the call', '',
     AsmMissing(Src, #9'callq TBase_T' + #10 + #9'cvtss2sd %xmm0, %xmm0',
       #9'bl _TBase_T' + #10 + #9'fcvt d0, s0'));
 end;
@@ -2030,8 +2030,8 @@ begin
     end.
     ''', TargetArm64);
   { Monomorphised name: <Template>_<Arg>_<Method>, matching x86-64. }
-  AssertTrue('instance method body emitted', Pos('TB_Integer_G:', AsmT) >= 0);
-  AssertTrue('and is called', Pos('bl _TB_Integer_G', AsmT) >= 0);
+  AssertTrue('instance method body emitted', Pos('TB_Int32_G:', AsmT) >= 0);
+  AssertTrue('and is called', Pos('bl _TB_Int32_G', AsmT) >= 0);
   { Self is the record's ADDRESS, exactly as for a non-generic record method. }
   AssertTrue('receiver address formed, not loaded',
     Pos('add x0, x0, _g_b@PAGEOFF', AsmT) >= 0);
@@ -2065,7 +2065,7 @@ begin
     ''', TargetArm64);
   { Two specialisations of one template are two DISTINCT functions — emitting
     only the first would silently give the string instance the integer body. }
-  AssertTrue('Integer instance emitted', Pos('TB_Integer_G:', AsmT) >= 0);
+  AssertTrue('Int32 instance emitted', Pos('TB_Int32_G:', AsmT) >= 0);
   AssertTrue('string instance emitted', Pos('TB_string_G:', AsmT) >= 0);
 end;
 
@@ -2094,7 +2094,7 @@ begin
   { Weak, not global: two units instantiating TB<Integer> must collapse to one
     definition at link time rather than colliding with a duplicate symbol. }
   AssertTrue('instance method is weak-bound',
-    Pos('.weak_definition _TB_Integer_G', AsmT) >= 0);
+    Pos('.weak_definition _TB_Int32_G', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestManagedRecord_CopyAndFieldStore;
@@ -3213,12 +3213,12 @@ begin
     ''', TargetArm64);
   { the monomorphised constructor body must be defined EXACTLY once }
   N := 0;
-  P := PosEx('TBox_Integer_Put:', AsmT, 0);
+  P := PosEx('TBox_Int32_Put:', AsmT, 0);
   while P >= 0 do
   begin
     N := N + 1;
     if P + 1 > Length(AsmT) then break;
-    P := PosEx('TBox_Integer_Put:', AsmT, P + 1);
+    P := PosEx('TBox_Int32_Put:', AsmT, P + 1);
   end;
   AssertEquals('unit generic-instance body emitted exactly once', 1, N);
 end;
@@ -3322,11 +3322,11 @@ begin
     ''', TargetArm64);
   { the monomorphised TBox<Integer>.Put body is DEFINED (a label), not just
     referenced }
-  AssertTrue('TBox<Integer>.Put body is defined',
-    Pos('TBox_Integer_Put:', AsmT) >= 0);
+  AssertTrue('TBox<Int32>.Put body is defined',
+    Pos('TBox_Int32_Put:', AsmT) >= 0);
   { and it is weak-bound (bare generic-instance symbol) for cross-object dedup }
   AssertTrue('the generic-instance method body is weak',
-    Pos('.weak_definition _TBox_Integer_Put', AsmT) >= 0);
+    Pos('.weak_definition _TBox_Int32_Put', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClassTypeinfo_InstanceSizeCoversAllFields;
@@ -4496,7 +4496,7 @@ begin
   AssertTrue('__SysWriteInt is called', WrP >= 0);
   { the arg move before the call must be the full 64-bit mov x1, x0, NOT the
     zero-extending mov w1, w0 }
-  AssertTrue('the WriteLn Integer arg is passed sign-extended (mov x1, x0)',
+  AssertTrue('the WriteLn Int32 arg is passed sign-extended (mov x1, x0)',
     Pos(#9'mov x1, x0'#10#9'movz w0, #1'#10#9'bl __SysWriteInt', Body) >= 0);
   AssertTrue('the zero-extending mov w1, w0 is not used for WriteInt',
     Pos(#9'mov w1, w0'#10#9'movz w0, #1'#10#9'bl __SysWriteInt', Body) < 0);
@@ -5440,7 +5440,7 @@ begin
     begin
     end.
     ''', TargetArm64);
-  AssertTrue('Single bits through s0',
+  AssertTrue('Float32 bits through s0',
     Pos(#9'ldr w0, [x0]' + #10 + #9'fmov s0, w0' + #10 + #9'fcvt d0, s0',
       AsmT) >= 0);
 end;
@@ -6565,12 +6565,12 @@ begin
     ''', TargetArm64);
   { the itab and impllist are weak-bound for the generic instance }
   AssertTrue('itab weak-bound',
-    Pos('.weak_definition _itab_TBox_Integer_IHolder', AsmStr) >= 0);
+    Pos('.weak_definition _itab_TBox_Int32_IHolder', AsmStr) >= 0);
   AssertTrue('impllist weak-bound',
-    Pos('.weak_definition _impllist_TBox_Integer', AsmStr) >= 0);
+    Pos('.weak_definition _impllist_TBox_Int32', AsmStr) >= 0);
   { the itab entry points at the clone's own instance-mangled method }
   AssertTrue('itab binds the clone method',
-    Pos('_itab_TBox_Integer_IHolder:' + LF + #9'.quad _TBox_Integer_Get',
+    Pos('_itab_TBox_Int32_IHolder:' + LF + #9'.quad _TBox_Int32_Get',
         AsmStr) >= 0);
   Obj := AssembleArm64ToBytes(AsmStr);
   F := ParseMachO(Obj, 'arm64gii.o');
@@ -6612,12 +6612,12 @@ begin
     ''', TargetArm64);
   { the generic-interface instance typeinfo is emitted weak }
   AssertTrue('weak generic-intf typeinfo',
-    Pos('.weak_definition _typeinfo_ITransform_Integer', AsmT) >= 0);
+    Pos('.weak_definition _typeinfo_ITransform_Int32', AsmT) >= 0);
   AssertTrue('generic-intf typeinfo label',
-    Pos('_typeinfo_ITransform_Integer:', AsmT) >= 0);
+    Pos('_typeinfo_ITransform_Int32:', AsmT) >= 0);
   { the class's impllist references that typeinfo }
   AssertTrue('impllist references the instance typeinfo',
-    Pos(#9'.quad _typeinfo_ITransform_Integer', AsmT) >= 0);
+    Pos(#9'.quad _typeinfo_ITransform_Int32', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestAbstractInterfaceMethodItab;
@@ -7274,13 +7274,13 @@ begin
     end.
     ''', TargetArm64);
   { the monomorphised instance bodies are emitted with weak binding }
-  AssertTrue('Wrap instance body', Pos('TBox_Wrap_Integer:', AsmT) >= 0);
-  AssertTrue('Wrap weak bind', Pos('.weak_definition _TBox_Wrap_Integer', AsmT) >= 0);
-  AssertTrue('AddBase instance body', Pos('TBox_AddBase_Integer:', AsmT) >= 0);
-  AssertTrue('AddBase weak bind', Pos('.weak_definition _TBox_AddBase_Integer', AsmT) >= 0);
+  AssertTrue('Wrap instance body', Pos('TBox_Wrap_Int32:', AsmT) >= 0);
+  AssertTrue('Wrap weak bind', Pos('.weak_definition _TBox_Wrap_Int32', AsmT) >= 0);
+  AssertTrue('AddBase instance body', Pos('TBox_AddBase_Int32:', AsmT) >= 0);
+  AssertTrue('AddBase weak bind', Pos('.weak_definition _TBox_AddBase_Int32', AsmT) >= 0);
   { the call sites reference the same mangled labels }
-  AssertTrue('Wrap called', Pos(#9'bl _TBox_Wrap_Integer', AsmT) >= 0);
-  AssertTrue('AddBase called', Pos(#9'bl _TBox_AddBase_Integer', AsmT) >= 0);
+  AssertTrue('Wrap called', Pos(#9'bl _TBox_Wrap_Int32', AsmT) >= 0);
+  AssertTrue('AddBase called', Pos(#9'bl _TBox_AddBase_Int32', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClosure_CaptureFree_ValueParamCall;
@@ -8850,7 +8850,7 @@ begin
     ''', TargetArm64);
   Body := Copy(AsmT, Pos('_Outer_Init:', AsmT), Length(AsmT));
   Body := Copy(Body, 0, Pos(#9'ret', Body));
-  AssertTrue('Init stores the Integer at its own width',
+  AssertTrue('Init stores the Int32 at its own width',
     Pos(#9'str w0, [x9]', Body) >= 0);
   AssertTrue('Init never stores 8 bytes into a 4-byte env field',
     Pos(#9'str x0, [x9]', Body) < 0);
@@ -9951,7 +9951,7 @@ begin
   P := Q;
   Q := Pos('bl _abi_v4', A);
   Seg := Copy(A, P, Q - P);
-  AssertTrue('the spilled Single HFA is four 4-byte lanes: ' + Seg,
+  AssertTrue('the spilled Float32 HFA is four 4-byte lanes: ' + Seg,
     (Pos('str w9, [sp, #', Seg) >= 0) and (Pos('s0', Seg) < 0));
 end;
 

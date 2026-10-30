@@ -401,7 +401,7 @@ begin
   AssertTrue('warns: ' + W, Pos('unsigned', W) >= 0);
   AssertTrue('names the variable: ' + W, Pos(#39 + 'U' + #39, W) >= 0);
   W := SemanticWarnings(DowntoHead + 'for W := C downto 0 do I := 1 end.');
-  AssertTrue('Word as well: ' + W, Pos('unsigned', W) >= 0);
+  AssertTrue('UInt16 as well: ' + W, Pos('unsigned', W) >= 0);
 end;
 
 procedure TForTests.TestSemantic_ForDownto0_ConstStart_NoWarning;

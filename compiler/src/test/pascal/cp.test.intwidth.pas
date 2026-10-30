@@ -103,7 +103,7 @@ procedure TIntWidthTests.TestSemantic_NegLiteral_TakesHint;
 begin
   { a negated literal takes its assignment target's type (D4, rule 1) }
   AssertEquals('Int64', TypeOf('-5'));
-  AssertEquals('Integer', TypeOf('-5', 'Integer'));
+  AssertEquals('Int32', TypeOf('-5', 'Int32'));
 end;
 
 procedure TIntWidthTests.TestSemantic_ConstExpr_IsInt;
@@ -112,7 +112,7 @@ begin
     that type under a narrower hint: it is narrowed on store }
   AssertEquals('small', 'Int64', TypeOf('5 - 1'));
   AssertEquals('large', 'Int64', TypeOf('2147483647 + 1'));
-  AssertEquals('hinted', 'Int64', TypeOf('5 - 1', 'Integer'));
+  AssertEquals('hinted', 'Int64', TypeOf('5 - 1', 'Int32'));
 end;
 
 procedure TIntWidthTests.TestSemantic_IntegerAndUInt32_IsInt64;
@@ -138,12 +138,12 @@ end;
 
 procedure TIntWidthTests.TestSemantic_Int8Shl_IsInteger;
 begin
-  AssertEquals('Integer', TypeOf('K shl 8'));
+  AssertEquals('Int32', TypeOf('K shl 8'));
 end;
 
 procedure TIntWidthTests.TestSemantic_IntegerShl_KeepsInteger;
 begin
-  AssertEquals('Integer', TypeOf('I shl 31'));
+  AssertEquals('Int32', TypeOf('I shl 31'));
 end;
 
 procedure TIntWidthTests.TestSemantic_UInt32Shr_KeepsUInt32;
@@ -203,7 +203,7 @@ const
   Src = 'program P; var I: Int32; L: Int64; begin I := 0; L := 7; ' +
     'WriteLn(I < L) end.';
 begin
-  AssertEquals('an Integer beside an Int64 is sign-extended, compared 64-bit',
+  AssertEquals('an Int32 beside an Int64 is sign-extended, compared 64-bit',
     '', AsmMissing(Src, 'movslq %eax, %rax'#10#9'cmpq %rcx, %rax',
       'sxtw x0, w0'#10#9'cmp x0, x1'));
 end;

@@ -155,16 +155,16 @@ procedure TUnaryNegTests.TestSem_Neg_ResultTypes;
 begin
   { narrow operands are promoted, as 0 - X is (see "Integer Expression
     Width") }
-  AssertEquals('Integer', 'Int64', Self.NegType('Integer'));
+  AssertEquals('Int32', 'Int64', Self.NegType('Int32'));
   AssertEquals('Byte', 'Int64', Self.NegType('Byte'));
   AssertEquals('Int8', 'Int64', Self.NegType('Int8'));
-  AssertEquals('SmallInt', 'Int64', Self.NegType('SmallInt'));
-  AssertEquals('Word', 'Int64', Self.NegType('Word'));
+  AssertEquals('Int16', 'Int64', Self.NegType('Int16'));
+  AssertEquals('UInt16', 'Int64', Self.NegType('UInt16'));
   AssertEquals('UInt32', 'Int64', Self.NegType('UInt32'));
   AssertEquals('Int64', 'Int64', Self.NegType('Int64'));
   AssertEquals('UInt64', 'UInt64', Self.NegType('UInt64'));
-  AssertEquals('Double', 'Double', Self.NegType('Double'));
-  AssertEquals('Single stays Single', 'Single', Self.NegType('Single'));
+  AssertEquals('Float64', 'Float64', Self.NegType('Float64'));
+  AssertEquals('Float32 stays Float32', 'Float32', Self.NegType('Float32'));
 end;
 
 procedure TUnaryNegTests.TestSem_Neg_NonNumeric_Rejected;
@@ -339,7 +339,7 @@ procedure TUnaryNegTests.TestAsm_NegDouble_FlipsSignBit;
 const
   Src = 'program P; var Z, N: Float64; begin Z := 0.0; N := -Z end.';
 begin
-  AssertEquals('Double negation flips bit 63, never 0.0 - x', '',
+  AssertEquals('Float64 negation flips bit 63, never 0.0 - x', '',
     AsmMissing(Src, 'xorq %rcx, %rax', 'fneg d0, d0'));
   AssertTrue('x86-64: no subtraction',
     Pos('subsd', GenAsm(Src, TargetX86_64)) < 0);
@@ -351,7 +351,7 @@ procedure TUnaryNegTests.TestAsm_NegSingle_FlipsSignBit;
 const
   Src = 'program P; var Z, N: Float32; begin Z := 0.0; N := -Z end.';
 begin
-  AssertEquals('Single negation flips bit 31', '',
+  AssertEquals('Float32 negation flips bit 31', '',
     AsmMissing(Src, 'xorl $-2147483648, %eax', 'fneg d0, d0'));
   AssertTrue('x86-64: no subtraction',
     Pos('subs', GenAsm(Src, TargetX86_64)) < 0);

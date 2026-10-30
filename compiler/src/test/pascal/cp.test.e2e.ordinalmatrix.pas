@@ -309,7 +309,7 @@ end;
 
 procedure TE2EOrdinalMatrixTests.TestRun_Matrix_Word;
 begin
-  RunMatrix('Word', '0', '65535', 'u', True, '32767', '5', '0', '0');
+  RunMatrix('UInt16', '0', '65535', 'u', True, '32767', '5', '0', '0');
 end;
 
 procedure TE2EOrdinalMatrixTests.TestRun_Matrix_Int32;

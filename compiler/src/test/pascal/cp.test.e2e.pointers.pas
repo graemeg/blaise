@@ -510,7 +510,7 @@ const
     program P;
     var
       A: Int8; B: Int16; C: Byte; D: UInt16;
-      PA: ^Int8; PB: ^Int16; PC: PByte; PD: PWord;
+      PA: ^Int8; PB: ^Int16; PC: PByte; PD: PUInt16;
     procedure Poke(var X: Int8; var Y: Int16);
     var
       QX: ^Int8; QY: ^Int16;
@@ -553,7 +553,7 @@ const
     program P;
     var
       I: Int32; B: Byte; W: UInt16; L: Int64; D: Float64; F: Boolean;
-      PI: PInteger; PB: PByte; PW: PWord; PL: PInt64; PD: PDouble;
+      PI: PInt32; PB: PByte; PW: PUInt16; PL: PInt64; PD: PFloat64;
       PF: PBoolean; PP: PPointer; Raw: Pointer;
     begin
       PI := @I; PB := @B; PW := @W; PL := @L; PD := @D; PF := @F;
@@ -561,7 +561,7 @@ const
       PF^ := True;
       Raw := PI; PP := @Raw;
       WriteLn(I, ' ', B, ' ', W, ' ', L, ' ', D:0:1, ' ', F, ' ',
-        PInteger(PP^)^)
+        PInt32(PP^)^)
     end.
     ''';
 begin
@@ -630,7 +630,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcDoublePtrWriteE2E, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
-  AssertEquals('Double round-trips through PDouble^',
+  AssertEquals('Float64 round-trips through PDouble^',
     '3.14' + LE, Output);
 end;
 
@@ -640,7 +640,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSinglePtrAdjacentE2E, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
-  AssertEquals('PSingle^ write must not clobber adjacent Single B',
+  AssertEquals('PSingle^ write must not clobber adjacent Float32 B',
     '9.5' + LE, Output);
 end;
 

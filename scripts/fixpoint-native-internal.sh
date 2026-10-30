@@ -89,7 +89,7 @@ end;
 
 var
   P: TPoint;
-  I: Integer;
+  I: Int;
   Total: Int64;
 begin
   Total := 0;

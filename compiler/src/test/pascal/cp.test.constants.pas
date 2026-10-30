@@ -289,7 +289,7 @@ begin
     SA.Analyse(Pr);
     Sym := Pr.SymbolTable.Lookup('Pi');
     AssertNotNil('Pi symbol exists', Sym);
-    AssertEquals('Pi is Double', 'Double', Sym.TypeDesc.Name);
+    AssertEquals('Pi is Float64', 'Float64', Sym.TypeDesc.Name);
   finally
     SA.Free(); Pr.Free(); P.Free(); L.Free();
   end;
@@ -687,10 +687,10 @@ begin
   SA := TSemanticAnalyser.Create();
   try
     SA.Analyse(Prog);
-    AssertEquals('B type', 'Integer', Rhs(0).ResolvedType.Name);
+    AssertEquals('B type', 'Int32', Rhs(0).ResolvedType.Name);
     AssertEquals('B value', 5, Int32(Rhs(0).ConstValue));
     AssertEquals('C value', 6, Int32(Rhs(1).ConstValue));
-    AssertEquals('G type', 'Double', Rhs(2).ResolvedType.Name);
+    AssertEquals('G type', 'Float64', Rhs(2).ResolvedType.Name);
     AssertEquals('T text', 'xy', Rhs(3).ConstString);
     AssertEquals('KB type', 'Boolean', Rhs(4).ResolvedType.Name);
     AssertEquals('KE type', 'TE', Rhs(5).ResolvedType.Name);
@@ -725,8 +725,8 @@ const
 begin
   AssertEquals('Int16', '', AsmMissing(Src, #9'.word 11', #9'.hword 11'));
   AssertEquals('UInt16', '', AsmMissing(Src, #9'.word 21', #9'.hword 21'));
-  AssertEquals('QWord', '', AsmMissing(Src, #9'.quad 31', #9'.quad 31'));
-  AssertEquals('PtrUInt', '', AsmMissing(Src, #9'.quad 41', #9'.quad 41'));
+  AssertEquals('UInt64', '', AsmMissing(Src, #9'.quad 31', #9'.quad 31'));
+  AssertEquals('UInt64', '', AsmMissing(Src, #9'.quad 41', #9'.quad 41'));
   AssertEquals('user alias of Int16', '',
     AsmMissing(Src, #9'.word 51', #9'.hword 51'));
 end;

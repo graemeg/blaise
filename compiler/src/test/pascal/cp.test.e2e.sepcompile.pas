@@ -289,7 +289,7 @@ type
     procedure TestIncrementalRebuild_SharedEnumMemberName_BareRef_Warm;
     { A procedural type with an open-array param, exported from a cached unit.
       The importer (RegisterProcType) resolved each param by its TypeName
-      alone, so the warm build saw 'array of Integer' as 'Integer' and
+      alone, so the warm build saw 'array of Int32' as 'Int32' and
       rejected @Cnt -- the same gap the source path had
       (BUG-20260923-addr-of-openarray-proc). }
     procedure TestIncrementalRebuild_OpenArrayProcType_Warm;
@@ -4236,7 +4236,7 @@ begin
     cached .bif.  The CONST block used to carry only scalar fields, so on the
     warm pass every array const came back as an Integer and the program was
     rejected ("String subscript '[]' requires a string expression, got
-    'Integer'") -- BUG-20261008-warm-embed-dynarray-const-import.  Every index
+    'Int32'") -- BUG-20261008-warm-embed-dynarray-const-import.  Every index
     form is covered: integer range, dynamic, enum, multi-dimensional, a named
     array type and Boolean. }
   if not ToolchainAvailable() then

@@ -152,7 +152,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
-  AssertEquals('Integer bounds',
+  AssertEquals('Int32 bounds',
     '2147483647' + LE + '-2147483648' + LE, Output);
 end;
 

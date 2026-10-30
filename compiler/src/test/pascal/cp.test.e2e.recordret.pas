@@ -548,7 +548,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcMixIntInt64, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
-  AssertEquals('mixed Integer+Int64', '42 1000000000000' + LE, Output);
+  AssertEquals('mixed Int32+Int64', '42 1000000000000' + LE, Output);
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcSSE1_Double_RoundTrip;
@@ -575,7 +575,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntSSE, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
-  AssertEquals('Int64+Double via (rax, xmm0)', '42' + LE + '3.5', Trim(Output));
+  AssertEquals('Int64+Float64 via (rax, xmm0)', '42' + LE + '3.5', Trim(Output));
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcSSEInt_DoubleInt64_RoundTrip;
@@ -584,7 +584,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSSEInt, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
-  AssertEquals('Double+Int64 via (xmm0, rax)', '-1.5' + LE + '99', Trim(Output));
+  AssertEquals('Float64+Int64 via (xmm0, rax)', '-1.5' + LE + '99', Trim(Output));
 end;
 
 procedure TE2ERecordReturnTests.TestRun_SingleHfa_AndOddSizedImages;

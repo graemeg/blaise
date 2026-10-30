@@ -526,7 +526,7 @@ begin
   Prog := AnalyseSrc(SrcIMapVarDecl);
   try
     VD := TVarDecl(Prog.Block.Decls[0]);
-    AssertEquals('IMap<Integer,Integer> resolves to tyInterface',
+    AssertEquals('IMap<Int32,Int32> resolves to tyInterface',
       Ord(tyInterface), Ord(VD.ResolvedType.Kind));
   finally
     Prog.Free();

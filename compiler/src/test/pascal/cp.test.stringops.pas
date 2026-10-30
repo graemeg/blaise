@@ -504,7 +504,7 @@ begin
   try
     A.Analyse(Pr);
     Assign := TAssignment(Pr.Block.Stmts[0]);
-    AssertEquals('StrToInt returns Integer',
+    AssertEquals('StrToInt returns Int32',
       Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     A.Free();

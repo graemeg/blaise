@@ -297,7 +297,7 @@ begin
   SA.Analyse(Prog);
   SA.Free();
   Assign := TAssignment(Prog.Block.Stmts[0]);
-  AssertEquals('CompareStr returns Integer',
+  AssertEquals('CompareStr returns Int32',
     Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
   Prog.Free();
 end;

@@ -133,7 +133,7 @@ type
     procedure TestSemantic_ProcTypeOpenArrayParam_ScalarArg_Fails;
     { BUG-20261013-proctype-inline-param-types: a parameter or return type
       written as an inline type form (^T, set of T, array of T) resolves --
-      it was looked up by name only ("Unknown parameter type '^Integer'") --
+      it was looked up by name only ("Unknown parameter type '^Int32'") --
       and still takes part in the signature check }
     procedure TestSemantic_ProcTypeInlineParamTypes_Resolve;
     procedure TestSemantic_ProcTypeInlineParamType_Mismatch_Fails;
@@ -232,7 +232,7 @@ begin
     TD  := FindTypeDecl(Prog, 'TIntFn');
     Def := TProceduralTypeDef(TD.Def);
     AssertEquals('IsFunction should be True', True, Def.IsFunction);
-    AssertEquals('ReturnTypeName should be Integer', 'Int32', Def.ReturnTypeName);
+    AssertEquals('ReturnTypeName should be Int32', 'Int32', Def.ReturnTypeName);
     AssertEquals('Should have 0 params', 0, Def.Params.Count);
   finally
     Prog.Free();
@@ -474,7 +474,7 @@ end;
 
 procedure TProcTypesTests.TestSemantic_QualifiedProcFieldCallExpr_WrongArgType_Fails;
 begin
-  AssertTrue('Qualified proc-field call expr must reject string where Integer expected',
+  AssertTrue('Qualified proc-field call expr must reject string where Int32 expected',
     SemanticError(
       '''
           program Test;
@@ -494,7 +494,7 @@ procedure TProcTypesTests.TestSemantic_IndirectCallStmt_WrongArgType_Fails;
 begin
   { Statement-form indirect call: H('s') where H expects Integer must
     be rejected at semantic time, not silently miscompiled. }
-  AssertTrue('Indirect call statement should reject string where Integer expected',
+  AssertTrue('Indirect call statement should reject string where Int32 expected',
     SemanticError(
       '''
           program Test;
@@ -515,7 +515,7 @@ procedure TProcTypesTests.TestSemantic_IndirectCallExpr_WrongArgType_Fails;
 begin
   { Expression-form indirect call: R := F('s') where F expects Integer
     must also be rejected at semantic time. }
-  AssertTrue('Indirect call expression should reject string where Integer expected',
+  AssertTrue('Indirect call expression should reject string where Int32 expected',
     SemanticError(
       '''
           program Test;
@@ -561,7 +561,7 @@ end;
 
 procedure TProcTypesTests.TestSemantic_AddrOfOpenArrayProc_ElementMismatch_Fails;
 begin
-  AssertTrue('array of Byte routine must not match an array of Integer signature',
+  AssertTrue('array of Byte routine must not match an array of Int32 signature',
     SemanticError(
       '''
           program Test;
@@ -580,7 +580,7 @@ end;
 
 procedure TProcTypesTests.TestSemantic_ProcTypeOpenArrayParam_ScalarArg_Fails;
 begin
-  AssertTrue('an Integer is not an array of Integer',
+  AssertTrue('an Int32 is not an array of Int32',
     SemanticError(
       '''
           program Test;
@@ -1021,7 +1021,7 @@ end;
 
 procedure TProcTypesTests.TestSemantic_ProcTypeInlineParamType_Mismatch_Fails;
 begin
-  AssertTrue('a ^Byte routine must not match a ^Integer signature',
+  AssertTrue('a ^Byte routine must not match a ^Int32 signature',
     SemanticError(
       '''
           program Test;

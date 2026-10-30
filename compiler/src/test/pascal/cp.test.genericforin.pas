@@ -269,8 +269,8 @@ begin
   { Instantiate TGenEnum<Integer> via the collection source }
   Prog := AnalyseSrc(SrcGenericCollection);
   try
-    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TGenEnum<Integer>'));
-    AssertNotNull('TGenEnum<Integer> was instantiated', RT);
+    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TGenEnum<Int32>'));
+    AssertNotNull('TGenEnum<Int32> was instantiated', RT);
     Prop := RT.FindProperty('Current');
     AssertNotNull('Current property present on TGenEnum<Int32>', Prop);
     AssertEquals('Current property type is tyInteger',
@@ -345,8 +345,8 @@ var
 begin
   Prog := AnalyseSrc(SrcForInGenericList);
   try
-    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TListEnumerator<Integer>'));
-    AssertNotNull('TListEnumerator<Integer> instantiated', RT);
+    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TListEnumerator<Int32>'));
+    AssertNotNull('TListEnumerator<Int32> instantiated', RT);
     Prop := RT.FindProperty('Current');
     AssertNotNull('Current property on TListEnumerator<Int32>', Prop);
     AssertEquals('Current type is tyInteger',

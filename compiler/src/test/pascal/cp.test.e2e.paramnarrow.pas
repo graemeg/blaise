@@ -62,10 +62,10 @@ procedure TE2EParamNarrowTests.TestRun_Int64Arg_RegisterParam_EveryKind;
 const
   Src = '''
     program P;
-    procedure PI(X: Int32); begin WriteLn('Integer ', X) end;
+    procedure PI(X: Int32); begin WriteLn('Int32 ', X) end;
     procedure PU(X: UInt32); begin WriteLn('UInt32 ', X) end;
-    procedure PS(X: Int16); begin WriteLn('SmallInt ', X) end;
-    procedure PW(X: UInt16); begin WriteLn('Word ', X) end;
+    procedure PS(X: Int16); begin WriteLn('Int16 ', X) end;
+    procedure PW(X: UInt16); begin WriteLn('UInt16 ', X) end;
     procedure PB(X: Byte); begin WriteLn('Byte ', X) end;
     procedure P8(X: Int8); begin WriteLn('Int8 ', X) end;
     var L: Int64;
@@ -79,16 +79,16 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
-    'Integer 705164031' + LE +
+    'Int32 705164031' + LE +
     'UInt32 705164031' + LE +
-    'SmallInt -3329' + LE +
-    'Word 62207' + LE +
+    'Int16 -3329' + LE +
+    'UInt16 62207' + LE +
     'Byte 255' + LE +
     'Int8 -1' + LE +
-    'Integer -705032704' + LE +
+    'Int32 -705032704' + LE +
     'UInt32 3589934592' + LE +
-    'SmallInt 3584' + LE +
-    'Word 3584' + LE +
+    'Int16 3584' + LE +
+    'UInt16 3584' + LE +
     'Byte 0' + LE +
     'Int8 0' + LE, 0);
 end;

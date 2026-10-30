@@ -33,9 +33,42 @@ type
     { Each classic name has its pointer alias, and it is the same type as
       the pointer to the modern name it maps to. }
     procedure TestPointerAliases;
+    { The names that were builtins until type standardisation Phase 6
+      (Integer, Cardinal, SmallInt, Word, QWord, PtrUInt, Single, Double) are
+      declared here at their widths, with their pointer aliases. }
+    procedure TestRetiredBuiltins_AreTheirWidths;
   end;
 
 implementation
+
+procedure TClassicPascalTypesTests.TestRetiredBuiltins_AreTheirWidths;
+var
+  I: Integer;
+  I32: Int32;
+  C: Cardinal;
+  U32: UInt32;
+  D: Double;
+  F64: Float64;
+  P: PInteger;
+  Q: PInt32;
+begin
+  AssertEquals('Integer', 4, SizeOf(Integer));
+  AssertEquals('Cardinal', 4, SizeOf(Cardinal));
+  AssertEquals('SmallInt', 2, SizeOf(SmallInt));
+  AssertEquals('Word', 2, SizeOf(Word));
+  AssertEquals('QWord', 8, SizeOf(QWord));
+  AssertEquals('PtrUInt', SizeOf(Pointer), SizeOf(PtrUInt));
+  AssertEquals('Single', 4, SizeOf(Single));
+  AssertEquals('Double', 8, SizeOf(Double));
+  I := -7; I32 := I; I := I32;
+  AssertEquals('Integer is Int32', -7, I);
+  C := 4294967295; U32 := C; C := U32;
+  AssertTrue('Cardinal is UInt32', C = 4294967295);
+  D := 1.5; F64 := D; D := F64;
+  AssertTrue('Double is Float64', D = 1.5);
+  Q := @I32; P := Q; Q := P;
+  AssertTrue('PInteger is PInt32', Q^ = -7);
+end;
 
 procedure TClassicPascalTypesTests.TestWidths;
 begin

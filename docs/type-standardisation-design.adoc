@@ -596,7 +596,18 @@ The announcement in discussion #106 is revised on the following points:
   in 16 bits; an arm64 conditional branch beyond its reach wrapped; a
   warm build failed to link after another unit stopped using a generic
   instance; data directives and object-file fields truncated a value too
-  wide for them.  Next: Phase 6.
+  wide for them.
+
+| 6
+| 6.1: the compiler's and stdlib's test programs decided per site, with
+  the tests that exercise a classic name kept on it.  6.2: `Integer`,
+  `Cardinal`, `SmallInt`, `Word`, `QWord`, `PtrUInt`, `Single`, `Double`
+  and their pointer types removed as builtins and added to
+  `ClassicPascalTypes`; diagnostics, mangled names and OPDF print the
+  fixed-width spellings; an unknown classic name gets the D11 error.
+  Found on the way: a generic receiver or a generic routine whose type
+  argument is an alias instantiated a second, differently named copy.
+  Next: Phase 7.
 |===
 
 [#timeline]
@@ -739,6 +750,8 @@ Done 2026-10-30.
   `ClassicPascalTypes` in the same commit; rename the canonical display
   names to the fixed-width spellings. External code uses
   `ClassicPascalTypes`. Unknown classic names produce the D11 error message.
+
+Done 2026-10-30.
 
 *Phase 7 — post-flip cleanup.*
 

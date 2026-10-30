@@ -2298,12 +2298,12 @@ var
   VarRecDesc:       TRecordTypeDesc;
 begin
   { Primitive types }
-  FTypeInteger  := NewType(tyInteger,  'Integer');
+  FTypeInteger  := NewType(tyInteger,  'Int32');
   FTypeInt64    := NewType(tyInt64,    'Int64');
   FTypeUInt32   := NewType(tyUInt32,   'UInt32');
   FTypeUInt64   := NewType(tyUInt64,   'UInt64');
-  FTypeSmallInt := NewType(tySmallInt, 'SmallInt');
-  FTypeWord     := NewType(tyWord,     'Word');
+  FTypeSmallInt := NewType(tySmallInt, 'Int16');
+  FTypeWord     := NewType(tyWord,     'UInt16');
   FTypeByte     := NewType(tyByte,     'Byte');
   FTypeInt8 := NewType(tyInt8, 'Int8');
   FTypeBoolean := NewType(tyBoolean, 'Boolean');
@@ -2312,21 +2312,18 @@ begin
   FTypeNil     := NewType(tyNil,     'nil');
   FTypePointer := NewPointerType('Pointer', nil);  { untyped pointer }
   FTypePChar   := NewType(tyPChar, 'PChar');
-  FTypeDouble  := NewType(tyDouble, 'Double');
-  FTypeSingle  := NewType(tySingle, 'Single');
+  FTypeDouble  := NewType(tyDouble, 'Float64');
+  FTypeSingle  := NewType(tySingle, 'Float32');
 
-  { Register type names as skType symbols in global scope }
-  Define(TSymbol.Create('Integer', skType, FTypeInteger));
+  { Register type names as skType symbols in global scope.  The classic
+    names (Integer, Cardinal, SmallInt, Word, QWord, PtrUInt, Single, Double)
+    are not builtins: ClassicPascalTypes provides them for ported code
+    (docs/type-standardisation-design.adoc, D8 and D11). }
   Define(TSymbol.Create('Int64',   skType, FTypeInt64));
   Define(TSymbol.Create('UInt32',  skType, FTypeUInt32));
-  Define(TSymbol.Create('Cardinal', skType, FTypeUInt32));  { FPC/Delphi alias }
   Define(TSymbol.Create('UInt64',  skType, FTypeUInt64));
-  Define(TSymbol.Create('QWord',   skType, FTypeUInt64));   { FPC alias }
-  Define(TSymbol.Create('PtrUInt', skType, FTypeUInt64));   { pointer-sized unsigned on 64-bit }
-  Define(TSymbol.Create('SmallInt', skType, FTypeSmallInt));
-  Define(TSymbol.Create('Int16',    skType, FTypeSmallInt));  { Delphi alias }
-  Define(TSymbol.Create('Word',     skType, FTypeWord));
-  Define(TSymbol.Create('UInt16',   skType, FTypeWord));      { Delphi alias }
+  Define(TSymbol.Create('Int16',    skType, FTypeSmallInt));
+  Define(TSymbol.Create('UInt16',   skType, FTypeWord));
   Define(TSymbol.Create('Byte',    skType, FTypeByte));
   Define(TSymbol.Create('Int8',    skType, FTypeInt8));
   Define(TSymbol.Create('Boolean', skType, FTypeBoolean));
@@ -2334,14 +2331,11 @@ begin
   Define(TSymbol.Create('Pointer', skType, FTypePointer));
   Define(TSymbol.Create('PChar',   skType, FTypePChar));
   Define(TSymbol.Create('TClass',  skType, FTypePointer));  { class metareference; placeholder until tyMetaClass lands }
-  Define(TSymbol.Create('Double',  skType, FTypeDouble));
-  Define(TSymbol.Create('Single',  skType, FTypeSingle));
 
-  { The platform-honest names (docs/type-standardisation-design.adoc).  Each
-    is a transparent alias -- the very same TTypeDesc as the type it names,
-    so the two spellings are one type for assignment, overloading and
-    generics alike.  Int / UInt are pointer-sized (64-bit on every current
-    target); Float is always Float64, never platform-sized. }
+  { The pointer-sized and float names (docs/type-standardisation-design.adoc).
+    Int / UInt are pointer-sized (64-bit on every current target) and name
+    the same descriptor as Int64 / UInt64; Float is always Float64, never
+    platform-sized; UInt8 is Byte. }
   Define(TSymbol.Create('Int',     skType, FTypeInt64));
   Define(TSymbol.Create('UInt',    skType, FTypeUInt64));
   Define(TSymbol.Create('Int32',   skType, FTypeInteger));
@@ -2351,24 +2345,22 @@ begin
   Define(TSymbol.Create('Float64', skType, FTypeDouble));
 
   { System's pointer aliases: P + each builtin type name.  Each is the same
-    type as its ^Base form, so PInteger and ^Integer interchange freely, and
-    the aliases of one type (PInteger, PInt32) share one descriptor.  A unit
-    or program may still declare its own same-named alias (see
-    DefinePointerAliases).  The classic names among them (PInteger, PCardinal,
-    PSmallInt, PWord, PQWord, PPtrUInt, PSingle, PDouble) move to
-    ClassicPascalTypes together with their base names when those builtins are
-    retired (docs/type-standardisation-design.adoc, D8). }
-  DefinePointerAliases(['PInt32', 'PInteger'], FTypeInteger);
-  DefinePointerAliases(['PUInt32', 'PCardinal'], FTypeUInt32);
+    type as its ^Base form, so PInt32 and ^Int32 interchange freely, and the
+    aliases of one type (PInt64, PInt) share one descriptor.  A unit or
+    program may still declare its own same-named alias (see
+    DefinePointerAliases).  The classic ones (PInteger, PCardinal, ...) are
+    ClassicPascalTypes', with their base names. }
+  DefinePointerAliases(['PInt32'], FTypeInteger);
+  DefinePointerAliases(['PUInt32'], FTypeUInt32);
   DefinePointerAliases(['PInt64', 'PInt'], FTypeInt64);
-  DefinePointerAliases(['PUInt64', 'PUInt', 'PQWord', 'PPtrUInt'], FTypeUInt64);
-  DefinePointerAliases(['PInt16', 'PSmallInt'], FTypeSmallInt);
-  DefinePointerAliases(['PUInt16', 'PWord'], FTypeWord);
+  DefinePointerAliases(['PUInt64', 'PUInt'], FTypeUInt64);
+  DefinePointerAliases(['PInt16'], FTypeSmallInt);
+  DefinePointerAliases(['PUInt16'], FTypeWord);
   DefinePointerAliases(['PUInt8', 'PByte'], FTypeByte);
   DefinePointerAliases(['PInt8'], FTypeInt8);
   DefinePointerAliases(['PBoolean'], FTypeBoolean);
-  DefinePointerAliases(['PFloat64', 'PFloat', 'PDouble'], FTypeDouble);
-  DefinePointerAliases(['PFloat32', 'PSingle'], FTypeSingle);
+  DefinePointerAliases(['PFloat64', 'PFloat'], FTypeDouble);
+  DefinePointerAliases(['PFloat32'], FTypeSingle);
   DefinePointerAliases(['PPointer'], FTypePointer);
   DefinePointerAliases(['PPChar'], FTypePChar);
 
@@ -2449,8 +2441,8 @@ begin
   Define(Sym);
 
   { Platform constants — values derived from the compilation target (GTarget).
-    Defined in system.pas; pre-seeded here so they resolve even before
-    system.pas is loaded as a unit. }
+    They belong to the implicit System unit, which has no source file: its
+    symbols are defined here. }
   Sym := TSymbol.Create('LineEnding', skConstant, FTypeString);
   Sym.ConstString := TargetLineEnding(GTarget);
   Define(Sym);

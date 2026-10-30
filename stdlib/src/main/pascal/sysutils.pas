@@ -12,8 +12,8 @@ unit SysUtils;
 //
 // Provides the Exception base class and the BoolToStr helper.
 //
-// Platform constants (LineEnding, DirectorySeparator, PathSeparator) are
-// defined in system.pas — they are platform fundamentals, not SysUtils
+// Platform constants (LineEnding, DirectorySeparator, PathSeparator) belong
+// to the implicit System unit — they are platform fundamentals, not SysUtils
 // concerns.  Blaise does not carry the Delphi/FPC legacy aliases
 // (sLineBreak, PathDelim).
 //

@@ -373,20 +373,20 @@ procedure TE2ETypeStdTests.TestRun_NarrowArg_ReachesClosestOverload;
 const
   Src = '''
     program P;
-    procedure A(X: Int32); overload; begin WriteLn('Integer') end;
+    procedure A(X: Int32); overload; begin WriteLn('Int32') end;
     procedure A(X: Int64); overload; begin WriteLn('Int64') end;
-    procedure A(X: Float64); overload; begin WriteLn('Double') end;
-    procedure W(X: UInt16); overload; begin WriteLn('Word') end;
-    procedure W(X: Int16); overload; begin WriteLn('SmallInt') end;
+    procedure A(X: Float64); overload; begin WriteLn('Float64') end;
+    procedure W(X: UInt16); overload; begin WriteLn('UInt16') end;
+    procedure W(X: Int16); overload; begin WriteLn('Int16') end;
     procedure L(X: Int64); overload; begin WriteLn('Int64') end;
-    procedure L(X: Float64); overload; begin WriteLn('Double') end;
+    procedure L(X: Float64); overload; begin WriteLn('Float64') end;
     type
       TC = class
         procedure B(X: Int64); overload;
         procedure B(X: Int32); overload;
       end;
     procedure TC.B(X: Int64); begin WriteLn('m Int64') end;
-    procedure TC.B(X: Int32); begin WriteLn('m Integer ', X) end;
+    procedure TC.B(X: Int32); begin WriteLn('m Int32 ', X) end;
     var
       V8: Int8; VB: Byte; VS: Int16; VI: Int32; O: TC;
     begin
@@ -402,8 +402,8 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
-    'Integer' + #10 + 'Integer' + #10 + 'Integer' + #10 +
-    'Word' + #10 + 'Int64' + #10 + 'm Integer -1' + #10, 0);
+    'Int32' + #10 + 'Int32' + #10 + 'Int32' + #10 +
+    'UInt16' + #10 + 'Int64' + #10 + 'm Int32 -1' + #10, 0);
 end;
 
 procedure TE2ETypeStdTests.TestRun_Format_U_Unsigned;
@@ -437,7 +437,7 @@ const
     program P;
     const
       N = 42;
-    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Int32 ', X) end;
     procedure F(X: Int64); overload; begin WriteLn('Int64 ', X) end;
     procedure G(X: Byte); begin WriteLn('Byte ', X) end;
     var
@@ -465,10 +465,10 @@ begin
     '8' + #10 +
     '2147483648' + #10 +
     '9223372036854775807' + #10 +
-    'Integer 7' + #10 +
+    'Int32 7' + #10 +
     'Byte 200' + #10 +
     '256' + #10 +
-    'Integer 2147483647' + #10 +
+    'Int32 2147483647' + #10 +
     'True' + #10, 0);
 end;
 
@@ -480,9 +480,9 @@ const
       Buckets = 4096;
     procedure Q(X: UInt64); begin WriteLn('Q ', X) end;
     procedure F(X: Byte); overload; begin WriteLn('Byte ', X) end;
-    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Int32 ', X) end;
     procedure Pair(const S: string; A, B: Int32); overload;
-    begin WriteLn(S, ' Integer ', A + B) end;
+    begin WriteLn(S, ' Int32 ', A + B) end;
     procedure Pair(const S: string; A, B: Int64); overload;
     begin WriteLn(S, ' Int64 ', A + B) end;
     procedure Tags(const Args: array of const);
@@ -518,9 +518,9 @@ begin
     '1 1 3' + #10 +
     'Q 5' + #10 +
     'Q 4096' + #10 +
-    'Integer 5' + #10 +
-    'Integer 300' + #10 +
-    'mixed Integer 8' + #10 +
+    'Int32 5' + #10 +
+    'Int32 300' + #10 +
+    'mixed Int32 8' + #10 +
     '42 -1 4096 tag16 ' + #10 +
     'True True True True' + #10, 0);
 end;
@@ -588,7 +588,7 @@ const
     type
       TE = (eA, eB, eC);
       TN = (nNeg = -3, nZero = 0);
-    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Int32 ', X) end;
     procedure F(X: Int64); overload; begin WriteLn('Int64 ', X) end;
     procedure OA(const X: array of Int32);
     begin
@@ -658,7 +658,7 @@ begin
     'Int64 1' + #10 +
     'Int64 3' + #10 +
     'Int64 2' + #10 +
-    'Integer 2147483647' + #10 +
+    'Int32 2147483647' + #10 +
     '-5000000000' + #10 +
     'ello' + #10 +
     '4' + #10 +

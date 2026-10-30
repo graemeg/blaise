@@ -154,7 +154,7 @@ begin
   AssertEquals('within', 0.1 + 0.2, 0.3, 1e-9);
   AssertEquals(3.14159, 3.1416, 0.001);
   S := 2.5;
-  AssertEquals('a Single widens', 2.5, S, 0.0);
+  AssertEquals('a Float32 widens', 2.5, S, 0.0);
   Zero := 0.0;
   Inf := 1.0 / Zero;
   AssertEquals('an infinity matches itself', Inf, Inf, 0.0);

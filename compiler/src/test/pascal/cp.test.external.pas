@@ -397,7 +397,7 @@ end;
 
 procedure TExternalTests.TestCodegen_ExternalWordReturn_MaskedToLow16;
 begin
-  AssertEquals('Word FFI return zero-extended from 16 bits', '', AsmMissing(
+  AssertEquals('UInt16 FFI return zero-extended from 16 bits', '', AsmMissing(
     '''
         program Test;
         function Foo: UInt16; external;
@@ -412,7 +412,7 @@ end;
 
 procedure TExternalTests.TestCodegen_ExternalSmallIntReturn_SignExtendedFromLow16;
 begin
-  AssertEquals('SmallInt FFI return sign-extended from 16 bits', '', AsmMissing(
+  AssertEquals('Int16 FFI return sign-extended from 16 bits', '', AsmMissing(
     '''
         program Test;
         function Foo: Int16; external;
@@ -444,17 +444,17 @@ begin
   { Full-width returns need no narrow fix-up. }
   X86 := GenAsm(Src, TargetX86_64);
   A64 := GenAsm(Src, TargetArm64);
-  AssertTrue('x86-64: Integer FFI return not narrowed',
+  AssertTrue('x86-64: Int32 FFI return not narrowed',
     (Pos('movzbq', X86) < 0) and (Pos('movzwq', X86) < 0) and
     (Pos('movswq', X86) < 0));
-  AssertTrue('arm64: Integer FFI return not narrowed',
+  AssertTrue('arm64: Int32 FFI return not narrowed',
     (Pos('x0, #56', A64) < 0) and (Pos('x0, #48', A64) < 0));
 end;
 
 procedure TExternalTests.TestCodegen_ExternalSingleParam_DoubleArgNarrowed;
 begin
   { Double literal narrowed to single before the call. }
-  AssertEquals('Double-typed arg narrowed to Single before the FFI call', '',
+  AssertEquals('Float64-typed arg narrowed to Float32 before the FFI call', '',
     AsmMissing(
     '''
         program Test;
@@ -514,7 +514,7 @@ begin
   AssertTrue('x86-64: second eightbyte loaded', Pos('movl 8(%rcx), %eax', X86) >= 0);
   AssertTrue('x86-64: the eightbytes land in rdi and rsi',
     (Pos('movq 0(%rsp), %rdi', X86) >= 0) and (Pos('movq 8(%rsp), %rsi', X86) >= 0));
-  AssertTrue('x86-64: the Integer follows in rdx', Pos('%rdx', X86) >= 0);
+  AssertTrue('x86-64: the Int32 follows in rdx', Pos('%rdx', X86) >= 0);
   AssertTrue('arm64: both halves loaded',
     Pos('ldr x0, [x9, #8]', GenAsm(Src, TargetArm64)) >= 0);
 end;

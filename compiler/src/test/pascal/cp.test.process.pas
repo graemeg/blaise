@@ -261,7 +261,7 @@ begin
   SA.Analyse(Prog);
   SA.Free();
   Ass := TAssignment(Prog.Block.Stmts[1]);
-  AssertEquals('ProcessExitCode returns Integer',
+  AssertEquals('ProcessExitCode returns Int32',
     Ord(tyInteger), Ord(Ass.Expr.ResolvedType.Kind));
   Prog.Free();
 end;

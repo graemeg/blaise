@@ -143,7 +143,7 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertSame('SmallInt and Int16 share descriptor',
+    AssertSame('Int16 and Int16 share descriptor',
       TVarDecl(Prog.Block.Decls.Items[0]).ResolvedType,
       TVarDecl(Prog.Block.Decls.Items[1]).ResolvedType);
   finally
@@ -164,7 +164,7 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertSame('Word and UInt16 share descriptor',
+    AssertSame('UInt16 and UInt16 share descriptor',
       TVarDecl(Prog.Block.Decls.Items[0]).ResolvedType,
       TVarDecl(Prog.Block.Decls.Items[1]).ResolvedType);
   finally
@@ -481,7 +481,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcImplicitSelfSmallIntFields, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
-  AssertEquals('SmallInt sign-extend + Word zero-extend',
+  AssertEquals('Int16 sign-extend + UInt16 zero-extend',
     '-1000' + LE + '60000' + LE, Output);
 end;
 

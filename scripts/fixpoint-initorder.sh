@@ -74,7 +74,7 @@ unit reg;
 interface
 uses Generics.Collections;
 procedure Register(const AName: string);
-function Count: Integer;
+function Count: Int;
 implementation
 var
   GItems: TList<string>;
@@ -82,7 +82,7 @@ procedure Register(const AName: string);
 begin
   GItems.Add(AName);
 end;
-function Count: Integer;
+function Count: Int;
 begin
   Result := GItems.Count;
 end;

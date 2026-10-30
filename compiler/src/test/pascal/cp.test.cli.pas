@@ -378,7 +378,7 @@ begin
   AssertTrue('the compile fails: ' + Out_, EC <> 0);
   AssertTrue('names both parameter lists: ' + Out_,
     Pos('Implementation of ''Foo'' does not match its declaration at ' +
-      'line 3: declared (Integer), implemented (Byte)', Out_) >= 0);
+      'line 3: declared (Int32), implemented (Byte)', Out_) >= 0);
   AssertTrue('points at the implementation: ' + Out_,
     Pos('at line 5 col 1 in uimpl215', Out_) >= 0);
 end;

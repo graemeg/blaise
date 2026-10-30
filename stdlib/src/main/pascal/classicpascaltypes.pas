@@ -24,17 +24,24 @@
               intermediate precision computes in 64-bit here.
     Real      is Float64 (it already is, in practice, in FPC and Delphi).
 
-  Integer, Cardinal, SmallInt, Word, QWord, PtrUInt, Single and Double are
-  still builtin names, so they are not declared here, nor are their pointer
-  aliases (PInteger, PCardinal, ...), which System provides; they move into
-  this unit when the builtins are retired.  See
-  docs/type-standardisation-design.adoc. }
+  Integer, Cardinal, SmallInt, Word, QWord, PtrUInt, Single and Double were
+  builtin names until type standardisation Phase 6; they and their pointer
+  aliases (PInteger, PCardinal, ...) are declared here now, like the rest.
+  See docs/type-standardisation-design.adoc. }
 
 unit ClassicPascalTypes;
 
 interface
 
 type
+  Integer = Int32;
+  Cardinal = UInt32;
+  SmallInt = Int16;
+  Word = UInt16;
+  QWord = UInt64;
+  PtrUInt = UInt;
+  Single = Float32;
+  Double = Float64;
   ShortInt = Int8;
   LongInt = Int32;
   LongWord = UInt32;
@@ -47,6 +54,14 @@ type
 
   { Their pointer aliases -- each the same type as the pointer to the Blaise
     type it maps to (PLongInt is ^Int32, so it is System's PInt32). }
+  PInteger = ^Integer;
+  PCardinal = ^Cardinal;
+  PSmallInt = ^SmallInt;
+  PWord = ^Word;
+  PQWord = ^QWord;
+  PPtrUInt = ^PtrUInt;
+  PSingle = ^Single;
+  PDouble = ^Double;
   PShortInt = ^ShortInt;
   PLongInt = ^LongInt;
   PLongWord = ^LongWord;

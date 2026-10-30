@@ -148,7 +148,7 @@ begin
   Prog := AnalyseSrc(Src);
   try
     T := TVarDecl(Prog.Block.Decls.Items[0]).ResolvedType;
-    AssertTrue('QWord resolves',      T <> nil);
+    AssertTrue('UInt64 resolves',      T <> nil);
     AssertEquals('Kind = tyUInt64', Ord(tyUInt64), Ord(T.Kind));
   finally
     Prog.Free();
@@ -169,7 +169,7 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertSame('UInt64 and QWord share one descriptor',
+    AssertSame('UInt64 and UInt64 share one descriptor',
       TVarDecl(Prog.Block.Decls.Items[0]).ResolvedType,
       TVarDecl(Prog.Block.Decls.Items[1]).ResolvedType);
   finally
@@ -190,7 +190,7 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertEquals('PtrUInt has Kind=tyUInt64', Ord(tyUInt64),
+    AssertEquals('UInt64 has Kind=tyUInt64', Ord(tyUInt64),
       Ord(TVarDecl(Prog.Block.Decls.Items[0]).ResolvedType.Kind));
   finally
     Prog.Free();

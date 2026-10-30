@@ -1207,7 +1207,7 @@ var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcMultiTypeBlock, Output, RCode));
-  AssertEquals('TCounter(3).Double = 6', '6', Trim(Output));
+  AssertEquals('TCounter(3).Float64 = 6', '6', Trim(Output));
 end;
 
 procedure TE2EClasses2Tests.TestRun_ForwardClass_CaseDifferentSpelling_RunsClean;
@@ -3045,7 +3045,7 @@ begin
     Integer->Single, where the native backend had stored a Double into the
     4-byte Single slot. }
   AssertTrue('compile+run', CompileAndRun(SrcIntToFloatField, Output, RCode));
-  AssertEquals('Int64/Integer→float field stores convert',
+  AssertEquals('Int64/Int32→float field stores convert',
     '7' + LE + '42' + LE + '5' + LE + '9', Trim(Output));
 end;
 

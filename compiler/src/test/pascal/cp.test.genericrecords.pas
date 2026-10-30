@@ -295,7 +295,7 @@ begin
   Prog := AnalyseSrc(SrcGenericRecordVarInteger);
   try
     AssertNotNull('type exists',
-      Prog.SymbolTable.FindType('TMyVal<Integer>'));
+      Prog.SymbolTable.FindType('TMyVal<Int32>'));
   finally
     Prog.Free();
   end;
@@ -309,7 +309,7 @@ var
 begin
   Prog := AnalyseSrc(SrcGenericRecordVarInteger);
   try
-    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TMyVal<Integer>'));
+    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TMyVal<Int32>'));
     AssertNotNull('RT exists', RT);
     FI := RT.FindField('Value');
     AssertNotNull('Value field exists', FI);
@@ -345,9 +345,9 @@ var
 begin
   Prog := AnalyseSrc(SrcGenericRecordTwoParamVar);
   try
-    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TPair<string,Integer>'));
+    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TPair<string,Int32>'));
     if RT = nil then
-      RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TPair<string, Integer>'));
+      RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TPair<string, Int32>'));
     AssertNotNull('RT exists', RT);
     FI0 := RT.FindField('Key');
     FI1 := RT.FindField('Val');
@@ -367,7 +367,7 @@ var
 begin
   Prog := AnalyseSrc(SrcGenericRecordVarInteger);
   try
-    TD := Prog.SymbolTable.FindType('TMyVal<Integer>');
+    TD := Prog.SymbolTable.FindType('TMyVal<Int32>');
     AssertNotNull('type exists', TD);
     AssertTrue('kind is tyRecord', TD.Kind = tyRecord);
   finally

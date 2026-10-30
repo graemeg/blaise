@@ -1655,6 +1655,33 @@ begin
   inherited Destroy();
 end;
 
+{ D11: when a message reports an unknown type or identifier that is a classic
+  Pascal type name, the guidance to append -- the width-stating name to use,
+  or the ClassicPascalTypes unit that still provides it; '' otherwise. }
+function ClassicTypeHint(const AMsg: string): string;
+const
+  Names: array[0..16] of string = ('Integer', 'Cardinal', 'SmallInt',
+    'ShortInt', 'Word', 'LongInt', 'LongWord', 'QWord', 'NativeInt',
+    'NativeUInt', 'PtrInt', 'PtrUInt', 'Single', 'Double', 'Real',
+    'Extended', 'Comp');
+  Use: array[0..16] of string = ('Int32 (or Int for counts and indices)',
+    'UInt32', 'Int16', 'Int8', 'UInt16', 'Int32', 'UInt32', 'UInt64', 'Int',
+    'UInt', 'Int', 'UInt', 'Float32', 'Float64', 'Float64', 'Float64',
+    'Int64');
+var
+  I: Int;
+begin
+  Result := '';
+  if (Pos('Unknown type ''', AMsg) < 0) and
+     (Pos('Undeclared identifier ''', AMsg) < 0) then
+    Exit;
+  for I := 0 to High(Names) do
+    if (Pos('''' + Names[I] + '''', AMsg) >= 0) or
+       (Pos('''' + LowerCase(Names[I]) + '''', LowerCase(AMsg)) >= 0) then
+      Exit(Format(' (''%s'' is not a builtin type: use %s, or add uses ' +
+        'ClassicPascalTypes)', [Names[I], Use[I]]));
+end;
+
 procedure TSemanticAnalyser.SemanticError(const AMsg: string; ALine, ACol: Int);
 var
   Msg: string;
@@ -1669,6 +1696,7 @@ begin
   { Not cleared here: a probe whose error is caught must not erase the note
     before the real error is raised.  The hint is only added when the message
     names the hidden symbol, so a stale note is harmless. }
+  Msg := Msg + ClassicTypeHint(Msg);
   if FCurrentUnitName <> '' then
     raise ESemanticError.Create(Format('%s at line %d col %d in %s', [Msg, ALine, ACol, FCurrentUnitName]))
   else
@@ -13767,7 +13795,7 @@ begin
       begin
         SynthDecl := TVarDecl.Create();
         SynthDecl.Names.Add(ForInS.IdxVarName);
-        SynthDecl.TypeName    := 'Integer';
+        SynthDecl.TypeName    := 'Int32';
         SynthDecl.ResolvedType := FTable.TypeInteger;
         SynthDecl.IsGlobal    := False;
         FCurrentLocalBlock.Decls.Add(SynthDecl);
@@ -13879,7 +13907,7 @@ begin
       if (VarSym.TypeDesc.Kind <> tyByte) and
          (VarSym.TypeDesc.Kind <> tyInteger) then
         SemanticError(
-          Format('for-in over string: loop variable ''%s'' must be Byte or Integer',
+          Format('for-in over string: loop variable ''%s'' must be Byte or Int32',
             [ForInS.VarName]),
           ForInS.Line, ForInS.Col);
       ForInS.VarIsGlobal := VarSym.IsGlobal;
@@ -13912,7 +13940,7 @@ begin
         begin
           SynthDecl := TVarDecl.Create();
           SynthDecl.Names.Add(ForInS.AdvVarName);
-          SynthDecl.TypeName    := 'Integer';
+          SynthDecl.TypeName    := 'Int32';
           SynthDecl.ResolvedType := FTable.TypeInteger;
           SynthDecl.IsGlobal    := False;
           FCurrentLocalBlock.Decls.Add(SynthDecl);
@@ -13968,7 +13996,7 @@ begin
         end
         else
         begin
-          SynthDecl.TypeName    := 'Integer';
+          SynthDecl.TypeName    := 'Int32';
           SynthDecl.ResolvedType := FTable.TypeInteger;
         end;
         SynthDecl.IsGlobal    := False;
@@ -13976,7 +14004,7 @@ begin
 
         SynthDecl := TVarDecl.Create();
         SynthDecl.Names.Add(ForInS.IdxVarName);
-        SynthDecl.TypeName    := 'Integer';
+        SynthDecl.TypeName    := 'Int32';
         SynthDecl.ResolvedType := FTable.TypeInteger;
         SynthDecl.IsGlobal    := False;
         FCurrentLocalBlock.Decls.Add(SynthDecl);
@@ -16739,7 +16767,7 @@ begin
       tySingle:
         SemanticError(
           Format('varargs argument %d of ''%s'': C promotes float to ' +
-            'double — pass Double(...) explicitly', [I + 1, AName]),
+            'double — pass Float64(...) explicitly', [I + 1, AName]),
           ALine, ACol);
       tyString:
         SemanticError(
@@ -18478,26 +18506,6 @@ begin
           [ArgType.Name]),
         AExpr.Line, AExpr.Col);
     Result := FTable.TypePointer;
-    AExpr.ResolvedType := Result;
-    Exit;
-  end;
-
-  { PtrUInt(intOrPtrExpr) — reinterpret any integer or pointer value as
-    a pointer-sized unsigned integer (UInt64 on 64-bit targets).  The
-    primary use is arithmetic on pointer values without signed overflow. }
-  if SameText(AExpr.Name, 'PtrUInt') then
-  begin
-    if AExpr.Args.Count <> 1 then
-      SemanticError('PtrUInt cast requires exactly one argument', AExpr.Line, AExpr.Col);
-    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
-    if not (ArgType.Kind in [tyInteger, tyInt64, tyUInt64, tyUInt32, tyByte,
-                              tyInt8, tySmallInt, tyWord, tyPointer, tyPChar, tyString,
-                              tyClass, tyNil]) then
-      SemanticError(
-        Format('PtrUInt cast requires an integer, pointer, or class expression, got ''%s''',
-          [ArgType.Name]),
-        AExpr.Line, AExpr.Col);
-    Result := FTable.TypeUInt64;
     AExpr.ResolvedType := Result;
     Exit;
   end;
@@ -22219,7 +22227,7 @@ begin
       AExpr.Line, AExpr.Col);
   if TPointerTypeDesc(PtrType).BaseType = nil then
     SemanticError(
-      'Cannot dereference untyped ''Pointer'' — use a typed pointer (e.g. ^Integer)',
+      'Cannot dereference untyped ''Pointer'' — use a typed pointer (e.g. ^Int32)',
       AExpr.Line, AExpr.Col);
   Result := TPointerTypeDesc(PtrType).BaseType;
 end;
@@ -23989,7 +23997,7 @@ begin
       AStmt.Line, AStmt.Col);
   if TPointerTypeDesc(PtrType).BaseType = nil then
     SemanticError(
-      'Cannot write through untyped ''Pointer'' — use a typed pointer (e.g. ^Integer)',
+      'Cannot write through untyped ''Pointer'' — use a typed pointer (e.g. ^Int32)',
       AStmt.Line, AStmt.Col);
   AStmt.BaseTy := TPointerTypeDesc(PtrType).BaseType;
   ValType := AnalyseExprHinted(AStmt.ValExpr, AStmt.BaseTy);

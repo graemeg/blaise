@@ -212,7 +212,7 @@ begin
       ''');
   Assn := TAssignment(Prog.Block.Stmts[1]);
   AssertTrue('RHS is TNotExpr', Assn.Expr is TNotExpr);
-  AssertEquals('type is Integer', 'Integer',
+  AssertEquals('type is Integer', 'Int32',
     TNotExpr(Assn.Expr).ResolvedType.Name);
 end;
 

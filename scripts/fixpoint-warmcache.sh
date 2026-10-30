@@ -208,10 +208,10 @@ unit GBFDep;
 interface
 type
   TGBFBox<T> = class
-    function Tag(): Integer;
+    function Tag(): Int;
   end;
 implementation
-function TGBFBox<T>.Tag(): Integer;
+function TGBFBox<T>.Tag(): Int;
 begin
   Result := 111
 end;
@@ -225,13 +225,13 @@ EOF
 cat > "$GWORK/src/gbfuser.pas" <<'EOF'
 unit GBFUser;
 interface
-function Run(): Integer;
+function Run(): Int;
 implementation
 uses GBFDep;
-function Run(): Integer;
-var B: TGBFBox<Integer>;
+function Run(): Int;
+var B: TGBFBox<Int>;
 begin
-  B := TGBFBox<Integer>.Create();
+  B := TGBFBox<Int>.Create();
   Result := B.Tag();
   B.Free()
 end;
@@ -310,9 +310,9 @@ mkdir -p "$IWORK/src" "$IWORK/cache"
 cat > "$IWORK/src/ioleaf.pas" <<'EOF'
 unit IOLeaf;
 interface
-function LeafVal: Integer;
+function LeafVal: Int;
 implementation
-function LeafVal: Integer;
+function LeafVal: Int;
 begin
   Result := 42
 end;
@@ -321,10 +321,10 @@ EOF
 cat > "$IWORK/src/iohelper.pas" <<'EOF'
 unit IOHelper;
 interface
-function HelperVal: Integer;
+function HelperVal: Int;
 implementation
 uses IOLeaf;
-function HelperVal: Integer;
+function HelperVal: Int;
 begin
   Result := LeafVal() + 1
 end;
@@ -333,10 +333,10 @@ EOF
 cat > "$IWORK/src/iomid.pas" <<'EOF'
 unit IOMid;
 interface
-function MidVal: Integer;
+function MidVal: Int;
 implementation
 uses IOHelper;
-function MidVal: Integer;
+function MidVal: Int;
 begin
   Result := HelperVal() + 1
 end;

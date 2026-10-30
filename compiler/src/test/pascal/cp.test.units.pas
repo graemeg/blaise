@@ -47,7 +47,7 @@ type
     procedure TestCodegen_IsAs_QualifiedType_BindsUnitsNamesake;
     { AnalyseUnitForExport -- the path of a unit compiled with the program
       that uses it -- folds variable initialisers: it never analysed them,
-      so 'A: Integer = 2 + 3' or '= K' kept the parser's 0 }
+      so 'A: Int32 = 2 + 3' or '= K' kept the parser's 0 }
     procedure TestSemantic_ExportPathFoldsVarInitialisers;
     procedure TestParse_Unit_Name;
     procedure TestParse_Unit_IntfHasForwardDecls;
@@ -74,7 +74,7 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Unit_OK;
     procedure TestSemantic_Unit_WithType_OK;
-    { Qualified type name 'System.Integer' resolves to the builtin. }
+    { Qualified type name 'System.Int32' resolves to the builtin. }
     procedure TestSemantic_Unit_QualifiedType_OK;
     procedure TestSemantic_Unit_ImplBodyUsesIntfType;
     procedure TestSemantic_Unit_SignatureMismatch_ParamCount_RaisesError;
@@ -235,7 +235,7 @@ const
         ''';
 
   { Qualified type names resolve by their final dotted component through the
-    uses chain.  'System.Integer' needs no cross-unit load — System is
+    uses chain.  'System.Int32' needs no cross-unit load — System is
     implicit and Integer is builtin — so it self-containedly exercises the
     qualifier-stripping type resolver. }
   SrcUnitQualifiedType =

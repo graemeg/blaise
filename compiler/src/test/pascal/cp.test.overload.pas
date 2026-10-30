@@ -26,7 +26,7 @@ type
       methods alike; the message names the argument and both types }
     procedure TestSem_FloatArgForIntegerParam_Rejected;
     { overloads whose parameter types differ only by an alias of the same type
-      (UInt32 / Cardinal) are one signature: rejected at the second
+      (Int64 / Int) are one signature: rejected at the second
       declaration, naming both spellings, instead of reaching the assembler
       as a duplicate label -- standalone, method, unit interface (both
       analysis paths) and unit implementation-only alike }
@@ -481,7 +481,7 @@ const
       ''';
 begin
   AssertEquals('procedure', 0,
-    Pos('Type mismatch in argument 1 of ''P1'': expected ''Integer'' but got ''Double''',
+    Pos('Type mismatch in argument 1 of ''P1'': expected ''Int32'' but got ''Float64''',
       SemanticError(Head + 'P1(D) end.')));
   AssertTrue('float literal',
     Pos('argument 1 of ''P1''', SemanticError(Head + 'P1(2.5) end.')) >= 0);
@@ -491,13 +491,13 @@ begin
     Pos('argument 1 of ''TO1.M''', SemanticError(Head + 'O.M(D) end.')) >= 0);
   AssertTrue('Int64 for UInt64',
     Pos('argument 1 of ''U1''', SemanticError(Head + 'U1(I) end.')) >= 0);
-  AssertEquals('Integer widens to Int64 and Double still', '',
+  AssertEquals('Int32 widens to Int64 and Float64 still', '',
     SemanticError(Head + 'I := F1(3); D := 1 end.'));
 end;
 
 const
   AliasDupMsg = 'has the same parameter signature as the declaration at line';
-  AliasDupPair = '''Cardinal'' and ''UInt32'' are the same type';
+  AliasDupPair = '''Int'' and ''Int64'' are the same type';
 
 { The semantic error raised while analysing AUnitSrc -- through AnalyseUnit
   (separate compilation) when AForExport is False, else through
@@ -522,8 +522,8 @@ var
 begin
   Msg := SemanticError('''
     program p;
-    procedure F(X: UInt32); overload; begin end;
-    procedure F(X: Cardinal); overload; begin end;
+    procedure F(X: Int64); overload; begin end;
+    procedure F(X: Int); overload; begin end;
     begin
     end.
     ''');
@@ -541,8 +541,8 @@ begin
     program p;
     type
       TC = class
-        procedure F(X: UInt32); overload;
-        procedure F(X: Cardinal); overload;
+        procedure F(X: Int64); overload;
+        procedure F(X: Int); overload;
       end;
     procedure TC.F(X: UInt32);
     begin
@@ -560,8 +560,8 @@ const
   Src = '''
     unit ua;
     interface
-    procedure F(X: UInt32); overload;
-    procedure F(X: Cardinal); overload;
+    procedure F(X: Int64); overload;
+    procedure F(X: Int); overload;
     implementation
     procedure F(X: UInt32);
     begin
@@ -709,8 +709,8 @@ begin
     else
       Target := TargetArm64;
     Text := GenAsm(Src, Target);
-    AssertTrue(Target + ' F(Integer) emitted', Pos('F_D_i:', Text) >= 0);
-    AssertTrue(Target + ' F(Integer) emitted once',
+    AssertTrue(Target + ' F(Int32) emitted', Pos('F_D_i:', Text) >= 0);
+    AssertTrue(Target + ' F(Int32) emitted once',
       Pos('F_D_i:', Copy(Text, Pos('F_D_i:', Text) + 1, MaxInt)) < 0);
     AssertTrue(Target + ' F(string) emitted', Pos('F_D_S:', Text) >= 0);
   end;
@@ -739,13 +739,13 @@ const
     begin
     ''';
 begin
-  AssertEquals('Int8 -> Integer', '', SemanticError(Head + 'A(''m'', 1, V8) end.'));
-  AssertEquals('Byte -> Integer', '', SemanticError(Head + 'A(''m'', 1, VB) end.'));
-  AssertEquals('SmallInt -> Integer', '', SemanticError(Head + 'A(''m'', 1, VS) end.'));
-  AssertEquals('Word -> Integer', '', SemanticError(Head + 'A(''m'', VW, VW) end.'));
-  AssertEquals('method: Byte -> Integer', '', SemanticError(Head + 'O.B(VB) end.'));
-  AssertEquals('Byte -> Word over SmallInt', '', SemanticError(Head + 'W(VB) end.'));
-  AssertTrue('Integer to Single or Double stays ambiguous',
+  AssertEquals('Int8 -> Int32', '', SemanticError(Head + 'A(''m'', 1, V8) end.'));
+  AssertEquals('Byte -> Int32', '', SemanticError(Head + 'A(''m'', 1, VB) end.'));
+  AssertEquals('Int16 -> Int32', '', SemanticError(Head + 'A(''m'', 1, VS) end.'));
+  AssertEquals('UInt16 -> Int32', '', SemanticError(Head + 'A(''m'', VW, VW) end.'));
+  AssertEquals('method: Byte -> Int32', '', SemanticError(Head + 'O.B(VB) end.'));
+  AssertEquals('Byte -> UInt16 over Int16', '', SemanticError(Head + 'W(VB) end.'));
+  AssertTrue('Int32 to Float32 or Float64 stays ambiguous',
     Pos('Ambiguous overload', SemanticError(Head + 'F(VI) end.')) >= 0);
 end;
 

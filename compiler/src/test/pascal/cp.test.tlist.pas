@@ -296,7 +296,7 @@ begin
   Prog := AnalyseSrc(SrcSizeOfInteger);
   try
     Assign := TAssignment(Prog.Block.Stmts[0]);
-    AssertEquals('SizeOf(Integer) is Int (D5)',
+    AssertEquals('SizeOf(Int32) is Int (D5)',
       Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     Prog.Free();

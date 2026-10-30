@@ -823,16 +823,16 @@ begin
   if Lo >= 0 then
   begin
     if Hi <= 255 then               Result := 'Byte'
-    else if Hi <= 65535 then        Result := 'Word'
-    else if Hi <= 4294967295 then   Result := 'Cardinal'
+    else if Hi <= 65535 then        Result := 'UInt16'
+    else if Hi <= 4294967295 then   Result := 'UInt32'
     else                            Result := 'UInt64';
   end
   else
   begin
-    { Blaise has no 8-bit signed alias name (no ShortInt), so the narrowest
-      signed alias target is SmallInt (16-bit). }
-    if (Lo >= -32768) and (Hi <= 32767) then        Result := 'SmallInt'
-    else if (Lo >= -2147483648) and (Hi <= 2147483647) then Result := 'Integer'
+    { The narrowest signed target is 16-bit: a signed subrange predates Int8,
+      and moving it to 8 bits would change existing layouts. }
+    if (Lo >= -32768) and (Hi <= 32767) then        Result := 'Int16'
+    else if (Lo >= -2147483648) and (Hi <= 2147483647) then Result := 'Int32'
     else                                            Result := 'Int64';
   end;
 end;

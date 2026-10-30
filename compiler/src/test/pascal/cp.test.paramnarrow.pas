@@ -40,7 +40,7 @@ const
   Src = 'program P; procedure Q(X: Int32); begin WriteLn(X) end; ' +
     'begin Q(1) end.';
 begin
-  AssertEquals('Integer param extended from 32 bits', '',
+  AssertEquals('Int32 param extended from 32 bits', '',
     AsmMissing(Src, 'movl %edi, %r14d', 'sxtw x0, w0'#10#9'stur x0'));
 end;
 

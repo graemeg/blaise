@@ -1761,9 +1761,9 @@ begin
   A := TSemanticAnalyser.Create();
   try
     A.Analyse(Prog);
-    AssertEquals('KF type', 'Double', RhsOf(0).ResolvedType.Name);
+    AssertEquals('KF type', 'Float64', RhsOf(0).ResolvedType.Name);
     AssertEquals('KF text', '2.5', RhsOf(0).ConstString);
-    AssertEquals('KS type', 'Single', RhsOf(1).ResolvedType.Name);
+    AssertEquals('KS type', 'Float32', RhsOf(1).ResolvedType.Name);
     AssertEquals('KSum type (untyped, so Int)', 'Int64', RhsOf(2).ResolvedType.Name);
     AssertEquals('KSum value', 14, Int32(RhsOf(2).ConstValue));
     AssertEquals('KB type', 'Boolean', RhsOf(3).ResolvedType.Name);
@@ -1836,7 +1836,7 @@ begin
     AssertFalse('CreateDefault is not a constructor call',
       RhsOf(1).IsConstructorCall);
     AssertTrue('CreateDefault is a static call', RhsOf(1).IsStaticCall);
-    AssertEquals('CreateCount type', 'Integer', RhsOf(2).ResolvedType.Name);
+    AssertEquals('CreateCount type', 'Int32', RhsOf(2).ResolvedType.Name);
   finally
     A.Free();
     Prog.Free();
@@ -1893,16 +1893,16 @@ const
 begin
   Rejected('program P; type T = class procedure M(A: Int32; B: Byte); end; ' +
     'procedure T.M(A: Byte; B: Int32); begin end; begin end.',
-    'declared (Integer; Byte), implemented (Byte; Integer)');
+    'declared (Int32; Byte), implemented (Byte; Int32)');
   Rejected('program P; type T = class procedure M(var A: Int32); end; ' +
     'procedure T.M(A: Int32); begin end; begin end.',
-    'declared (var Integer), implemented (Integer)');
+    'declared (var Int32), implemented (Int32)');
   Rejected('program P; type T = class procedure M(const S: string); end; ' +
     'procedure T.M(S: string); begin end; begin end.',
     'declared (const string), implemented (string)');
   Rejected('program P; type T = class procedure M(A: Int32); end; ' +
     'procedure T.M; begin end; begin end.',
-    'declared (Integer), implemented ()');
+    'declared (Int32), implemented ()');
   Rejected('program P; type T = class function M: Int32; end; ' +
     'function T.M: string; begin end; begin end.',
     'declared (): Int32, implemented (): string');
@@ -1910,20 +1910,20 @@ begin
     'procedure T.M; begin end; begin end.', 'implemented ()');
   Rejected('program P; type T = class constructor Create(A: Int32); end; ' +
     'constructor T.Create(A: Byte); begin end; begin end.',
-    'declared (Integer), implemented (Byte)');
+    'declared (Int32), implemented (Byte)');
   Rejected('program P; type R = record procedure M(A: Int32); end; ' +
     'procedure R.M(A: Byte); begin end; begin end.',
-    'declared (Integer), implemented (Byte)');
+    'declared (Int32), implemented (Byte)');
   Rejected('program P; procedure Foo(X: Int32); forward; ' +
     'procedure Foo(X: Byte); begin end; begin Foo(1) end.',
-    'declared (Integer), implemented (Byte)');
+    'declared (Int32), implemented (Byte)');
   Rejected('program P; type T<X> = class procedure M(A: X; B: Int32); end; ' +
     'procedure T<X>.M(A: X; B: Byte); begin end; begin end.',
     'declared (X; Int32), implemented (X; Byte)');
   Rejected('program P; type T = class function Pick<X>(A: X; B: Int32): X; ' +
     'end; function T.Pick<X>(A: X; B: Byte): X; begin Result := A end; ' +
     'begin end.', 'declared (X; Int32): X, implemented (X; Byte): X');
-  Accepted('program P; type TI = Integer; T = class ' +
+  Accepted('program P; type TI = Int32; T = class ' +
     'procedure M(A: Int32; const S: string); function F: Int32; end; ' +
     'procedure T.M(X: Int32; const Y: string); begin end; ' +
     'function T.F: TI; begin Result := 1 end; ' +

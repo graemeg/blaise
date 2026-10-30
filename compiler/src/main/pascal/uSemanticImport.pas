@@ -437,7 +437,7 @@ begin
     if CD.IsString then
       Par := ATable.FindType('string')
     else
-      Par := ATable.FindType('Integer');
+      Par := ATable.FindType('Int32');
     { Qualified name only — TFoo.Tag.  This mirrors the from-source
       registration in uSemantic.AnalyseTypeDecls: the bare member name is NOT
       defined globally (it is resolved through the owning type's scope), and
@@ -1350,9 +1350,9 @@ begin
       if Entry.Decl.IsString then
         TypeDesc := ATable.FindType('string')
       else if Entry.Decl.IsFloat then
-        TypeDesc := ATable.FindType('Double')
+        TypeDesc := ATable.FindType('Float64')
       else
-        TypeDesc := ATable.FindType('Integer');
+        TypeDesc := ATable.FindType('Int32');
     end;
 
     Sym := TSymbol.Create(Entry.Decl.Name, skConstant, TypeDesc);

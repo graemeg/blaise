@@ -231,7 +231,7 @@ smoke_test() {
   local d; d="$(mktemp -d)"
   cat > "$d/s.pas" <<'PAS'
 program P;
-var X: Integer;
+var X: Int64;  { the one integer name every Blaise version knows }
 begin
   X := 6 * 7;
   WriteLn(X)

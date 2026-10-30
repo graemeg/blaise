@@ -685,7 +685,7 @@ begin
   try
     RT := TRecordTypeDesc(TVarDecl(Prog.Block.Decls.Items[0]).ResolvedType);
     F  := RT.FindField('B');
-    AssertEquals('Integer after Byte aligns to offset 4', 4, F.Offset);
+    AssertEquals('Int32 after Byte aligns to offset 4', 4, F.Offset);
     AssertEquals('record total size is 8 (1 byte + 3 pad + 4)', 8, RT.TotalSize());
   finally
     Prog.Free();

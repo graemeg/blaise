@@ -1254,7 +1254,7 @@ begin
       { Floating-point constant: emit the 8-byte IEEE-754 Double via GAS
         .double (StrVal holds the raw literal text).  The debugger decodes
         ckReal as a Double. }
-      TypeID  := GetOrAllocTypeID('Double');
+      TypeID  := GetOrAllocTypeID('Float64');
       RecSize := 19 + Length(C.Name);  { 11 fixed + 8 (Double value) + name }
       L('');
       L('    # recConstant: ' + C.Name);

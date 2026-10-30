@@ -710,7 +710,7 @@ end;
 
 procedure TPropertyTests.TestSemantic_FieldSubscript_NonSubscriptable_RaisesError;
 begin
-  AssertTrue('Integer field subscript is rejected',
+  AssertTrue('Int32 field subscript is rejected',
     Pos('cannot be subscripted',
       SemanticError(Format(SrcPropValueHolder, ['I := H.FN[1]']))) >= 0);
   AssertTrue('Integer field-backed property subscript is rejected',
@@ -997,7 +997,7 @@ const
     end.
     ''';
 begin
-  AssertEquals('Double getter called', '',
+  AssertEquals('Float64 getter called', '',
     AsmMissing(Src, 'callq TObj_GetD', 'bl _TObj_GetD'));
 end;
 

@@ -1004,7 +1004,7 @@ begin
     var A: array[Int32, 0..1] of Byte;
     begin end.
     ''');
-  AssertTrue('Integer dimension rejected: ' + Msg,
+  AssertTrue('Int32 dimension rejected: ' + Msg,
     Pos('not a valid array index type', Msg) >= 0);
   Msg := SemanticError('''
     program P;
@@ -1063,7 +1063,7 @@ begin
   try
     CheckDecl(0, 0, 255, 'Byte');
     CheckDecl(1, -128, 127, 'Int8');
-    CheckDecl(2, 0, 65535, 'Word');
+    CheckDecl(2, 0, 65535, 'UInt16');
     CheckDecl(3, -32768, 32767, 'Int16');
   finally
     P.Free();

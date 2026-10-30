@@ -21,48 +21,48 @@ program Phase2Milestone;
 type
   { Base list node: integer value + link to next }
   TNode = class
-    FValue: Integer;
+    FValue: Int;
     FNext:  TNode;
-    function GetTag: Integer; virtual;
-    property Value: Integer read FValue;
+    function GetTag: Int; virtual;
+    property Value: Int read FValue;
     property Next:  TNode   read FNext;
   end;
 
   { Marked node: identical to TNode but GetTag returns 1 instead of 0 }
   TMarkedNode = class(TNode)
-    function GetTag: Integer; override;
+    function GetTag: Int; override;
   end;
 
   { Singly-linked list, push-at-front / pop-from-front }
   TLinkedList = class
     FHead:  TNode;
-    FCount: Integer;
-    procedure Push(Value: Integer);
-    procedure PushMarked(Value: Integer);
-    function  Pop: Integer;
+    FCount: Int;
+    procedure Push(Value: Int);
+    procedure PushMarked(Value: Int);
+    function  Pop: Int;
     procedure Walk;
     procedure Clear;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
     property Head:  TNode   read FHead;
   end;
 
 { ---- TNode ---- }
 
-function TNode.GetTag: Integer;
+function TNode.GetTag: Int;
 begin
   Result := 0
 end;
 
 { ---- TMarkedNode ---- }
 
-function TMarkedNode.GetTag: Integer;
+function TMarkedNode.GetTag: Int;
 begin
   Result := 1
 end;
 
 { ---- TLinkedList ---- }
 
-procedure TLinkedList.Push(Value: Integer);
+procedure TLinkedList.Push(Value: Int);
 var
   N: TNode;
 begin
@@ -73,7 +73,7 @@ begin
   Self.FCount := Self.FCount + 1
 end;
 
-procedure TLinkedList.PushMarked(Value: Integer);
+procedure TLinkedList.PushMarked(Value: Int);
 var
   N: TMarkedNode;
 begin
@@ -84,7 +84,7 @@ begin
   Self.FCount := Self.FCount + 1
 end;
 
-function TLinkedList.Pop: Integer;
+function TLinkedList.Pop: Int;
 var
   N: TNode;
 begin
@@ -131,7 +131,7 @@ end;
 
 var
   List: TLinkedList;
-  V:    Integer;
+  V:    Int;
 
 begin
   List := TLinkedList.Create;

@@ -94,8 +94,8 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    AssertNotNull('Integer type', ST.FindType('Integer'));
-    AssertEquals('Integer kind', Ord(tyInteger), Ord(ST.FindType('Integer').Kind));
+    AssertNotNull('Integer type', ST.FindType('Int32'));
+    AssertEquals('Int32 kind', Ord(tyInteger), Ord(ST.FindType('Int32').Kind));
   finally
     ST.Free();
   end;
@@ -176,7 +176,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    AssertTrue('Integer is numeric', ST.FindType('Integer').IsNumeric());
+    AssertTrue('Int32 is numeric', ST.FindType('Int32').IsNumeric());
   finally
     ST.Free();
   end;
@@ -212,7 +212,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    AssertFalse('Integer IsString', ST.FindType('Integer').IsString());
+    AssertFalse('Int32 IsString', ST.FindType('Int32').IsString());
   finally
     ST.Free();
   end;
@@ -228,10 +228,10 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    AssertNotNull('integer lowercase', ST.FindType('integer'));
-    AssertNotNull('INTEGER uppercase', ST.FindType('INTEGER'));
+    AssertNotNull('int32 lowercase', ST.FindType('int32'));
+    AssertNotNull('INT32 uppercase', ST.FindType('INT32'));
     AssertNotNull('String mixed',      ST.FindType('String'));
-    AssertSame('Same descriptor', ST.FindType('Integer'), ST.FindType('integer'));
+    AssertSame('Same descriptor', ST.FindType('Int32'), ST.FindType('int32'));
   finally
     ST.Free();
   end;
@@ -260,7 +260,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    Sym := MakeVar('x', ST.FindType('Integer'));
+    Sym := MakeVar('x', ST.FindType('Int32'));
     AssertTrue('Define succeeds', ST.Define(Sym));
     AssertSame('Lookup finds it', Sym, ST.Lookup('x'));
   finally
@@ -290,7 +290,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    S1 := MakeVar('x', ST.FindType('Integer'));
+    S1 := MakeVar('x', ST.FindType('Int32'));
     S2 := MakeVar('x', ST.FindType('string'));
     AssertTrue('First define ok', ST.Define(S1));
     AssertFalse('Duplicate fails', ST.Define(S2));
@@ -307,7 +307,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    S1 := MakeVar('n', ST.FindType('Integer'));
+    S1 := MakeVar('n', ST.FindType('Int32'));
     AssertTrue('Outer define ok', ST.Define(S1));
     ST.PushScope();
     S2 := MakeVar('n', ST.FindType('string'));
@@ -329,7 +329,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    Sym := MakeVar('result', ST.FindType('Integer'));
+    Sym := MakeVar('result', ST.FindType('Int32'));
     ST.Define(Sym);
     AssertSame('Found', Sym, ST.Lookup('result'));
   finally
@@ -356,7 +356,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    Sym := MakeVar('MyVar', ST.FindType('Integer'));
+    Sym := MakeVar('MyVar', ST.FindType('Int32'));
     ST.Define(Sym);
     AssertSame('lowercase', Sym, ST.Lookup('myvar'));
     AssertSame('uppercase', Sym, ST.Lookup('MYVAR'));
@@ -377,7 +377,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    Outer := MakeVar('x', ST.FindType('Integer'));
+    Outer := MakeVar('x', ST.FindType('Int32'));
     ST.Define(Outer);
     ST.PushScope();
     AssertSame('Inner sees outer x', Outer, ST.Lookup('x'));
@@ -395,7 +395,7 @@ begin
   ST := TSymbolTable.Create();
   try
     ST.PushScope();
-    Inner := MakeVar('local', ST.FindType('Integer'));
+    Inner := MakeVar('local', ST.FindType('Int32'));
     ST.Define(Inner);
     ST.PopScope();
     AssertNull('Outer cannot see inner local', ST.Lookup('local'));
@@ -411,7 +411,7 @@ var
 begin
   ST := TSymbolTable.Create();
   try
-    Outer := MakeVar('n', ST.FindType('Integer'));
+    Outer := MakeVar('n', ST.FindType('Int32'));
     ST.Define(Outer);
     ST.PushScope();
     Inner := MakeVar('n', ST.FindType('string'));
@@ -432,7 +432,7 @@ begin
   ST := TSymbolTable.Create();
   try
     ST.PushScope();
-    Inner := MakeVar('temp', ST.FindType('Integer'));
+    Inner := MakeVar('temp', ST.FindType('Int32'));
     ST.Define(Inner);
     AssertNotNull('Present before pop', ST.Lookup('temp'));
     ST.PopScope();

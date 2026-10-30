@@ -239,9 +239,9 @@ procedure TParserTests.TestQualifiedTypeName;
 var
   Prog: TProgram;
 begin
-  Prog := ParseSource('program P; var x: System.Integer; begin end.');
+  Prog := ParseSource('program P; var x: System.Int32; begin end.');
   try
-    AssertEquals('qualified type captured whole', 'System.Integer',
+    AssertEquals('qualified type captured whole', 'System.Int32',
       TVarDecl(Prog.Block.Decls.Items[0]).TypeName);
   finally
     Prog.Free();

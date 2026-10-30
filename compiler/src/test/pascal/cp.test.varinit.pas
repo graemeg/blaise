@@ -133,7 +133,7 @@ begin
   except
     on E: ESemanticError do Raised := True;
   end;
-  AssertTrue('string-into-Integer rejected', Raised);
+  AssertTrue('string-into-Int32 rejected', Raised);
 end;
 
 procedure TVarInitTests.TestSemantic_LocalInit_Rejected;
@@ -299,7 +299,7 @@ begin
   except
     on E: ESemanticError do Raised := True;
   end;
-  AssertTrue('nil into an Integer rejected', Raised);
+  AssertTrue('nil into an Int32 rejected', Raised);
 end;
 
 initialization

@@ -158,7 +158,7 @@ Blaise does not have a `Char` type. String subscript (`S[N]`) returns
   requires an O(N) walk to find the Nth codepoint, which is incompatible
   with the mental model that subscript is O(1). If codepoint-level access
   is needed, use `CodePointAt(S, N)` from `StrUtils` or iterate with
-  `for CP: Integer in S do`.
+  `for CP: Int32 in S do`.
 
 ==== Consequences for porting
 
@@ -190,7 +190,7 @@ See <<_string_subscript_s_n>> and <<_char_literal_coercion>>.
 ==== Decision
 
 `S[N]` returns the Nth byte of the string (0-based), as `Byte` (stored
-as `Integer` in the current implementation). Indexing is into raw UTF-8
+as `Int32` in the current implementation). Indexing is into raw UTF-8
 bytes, not into Unicode codepoints.
 
 ==== Rationale
@@ -240,8 +240,8 @@ subscript base must be a static or dynamic array".)
 ==== Address of a byte — `@S[N]`
 
 `@S[N]` is the address of the Nth byte and has type `^Byte`, matching what
-`S[N]` reads.  (The subscript value is held as an `Integer`, so the pointer
-type used to come out `^Integer`, and `P^` read four bytes.)  A pointer
+`S[N]` reads.  (The subscript value is held as an `Int32`, so the pointer
+type used to come out `^Int32`, and `P^` read four bytes.)  A pointer
 handed out may be written through, so taking the address performs the same
 copy-on-write as `S[N] := b`: the string is made unique in its own slot
 first.  The string must be a variable, parameter or field: `@F()[N]` is
@@ -252,7 +252,7 @@ as soon as the statement ended.
 
 Codepoint-level indexing is not supported via subscript syntax.  Use
 `CodePointAt(S, N)` from the `StrUtils` unit for O(N) codepoint-indexed
-access, or `for CP: Integer in S do` for sequential codepoint iteration.
+access, or `for CP: Int32 in S do` for sequential codepoint iteration.
 
 Assigning a multi-byte value through `S[N] :=` is not meaningful: the
 subscript addresses a single byte, so only a byte-sized right-hand side is
@@ -329,7 +329,7 @@ header layout differs, but the pointer-to-content invariant is shared.
 ==== Implication for the Migration Analyser (Phase 8)
 
 FPC code that manually accesses the `AnsiString` header via pointer arithmetic
-(e.g. `PInteger(PChar(s) - 12)^` to read the refcount) uses negative offsets
+(e.g. `PInt32(PChar(s) - 12)^` to read the refcount) uses negative offsets
 which are correct in Blaise too.  Code that used the old Blaise header-pointer
 form (positive offsets from a header pointer) is a porting error that the
 Migration Analyser should flag.
@@ -391,7 +391,7 @@ computations, or passing the position to another function).
 The loop variable's declared type selects the iteration mode:
 
 * `Byte` — iterates raw UTF-8 bytes (one byte per iteration)
-* `Integer` — iterates Unicode codepoints (one codepoint per iteration,
+* `Int32` — iterates Unicode codepoints (one codepoint per iteration,
   advancing 1–4 bytes as needed)
 * Any other type — compile-time error
 
@@ -400,14 +400,14 @@ There is no `Char` type in Blaise — both modes expose numeric values.
 ==== Rationale
 
 Since Blaise has no `Char` type (see <<_no_char_type>>), the natural
-element type for string iteration is `Byte` (raw bytes) or `Integer`
+element type for string iteration is `Byte` (raw bytes) or `Int32`
 (codepoints).  Byte iteration is consistent with `S[N]` returning `Byte`.
 Codepoint iteration provides the API users expect for Unicode text
 processing without requiring a separate function or iterator wrapper.
 
 The loop variable type acts as a discriminator: `Byte` signals intent to
 work with raw encoding units (systems code, protocol parsing), while
-`Integer` signals intent to work with Unicode characters (text processing).
+`Int32` signals intent to work with Unicode characters (text processing).
 
 ==== Byte iteration
 
@@ -430,7 +430,7 @@ simple index-and-load loop.
 
 ==== Codepoint iteration
 
-The compiler desugars `for CP: Integer in S do Body` as:
+The compiler desugars `for CP: Int32 in S do Body` as:
 
 [source,pascal]
 ----
@@ -461,9 +461,9 @@ local scope.
 * *Separate `Runes(S)` iterator function* — rejected.  The type-based
   dispatch is simpler to use and does not require importing a separate unit
   or learning a new API.
-* *Allowing `Word`, `SmallInt`, or other ordinals for codepoint iteration*
+* *Allowing `UInt16`, `Int16`, or other ordinals for codepoint iteration*
   — rejected.  Codepoints range from 0 to U+10FFFF (1,114,111), which
-  does not fit in 16-bit types.  Restricting to `Integer` avoids silent
+  does not fit in 16-bit types.  Restricting to `Int32` avoids silent
   truncation bugs.
 
 ---
@@ -474,7 +474,7 @@ local scope.
 
 A single-quoted string literal that contains exactly one byte (i.e. a
 single ASCII character, U+0000..U+007F) is implicitly coerced to its
-`Ord` value when used in a comparison with a `Byte` (or `Integer`) value.
+`Ord` value when used in a comparison with a `Byte` (or `Int32`) value.
 
 A single-quoted literal that encodes to more than one byte (e.g. an emoji
 or any non-ASCII codepoint) in that context is a compile-time error.
@@ -569,56 +569,54 @@ onwards without an explicit type annotation.
 
 ==== Decision
 
-Blaise defines five integer types with fixed, platform-independent widths:
+Blaise's builtin integer types state their width, apart from the
+pointer-sized `Int` and `UInt`:
 
-[cols="1,1,2,2", options="header"]
+[cols="1,1,2", options="header"]
 |===
-| Type | Width | QBE IR type | Aliases
+| Type | Width | Aliases
 
-| `Integer` | 32-bit signed   | `w` | `Int32`
-| `Int64`   | 64-bit signed   | `l` | `Int`
-| `UInt32`  | 32-bit unsigned | `w` | `Cardinal`
-| `UInt64`  | 64-bit unsigned | `l` | `UInt`, `QWord`, `PtrUInt`
-| `SmallInt`| 16-bit signed   | `w` (2 bytes in storage) | `Int16`
-| `Word`    | 16-bit unsigned | `w` (2 bytes in storage) | `UInt16`
-| `Byte`    | 8-bit unsigned  | `w` (1 byte in storage) | `UInt8`
-| `Int8`    | 8-bit signed    | `w` (1 byte in storage) |
+| `Int8`    | 8-bit signed    |
+| `Int16`   | 16-bit signed   |
+| `Int32`   | 32-bit signed   |
+| `Int64`   | 64-bit signed   | `Int` (on 64-bit targets)
+| `UInt8`   | 8-bit unsigned  | `Byte`
+| `UInt16`  | 16-bit unsigned |
+| `UInt32`  | 32-bit unsigned |
+| `UInt64`  | 64-bit unsigned | `UInt` (on 64-bit targets)
 |===
 
-`Integer` is 32-bit on all platforms.  This matches FPC's behaviour and
-makes arithmetic portable across Blaise's supported targets (linux-x86_64,
-macos-arm64) without requiring a platform-sized integer type.
+Every fixed-width type is the same width on every platform.  `Int` is the
+default for counts, indices and general arithmetic; a fixed width is chosen
+where the width is part of a contract (a C signature, a binary format, a
+wraparound or a record layout).  Diagnostics, RTTI and the debugger print
+the fixed-width spelling: an `Int` prints as `Int64` on a 64-bit target.
 
-`Int64` is 64-bit signed on all platforms.  It is used wherever values may
-exceed the 32-bit range.
+The classic names (`Integer`, `Cardinal`, `SmallInt`, `Word`, `QWord`,
+`PtrUInt`, `Single`, `Double`) are not builtins.  The stdlib unit
+`ClassicPascalTypes` supplies them, together with their `P`-prefixed
+pointer types, for code ported from FPC or Delphi.
 
-`UInt32` and `UInt64` are the unsigned counterparts of `Integer` and
-`Int64`.  `Cardinal` is provided as an alias for `UInt32` and `QWord` as
-an alias for `UInt64` so code ported from either FPC or Delphi compiles
-unchanged.  `PtrUInt` is the pointer-sized unsigned integer; on 64-bit
-targets it is identical to `UInt64`.
-
-`Byte` is 8-bit unsigned.  In registers and temporaries it is widened to
-`w` (32-bit QBE word).  Field and array element storage uses 1 byte per
-`Byte` element, consistent with FPC.
+`Byte` and `UInt8` occupy 1 byte in fields and array elements, consistent
+with FPC.
 
 ==== Platform-honest type names
 
-Alongside the classic names, Blaise provides the names set out in
-`docs/type-standardisation-design.adoc` (discussion #106):
+The names were set out in `docs/type-standardisation-design.adoc`
+(discussion #106):
 
 * `Int` / `UInt` — the pointer-sized signed / unsigned integer.  Every
   current target is 64-bit, so they are `Int64` / `UInt64`; a future 32-bit
   target would make them 32-bit.
-* `Int32`, `UInt8` — fixed-width spellings of `Integer` and `Byte`, joining
-  the existing `Int16`, `UInt16`, `Int64`, `UInt32` and `UInt64`.
+* `Int32`, `Int16`, `UInt16`, `UInt8` — the fixed-width names, joining
+  `Int64`, `UInt32` and `UInt64`.
 * `Int8` — the 8-bit signed integer (-128..127).  Unlike the names above it
   is a type of its own, not an alias: Blaise had no signed 8-bit type
   before.  It sign-extends wherever it is read, widens implicitly into every
   wider integer type, and follows the same constant-assignment rule as
   `Byte` (plain integer types are not range-checked; subranges and enums
   are).  `F(Int8)` and `F(Byte)` are a genuine overload pair.
-* `Float64`, `Float32` — fixed-width spellings of `Double` and `Single`.
+* `Float64`, `Float32` — the fixed-width floating-point types.
 * `Float` — always `Float64`, on every platform.
 
 Each is a *transparent alias*: the same type as the name it aliases, not a
@@ -653,20 +651,22 @@ retired with the other classic names: it means "one raw octet" rather than
 "a small number", reads naturally in binary I/O over `RawBytes`, and Go
 keeps `byte` beside `uint8` for the same reason.  The remaining classic
 names (`Integer`, `Cardinal`, `SmallInt`, `Word`, `QWord`, `PtrUInt`,
-`Single`, `Double`) carry FPC's frozen-width connotations and will be
-retired.
+`Single`, `Double`) carry FPC's frozen-width connotations and are retired.
 
-*Retirement, without deprecation warnings.*  The classic names that are
-still builtins keep their meaning for now, and diagnostics still print the
-classic spelling.  They will be removed as builtins in one step and move to
-the opt-in stdlib unit `ClassicPascalTypes`, which already supplies the FPC
-/ Delphi names Blaise never had as builtins (`LongInt`, `ShortInt`,
+*Retirement, without deprecation warnings.*  The classic names were removed
+as builtins in one step (v0.16) and moved to the opt-in stdlib unit
+`ClassicPascalTypes`, which also supplies the FPC / Delphi names Blaise
+never had as builtins (`LongInt`, `ShortInt`,
 `NativeInt`, `Real`, `Extended`, ... -- `Extended` is `Float64`, not the
 x87 80-bit type).  There is deliberately no deprecation-warning period:
 Blaise is young and its users expect change between releases, and a warning
 cycle would delay the removal by a whole release for little benefit.
-Migration guidance comes from tooling instead: BlaiseGuard rule BL-2006
-reports every classic type name with its replacement as a quick-fix.
+Migration guidance comes from the compiler's error, which names the
+replacement (`'Integer' is not a builtin type: use Int32 (or Int for counts
+and indices), or add uses ClassicPascalTypes`), and from BlaiseGuard rule
+BL-2006, which reports every classic type name with its replacement as a
+quick-fix.  `Integer` is not always `Int32`: a count or an index is better
+served by `Int`, so each use deserves a decision rather than a rename.
 
 *Planned with the retirement.*  Three changes are decided for the v0.16
 cycle, because each one changes the meaning of existing code:
@@ -688,7 +688,7 @@ cycle, because each one changes the meaning of existing code:
   `Capacity`, indices and index parameters of `TList<T>`, `TStack<T>`,
   `TQueue<T>`, `TSet<T>`, `TDictionary<K, V>`, `TOrderedDictionary<K, V>`,
   `IMap<K, V>`, `TStringList`, `TComponent` and `TObjectList` are `Int`.
-  Hash values and comparison results stay `Integer`.
+  Hash values and comparison results stay `Int32`.
 * *Counts stay signed.*  `Length` and `Count` return the signed `Int`, so
   `for I := Count - 1 downto 0` cannot underflow — the reason Go made
   `len()` signed.  `UInt` and the unsigned fixed-width names are for bit
@@ -705,7 +705,7 @@ arithmetic or comparison expression is a type error.  An explicit cast
 bit pattern rather than performing a numeric conversion.  This matches
 FPC's strict-mode behaviour and avoids the silent footgun where a
 negative `Int64` becomes a huge `UInt64` (or vice versa) without
-warning.  All narrower integer types (`Integer`, `UInt32`, `Byte`) widen
+warning.  All narrower integer types (`Int32`, `UInt32`, `Byte`) widen
 implicitly into both `Int64` and `UInt64`.
 
 A compile-time constant is the exception: a non-negative integer constant
@@ -715,30 +715,28 @@ Without it, making unhinted literals `Int` would have required a cast on
 every unsigned 64-bit constant.
 
 An `Int` that cannot be negative by construction converts the same way:
-`Length`, `SizeOf`, and `Ord` of an unsigned ordinal (`Byte`, `Word`,
+`Length`, `SizeOf`, and `Ord` of an unsigned ordinal (`Byte`, `UInt16`,
 `UInt32`, `Boolean`, a character `S[I]`, an enumeration with no negative
-ordinal).  These were `Integer` before they became `Int`, and an `Integer`
+ordinal).  These were `Int32` before they became `Int`, and an `Int32`
 widens into `UInt64`, so a hash such as `H := (H xor Ord(S[I])) * Prime`
 over a `UInt64` keeps compiling.  The exception covers the call itself,
 not an expression built from it: `Length(S) - 1` may be negative.  `Pos`,
 `PosEx` and `High` return `-1` for "none", so they, `Ord` of a signed
 value and every other non-constant `Int64` still need the cast.
 
-==== 16-bit integer types: SmallInt / Word
+==== 16-bit integer types: Int16 / UInt16
 
-`SmallInt` (16-bit signed, range −32768..32767) and `Word` (16-bit
-unsigned, range 0..65535) are provided alongside the established
-32-/64-bit integer types so that code ported from FPC or Delphi
-compiles unchanged and so that `record` field layouts can match
-fixed-width binary formats without packing tricks.
+`Int16` (16-bit signed, range −32768..32767) and `UInt16` (16-bit
+unsigned, range 0..65535) are provided alongside the 32-/64-bit integer
+types so that `record` field layouts can match fixed-width binary formats
+without packing tricks.  `ClassicPascalTypes` supplies `SmallInt` and
+`Word` for them.
 
-In registers and temporaries both types are widened to `w` (32-bit
-QBE word); only field and array element storage uses 2 bytes per
-element (`storeh` / `loadsh` for `SmallInt`, `loaduh` for `Word`).
-Implicit widening into `Integer`, `Int64`, `UInt32` and `UInt64` is
-permitted in the same way `Byte` widens, since 16-bit values fit
-losslessly in all of those.  `Int16` and `UInt16` are accepted as
-aliases for `SmallInt` and `Word` respectively.
+In registers and temporaries both types are widened; only field and array
+element storage uses 2 bytes per element (sign-extended loads for `Int16`,
+zero-extended for `UInt16`).  Implicit widening into `Int32`, `Int64`,
+`UInt32` and `UInt64` is permitted in the same way `Byte` widens, since
+16-bit values fit losslessly in all of those.
 
 ==== Integer literal typing
 
@@ -752,8 +750,8 @@ typed by its context, in the manner of Go's untyped constants:
   narrowed on store, which gives the same value.
 . *A typed operand.*  Beside a typed integer operand of a binary operator,
   a literal, a negated literal or a constant identifier takes that
-  operand's type when its value fits, so `I = 5` with `I: Integer` compares
-  two `Integer` values.  A shift is excluded: its right operand is a count,
+  operand's type when its value fits, so `I = 5` with `I: Int32` compares
+  two `Int32` values.  A shift is excluded: its right operand is a count,
   not a peer, so `1 shl N` is a 64-bit shift whatever `N` is.
 . *Otherwise `Int`*, or `UInt64` for a value above `High(Int64)`.
 
@@ -765,12 +763,12 @@ ambiguous), `1 shl 31` is `2147483648`, `-1 shr 1` shifts 64 bits, and
 *Overloads.*  A constant matches every integer parameter that can hold its
 value equally well, like an untyped constant in Pascal; among those, the
 one closest to the constant's own type wins, signed before unsigned.  So
-`F(42)` picks `Int64` over `Int32`, `F(5)` picks `Integer` over `Byte`, and
-`AssertEquals('n', 1, L.Count)` picks the `Integer` overload because
+`F(42)` picks `Int64` over `Int32`, `F(5)` picks `Int32` over `Byte`, and
+`AssertEquals('n', 1, L.Count)` picks the `Int32` overload because
 `L.Count` is exact there.  A parameter too narrow for the value is no
 match: `F(300)` cannot choose `F(Byte)` and truncate.  A bracket literal
 of constants ranks the same way, element by element, so `[1, 2]` reaches
-`array of Integer` before `array of Byte`.
+`array of Int32` before `array of Byte`.
 
 *`array of const`.*  An integer constant that fits in 32 bits is passed as
 `vtInteger`, as in FPC and Delphi, although its type is `Int`: code that
@@ -836,7 +834,7 @@ implicit narrowing rule.  Declare the variable `Int`, or use
 |===
 | Built-in | Signature | Notes
 
-| `IntToStr` | `(Integer): string` | 32-bit integer to decimal string; when the argument resolves to `Int64` the codegen automatically routes the call to `_Int64ToStr`, and when it resolves to `UInt64` / `QWord` to `_UInt64ToStr`, matching FPC's overloaded resolution
+| `IntToStr` | `(Int32): string` | 32-bit integer to decimal string; when the argument resolves to `Int64` the codegen automatically routes the call to `_Int64ToStr`, and when it resolves to `UInt64` to `_UInt64ToStr`, matching FPC's overloaded resolution
 | `Int64ToStr` | `(Int64): string` | 64-bit signed integer to decimal string
 | `UInt64ToStr` | `(UInt64): string` | 64-bit unsigned integer to decimal string
 | `StrToInt` | `(string): Integer` | Decimal string to 32-bit integer; truncates silently on overflow
@@ -854,11 +852,9 @@ implicit narrowing rule.  Declare the variable `Int`, or use
   type-standardisation design superseded that, by giving it a name of its
   own.
 
-* *`LongInt` alias* — deferred.  The FPC/Delphi `LongInt` name maps to
-  a 32-bit signed integer (identical to Blaise's `Integer`) and could
-  be added as a plain type alias in a future release.  `SmallInt`,
-  `Int16`, `Word` and `UInt16` are now first-class 16-bit types, and
-  `Cardinal` remains an alias for `UInt32`.
+* *`LongInt` alias* — not a builtin.  The FPC/Delphi `LongInt` name maps
+  to `Int32`; `ClassicPascalTypes` supplies it with the other classic
+  names.
 
 ---
 
@@ -876,8 +872,8 @@ Blaise supports the `packed record` qualifier with strict semantics:
   and Delphi, are parse errors in Blaise.
 * ARC-managed field types — `string`, class references, interfaces,
   and dynamic arrays — retain their natural 8-byte alignment inside a
-  packed record. Other field types (`Byte`, `Word`/`SmallInt`,
-  `Integer`/`UInt32`, `Int64`/`UInt64`, `Double`, enums, sets,
+  packed record. Other field types (`Byte`, `Int16`/`UInt16`,
+  `Int32`/`UInt32`, `Int64`/`UInt64`, `Float64`, enums, sets,
   static arrays of these, and nested packed/non-packed records)
   pack tight.
 * `MaxAlign` of a packed record collapses to `1` unless it contains
@@ -958,7 +954,7 @@ Blaise supports indexed properties — a class property with a single
 index parameter:
 
 ----
-property Items[Index: Integer]: Pointer read Get write Put;
+property Items[Index: Int]: Pointer read Get write Put;
 ----
 
 The index parameter is declared inside square brackets in the property
@@ -1006,7 +1002,7 @@ An indexed property may carry the `default` directive, marking it as the
 class's default array property:
 
 ----
-property Items[I: Integer]: T read Get write Put; default;
+property Items[I: Int]: T read Get write Put; default;
 ----
 
 A subscript applied directly to an object of that class — `Obj[I]` — is then
@@ -1242,21 +1238,21 @@ parameters on entry. Both are now unblocked by the `IsOutParam` flag.
 
 A numeric or `Boolean` argument passed to a `var` or `out` parameter
 must have the parameter's width.  Passing an `Int64` variable where the
-parameter is `var X: Integer`, or a `Byte` where it is `var X: Integer`,
+parameter is `var X: Int32`, or a `Byte` where it is `var X: Int32`,
 is a compile-time error:
 
 [source,pascal]
 ----
-procedure SetI(var X: Integer);
+procedure SetI(var X: Int32);
 var L: Int64;
 begin
   SetI(L);   { error: var argument 1 of 'SetI' is Int64 but the
-               parameter is Integer }
+               parameter is Int32 }
 end;
 ----
 
 An alias of the parameter's type is the same type and is accepted:
-`Int32` for `Integer`, and `Int` for `Int64` on a 64-bit target.
+`Int` for `Int64` on a 64-bit target.
 
 ==== Rationale
 
@@ -1366,18 +1362,18 @@ The literal takes its type from the formal, element by element: each
 element must be assignable to the formal's element type, exactly as a
 scalar argument must be assignable to its parameter.  So `[Dog, Cat]` is a
 valid `array of TAnimal`, `[TDog, TCat]` a valid `array of TAnimalClass`,
-`[1, 2.5, I]` a valid `array of Double`, and `[0, 4]` a valid
+`[1, 2.5, I]` a valid `array of Float`, and `[0, 4]` a valid
 `array of Byte` (GH #233: an untyped integer constant converts to any
 integer element type, with the literal laid out at the formal's element
-width).  As with scalar constants, a plain `Byte` / `Word` destination is
+width).  As with scalar constants, a plain `Byte` / `UInt16` destination is
 not range-checked; a subrange or enum element type rejects an out-of-range
 constant.  Integer variables are not narrowed implicitly, and a float never
 becomes an integer.
 
 The binding is scored as a conversion, so an overload whose element type
 the literal already has -- taken from its own elements, the first one
-deciding -- is still preferred: `Pick([1, 2])` chooses `array of Integer`
-over `array of Double`, while `Pick([1, 2.5])` can only be the latter.
+deciding -- is still preferred: `Pick([1, 2])` chooses `array of Int32`
+over `array of Float`, while `Pick([1, 2.5])` can only be the latter.
 Until 2026-10-17 a literal had to match the formal's element type exactly,
 apart from the integer-constant case: `[Y]` with `Y: TDog` did not match an
 `array of TAnimal` at all.
@@ -1396,7 +1392,7 @@ dynamic-array literal (`M := [[1, 2], [3]]`).  `DA := []` assigns the empty
 (nil) array.
 
 Each element is checked as an assignment to the element type would be, so
-`[1.5, 2]` is a valid `array of Double` and `[1, 255]` a valid
+`[1.5, 2]` is a valid `array of Float` and `[1, 255]` a valid
 `array of Byte`.  Range checking follows the scalar rule too: a subrange or
 enum element type rejects an out-of-range constant, while a plain `Byte` or
 `Word` element, like a `Byte` variable, is not checked.  A `lo..hi` range is

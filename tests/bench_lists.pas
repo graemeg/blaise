@@ -41,18 +41,18 @@ const
 
 type
   TItem = class
-    FValue: Integer;
+    FValue: Int;
   end;
 
 var
-  GRand: Integer;
+  GRand: Int;
 
-procedure SeedRand(S: Integer);
+procedure SeedRand(S: Int);
 begin
   GRand := S
 end;
 
-function NextRand: Integer;
+function NextRand: Int;
 begin
   GRand  := GRand * 1103515245 + 12345;
   Result := (GRand shr 16) and $7FFFFFFF
@@ -68,9 +68,9 @@ begin
   Result := D.TotalMilliseconds()
 end;
 
-function PadRight(const S: string; Width: Integer): string;
+function PadRight(const S: string; Width: Int): string;
 var
-  N: Integer;
+  N: Int;
 begin
   Result := S;
   N      := Width - Length(S);
@@ -81,9 +81,9 @@ begin
   end
 end;
 
-function PadLeft(const S: string; Width: Integer): string;
+function PadLeft(const S: string; Width: Int): string;
 var
-  N: Integer;
+  N: Int;
 begin
   Result := S;
   N      := Width - Length(S);
@@ -102,12 +102,12 @@ end;
 procedure BenchTStringList;
 var
   SL:    TStringList;
-  I:     Integer;
-  Idx:   Integer;
+  I:     Int;
+  Idx:   Int;
   T0:    TInstant;
   S:     string;
   Sum:   Int64;
-  Hits:  Integer;
+  Hits:  Int;
 begin
   WriteLn('TStringList');
 
@@ -173,13 +173,13 @@ end;
 procedure BenchGenericListString;
 var
   L:     TList<String>;
-  I:     Integer;
-  Idx:   Integer;
-  J:     Integer;
+  I:     Int;
+  Idx:   Int;
+  J:     Int;
   T0:    TInstant;
   S:     string;
   Sum:   Int64;
-  Hits:  Integer;
+  Hits:  Int;
   Found: Boolean;
 begin
   WriteLn('TList<String>');
@@ -254,12 +254,12 @@ end;
 procedure BenchTObjectList;
 var
   OL:     TObjectList;
-  I:      Integer;
-  Idx:    Integer;
+  I:      Int;
+  Idx:    Int;
   T0:     TInstant;
   Item:   TItem;
   Sum:    Int64;
-  Hits:   Integer;
+  Hits:   Int;
   Needle: TItem;
 begin
   WriteLn('TObjectList(OwnsObjects=True)');
@@ -319,14 +319,14 @@ end;
 procedure BenchGenericListObject;
 var
   L:      TList<TObject>;
-  I:      Integer;
-  J:      Integer;
-  Idx:    Integer;
+  I:      Int;
+  J:      Int;
+  Idx:    Int;
   T0:     TInstant;
   Obj:    TObject;
   Item:   TItem;
   Sum:    Int64;
-  Hits:   Integer;
+  Hits:   Int;
   Needle: TObject;
   Found:  Boolean;
 begin

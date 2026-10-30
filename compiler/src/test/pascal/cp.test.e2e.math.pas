@@ -1107,7 +1107,7 @@ begin
     end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
-  AssertEquals('Int64*Double', '123456789012345', Trim(Output));
+  AssertEquals('Int64*Float64', '123456789012345', Trim(Output));
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_Pi;
@@ -1396,7 +1396,7 @@ begin
     end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
-  AssertEquals('4345 as Double', '4345', Trim(Output));
+  AssertEquals('4345 as Float64', '4345', Trim(Output));
 end;
 
 procedure TE2EMathTests.TestRun_IntAssignSingle;
@@ -1415,7 +1415,7 @@ begin
     end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
-  AssertEquals('42 as Single→Double', '42', Trim(Output));
+  AssertEquals('42 as Float32→Float64', '42', Trim(Output));
 end;
 
 procedure TE2EMathTests.TestRun_Int64AssignDouble;
@@ -1434,7 +1434,7 @@ begin
     end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
-  AssertEquals('123456789 as Double', '123456789', Trim(Output));
+  AssertEquals('123456789 as Float64', '123456789', Trim(Output));
 end;
 
 procedure TE2EMathTests.TestRun_SingleMulDouble;
@@ -1556,7 +1556,7 @@ begin
     end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
-  AssertEquals('WriteLn(Double)', '3.14', Trim(Output));
+  AssertEquals('WriteLn(Float64)', '3.14', Trim(Output));
 end;
 
 procedure TE2EMathTests.TestRun_WriteLn_Single_Direct;
@@ -1573,7 +1573,7 @@ begin
     end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
-  AssertEquals('WriteLn(Single)', '1.5', Trim(Output));
+  AssertEquals('WriteLn(Float32)', '1.5', Trim(Output));
 end;
 
 procedure TE2EMathTests.TestRun_Trig_IntegerArgs;
@@ -1709,7 +1709,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { A Single(X)/Double(X) numeric cast must perform a REAL conversion, not a
     bit copy (leg 30 — the compiler's own blaise.assembler.x86_64.pas:3088
-    'FVal := Single(DVal)').  Double(Single(x)) must lose precision to 32-bit,
+    'FVal := Float32(DVal)').  Double(Single(x)) must lose precision to 32-bit,
     so the printed value is the single-rounded double, not the original. }
   AssertTrue('compile+run', CompileAndRun(
     '''
@@ -2054,10 +2054,10 @@ var
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcOk, '3 4 3 2 1 3.5' + LE, 0);
-  AssertTrue('Integer(D) is rejected',
+  AssertTrue('Int32(D) is rejected',
     CompileNativeCLI(SrcCast, False, '', BinFile, ToolOut) <> 0);
   AssertTrue('names the conversion: ' + ToolOut,
-    Pos('Illegal type conversion from ''Double'' to ''Integer''', ToolOut) >= 0);
+    Pos('Illegal type conversion from ''Float64'' to ''Int32''', ToolOut) >= 0);
   AssertTrue('Ord(I / 2) is rejected',
     CompileNativeCLI(SrcOrd, False, '', BinFile, ToolOut) <> 0);
   AssertTrue('names Ord: ' + ToolOut,

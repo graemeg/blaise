@@ -658,14 +658,14 @@ var
   t: array[0..3] of TToken;
   i: Int;
 begin
-  SetLexer('x : Integer');
+  SetLexer('x : Int32');
   for i := 0 to 3 do
     t[i] := FLexer.Next();
   AssertEquals('x kind', Ord(tkIdent), Ord(t[0].Kind));
   AssertEquals('x value', 'x', t[0].Value);
   AssertEquals(': kind', Ord(tkColon), Ord(t[1].Kind));
-  AssertEquals('Integer kind', Ord(tkIdent), Ord(t[2].Kind));
-  AssertEquals('Integer value', 'Integer', t[2].Value);
+  AssertEquals('Int32 kind', Ord(tkIdent), Ord(t[2].Kind));
+  AssertEquals('Int32 value', 'Int32', t[2].Value);
   AssertEquals('EOF', Ord(tkEOF), Ord(t[3].Kind));
 end;
 

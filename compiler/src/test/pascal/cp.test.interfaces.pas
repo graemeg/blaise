@@ -599,7 +599,7 @@ procedure TInterfaceTests.TestCodegen_IntfCall_IntArgToDoubleParam_Converted;
 begin
   { the Integer K travels as a double in a float register: both backends
     classified it by the argument and passed the raw integer }
-  AssertEquals('K is converted for the Double parameter', '',
+  AssertEquals('K is converted for the Float64 parameter', '',
     AsmMissing(
       '''
     program P;
@@ -771,7 +771,7 @@ begin
       end.
       ''');
   AssertTrue('generic cycle: ' + Msg, Pos(
-    'Cyclic interface inheritance: IA<Integer> -> IB<Integer> -> IA<Integer>',
+    'Cyclic interface inheritance: IA<Int32> -> IB<Int32> -> IA<Int32>',
     Msg) >= 0);
 end;
 
@@ -1227,7 +1227,7 @@ begin
     AssertTrue('read lowered to a getter call', Rhs is TMethodCallExpr);
     AssertEquals('getter', 'GetV', TMethodCallExpr(Rhs).Name);
     AssertEquals('getter args (index)', 1, TMethodCallExpr(Rhs).Args.Count);
-    AssertEquals('read type', 'Double', Rhs.ResolvedType.Name);
+    AssertEquals('read type', 'Float64', Rhs.ResolvedType.Name);
   finally
     SA.Free();
     Prog.Free();

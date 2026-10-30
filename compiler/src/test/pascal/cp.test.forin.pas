@@ -967,7 +967,7 @@ begin
   try
     FI := TForInStmt(Prog.Block.Stmts.Items[0]);
     AssertNotNil('record enumerator loop is lowered', FI.Lowered);
-    AssertEquals('loop variable type', 'Integer', FI.ResolvedVarType.Name);
+    AssertEquals('loop variable type', 'Int32', FI.ResolvedVarType.Name);
   finally
     Prog.Free();
   end;

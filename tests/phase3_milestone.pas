@@ -13,74 +13,74 @@ program Phase3Milestone;
 
 type
   TIntList = class
-    FData:     ^Integer;
-    FCount:    Integer;
-    FCapacity: Integer;
+    FData:     ^Int;
+    FCount:    Int;
+    FCapacity: Int;
     procedure Grow;
-    procedure Add(Value: Integer);
-    function  Get(AIndex: Integer): Integer;
-    procedure Delete(AIndex: Integer);
+    procedure Add(Value: Int);
+    function  Get(AIndex: Int): Int;
+    procedure Delete(AIndex: Int);
     procedure Destroy;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
   end;
 
   TStrIntDict = class
     FKeys:     ^string;
-    FValues:   ^Integer;
-    FCount:    Integer;
-    FCapacity: Integer;
+    FValues:   ^Int;
+    FCount:    Int;
+    FCapacity: Int;
     procedure Grow;
-    function  FindKey(Key: string): Integer;
-    procedure Add(Key: string; Value: Integer);
-    function  TryGetValue(Key: string; var Value: Integer): Boolean;
+    function  FindKey(Key: string): Int;
+    procedure Add(Key: string; Value: Int);
+    function  TryGetValue(Key: string; var Value: Int): Boolean;
     function  ContainsKey(Key: string): Boolean;
     procedure Remove(Key: string);
     procedure Destroy;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
   end;
 
 procedure TIntList.Grow;
 var
-  NewCap: Integer;
+  NewCap: Int;
 begin
   if Self.FCapacity = 0 then
     NewCap := 4
   else
     NewCap := Self.FCapacity * 2;
-  Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Integer));
+  Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Int));
   Self.FCapacity := NewCap
 end;
 
-procedure TIntList.Add(Value: Integer);
+procedure TIntList.Add(Value: Int);
 var
-  Dest: ^Integer;
+  Dest: ^Int;
 begin
   if Self.FCount = Self.FCapacity then
     Self.Grow();
-  Dest        := Self.FData + Self.FCount * SizeOf(Integer);
+  Dest        := Self.FData + Self.FCount * SizeOf(Int);
   Dest^       := Value;
   Self.FCount := Self.FCount + 1
 end;
 
-function TIntList.Get(AIndex: Integer): Integer;
+function TIntList.Get(AIndex: Int): Int;
 var
-  Src: ^Integer;
+  Src: ^Int;
 begin
-  Src    := Self.FData + AIndex * SizeOf(Integer);
+  Src    := Self.FData + AIndex * SizeOf(Int);
   Result := Src^
 end;
 
-procedure TIntList.Delete(AIndex: Integer);
+procedure TIntList.Delete(AIndex: Int);
 var
-  Src: ^Integer;
-  Dst: ^Integer;
-  I:   Integer;
+  Src: ^Int;
+  Dst: ^Int;
+  I:   Int;
 begin
   I := AIndex;
   while I < Self.FCount - 1 do
   begin
-    Dst  := Self.FData + I * SizeOf(Integer);
-    Src  := Self.FData + (I + 1) * SizeOf(Integer);
+    Dst  := Self.FData + I * SizeOf(Int);
+    Src  := Self.FData + (I + 1) * SizeOf(Int);
     Dst^ := Src^;
     I    := I + 1
   end;
@@ -97,8 +97,8 @@ end;
 
 procedure TStrIntDict.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FCapacity;
   if OldCap = 0 then
@@ -109,13 +109,13 @@ begin
   { Zero-init new string slots so ARC Release of "old" value is safe }
   ZeroMem(Self.FKeys + OldCap * SizeOf(string),
           (NewCap - OldCap) * SizeOf(string));
-  Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(Integer));
+  Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(Int));
   Self.FCapacity := NewCap
 end;
 
-function TStrIntDict.FindKey(Key: string): Integer;
+function TStrIntDict.FindKey(Key: string): Int;
 var
-  I:   Integer;
+  I:   Int;
   Ptr: ^string;
 begin
   Result := -1;
@@ -132,16 +132,16 @@ begin
   end
 end;
 
-procedure TStrIntDict.Add(Key: string; Value: Integer);
+procedure TStrIntDict.Add(Key: string; Value: Int);
 var
-  Idx:  Integer;
+  Idx:  Int;
   KPtr: ^string;
-  VPtr: ^Integer;
+  VPtr: ^Int;
 begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr  := Self.FValues + Idx * SizeOf(Integer);
+    VPtr  := Self.FValues + Idx * SizeOf(Int);
     VPtr^ := Value
   end
   else
@@ -149,22 +149,22 @@ begin
     if Self.FCount = Self.FCapacity then
       Self.Grow();
     KPtr  := Self.FKeys   + Self.FCount * SizeOf(string);
-    VPtr  := Self.FValues + Self.FCount * SizeOf(Integer);
+    VPtr  := Self.FValues + Self.FCount * SizeOf(Int);
     KPtr^ := Key;
     VPtr^ := Value;
     Self.FCount := Self.FCount + 1
   end
 end;
 
-function TStrIntDict.TryGetValue(Key: string; var Value: Integer): Boolean;
+function TStrIntDict.TryGetValue(Key: string; var Value: Int): Boolean;
 var
-  Idx:  Integer;
-  VPtr: ^Integer;
+  Idx:  Int;
+  VPtr: ^Int;
 begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr   := Self.FValues + Idx * SizeOf(Integer);
+    VPtr   := Self.FValues + Idx * SizeOf(Int);
     Value  := VPtr^;
     Result := True
   end
@@ -179,12 +179,12 @@ end;
 
 procedure TStrIntDict.Remove(Key: string);
 var
-  Idx:  Integer;
-  I:    Integer;
+  Idx:  Int;
+  I:    Int;
   KDst: ^string;
   KSrc: ^string;
-  VDst: ^Integer;
-  VSrc: ^Integer;
+  VDst: ^Int;
+  VSrc: ^Int;
 begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
@@ -194,8 +194,8 @@ begin
     begin
       KDst  := Self.FKeys   + I * SizeOf(string);
       KSrc  := Self.FKeys   + (I + 1) * SizeOf(string);
-      VDst  := Self.FValues + I * SizeOf(Integer);
-      VSrc  := Self.FValues + (I + 1) * SizeOf(Integer);
+      VDst  := Self.FValues + I * SizeOf(Int);
+      VSrc  := Self.FValues + (I + 1) * SizeOf(Int);
       KDst^ := KSrc^;
       VDst^ := VSrc^;
       I     := I + 1
@@ -209,7 +209,7 @@ end;
 
 procedure TStrIntDict.Destroy;
 var
-  I:   Integer;
+  I:   Int;
   Ptr: ^string;
 begin
   { Release all stored strings before freeing the backing store }
@@ -231,7 +231,7 @@ end;
 var
   List:  TIntList;
   Dict:  TStrIntDict;
-  V:     Integer;
+  V:     Int;
   Found: Boolean;
 
 begin

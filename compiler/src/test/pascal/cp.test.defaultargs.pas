@@ -66,7 +66,7 @@ begin
     'function TA.F(A: Int32; B: Int32): Int32; begin Result := A end; ' +
     'procedure TA.Q(A: Int32; B: Int32); begin end; ' +
     'procedure TA.Run(); begin end; begin N := X.F(1) end.'));
-  AssertEquals('X.G<Integer>(1)', '', SemanticError(Head +
+  AssertEquals('X.G<Int32>(1)', '', SemanticError(Head +
     'function TA.F(A: Int32; B: Int32): Int32; begin Result := A end; ' +
     'procedure TA.Q(A: Int32; B: Int32); begin end; ' +
     'procedure TA.Run(); begin end; begin N := X.G<Int32>(1) end.'));

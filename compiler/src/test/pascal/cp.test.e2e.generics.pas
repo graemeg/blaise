@@ -573,7 +573,7 @@ procedure TE2EGenericsTests.TestRun_GenericOpenArray_ElementTypeIsT;
 begin
   { `array of T` must substitute T at instantiation.  It used to leave the
     ELEMENT type unresolved -- it fell back to Integer -- so indexing the
-    array in a TBox<string> reported 'expected string but got Integer'.
+    array in a TBox<string> reported 'expected string but got Int32'.
     Plain T parameters were always substituted correctly; only the nested
     element type was missed. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;

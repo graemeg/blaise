@@ -1133,10 +1133,10 @@ const
         unit VisOwnPtr;
         interface
         type
-          PInteger = ^Byte;
-        function Peek(P: PInteger): Int32;
+          PInt32 = ^Byte;
+        function Peek(P: PInt32): Int32;
         implementation
-        function Peek(P: PInteger): Int32;
+        function Peek(P: PInt32): Int32;
         begin
           Result := P^
         end;
@@ -1164,7 +1164,7 @@ const
         uses VisPtrMid;
         var
           I: Int32;
-          Q: PInteger;
+          Q: PInt32;
         begin
           Q := @I;
           Q^ := MidPeek()
@@ -1176,16 +1176,16 @@ const
         uses VisOwnPtr;
         var
           B: Byte;
-          Q: PInteger;
+          Q: PInt32;
         begin
           Q := @B;
           B := Peek(Q)
         end.
         ''';
 begin
-  AssertEquals('System''s PInteger despite a hidden unit''s own', '',
+  AssertEquals('System''s PInt32 despite a hidden unit''s own', '',
     AnalyseUnitsAndProg([OwnSrc, MidSrc], NotUsingSrc));
-  AssertEquals('the used unit''s PInteger wins over System''s', '',
+  AssertEquals('the used unit''s PInt32 wins over System''s', '',
     AnalyseUnitsAndProg([OwnSrc], UsingSrc));
 end;
 

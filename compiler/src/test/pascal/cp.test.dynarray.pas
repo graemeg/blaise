@@ -201,7 +201,7 @@ begin
   try
     Sym := Prog.SymbolTable.Lookup('TIntArr');
     DAT := TDynArrayTypeDesc(Sym.TypeDesc);
-    AssertEquals('element type is Integer', 'Integer', DAT.ElementType.Name);
+    AssertEquals('element type is Integer', 'Int32', DAT.ElementType.Name);
   finally Prog.Free(); end;
 end;
 
@@ -300,8 +300,8 @@ end;
 procedure TDynArrayTests.TestSemantic_RecordField_DynArrayElemAssign_Accepted;
 var Prog: TProgram;
 begin
-  { r.A[0] := 10 used to fail semantic with "expected 'array of Integer'
-    but got 'Integer'" — the subscript was treated as an indexed-property
+  { r.A[0] := 10 used to fail semantic with "expected 'array of Int32'
+    but got 'Int32'" — the subscript was treated as an indexed-property
     index and dropped from the LHS type. }
   Prog := AnalyseSrc('''
       program Prg;
@@ -422,8 +422,8 @@ const
     end.
     ''';
 begin
-  { DA := [1, 2] was rejected with "expected 'array of Integer' but got
-    'array of Integer'" -- the literal had an anonymous type of its own
+  { DA := [1, 2] was rejected with "expected 'array of Int32' but got
+    'array of Int32'" -- the literal had an anonymous type of its own
     (BUG-20261014-dynarray-literal-assignment) }
   AssertEquals('dyn-array literals accepted', '', SemanticError(SrcOk));
   AssertTrue('element type checked',
