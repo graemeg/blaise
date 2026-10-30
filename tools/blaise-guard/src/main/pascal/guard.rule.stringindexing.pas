@@ -25,6 +25,7 @@ interface
 implementation
 
 uses
+  uStrCompat,
   Generics.Collections,
   uLexer,
   Guard.Domain,

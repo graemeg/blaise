@@ -46,6 +46,7 @@ implementation
 
 uses
   SysUtils,
+  Contnrs,
   uAST,
   Guard.Domain,
   Guard.Rules;
