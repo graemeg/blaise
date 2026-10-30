@@ -1000,7 +1000,9 @@ unused procedure and an unused 80 KB global array keeps both
 
 Two properties keep the cost down today:
 
-* Generic instances are emitted only for the type arguments actually used.
+* Generic instances are emitted only for the type arguments actually used
+  (though since 2026-10-30 every unit that uses an instance carries its own
+  weak copy; see <<weak-copy-bytes>>).
 * Unused globals land in BSS, so they cost address space but no file size.
 
 A hello-world is about 230 KB; adding `uses SysUtils` adds about 1.6 KB.
@@ -1052,6 +1054,33 @@ landed.
 in both internal linkers and the object writers, and the failure mode
 (a missing root) is silent until run time.  Best scheduled after the
 backends reach parity and the object/linker layer has stopped changing.
+
+[#weak-copy-bytes]
+=== Discard the losing weak copies
+
+*Current state.*  When several objects define the same weak symbol, both
+internal linkers bind every reference to one definition ("any one wins")
+but keep the bytes of all of them in the image.  Since
+BUG-20261030-generic-instance-owner-cache was fixed, each unit that uses a
+generic instance emits its own weak copy of it, so the cost grew: the
+compiler binary went from 4.77 MB to 5.02 MB (+5%) and a self-build takes
+about 2.5% longer.  The duplicates are unreachable; only their size is
+wasted.
+
+*Implementation outline.*  Treat each weak definition as an atom: on
+Mach-O the writer already sets `MH_SUBSECTIONS_VIA_SYMBOLS`, so a symbol's
+bytes run to the next symbol in its section; on ELF it needs the per-symbol
+sections of <<Dead-code elimination (smart linking)>>.  When the linker
+collapses a weak symbol, it drops the losing atoms and their relocations
+before layout.  This is the smallest useful step towards dead-code
+elimination and shares its prerequisite, granular sections; it needs no
+reachability analysis, because a losing copy is unreferenced by
+construction.
+
+*Verification.*  A self-build's size returns to within a few KB of its
+size before the fix, the fixpoints and the full suites pass, and a test
+links two units that share an instance and checks the image holds one
+copy of its methods.
 
 == Migration Analyser
 

@@ -742,6 +742,15 @@ Done 2026-10-30.
 
 *Phase 7 — post-flip cleanup.*
 
+* The object-file readers' unsigned fields read as `UInt32`.  `RdU32`,
+  `ReadU32` and `U32At` return `Int32` today, so a field at or above 2^31^
+  (a Mach-O magic, a load-command type) comes back negative, and the
+  format constants are spelt `Int32($FEEDFACF)` to match.  Returning
+  `UInt32` states what the field is; the constants and comparisons change
+  with them, in both linkers, as one behaviour-checked commit.  Deferred
+  from Phase 5, which kept their behaviour, because it touches every
+  comparison against a format constant and the flip does not need it.
+
 * BlaiseGuard and migration-analyser self-check over the tree; FreeBSD
   full-tier dispatch; refresh `-pre`; fold this document's decisions into the
   language rationale as the permanent record.
