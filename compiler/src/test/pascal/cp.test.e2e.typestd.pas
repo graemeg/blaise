@@ -94,6 +94,7 @@ type
     { Phase 4.7: MaxInt is High(Int), reaches the Int64 overload, and still
       means "to the end" as a Copy or Delete count }
     procedure TestRun_MaxInt_IsHighInt;
+    procedure TestRun_ImplementsGenericInterface_AliasArgument;
   end;
 
 implementation
@@ -826,6 +827,45 @@ begin
   AssertRunsOnAll(Src,
     '9223372036854775807' + #10 + 'True' + #10 +
     'Int 9223372036854775807' + #10 + 'cdef' + #10 + 'abc' + #10, 0);
+end;
+
+{ A class implementing a generic interface may spell the type argument with
+  any alias of it: IEq<Int32> is IEq<Integer>, whichever is written first. }
+procedure TE2ETypeStdTests.TestRun_ImplementsGenericInterface_AliasArgument;
+const
+  Src = '''
+    program P;
+    type
+      IEq<T> = interface
+        function Same(A, B: T): Boolean;
+      end;
+      TIntEq = class(IEq<Int32>)
+        function Same(A, B: Int32): Boolean;
+      end;
+      TFloatEq = class(TObject, IEq<Float64>)
+        function Same(A, B: Float64): Boolean;
+      end;
+    function TIntEq.Same(A, B: Int32): Boolean;
+    begin
+      Result := A = B
+    end;
+    function TFloatEq.Same(A, B: Float64): Boolean;
+    begin
+      Result := A = B
+    end;
+    var
+      EI: IEq<Integer>;
+      EF: IEq<Double>;
+    begin
+      EI := TIntEq.Create();
+      EF := TFloatEq.Create();
+      WriteLn(EI.Same(3, 3), ' ', EI.Same(3, 4));
+      WriteLn(EF.Same(1.5, 1.5))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'True False' + #10 + 'True' + #10, 0);
 end;
 
 initialization

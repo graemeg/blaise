@@ -9374,6 +9374,7 @@ var
   Key:        string;
   FldInfo:    TFieldInfo;
   IntfDesc:   TInterfaceTypeDesc;
+  IntfTD:     TTypeDesc;
   IntfName:   string;
   IntfSym:    TSymbol;
   ITD:        TInterfaceTypeDef;
@@ -10506,23 +10507,20 @@ begin
       begin
         IntfName := TClassTypeDef(TD.Def).ImplementsNames.Strings[L];
         IntfSym  := FTable.Lookup(IntfName);
-        if IntfSym = nil then
-        begin
-          { May be a generic interface — try instantiation }
-          IntfDesc := TInterfaceTypeDesc(FindTypeOrInstantiate(IntfName));
-          if IntfDesc = nil then
-            SemanticError(
-              Format('Unknown interface ''%s'' in implements list of ''%s''',
-                [IntfName, TD.Name]),
-              TD.Line, TD.Col);
-          IntfSym := FTable.Lookup(IntfName);
-        end;
-        if (IntfSym = nil) or not (IntfSym.TypeDesc is TInterfaceTypeDesc) then
+        if IntfSym <> nil then
+          IntfTD := IntfSym.TypeDesc
+        else
+          { May be a generic interface — try instantiation.  Use the
+            descriptor it returns: the instance is registered under its
+            canonical name, so IEq<Int32> is found as IEq<Integer>, and a
+            second lookup by the spelling written here would miss it. }
+          IntfTD := FindTypeOrInstantiate(IntfName);
+        if not (IntfTD is TInterfaceTypeDesc) then
           SemanticError(
             Format('Unknown interface ''%s'' in implements list of ''%s''',
               [IntfName, TD.Name]),
             TD.Line, TD.Col);
-        IntfDesc := TInterfaceTypeDesc(IntfSym.TypeDesc);
+        IntfDesc := TInterfaceTypeDesc(IntfTD);
         RT.AddImplements(IntfDesc);
         for J := 0 to IntfDesc.MethodCount() - 1 do
         begin
