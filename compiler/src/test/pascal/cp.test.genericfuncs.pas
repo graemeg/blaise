@@ -117,9 +117,9 @@ const
         begin
           Result := Val
         end;
-        var X: Integer;
+        var X: Int32;
         begin
-          X := Identity<Integer>(42)
+          X := Identity<Int32>(42)
         end.
         ''';
 
@@ -131,9 +131,9 @@ const
         begin
           Result := Val
         end;
-        var X: Integer;
+        var X: Int32;
         begin
-          X := Identity<Integer>(42)
+          X := Identity<Int32>(42)
         end.
         ''';
 
@@ -318,7 +318,7 @@ begin
   try
     Assign := TAssignment(Prog.Block.Stmts[0]);
     FCall  := TFuncCallExpr(Assign.Expr);
-    AssertEquals('call name', 'Identity<Integer>', FCall.Name);
+    AssertEquals('call name', 'Identity<Int32>', FCall.Name);
   finally
     Prog.Free();
   end;
@@ -555,15 +555,15 @@ begin
         type
           TPtrBox<T> = class
             F: ^T;
-            N: Integer;
+            N: Int32;
           end;
         function Make<T>(): TPtrBox<T>;
         begin
           Result := TPtrBox<T>.Create()
         end;
-        var B: TPtrBox<Integer>;
+        var B: TPtrBox<Int32>;
         begin
-          B := Make<Integer>()
+          B := Make<Int32>()
         end.
         ''');
   try
@@ -586,11 +586,11 @@ begin
   Prog := AnalyseSrc(
     '''
         program P;
-        function Size<T>(): Integer;
+        function Size<T>(): Int;
         begin
           Result := SizeOf(T)
         end;
-        var I: Integer;
+        var I: Int;
         begin
           I := Size<Int64>();
           I := Size<Byte>()
@@ -610,9 +610,9 @@ const
         program P;
         type
           TConv<T> = class
-            function Conv(X: Integer): T;
+            function Conv(X: Int): T;
           end;
-        function TConv<T>.Conv(X: Integer): T;
+        function TConv<T>.Conv(X: Int): T;
         begin
           Result := T(X)
         end;
@@ -630,7 +630,7 @@ procedure TGenericFuncTests.TestCodegen_GenericFunc_TypeParamCast_Narrows;
 const
   Src = '''
         program P;
-        function Conv<T>(X: Integer): T;
+        function Conv<T>(X: Int): T;
         begin
           Result := T(X)
         end;

@@ -218,10 +218,10 @@ const
     '''
         type
           TMyEnum = class
-            FCurrent: Integer;
+            FCurrent: Int;
             function MoveNext: Boolean;
-            function GetCurrent: Integer;
-            property Current: Integer read GetCurrent;
+            function GetCurrent: Int;
+            property Current: Int read GetCurrent;
           end;
           TMyCol = class
             function GetEnumerator: TMyEnum;
@@ -230,7 +230,7 @@ const
         begin
           Result := False;
         end;
-        function TMyEnum.GetCurrent: Integer;
+        function TMyEnum.GetCurrent: Int;
         begin
           Result := FCurrent;
         end;
@@ -246,7 +246,7 @@ const
     '''
         var
           Col: TMyCol;
-          X:   Integer;
+          X:   Int;
         begin
           for X in Col do
             X := X + 1
@@ -311,11 +311,11 @@ begin
         program P;
         type
           TBadCol = class
-            FCount: Integer;
+            FCount: Int;
           end;
         var
           Col: TBadCol;
-          X:   Integer;
+          X:   Int;
         begin
           for X in Col do
             X := X + 1
@@ -330,16 +330,16 @@ begin
         program P;
         type
           TBadEnum = class
-            function MoveNext: Integer;
-            function GetCurrent: Integer;
-            property Current: Integer read GetCurrent;
+            function MoveNext: Int;
+            function GetCurrent: Int;
+            property Current: Int read GetCurrent;
           end;
           TBadCol = class
             function GetEnumerator: TBadEnum;
           end;
         var
           Col: TBadCol;
-          X:   Integer;
+          X:   Int;
         begin
           for X in Col do
             X := X + 1
@@ -361,7 +361,7 @@ begin
           end;
         var
           Col: TBadCol;
-          X:   Integer;
+          X:   Int;
         begin
           for X in Col do
             X := X + 1
@@ -391,7 +391,7 @@ begin
     '''
         program P;
         var
-          X: Integer;
+          X: Int;
         begin
           for X in X do
             X := X + 1
@@ -410,8 +410,8 @@ begin
     '''
         program P;
         var
-          A: array[0..2] of Integer;
-          R: Integer;
+          A: array[0..2] of Int;
+          R: Int;
         begin
           A[0] := 1;
           for R in A do
@@ -429,7 +429,7 @@ begin
     '''
         program P;
         type
-          TRec = record N: Integer; end;
+          TRec = record N: Int; end;
         var
           A: array[0..2] of TRec;
           R: TRec;
@@ -452,7 +452,7 @@ begin
         program P;
         type
           TThing = class
-            Value: Integer;
+            Value: Int;
           end;
         var
           A: array[0..1] of TThing;
@@ -474,9 +474,9 @@ begin
     '''
         program P;
         var
-          A: array[0..2] of Integer;
-          R: Integer;
-          S: Integer;
+          A: array[0..2] of Int;
+          R: Int;
+          S: Int;
         begin
           S := 0;
           for R in A do
@@ -494,10 +494,10 @@ begin
     '''
         program P;
         type
-          TRec = record N: Integer; end;
+          TRec = record N: Int; end;
         var
           A: array[0..1] of TRec;
-          I: Integer;
+          I: Int;
         begin
           for I := 0 to 1 do
             A[I].N := I
@@ -515,10 +515,10 @@ begin
     '''
         program P;
         var
-          A: array[0..2] of Integer;
-          R: Integer;
+          A: array[0..2] of Int;
+          R: Int;
 
-        procedure Bump(var X: Integer);
+        procedure Bump(var X: Int);
         begin
           X := X + 1
         end;
@@ -539,8 +539,8 @@ begin
     '''
         program P;
         var
-          A: array[0..2] of Integer;
-          R: Integer;
+          A: array[0..2] of Int;
+          R: Int;
         begin
           for R in A do
             Inc(R)
@@ -558,10 +558,10 @@ begin
     '''
         program P;
         var
-          A: array[0..2] of Integer;
-          R: Integer;
+          A: array[0..2] of Int;
+          R: Int;
 
-        procedure Show(X: Integer);
+        procedure Show(X: Int);
         begin
           WriteLn(X)
         end;
@@ -584,7 +584,7 @@ begin
     '''
         program P;
         type
-          TInner = record N: Integer; end;
+          TInner = record N: Int; end;
           TOuter = record Inner: TInner; end;
         var
           A: array[0..1] of TOuter;
@@ -607,7 +607,7 @@ begin
     '''
         program P;
         type
-          TInner = record N: Integer; end;
+          TInner = record N: Int; end;
           TThing = class
             Inner: TInner;
           end;
@@ -628,12 +628,12 @@ const
   ForInPartsDecls = '''
     program P;
     type
-      TIn = record X: Integer; end;
-      TC = class F: Integer; end;
-      TSA = array[0..1] of Integer;
-      TR = record F: Integer; S: string; Arr: array[0..1] of TIn;
+      TIn = record X: Int; end;
+      TC = class F: Int; end;
+      TSA = array[0..1] of Int;
+      TR = record F: Int; S: string; Arr: array[0..1] of TIn;
         D: array of TIn; C: TC; end;
-    procedure Mut(var V: Integer); begin V := 1 end;
+    procedure Mut(var V: Int); begin V := 1 end;
     var A: array of TR; r: TR; S: array of string; t: string;
       SA: array of TSA; sa1: TSA;
     begin
@@ -701,8 +701,8 @@ const
     '''
         program P;
         var
-          Arr: array[0..4] of Integer;
-          X:   Integer;
+          Arr: array[0..4] of Int;
+          X:   Int;
         begin
           for X in Arr do
             X := X + 1
@@ -713,8 +713,8 @@ const
     '''
         program P;
         var
-          Arr: array[3..7] of Integer;
-          X:   Integer;
+          Arr: array[3..7] of Int;
+          X:   Int;
         begin
           for X in Arr do
             X := X + 1
@@ -736,7 +736,7 @@ begin
     '''
         program P;
         var
-          Arr: array[0..4] of Integer;
+          Arr: array[0..4] of Int;
           X:   string;
         begin
           for X in Arr do
@@ -759,8 +759,8 @@ const
     '''
         program P;
         var
-          DA: array of Integer;
-          X:  Integer;
+          DA: array of Int;
+          X:  Int;
         begin
           for X in DA do
             X := X + 1
@@ -782,7 +782,7 @@ begin
     '''
         program P;
         var
-          DA: array of Integer;
+          DA: array of Int;
           X:  string;
         begin
           for X in DA do
@@ -799,9 +799,9 @@ const
   SrcOpenArrayForIn =
     '''
         program P;
-        procedure Show(const A: array of Integer);
+        procedure Show(const A: array of Int);
         var
-          X: Integer;
+          X: Int;
         begin
           for X in A do
             WriteLn(X)
@@ -821,7 +821,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        procedure Show(const A: array of Integer);
+        procedure Show(const A: array of Int);
         var
           X: string;
         begin
@@ -868,7 +868,7 @@ const
         program P;
         var
           S: string;
-          I: Integer;
+          I: Int32;
         begin
           for I in S do
             I := 0
@@ -911,7 +911,7 @@ begin
         program P;
         var
           S: string;
-          W: Word;
+          W: UInt16;
         begin
           for W in S do
             W := 0
@@ -926,7 +926,7 @@ begin
         program P;
         var
           S: string;
-          N: SmallInt;
+          N: Int16;
         begin
           for N in S do
             N := 0
@@ -940,19 +940,19 @@ const
         program P;
         type
           TRangeEnum = record
-            Cur, Last: Integer;
+            Cur, Last: Int32;
             function MoveNext(): Boolean;
-            function GetCurrent(): Integer;
-            property Current: Integer read GetCurrent;
+            function GetCurrent(): Int32;
+            property Current: Int32 read GetCurrent;
           end;
           TRange = record
-            Lo, Hi: Integer;
+            Lo, Hi: Int32;
             function GetEnumerator(): TRangeEnum;
           end;
         function TRangeEnum.MoveNext(): Boolean; begin Cur := Cur + 1; Result := Cur <= Last end;
-        function TRangeEnum.GetCurrent(): Integer; begin Result := Cur end;
+        function TRangeEnum.GetCurrent(): Int32; begin Result := Cur end;
         function TRange.GetEnumerator(): TRangeEnum; begin Result.Cur := Lo - 1; Result.Last := Hi end;
-        var R: TRange; X: Integer;
+        var R: TRange; X: Int32;
         begin
           for X in R do
     ''';
@@ -984,14 +984,14 @@ begin
         type
           IIntEnum = interface
             function MoveNext(): Boolean;
-            function GetCurrent(): Integer;
-            property Current: Integer read GetCurrent;
+            function GetCurrent(): Int;
+            property Current: Int read GetCurrent;
           end;
           TIntColl = class
             function GetEnumerator(): IIntEnum;
           end;
         function TIntColl.GetEnumerator(): IIntEnum; begin Result := nil end;
-        var C: TIntColl; X: Integer;
+        var C: TIntColl; X: Int;
         begin
           for X in C do
             WriteLn(X)
@@ -1010,8 +1010,8 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        type TR = record A: Integer; end;
-        var R: TR; X: Integer;
+        type TR = record A: Int; end;
+        var R: TR; X: Int;
         begin
           for X in R do
             WriteLn(X)
@@ -1082,8 +1082,8 @@ begin
     '''
         program P;
         var
-          N: Integer;
-          X: Integer;
+          N: Int;
+          X: Int;
         begin
           for X in N do
             X := X
@@ -1096,10 +1096,10 @@ const
   Src = '''
     program P;
     type
-      TDA = array of Integer;
+      TDA = array of Int;
       TObj = class D: TDA; end;
     function MkD: TDA; begin SetLength(Result, 1) end;
-    var O: TObj; I: Integer;
+    var O: TObj; I: Int;
     begin
       for I in O.D do Write(I);
       for I in MkD() do Write(I);
@@ -1117,7 +1117,7 @@ const
   Src = '''
     program P;
     type TBig = set of 0..127;
-    var S: String; C, I: Integer; B: TBig;
+    var S: String; C, I: Int32; B: TBig;
     begin
       for C in S do Write(C);
       for I in B do Write(I);
@@ -1136,11 +1136,11 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TRec = record A: TArr; end;
-      TObj = class D: array of Integer; end;
-    var K: TObj; I: Integer;
-    function F(N: Integer): TRec; begin Result.A[1] := N; end;
+      TObj = class D: array of Int; end;
+    var K: TObj; I: Int;
+    function F(N: Int): TRec; begin Result.A[1] := N; end;
     function GetK: TObj; begin Result := K; end;
     begin
       for I in F(3).A do Write(I);

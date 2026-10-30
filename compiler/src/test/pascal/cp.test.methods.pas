@@ -113,8 +113,8 @@ const
         program P;
         type
           TCounter = class
-            Value: Integer;
-            procedure SetValue(AVal: Integer);
+            Value: Int32;
+            procedure SetValue(AVal: Int32);
             begin
               Self.Value := AVal
             end;
@@ -131,7 +131,7 @@ const
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
             procedure Reset;
             begin
               Self.X := 0
@@ -258,7 +258,7 @@ begin
     CD  := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
     MD  := TMethodDecl(CD.Methods[0]);
     Par := TMethodParam(MD.Params[0]);
-    AssertEquals('param type', 'Integer', Par.TypeName);
+    AssertEquals('param type', 'Int32', Par.TypeName);
   finally
     Prog.Free();
   end;
@@ -345,7 +345,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin
@@ -362,8 +362,8 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
-            procedure SetX(AVal: Integer);
+            X: Int;
+            procedure SetX(AVal: Int);
             begin
               Self.X := AVal
             end;
@@ -383,8 +383,8 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
-            procedure SetX(AVal: Integer);
+            X: Int;
+            procedure SetX(AVal: Int);
             begin
               Self.X := AVal
             end;
@@ -448,13 +448,13 @@ const
     type
       TH = class
       public
-        V: Integer;
-        procedure Put(A: Integer);
-        function Get(A: Integer): Integer;
+        V: Int;
+        procedure Put(A: Int);
+        function Get(A: Int): Int;
       end;
-    var G: TH; N: Integer;
-    procedure TH.Put(A: Integer); begin V := A end;
-    function TH.Get(A: Integer): Integer; begin Result := A end;
+    var G: TH; N: Int;
+    procedure TH.Put(A: Int); begin V := A end;
+    function TH.Get(A: Int): Int; begin Result := A end;
     function MkH(): TH; begin Inc(N); Result := G end;
     begin
       MkH().Put(N);

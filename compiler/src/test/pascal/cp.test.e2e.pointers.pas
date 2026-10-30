@@ -88,12 +88,12 @@ const
   Src = '''
     program PD;
     type
-      TPt = record X, Y: Integer; end;
-      TArr = array[0..3] of Integer;
+      TPt = record X, Y: Int; end;
+      TArr = array[0..3] of Int;
       TPts = array[0..1] of TPt;
       PArr = ^TArr; PPts = ^TPts;
-      TGrid = array[0..1, 0..2] of Integer; PGrid = ^TGrid;
-    var a: TArr; P: PArr; pts: TPts; Q: PPts; g: TGrid; G2: PGrid; I: Integer;
+      TGrid = array[0..1, 0..2] of Int; PGrid = ^TGrid;
+    var a: TArr; P: PArr; pts: TPts; Q: PPts; g: TGrid; G2: PGrid; I: Int;
     begin
       P := @a; Q := @pts; G2 := @g;
       P^[0] := 9; P^[3] := P^[0] + 1;
@@ -117,19 +117,19 @@ const
     expression"); net.sockets.FillSockAddr(var AAddr) passes @AAddr on. }
   Src = '''
     program P;
-    type TPt = record X, Y: Integer; end;
+    type TPt = record X, Y: Int; end;
     procedure Poke(Dst: Pointer);
-    var P: ^Integer;
+    var P: ^Int;
     begin
       P := Dst;
       P^ := 42
     end;
-    procedure Fill(var R: TPt; var N: Integer);
+    procedure Fill(var R: TPt; var N: Int);
     begin
       Poke(@N);
       Poke(@R)
     end;
-    var Q: TPt; K: Integer;
+    var Q: TPt; K: Int;
     begin
       Q.Y := 7;
       Fill(Q, K);
@@ -146,24 +146,24 @@ const
   Src = '''
     program P;
     type
-      IFoo = interface function Get: Integer; end;
+      IFoo = interface function Get: Int; end;
       TFoo = class(TObject, IFoo)
-        V: Integer;
-        function Get: Integer;
+        V: Int;
+        function Get: Int;
       end;
-      TRec = record A, B: Integer; Arr: array[0..3] of Integer; end;
+      TRec = record A, B: Int; Arr: array[0..3] of Int; end;
       TObj = class
-        N: Integer;
+        N: Int;
         R: TRec;
       end;
-      PInt = ^Integer;
+      PInt = ^Int;
       PIFoo = ^IFoo;
     var
       GI: IFoo;
       Recs: array[0..2] of TRec;
       DRecs: array of TRec;
-    function TFoo.Get: Integer; begin Result := V end;
-    procedure SetVia(P: PInt; V: Integer); begin P^ := V end;
+    function TFoo.Get: Int; begin Result := V end;
+    procedure SetVia(P: PInt; V: Int); begin P^ := V end;
     procedure VarRec(var R: TRec); begin SetVia(@R.B, 77); SetVia(@R.Arr[2], 78) end;
     procedure VarObj(var O: TObj); begin SetVia(@O.N, 55) end;
     procedure UseIntfPtr(P: PIFoo); var I: IFoo; begin I := P^; WriteLn(I.Get()) end;
@@ -194,27 +194,27 @@ const
     program DerefCalls;
     type
       IFoo = interface
-        function Get: Integer;
+        function Get: Int;
         function Name: String;
         function Self2: IFoo;
-        procedure Add(N: Integer; const S: String);
+        procedure Add(N: Int; const S: String);
       end;
       TFoo = class(TObject, IFoo)
-        V: Integer;
-        function Get: Integer; function Name: String; function Self2: IFoo;
-        procedure Add(N: Integer; const S: String);
+        V: Int;
+        function Get: Int; function Name: String; function Self2: IFoo;
+        procedure Add(N: Int; const S: String);
       end;
       PIFoo = ^IFoo;
       PFoo = ^TFoo;
-      TIn = record Y: Integer; end;
-      TRec = record X: Integer; Inner: TIn; end;
+      TIn = record Y: Int; end;
+      TRec = record X: Int; Inner: TIn; end;
       PRec = ^TRec;
-      PInt = ^Integer;
-    function TFoo.Get: Integer; begin Result := V end;
+      PInt = ^Int;
+    function TFoo.Get: Int; begin Result := V end;
     function TFoo.Name: String; begin Result := 'foo' + IntToStr(V) end;
     function TFoo.Self2: IFoo; begin Result := Self end;
-    procedure TFoo.Add(N: Integer; const S: String); begin V := V + N + Length(S) end;
-    var GR: TRec; GN: Integer; GF: TFoo;
+    procedure TFoo.Add(N: Int; const S: String); begin V := V + N + Length(S) end;
+    var GR: TRec; GN: Int; GF: TFoo;
     function GetP: PRec; begin Result := @GR end;
     function GetN: PInt; begin Result := @GN end;
     function GetF: PFoo; begin Result := @GF end;
@@ -244,17 +244,17 @@ const
   UnitSrc = '''
     unit ptcast;
     interface
-    function Probe(P: Pointer): Integer;
+    function Probe(P: Pointer): Int;
     implementation
     type
       PNode = ^TNode;
       TNode = record Next: PNode; Total: Int64; end;
-    function Probe(P: Pointer): Integer;
+    function Probe(P: Pointer): Int;
     var N: PNode;
     begin
       N := PNode(P + 8);
       N^.Total := 5;
-      Result := Integer(N^.Total)
+      Result := Int32(N^.Total)
     end;
     end.
     ''';
@@ -288,7 +288,7 @@ const
 
   SrcGetMemWriteRead = '''
     program P;
-    var P1: ^Integer;
+    var P1: ^Int;
     begin
       P1 := GetMem(4);
       P1^ := 42;
@@ -300,8 +300,8 @@ const
   SrcTypedPointerDeref = '''
     program P;
     var
-      A: Integer;
-      P1: ^Integer;
+      A: Int;
+      P1: ^Int;
     begin
       A  := 99;
       P1 := @A;
@@ -311,7 +311,7 @@ const
 
   SrcPointerNilCheck = '''
     program P;
-    var P1: ^Integer;
+    var P1: ^Int;
     begin
       P1 := nil;
       if P1 = nil then
@@ -333,7 +333,7 @@ const
     var
       Arr: array[0..1] of PChar;
       A, B: PChar;
-      I: Integer;
+      I: Int;
     begin
       A := GetMem(3);
       for I := 0 to 1 do A[I] := Chr(72 + I);
@@ -376,7 +376,7 @@ const
     program P;
     var
       P1: PChar;
-      I:  Integer;
+      I:  Int;
     begin
       P1 := GetMem(5);
       for I := 0 to 3 do
@@ -390,8 +390,8 @@ const
   SrcDoublePtrWriteE2E = '''
     program P;
     var
-      D:  Double;
-      PD: ^Double;
+      D:  Float64;
+      PD: ^Float64;
     begin
       D := 0.0;
       PD := @D;
@@ -403,9 +403,9 @@ const
   SrcSinglePtrAdjacentE2E = '''
     program P;
     var
-      A:  Single;
-      B:  Single;
-      PA: ^Single;
+      A:  Float32;
+      B:  Float32;
+      PA: ^Float32;
     begin
       A := 0.0;
       B := 9.5;
@@ -424,7 +424,7 @@ const
     var
       V:   Int64;
       Ptr: ^Int64;
-      I:   Integer;
+      I:   Int;
     begin
       V := 0;
       Ptr := @V;
@@ -442,7 +442,7 @@ const
     var
       V:   Int64;
       Ptr: ^Int64;
-      C:   Cardinal;
+      C:   UInt32;
     begin
       V := 0;
       Ptr := @V;
@@ -457,9 +457,9 @@ const
   SrcDoublePtrIntRhsE2E = '''
     program P;
     var
-      D:   Double;
-      Ptr: ^Double;
-      I:   Integer;
+      D:   Float64;
+      Ptr: ^Float64;
+      I:   Int;
     begin
       D := 0.0;
       Ptr := @D;
@@ -475,9 +475,9 @@ const
   SrcSinglePtrIntRhsE2E = '''
     program P;
     var
-      F:   Single;
-      Ptr: ^Single;
-      I:   Integer;
+      F:   Float32;
+      Ptr: ^Float32;
+      I:   Int;
     begin
       F := 0.0;
       Ptr := @F;
@@ -492,9 +492,9 @@ const
   SrcDoublePtrSingleRhsE2E = '''
     program P;
     var
-      D:   Double;
-      Ptr: ^Double;
-      S:   Single;
+      D:   Float64;
+      Ptr: ^Float64;
+      S:   Float32;
     begin
       D := 0.0;
       Ptr := @D;
@@ -509,11 +509,11 @@ const
   Src = '''
     program P;
     var
-      A: Int8; B: SmallInt; C: Byte; D: Word;
-      PA: ^Int8; PB: ^SmallInt; PC: PByte; PD: PWord;
-    procedure Poke(var X: Int8; var Y: SmallInt);
+      A: Int8; B: Int16; C: Byte; D: UInt16;
+      PA: ^Int8; PB: ^Int16; PC: PByte; PD: PWord;
+    procedure Poke(var X: Int8; var Y: Int16);
     var
-      QX: ^Int8; QY: ^SmallInt;
+      QX: ^Int8; QY: ^Int16;
     begin
       QX := @X; QY := @Y;
       QX^ := -9; QY^ := -400;
@@ -521,7 +521,7 @@ const
     end;
     procedure Loc();
     var
-      LA: Int8; LB: SmallInt; QA: ^Int8; QB: ^SmallInt;
+      LA: Int8; LB: Int16; QA: ^Int8; QB: ^Int16;
     begin
       LA := 1; LB := 1;
       QA := @LA; QB := @LB;
@@ -552,7 +552,7 @@ const
   Src = '''
     program P;
     var
-      I: Integer; B: Byte; W: Word; L: Int64; D: Double; F: Boolean;
+      I: Int32; B: Byte; W: UInt16; L: Int64; D: Float64; F: Boolean;
       PI: PInteger; PB: PByte; PW: PWord; PL: PInt64; PD: PDouble;
       PF: PBoolean; PP: PPointer; Raw: Pointer;
     begin
@@ -684,22 +684,22 @@ end;
 const
   SrcPtrRecordField = '''
     program Prg;
-    type TP = record X, Y: Integer; end;
+    type TP = record X, Y: Int; end;
     var r: TP; pr: ^TP;
     begin r.X := 5; pr := @r; pr^.Y := 8; WriteLn(pr^.X + pr^.Y) end.
     ''';
 
   SrcPtrParam2 = '''
     program Prg;
-    type PInt = ^Integer;
+    type PInt = ^Int;
     procedure Bump(P: PInt); begin P^ := P^ + 10 end;
-    var a: Integer;
+    var a: Int;
     begin a := 5; Bump(@a); WriteLn(a) end.
     ''';
 
   SrcPtrEquality = '''
     program Prg;
-    var a, b: Integer; pa, pb: ^Integer;
+    var a, b: Int; pa, pb: ^Int;
     begin a := 1; b := 2; pa := @a; pb := @a;
       if pa = pb then WriteLn('same') else WriteLn('diff');
       pb := @b;
@@ -709,8 +709,8 @@ const
 
   SrcPtrToElem2 = '''
     program Prg;
-    type PInt = ^Integer;
-    var arr: array[0..4] of Integer; p: PInt; i: Integer;
+    type PInt = ^Int;
+    var arr: array[0..4] of Int; p: PInt; i: Int;
     begin
       for i := 0 to 4 do arr[i] := i * 11;
       p := @arr[2];
@@ -720,8 +720,8 @@ const
 
   SrcLinkedList2 = '''
     program Prg;
-    type PNode = ^TNode; TNode = record Val: Integer; Next: PNode; end;
-    var head, n: PNode; sum: Integer;
+    type PNode = ^TNode; TNode = record Val: Int; Next: PNode; end;
+    var head, n: PNode; sum: Int;
     begin
       head := nil;
       n := GetMem(SizeOf(TNode)); n^.Val := 1; n^.Next := head; head := n;
@@ -768,8 +768,8 @@ const
     program prg;
     type
       TInfo = record
-        A: Integer;
-        B: Integer;
+        A: Int;
+        B: Int;
       end;
       PInfo = ^TInfo;
     var
@@ -797,7 +797,7 @@ const
     type
       TNamed = record
         Name: string;
-        N: Integer;
+        N: Int;
       end;
       PNamed = ^TNamed;
     var
@@ -825,8 +825,8 @@ const
   Src = '''
     program P;
     type TBox = class Bytes: array[0..7] of Byte; end;
-    procedure Copy8(Dst, Src: Pointer; N: Integer); external name 'memcpy';
-    var B: TBox; L: array[0..7] of Byte; I: Integer;
+    procedure Copy8(Dst, Src: Pointer; N: Int32); external name 'memcpy';
+    var B: TBox; L: array[0..7] of Byte; I: Int;
     begin
       B := TBox.Create();
       for I := 0 to 7 do B.Bytes[I] := I + 10;
@@ -857,14 +857,14 @@ const
   Src = '''
     program Pointers;
     type
-      PInt = ^Integer;
-      PDbl = ^Double;
-      PSgl = ^Single;
+      PInt = ^Int;
+      PDbl = ^Float64;
+      PSgl = ^Float32;
       PI64 = ^Int64;
       PByte = ^Byte;
       PRec = ^TRec;
       TRec = record
-        DA: array of Integer;
+        DA: array of Int;
       end;
     var
       P: Pointer;
@@ -873,10 +873,10 @@ const
       PS: PSgl;
       P64: PI64;
       PB: PByte;
-      N: Integer;
-      C: Cardinal;
-      D: Double;
-      S: Single;
+      N: Int;
+      C: UInt32;
+      D: Float64;
+      S: Float32;
       V: Int64;
       R: TRec;
       Ptr: PRec;
@@ -911,10 +911,10 @@ const
       FreeMem(P);
       N := 42;
       P := Pointer(N);
-      U := PtrUInt(P);
+      U := UInt(P);
       WriteLn(U);
       N := -1;
-      U := PtrUInt(Pointer(N));
+      U := UInt(Pointer(N));
       WriteLn(U);
       Ptr := @R;
       SetLength(R.DA, 3);
@@ -947,23 +947,23 @@ const
     program MoveDemo;
     type
       TPoint = record
-        X, Y: Integer;
+        X, Y: Int32;
       end;
     var
-      A, B: array[0..7] of Integer;
+      A, B: array[0..7] of Int32;
       P, Q: TPoint;
-      I, Neg: Integer;
+      I, Neg: Int32;
       N: Int64;
     begin
       for I := 0 to 7 do
         A[I] := I + 1;
       Move(A, B, SizeOf(A));
       WriteLn(B[0], ' ', B[7]);
-      Move(A[0], A[2], 6 * SizeOf(Integer));
+      Move(A[0], A[2], 6 * SizeOf(Int32));
       for I := 0 to 7 do
         Write(A[I], ' ');
       WriteLn();
-      Move(A[2], A[0], 6 * SizeOf(Integer));
+      Move(A[2], A[0], 6 * SizeOf(Int32));
       for I := 0 to 7 do
         Write(A[I], ' ');
       WriteLn();
@@ -975,7 +975,7 @@ const
       Move(A, B, Neg);
       Move(A, B, 0);
       WriteLn(B[0]);
-      N := SizeOf(Integer);
+      N := SizeOf(Int32);
       Move(A[7], B[0], N);
       WriteLn(B[0]);
     end.
@@ -999,10 +999,10 @@ const
     program MethodMove;
     type
       TItems = class
-        procedure Move(ACur, ANew: Integer);
+        procedure Move(ACur, ANew: Int);
         procedure Shuffle;
       end;
-    procedure TItems.Move(ACur, ANew: Integer);
+    procedure TItems.Move(ACur, ANew: Int);
     begin
       WriteLn('method Move ', ACur, ' ', ANew);
     end;
@@ -1032,12 +1032,12 @@ const
     program FillDemo;
     type
       TPair = record
-        X, Y: Integer;
+        X, Y: Int;
       end;
     var
       A: array[0..7] of Byte;
       R: TPair;
-      I, Neg, V: Integer;
+      I, Neg, V: Int;
       N: Int64;
     begin
       FillByte(A, SizeOf(A), 7);
@@ -1076,7 +1076,7 @@ const
         Tag: string;
         destructor Destroy(); override;
       end;
-      TRow = array[0..2] of Integer;
+      TRow = array[0..2] of Int;
       TSRow = array[0..1] of string;
       TKRow = array[0..1] of TK;
       PRow = ^TRow;

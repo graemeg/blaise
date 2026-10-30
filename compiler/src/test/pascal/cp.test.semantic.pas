@@ -548,8 +548,8 @@ begin
   AnalyseExpectError(
     '''
     program TestProc;
-    type TProc = procedure(A, B: Integer);
-    procedure Dummy(A, B: Integer); begin end;
+    type TProc = procedure(A, B: Int);
+    procedure Dummy(A, B: Int); begin end;
     var V: TProc;
     begin
       V := @Dummy;
@@ -565,8 +565,8 @@ begin
   AnalyseExpectError(
     '''
     program TestProc;
-    type TProc = procedure(A, B: Integer);
-    procedure Dummy(A, B: Integer); begin end;
+    type TProc = procedure(A, B: Int);
+    procedure Dummy(A, B: Int); begin end;
     var V: TProc;
     begin
       V := @Dummy;
@@ -601,7 +601,7 @@ begin
   Analyse(
     '''
         program Arith;
-        var n: Integer;
+        var n: Int;
         begin
           n := 3 * 4 + 2;
           WriteLn(n);
@@ -646,7 +646,7 @@ begin
   AssertTrue('float rejected', Pos('requires an ordinal',
     SemanticError('''
       program P;
-      var D: Double;
+      var D: Float64;
       begin
         D := Succ(1.5);
       end.
@@ -714,7 +714,7 @@ const
   Src = '''
     program P;
     type
-      TRec = record N: Integer; end;
+      TRec = record N: Int; end;
       TObj = class
       public
         R: TRec;
@@ -722,7 +722,7 @@ const
       end;
     var R: TRec;
     procedure TObj.Direct;
-    var X: Integer;
+    var X: Int;
     begin
       R.N := 5;
       X := R.N;
@@ -772,12 +772,12 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       public
         const CA: TArr = (5, 6, 7, 8);
       end;
-    procedure ShowOpen(const A: array of Integer); begin end;
+    procedure ShowOpen(const A: array of Int); begin end;
     begin
       ShowOpen(TObj.CA)
     end.
@@ -802,7 +802,7 @@ const
     ''';
   SrcInt = '''
     program P;
-    var S: string; Q: ^Integer;
+    var S: string; Q: ^Int32;
     begin
       Q := @S[1];
     end.
@@ -827,7 +827,7 @@ const
   SrcField = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       private
         FArr: TArr;
@@ -847,7 +847,7 @@ const
   SrcGetter = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       private
         function GetArr: TArr;
@@ -877,24 +877,24 @@ const
   SrcOk = '''
     program P;
     type
-      TRec = record N: Integer; A: array[0..1] of Integer; end;
+      TRec = record N: Int; A: array[0..1] of Int; end;
       PRec = ^TRec;
-    var X: Integer; R: TRec; PR: PRec; Q: ^Integer; A: array[0..2] of Integer;
+    var X: Int; R: TRec; PR: PRec; Q: ^Int; A: array[0..2] of Int;
     begin
       Q := @X; Q := @R.N; Q := @R.A[1]; Q := @A[2]; PR := @R; Q := @PR^.N;
     end.
     ''';
   SrcCall = '''
     program P;
-    function F: Integer; begin Result := 1; end;
-    var Q: ^Integer;
+    function F: Int; begin Result := 1; end;
+    var Q: ^Int;
     begin
       Q := @F();
     end.
     ''';
   SrcExpr = '''
     program P;
-    var Q: ^Integer; X: Integer;
+    var Q: ^Int; X: Int;
     begin
       Q := @(X + 1);
     end.
@@ -902,7 +902,7 @@ const
   SrcConst = '''
     program P;
     const K = 3;
-    var Q: ^Integer;
+    var Q: ^Int;
     begin
       Q := @K;
     end.

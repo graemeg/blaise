@@ -80,7 +80,7 @@ const
   Src =
     '''
         program P;
-        var X: Integer; B: Byte;
+        var X: Int32; B: Byte;
         begin
           WriteLn(SizeOf(X));
           WriteLn(SizeOf(B))
@@ -105,8 +105,8 @@ const
   Src = '''
     program P;
     type
-      Trec = record a: Integer; b: Byte; c: UInt32; end;
-    var X: Integer; B: Byte; Q: Int64; T: Trec;
+      Trec = record a: Int32; b: Byte; c: UInt32; end;
+    var X: Int32; B: Byte; Q: Int64; T: Trec;
     begin
       WriteLn(SizeOf(X), ' ', SizeOf(B), ' ', SizeOf(Q));
       WriteLn(SizeOf(T), ' ', SizeOf(T.b))

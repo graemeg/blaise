@@ -269,10 +269,10 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var X: Integer;
+        var X: Int;
             R: Boolean;
         begin
-          R := X is Integer
+          R := X is Int
         end.
         ''');
 end;
@@ -298,10 +298,10 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var X: Integer;
-            Y: Integer;
+        var X: Int;
+            Y: Int;
         begin
-          Y := X as Integer
+          Y := X as Int
         end.
         ''');
 end;

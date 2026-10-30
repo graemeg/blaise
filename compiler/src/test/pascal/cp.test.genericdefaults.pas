@@ -54,7 +54,7 @@ const
         type
           IEqualityComparer<T> = interface
             function Equals(A, B: T): Boolean;
-            function GetHashCode(Value: T): Integer;
+            function GetHashCode(Value: T): Int32;
           end;
         begin end.
         ''';
@@ -64,7 +64,7 @@ const
         program P;
         type
           IComparer<T> = interface
-            function Compare(A, B: T): Integer;
+            function Compare(A, B: T): Int32;
           end;
         begin end.
         ''';
@@ -75,14 +75,14 @@ const
         type
           IEqualityComparer<T> = interface
             function Equals(A, B: T): Boolean;
-            function GetHashCode(Value: T): Integer;
+            function GetHashCode(Value: T): Int32;
           end;
-          TIntegerEqualityComparer = class(IEqualityComparer<Integer>)
-            function Equals(A, B: Integer): Boolean;
+          TIntegerEqualityComparer = class(IEqualityComparer<Int32>)
+            function Equals(A, B: Int32): Boolean;
             begin
               Result := A = B
             end;
-            function GetHashCode(Value: Integer): Integer;
+            function GetHashCode(Value: Int32): Int32;
             begin
               Result := Value
             end;
@@ -95,10 +95,10 @@ const
         program P;
         type
           IComparer<T> = interface
-            function Compare(A, B: T): Integer;
+            function Compare(A, B: T): Int32;
           end;
-          TIntegerComparer = class(IComparer<Integer>)
-            function Compare(A, B: Integer): Integer;
+          TIntegerComparer = class(IComparer<Int>)
+            function Compare(A, B: Int): Int32;
             begin
               if A < B then
                 Result := -1
@@ -117,20 +117,20 @@ const
         type
           IEqualityComparer<T> = interface
             function Equals(A, B: T): Boolean;
-            function GetHashCode(Value: T): Integer;
+            function GetHashCode(Value: T): Int32;
           end;
-          TIntegerEqualityComparer = class(IEqualityComparer<Integer>)
-            function Equals(A, B: Integer): Boolean;
+          TIntegerEqualityComparer = class(IEqualityComparer<Int>)
+            function Equals(A, B: Int): Boolean;
             begin
               Result := A = B
             end;
-            function GetHashCode(Value: Integer): Integer;
+            function GetHashCode(Value: Int): Int32;
             begin
               Result := Value
             end;
           end;
         var
-          C: IEqualityComparer<Integer>;
+          C: IEqualityComparer<Int>;
           OK: Boolean;
         begin
           C  := TIntegerEqualityComparer.Create();
@@ -216,9 +216,9 @@ begin
     TD := TTypeDecl(Prog.Block.TypeDecls[1]);
     AssertTrue('Is class', TD.Def is TClassTypeDef);
     CD := TClassTypeDef(TD.Def);
-    AssertTrue('Has IEqualityComparer<Integer>',
-      (CD.ParentName = 'IEqualityComparer<Integer>') or
-      (CD.ImplementsNames.IndexOf('IEqualityComparer<Integer>') >= 0));
+    AssertTrue('Has IEqualityComparer<Int32>',
+      (CD.ParentName = 'IEqualityComparer<Int32>') or
+      (CD.ImplementsNames.IndexOf('IEqualityComparer<Int32>') >= 0));
   finally
     Prog.Free();
   end;

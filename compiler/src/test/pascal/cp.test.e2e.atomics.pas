@@ -64,7 +64,7 @@ const Src = '''
       external name '_AtomicCASPtr';
     var
       Slot: Pointer;
-      A, B, C: Integer;
+      A, B, C: Int;
     begin
       Slot := @A;
       if _AtomicCASPtr(@Slot, @A, @B) then
@@ -98,7 +98,7 @@ const Src = '''
       external name '_AtomicXchgPtr';
     var
       Slot: Pointer;
-      A, B: Integer;
+      A, B: Int;
       Old: Pointer;
     begin
       Slot := @A;
@@ -163,7 +163,7 @@ const Src = '''
       PNode = ^TNode;
       TNode = record
         Next: PNode;
-        Tag: Integer;
+        Tag: Int;
       end;
     function _AtomicCASPtr(Ptr: Pointer; Expected, NewVal: Pointer): Boolean;
       external name '_AtomicCASPtr';
@@ -173,7 +173,7 @@ const Src = '''
       Head: Pointer;
       N1, N2, N3: TNode;
       Claimed: PNode;
-      Sum: Integer;
+      Sum: Int;
     procedure Push(N: PNode);
     var
       OldHead: Pointer;

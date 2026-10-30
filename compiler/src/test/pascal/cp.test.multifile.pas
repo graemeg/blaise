@@ -210,9 +210,9 @@ const
     '''
         unit MathUtils;
         interface
-        function Add(A, B: Integer): Integer;
+        function Add(A, B: Int): Int;
         implementation
-        function Add(A, B: Integer): Integer;
+        function Add(A, B: Int): Int;
         begin
           Result := A + B
         end;
@@ -436,8 +436,8 @@ const
         interface
         type
           TPoint = record
-            X: Integer;
-            Y: Integer;
+            X: Int;
+            Y: Int;
           end;
         implementation
         end.
@@ -477,9 +477,9 @@ const
     '''
         unit MathU;
         interface
-        function Add(A, B: Integer): Integer;
+        function Add(A, B: Int): Int;
         implementation
-        function Add(A, B: Integer): Integer;
+        function Add(A, B: Int): Int;
         begin
           Result := A + B
         end;
@@ -489,7 +489,7 @@ const
     '''
         program TestP;
         uses MathU;
-        var r: Integer;
+        var r: Int;
         begin
           r := Add(1, 2)
         end.
@@ -584,9 +584,9 @@ const
     '''
         unit blaise_testmem;
         interface
-        function _TestGetMem(Size: Integer): Pointer;
+        function _TestGetMem(Size: Int): Pointer;
         implementation
-        function _TestGetMem(Size: Integer): Pointer;
+        function _TestGetMem(Size: Int): Pointer;
         begin
           Result := nil
         end;
@@ -598,7 +598,7 @@ const
         interface
         function GrabMem: Pointer;
         implementation
-        function _TestGetMem(Size: Integer): Pointer; external name '_TestGetMem';
+        function _TestGetMem(Size: Int32): Pointer; external name '_TestGetMem';
         function GrabMem: Pointer;
         begin
           Result := _TestGetMem(8)
@@ -645,13 +645,13 @@ const
     '''
         unit PrivA;
         interface
-        function GoA: Integer;
+        function GoA: Int;
         implementation
-        function Helper(X: Integer): Integer;
+        function Helper(X: Int): Int;
         begin
           Result := X + 1
         end;
-        function GoA: Integer;
+        function GoA: Int;
         begin
           Result := Helper(10)
         end;
@@ -661,13 +661,13 @@ const
     '''
         unit PrivB;
         interface
-        function GoB: Integer;
+        function GoB: Int;
         implementation
-        function Helper(X: Integer): Integer;
+        function Helper(X: Int): Int;
         begin
           Result := X + 2
         end;
-        function GoB: Integer;
+        function GoB: Int;
         begin
           Result := Helper(20)
         end;
@@ -677,7 +677,7 @@ const
     '''
         program TestP;
         uses PrivA, PrivB;
-        var r: Integer;
+        var r: Int;
         begin
           r := GoA() + GoB()
         end.
@@ -712,10 +712,10 @@ const
     '''
         unit ExtPriv;
         interface
-        function GoX: Integer;
+        function GoX: Int;
         implementation
-        function ext_probe(X: Integer): Integer; external name 'abs';
-        function GoX: Integer;
+        function ext_probe(X: Int32): Int32; external name 'abs';
+        function GoX: Int;
         begin
           Result := ext_probe(-7)
         end;
@@ -725,8 +725,8 @@ const
     '''
         program TestP;
         uses ExtPriv;
-        function ext_probe(X: Integer): Integer; external name 'abs';
-        var r: Integer;
+        function ext_probe(X: Int32): Int32; external name 'abs';
+        var r: Int;
         begin
           r := ext_probe(-5) + GoX()
         end.
@@ -762,21 +762,21 @@ const
         interface
         type
           TUnitRec = record
-            One: Integer;
-            Two: Integer;
+            One: Int;
+            Two: Int;
           end;
           TBaseObj = class
-            function Hello(): Integer;
+            function Hello(): Int;
           end;
         const
           VisAnswer = 42;
-        function VisTwice(N: Integer): Integer;
+        function VisTwice(N: Int): Int;
         implementation
-        function TBaseObj.Hello(): Integer;
+        function TBaseObj.Hello(): Int;
         begin
           Result := 7
         end;
-        function VisTwice(N: Integer): Integer;
+        function VisTwice(N: Int): Int;
         begin
           Result := N * 2
         end;
@@ -853,7 +853,7 @@ const
         program P;
         uses VisBase;
         var
-          N: Integer;
+          N: Int;
         begin
           N := VisTwice(3)
         end.
@@ -873,7 +873,7 @@ const
         program P;
         uses VisBase;
         var
-          N: Integer;
+          N: Int;
         begin
           N := VisAnswer
         end.
@@ -892,10 +892,10 @@ const
     '''
         unit VisMid;
         interface
-        function MidValue(): Integer;
+        function MidValue(): Int;
         implementation
         uses VisTypes;
-        function MidValue(): Integer;
+        function MidValue(): Int;
         begin
           Result := VisAnswer
         end;
@@ -906,7 +906,7 @@ const
         program P;
         uses VisMid;
         var
-          N: Integer;
+          N: Int;
         begin
           N := MidValue() + VisTwice(1)
         end.
@@ -925,7 +925,7 @@ const
     '''
         unit VisMid;
         interface
-        function MidValue(): Integer;
+        function MidValue(): Int;
         implementation
         uses VisTypes;
         type
@@ -934,7 +934,7 @@ const
           end;
         var
           Box: TLocalBox;
-        function MidValue(): Integer;
+        function MidValue(): Int;
         var
           O: TBaseObj;
         begin
@@ -949,7 +949,7 @@ const
         program P;
         uses VisMid;
         var
-          N: Integer;
+          N: Int;
         begin
           N := MidValue()
         end.
@@ -966,7 +966,7 @@ const
         program P;
         uses VisBase;
         var
-          N: Integer;
+          N: Int;
         begin
           Ur.One := 1;
           VisBase.Ur.Two := 2;
@@ -986,7 +986,7 @@ const
         uses VisBase;
         var
           D: TDerivedObj;
-          N: Integer;
+          N: Int;
         begin
           D := TDerivedObj.Create();
           N := D.Hello()
@@ -1004,9 +1004,9 @@ const
         interface
         const
           HelpBase = 100;
-        function HelpAdd(N: Integer): Integer;
+        function HelpAdd(N: Int): Int;
         implementation
-        function HelpAdd(N: Integer): Integer;
+        function HelpAdd(N: Int): Int;
         begin
           Result := N + HelpBase
         end;
@@ -1020,15 +1020,15 @@ const
         type
           TGenBox<T> = class
             FValue: T;
-            function Bumped(): Integer;
+            function Bumped(): Int;
           end;
-        function GenBump<T>(const A: T): Integer;
+        function GenBump<T>(const A: T): Int;
         implementation
-        function TGenBox<T>.Bumped(): Integer;
+        function TGenBox<T>.Bumped(): Int;
         begin
           Result := HelpAdd(HelpBase)
         end;
-        function GenBump<T>(const A: T): Integer;
+        function GenBump<T>(const A: T): Int;
         begin
           Result := HelpAdd(SizeOf(A))
         end;
@@ -1064,10 +1064,10 @@ const
         program P;
         uses VisGen;
         var
-          B: TGenBox<Integer>;
-          N: Integer;
+          B: TGenBox<Int>;
+          N: Int;
         begin
-          B := TGenBox<Integer>.Create();
+          B := TGenBox<Int>.Create();
           N := B.Bumped()
         end.
         ''';
@@ -1083,9 +1083,9 @@ const
         program P;
         uses VisGen;
         var
-          N: Integer;
+          N: Int;
         begin
-          N := GenBump<Integer>(3)
+          N := GenBump<Int>(3)
         end.
         ''';
 begin
@@ -1101,17 +1101,17 @@ const
         uses VisGen;
         type
           TProgRec = record
-            A: Integer;
+            A: Int;
           end;
         procedure Run();
         type
           TLocalRec = record
-            B: Integer;
+            B: Int;
           end;
         var
           B1: TGenBox<TProgRec>;
           B2: TGenBox<TLocalRec>;
-          N: Integer;
+          N: Int;
         begin
           B1 := TGenBox<TProgRec>.Create();
           B2 := TGenBox<TLocalRec>.Create();
@@ -1134,9 +1134,9 @@ const
         interface
         type
           PInteger = ^Byte;
-        function Peek(P: PInteger): Integer;
+        function Peek(P: PInteger): Int32;
         implementation
-        function Peek(P: PInteger): Integer;
+        function Peek(P: PInteger): Int32;
         begin
           Result := P^
         end;
@@ -1146,10 +1146,10 @@ const
     '''
         unit VisPtrMid;
         interface
-        function MidPeek(): Integer;
+        function MidPeek(): Int32;
         implementation
         uses VisOwnPtr;
-        function MidPeek(): Integer;
+        function MidPeek(): Int32;
         var
           B: Byte;
         begin
@@ -1163,7 +1163,7 @@ const
         program P;
         uses VisPtrMid;
         var
-          I: Integer;
+          I: Int32;
           Q: PInteger;
         begin
           Q := @I;

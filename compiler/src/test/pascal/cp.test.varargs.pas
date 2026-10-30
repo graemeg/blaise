@@ -101,7 +101,7 @@ begin
   Prog := Self.AnalyseSrc(
     '''
         program P;
-        function printf(AFormat: PChar): Integer; cdecl; varargs; external 'c' name 'printf';
+        function printf(AFormat: PChar): Int32; cdecl; varargs; external 'c' name 'printf';
         begin
         end.
         ''');
@@ -118,7 +118,7 @@ begin
   Self.AnalyseExpectError(
     '''
         program P;
-        function F(A: Integer): Integer; varargs;
+        function F(A: Int): Int; varargs;
         begin
           Result := A
         end;
@@ -132,7 +132,7 @@ begin
   Self.AnalyseExpectError(
     '''
         program P;
-        function xprintf(AFormat: PChar; AMode: Integer): Integer; cdecl; varargs; external 'c' name 'printf';
+        function xprintf(AFormat: PChar; AMode: Int32): Int32; cdecl; varargs; external 'c' name 'printf';
         begin
           xprintf(PChar('x'))
         end.
@@ -144,7 +144,7 @@ begin
   Self.AnalyseExpectError(
     '''
         program P;
-        function printf(AFormat: PChar): Integer; cdecl; varargs; external 'c' name 'printf';
+        function printf(AFormat: PChar): Int32; cdecl; varargs; external 'c' name 'printf';
         var S: string;
         begin
           S := 'abc';
@@ -158,8 +158,8 @@ begin
   Self.AnalyseExpectError(
     '''
         program P;
-        function printf(AFormat: PChar): Integer; cdecl; varargs; external 'c' name 'printf';
-        var F: Single;
+        function printf(AFormat: PChar): Int32; cdecl; varargs; external 'c' name 'printf';
+        var F: Float32;
         begin
           F := 1.5;
           printf(PChar('%f'), F)
@@ -180,10 +180,10 @@ const
   Src =
     '''
         program P;
-        function printf(AFormat: PChar): Integer; cdecl; varargs; external 'c' name 'printf';
+        function printf(AFormat: PChar): Int32; cdecl; varargs; external 'c' name 'printf';
         var
-          N: Integer;
-          D: Double;
+          N: Int;
+          D: Float64;
         begin
           N := 42;
           D := 3.5;

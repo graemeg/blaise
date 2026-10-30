@@ -80,7 +80,7 @@ const
 const
   SrcFib = '''
       program P;
-      function Fib(N: Integer): Int64;
+      function Fib(N: Int32): Int64;
       begin
         if N < 2 then
           Result := N
@@ -136,8 +136,8 @@ procedure TNativePromoTests.TestAddrTakenLocal_NotPromoted;
 const
   Src = '''
       program P;
-      function F(N: Integer): Integer;
-      var A: Integer; PA: ^Integer;
+      function F(N: Int): Int;
+      var A: Int; PA: ^Int;
       begin
         A := N;
         PA := @A;
@@ -164,7 +164,7 @@ const
   Src = '''
       program P;
       uses SysUtils;
-      function F(N: Integer): Integer;
+      function F(N: Int): Int;
       begin
         Result := 0;
         try
@@ -196,8 +196,8 @@ const
       type
         TInner = record S: String; end;
         TRec = record I: TInner; end;
-      function F(N: Integer): Integer;
-      var R: TRec; K: Integer;
+      function F(N: Int): Int;
+      var R: TRec; K: Int;
       begin
         R.I.S := 'x';
         K := N + N + N + N;
@@ -227,7 +227,7 @@ const
     zero-extend from it. }
   Src = '''
       program P;
-      function F(B: Byte): Integer;
+      function F(B: Byte): Int;
       begin
         B := B + 1;
         B := B + 2;
@@ -264,17 +264,17 @@ const
       program P;
       type
         IStore = interface
-          function GetPair(out A: Integer; out B: Integer): Boolean;
+          function GetPair(out A: Int; out B: Int): Boolean;
         end;
         TStore = class(IStore)
-          function GetPair(out A: Integer; out B: Integer): Boolean;
+          function GetPair(out A: Int; out B: Int): Boolean;
         end;
-      function TStore.GetPair(out A: Integer; out B: Integer): Boolean;
+      function TStore.GetPair(out A: Int; out B: Int): Boolean;
       begin
         A := 7; B := 9; Result := True
       end;
-      function UseIt(S: IStore): Integer;
-      var X, Y: Integer;
+      function UseIt(S: IStore): Int;
+      var X, Y: Int;
       begin
         if S.GetPair(X, Y) then
           Result := X * 100 + Y
@@ -301,13 +301,13 @@ procedure TNativePromoTests.TestIndirectVarParam_ExcludedNotError;
 const
   Src = '''
       program P;
-      type TBump = procedure(var N: Integer);
-      procedure DoBump(var N: Integer);
+      type TBump = procedure(var N: Int);
+      procedure DoBump(var N: Int);
       begin
         N := N + 1
       end;
-      function Run: Integer;
-      var P1: TBump; V: Integer;
+      function Run: Int;
+      var P1: TBump; V: Int;
       begin
         P1 := @DoBump;
         V := 41;
@@ -341,8 +341,8 @@ procedure TNativePromoTests.TestForCond_NoPushPop;
 const
   Src = '''
       program P;
-      function SumTo(N: Integer): Int64;
-      var I: Integer;
+      function SumTo(N: Int): Int64;
+      var I: Int;
       begin
         Result := 0;
         for I := 1 to N do

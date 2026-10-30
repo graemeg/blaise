@@ -72,7 +72,7 @@ const
   SrcExit =
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         begin
           I := 1;
           if I = 1 then exit;
@@ -83,7 +83,7 @@ const
   SrcBreakInFor =
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         begin
           for I := 1 to 10 do
           begin
@@ -95,7 +95,7 @@ const
   SrcBreakInWhile =
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         begin
           I := 0;
           while I < 100 do
@@ -109,7 +109,7 @@ const
   SrcBreakOutsideLoop =
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         begin
           I := 0;
           break
@@ -119,13 +119,13 @@ const
   SrcExitFromFunc =
     '''
         program P;
-        function Abs1(X: Integer): Integer;
+        function Abs1(X: Int): Int;
         begin
           if X < 0 then
           begin Result := 0 - X; exit end;
           Result := X
         end;
-        var N: Integer;
+        var N: Int;
         begin
           N := Abs1(-7)
         end.
@@ -135,12 +135,12 @@ const
   SrcExitValueFunc =
     '''
         program P;
-        function Classify(N: Integer): Integer;
+        function Classify(N: Int): Int;
         begin
           if N < 0 then Exit(-1);
           Result := 1
         end;
-        var R: Integer;
+        var R: Int;
         begin
           R := Classify(-3)
         end.
@@ -163,11 +163,11 @@ const
   SrcExitValueMismatch =
     '''
         program P;
-        function F: Integer;
+        function F: Int;
         begin
           Exit('text')
         end;
-        var R: Integer;
+        var R: Int;
         begin
           R := F
         end.

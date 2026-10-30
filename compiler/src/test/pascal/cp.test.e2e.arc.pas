@@ -191,7 +191,7 @@ const
     program P;
     type
       TInner = class
-        V: Integer;
+        V: Int;
       end;
       TOuter = class
         Child: TInner;
@@ -216,7 +216,7 @@ const
         procedure Emit;
       end;
       TThing = class(TObject, IThing)
-        FValue: Integer;
+        FValue: Int;
         procedure Emit;
       end;
     procedure TThing.Emit;
@@ -238,7 +238,7 @@ const
     program P;
     type
       TNode = class
-        Value: Integer;
+        Value: Int;
         [Weak] Other: TNode;
       end;
     var
@@ -259,13 +259,13 @@ const
     program P;
     type
       TBuf = class
-        FData: ^Integer;
+        FData: ^Int;
         procedure Init;
         procedure Destroy;
       end;
     procedure TBuf.Init;
     begin
-      Self.FData := GetMem(4 * SizeOf(Integer))
+      Self.FData := GetMem(4 * SizeOf(Int))
     end;
     procedure TBuf.Destroy;
     begin
@@ -284,35 +284,35 @@ const
     program P;
     type
       TList = class
-        FData:     ^Integer;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FData:     ^Int32;
+        FCount:    Int32;
+        FCapacity: Int32;
         procedure Grow;
-        procedure Add(V: Integer);
-        function  Get(I: Integer): Integer;
+        procedure Add(V: Int32);
+        function  Get(I: Int32): Int32;
         procedure Destroy;
-        property Count: Integer read FCount;
+        property Count: Int32 read FCount;
       end;
     procedure TList.Grow;
-    var NewCap: Integer;
+    var NewCap: Int32;
     begin
       if Self.FCapacity = 0 then NewCap := 4
       else NewCap := Self.FCapacity * 2;
-      Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Integer));
+      Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Int32));
       Self.FCapacity := NewCap
     end;
-    procedure TList.Add(V: Integer);
-    var Dest: ^Integer;
+    procedure TList.Add(V: Int32);
+    var Dest: ^Int32;
     begin
       if Self.FCount = Self.FCapacity then Self.Grow();
-      Dest  := Self.FData + Self.FCount * SizeOf(Integer);
+      Dest  := Self.FData + Self.FCount * SizeOf(Int32);
       Dest^ := V;
       Self.FCount := Self.FCount + 1
     end;
-    function TList.Get(I: Integer): Integer;
-    var Src: ^Integer;
+    function TList.Get(I: Int32): Int32;
+    var Src: ^Int32;
     begin
-      Src    := Self.FData + I * SizeOf(Integer);
+      Src    := Self.FData + I * SizeOf(Int32);
       Result := Src^
     end;
     procedure TList.Destroy;
@@ -341,7 +341,7 @@ const
     type
       TThing = class
       public
-        V: Integer;
+        V: Int;
       end;
       TBox = class
       public
@@ -481,15 +481,15 @@ const
       Self.FValue := V
     end;
     var
-      A: TBox<Integer>;
+      A: TBox<Int>;
       B: TBox<Boolean>;
-      C: TBox<Integer>;
+      C: TBox<Int>;
     begin
-      A := TBox<Integer>.Create();
+      A := TBox<Int>.Create();
       A.Value := 10;
       B := TBox<Boolean>.Create();
       B.Value := True;
-      C := TBox<Integer>.Create();
+      C := TBox<Int>.Create();
       C.Value := 30;
       WriteLn(A.Value);
       if B.Value then WriteLn(1) else WriteLn(0);
@@ -508,13 +508,13 @@ const
     program P;
     type
       IThing = interface
-        function Get: Integer;
+        function Get: Int;
       end;
       TThing = class(TObject, IThing)
-        FValue: Integer;
-        function Get: Integer;
+        FValue: Int;
+        function Get: Int;
       end;
-    function TThing.Get: Integer;
+    function TThing.Get: Int;
     begin
       Result := Self.FValue
     end;
@@ -667,7 +667,7 @@ const
       end;
     var
       L:     TObjectList;
-      Freed: Integer;
+      Freed: Int;
     procedure TThing.Destroy;
     begin
       Freed := Freed + 1
@@ -733,8 +733,8 @@ const
     program P;
     type
       TInner = class
-        Val: Integer;
-        function GetVal: Integer;
+        Val: Int;
+        function GetVal: Int;
       end;
       TBlk = class
         Inner: TInner;
@@ -744,7 +744,7 @@ const
         Blk: TBlk;
         constructor Create;
       end;
-    function TInner.GetVal: Integer;
+    function TInner.GetVal: Int;
     begin
       Result := Self.Val
     end;
@@ -762,7 +762,7 @@ const
       Result := TProg.Create()
     end;
     var
-      V, I: Integer;
+      V, I: Int;
     begin
       { Two field hops (.Blk.Inner) before the method call, on a transient
         function result that is never explicitly freed.  The loop forces the
@@ -842,7 +842,7 @@ begin
     type
       TInner = class
       public
-        N: Integer;
+        N: Int;
       end;
       TThing = class
       public
@@ -867,9 +867,9 @@ procedure TE2EArcTests.TestRun_DynArrayFunctionReturn_NoLeak_Valgrind;
 const
   Src = '''
     program P;
-    type TArr = array of Integer;
-    function MakeArr(N: Integer): TArr;
-    var I: Integer;
+    type TArr = array of Int;
+    function MakeArr(N: Int): TArr;
+    var I: Int;
     begin
       SetLength(Result, N);
       for I := 0 to N - 1 do
@@ -877,7 +877,7 @@ const
     end;
     var
       A: TArr;
-      I, Sum: Integer;
+      I, Sum: Int;
     begin
       A := MakeArr(4);
       Sum := 0;
@@ -909,17 +909,17 @@ const
     type
       TSpec = record
         Name: string;
-        Kind: Integer;
+        Kind: Int;
       end;
       TArr = array of TSpec;
-    function MakeSpec(N: Integer): TSpec;
+    function MakeSpec(N: Int): TSpec;
     begin
       Result.Name := 'tool';
       Result.Kind := N
     end;
     var
       Arr: TArr;
-      I, Sum: Integer;
+      I, Sum: Int;
     begin
       SetLength(Arr, 3);
       for I := 0 to 2 do
@@ -954,7 +954,7 @@ const
     type
       TThing = class
       public
-        V: Integer;
+        V: Int;
       end;
       TR = record
         Arr: array[0..1] of TThing;
@@ -991,12 +991,12 @@ const
     type
       TL = class
         procedure Hello();
-        function Num(): Integer;
+        function Num(): Int;
         destructor Destroy(); override;
       end;
-    var Frees: Integer;
+    var Frees: Int;
     procedure TL.Hello(); begin WriteLn('hi') end;
-    function TL.Num(): Integer; begin Result := 5 end;
+    function TL.Num(): Int; begin Result := 5 end;
     destructor TL.Destroy(); begin Frees := Frees + 1; inherited Destroy() end;
     function MakeL(): TL; begin Result := TL.Create() end;
     begin
@@ -1018,14 +1018,14 @@ const
     program P;
     type
       TC = class
-        Tag: Integer;
+        Tag: Int;
         destructor Destroy(); override;
       end;
       THolder = class
         F: TObject;
         procedure Drop();
       end;
-    var Frees: Integer;
+    var Frees: Int;
     destructor TC.Destroy(); begin Frees := Frees + 1; inherited Destroy() end;
     procedure THolder.Drop(); begin TC(F).Free() end;
     procedure Go();
@@ -1074,13 +1074,13 @@ const
       TBase = class
       end;
       TChild = class(TBase)
-        Tag: Integer;
-        Items: array[0..2] of Integer;
+        Tag: Int;
+        Items: array[0..2] of Int;
         procedure Bump();
         destructor Destroy(); override;
       end;
     var
-      Frees: Integer;
+      Frees: Int;
     procedure TChild.Bump();
     begin
       Tag := Tag + 1
@@ -1127,30 +1127,30 @@ const
   Src = '''
     program P;
     type
-      TObj = class V: Integer; end;
-      IGreet = interface function Hi(): Integer; end;
-      TG = class(TObject, IGreet) public function Hi(): Integer; end;
+      TObj = class V: Int; end;
+      IGreet = interface function Hi(): Int; end;
+      TG = class(TObject, IGreet) public function Hi(): Int; end;
       TTok = record
-        Kind: Integer; Value: string; D: Double; O: TObj; A: array of Integer;
+        Kind: Int; Value: string; D: Float64; O: TObj; A: array of Int;
         G: IGreet;
       end;
       TBase = class
-        function Next(N: Integer): TTok; virtual;
+        function Next(N: Int): TTok; virtual;
       end;
-    function TG.Hi(): Integer; begin Result := 42 end;
-    function F(N: Integer): TTok;
+    function TG.Hi(): Int; begin Result := 42 end;
+    function F(N: Int): TTok;
     begin
       Result.Kind := N; Result.Value := 'f-' + IntToStr(N); Result.D := N + 0.5;
       Result.O := TObj.Create(); Result.O.V := N * 10;
       SetLength(Result.A, 3); Result.A[1] := N;
       Result.G := TG.Create()
     end;
-    function TBase.Next(N: Integer): TTok;
+    function TBase.Next(N: Int): TTok;
     begin
       Result := F(N)
     end;
     procedure Show(B: TBase);
-    var S: string; K, I: Integer; X: Double; O: TObj; G: IGreet;
+    var S: string; K, I: Int; X: Float64; O: TObj; G: IGreet;
     begin
       WriteLn(F(1).Value);
       S := F(2).Value; WriteLn(S);
@@ -1184,18 +1184,18 @@ const
   Src = '''
     program P;
     type
-      TT = record K: Integer; V: string; end;
+      TT = record K: Int; V: string; end;
       TOb = class
         function GetT(): TT;
-        function GetI(I: Integer): TT;
+        function GetI(I: Int): TT;
         property T: TT read GetT;
-        property Items[I: Integer]: TT read GetI; default;
+        property Items[I: Int]: TT read GetI; default;
       end;
     function TOb.GetT(): TT;
     begin
       Result.K := 3; Result.V := 'p' + IntToStr(Result.K)
     end;
-    function TOb.GetI(I: Integer): TT;
+    function TOb.GetI(I: Int): TT;
     begin
       Result.K := I; Result.V := 'i' + IntToStr(I)
     end;
@@ -1220,13 +1220,13 @@ const
   Src = '''
     program P;
     type
-      TB = class V: Integer; end;
+      TB = class V: Int; end;
       TA = class
         B: TB;
         constructor Create();
         destructor Destroy(); override;
       end;
-    var Frees: Integer;
+    var Frees: Int;
     constructor TA.Create();
     begin
       B := TB.Create();
@@ -1248,7 +1248,7 @@ const
       if A + B + C + D + E + F + G + H = 0 then WriteLn('x')
     end;
     procedure Run(First: Boolean);
-    var I, Hits: Integer;
+    var I, Hits: Int;
     begin
       Hits := 0;
       for I := 0 to 5 do
@@ -1278,19 +1278,19 @@ const
     type
       TThing = class
       public
-        V: Integer;
+        V: Int;
       end;
       TR = record
         Arr: array[0..1] of TThing;
       end;
       IGreet = interface
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
       TG = class(TObject, IGreet)
       public
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
-    function TG.Hi(): Integer;
+    function TG.Hi(): Int;
     begin
       Result := 1;
     end;
@@ -1324,14 +1324,14 @@ const
   Src = '''
     program P;
     type
-      TA = array of Integer;
+      TA = array of Int;
     var
       X: TA;
     procedure Drop();
     begin
       SetLength(X, 0)
     end;
-    function Take(A: TA): Integer;
+    function Take(A: TA): Int;
     begin
       { Drop the caller's only other reference: without the callee's
         entry retain, A now dangles. }
@@ -1363,21 +1363,21 @@ const
         FCur: string;
         FItems: array[0..3] of string;
         procedure SetCur(AValue: string);
-        procedure SetItem(I: Integer; AValue: string);
+        procedure SetItem(I: Int; AValue: string);
       public
         property Cur: string read FCur write SetCur;
-        property Items[I: Integer]: string write SetItem; default;
-        function Item(I: Integer): string;
+        property Items[I: Int]: string write SetItem; default;
+        function Item(I: Int): string;
       end;
     procedure TBox.SetCur(AValue: string);
     begin
       FCur := AValue
     end;
-    procedure TBox.SetItem(I: Integer; AValue: string);
+    procedure TBox.SetItem(I: Int; AValue: string);
     begin
       FItems[I] := AValue
     end;
-    function TBox.Item(I: Integer): string;
+    function TBox.Item(I: Int): string;
     begin
       Result := FItems[I]
     end;
@@ -1417,18 +1417,18 @@ const
     type
       TSink = class
       private
-        FLen: Integer;
+        FLen: Int;
         procedure SetText(AValue: string);
       public
         property Text: string write SetText;
-        function Len(): Integer;
+        function Len(): Int;
       end;
     procedure TSink.SetText(AValue: string);
     begin
       { does NOT store AValue — only derives from it }
       FLen := Length(AValue)
     end;
-    function TSink.Len(): Integer;
+    function TSink.Len(): Int;
     begin
       Result := FLen
     end;
@@ -1461,7 +1461,7 @@ const
     type
       TInner = class
       public
-        N: Integer;
+        N: Int;
       end;
       TThing = class
       public
@@ -1502,8 +1502,8 @@ const
     program WeakRefs;
     type
       TTarget = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
       THolder = class
@@ -1525,7 +1525,7 @@ const
         [Weak] FW: TTarget;
         procedure Grab;
       end;
-    constructor TTarget.Create(AN: Integer);
+    constructor TTarget.Create(AN: Int);
     begin N := AN end;
     destructor TTarget.Destroy;
     begin WriteLn('free ', N); inherited Destroy() end;
@@ -1535,7 +1535,7 @@ const
     begin Result := TTarget.Create(3) end;
     procedure TPool.CacheIt;
     begin FCached := MakeTarget() end;
-    function MakeT(AN: Integer): TTarget;
+    function MakeT(AN: Int): TTarget;
     begin Result := TTarget.Create(AN) end;
     procedure TWatcher.Grab;
     begin FW := MakeT(6) end;
@@ -1618,13 +1618,13 @@ const
   Src = '''
     program ArcA;
     type
-      TArr = array of Integer;
+      TArr = array of Int;
       IFoo = interface
-        function Val: Integer;
+        function Val: Int;
       end;
       TFoo = class(TObject, IFoo)
-        Tag: Integer;
-        function Val: Integer;
+        Tag: Int;
+        function Val: Int;
         destructor Destroy; override;
       end;
       TBox = class
@@ -1632,25 +1632,25 @@ const
         FCur: string;
         FItems: array[0..3] of string;
         procedure SetCur(AValue: string);
-        procedure SetItem(I: Integer; AValue: string);
-        function GetItem(I: Integer): string;
+        procedure SetItem(I: Int; AValue: string);
+        function GetItem(I: Int): string;
       public
         Names: array[0..1] of string;
         property Cur: string read FCur write SetCur;
-        property Items[I: Integer]: string read GetItem write SetItem; default;
+        property Items[I: Int]: string read GetItem write SetItem; default;
       end;
-    function TFoo.Val: Integer; begin Result := Tag end;
+    function TFoo.Val: Int; begin Result := Tag end;
     destructor TFoo.Destroy;
     begin
       WriteLn('foo ', Tag, ' gone');
       inherited Destroy()
     end;
     procedure TBox.SetCur(AValue: string); begin FCur := AValue end;
-    procedure TBox.SetItem(I: Integer; AValue: string); begin FItems[I] := AValue end;
-    function TBox.GetItem(I: Integer): string; begin Result := FItems[I] end;
+    procedure TBox.SetItem(I: Int; AValue: string); begin FItems[I] := AValue end;
+    function TBox.GetItem(I: Int): string; begin Result := FItems[I] end;
     function MakeS(): string; begin Result := 'm' + 'k' end;
     function MakeArr(): TArr; begin SetLength(Result, 2); Result[1] := 5 end;
-    function MakeFoo(T: Integer): IFoo;
+    function MakeFoo(T: Int): IFoo;
     var F: TFoo;
     begin
       F := TFoo.Create();
@@ -1775,7 +1775,7 @@ const
         procedure Hello;
       end;
       TPlain = class
-        X: Integer;
+        X: Int;
       end;
       TG<T> = class
         V: T;
@@ -1803,10 +1803,10 @@ const
         M: TMP;
       end;
       IFoo = interface
-        function Val: Integer;
+        function Val: Int;
       end;
       TFoo = class(TObject, IFoo)
-        function Val: Integer;
+        function Val: Int;
         destructor Destroy; override;
       end;
     constructor TNode.Create(const N: string);
@@ -1827,7 +1827,7 @@ const
       WriteLn('generic gone');
       inherited Destroy()
     end;
-    function TFoo.Val: Integer;
+    function TFoo.Val: Int;
     begin
       Result := 1
     end;
@@ -1847,7 +1847,7 @@ const
     end;
     procedure Run;
     var
-      A, B: TNode; P: TPlain; G: TG<Integer>; SA: array[0..1] of TNode;
+      A, B: TNode; P: TPlain; G: TG<Int>; SA: array[0..1] of TNode;
       SS: array[0..1] of string; SR: array[0..1] of TStrRec;
       AR1, AR2: TArrRec; CR: TCR; CC: TCC; MR: TMR; S: string; Flag: Boolean;
     begin
@@ -1860,7 +1860,7 @@ const
       WriteLn('after branch');
       P := TPlain.Create();
       P := nil;
-      G := TG<Integer>.Create();
+      G := TG<Int>.Create();
       G := nil;
       SA[0] := TNode.Create('sa0');
       SA[0].Free();
@@ -1928,11 +1928,11 @@ const
     program UnretCast;
     uses Contnrs;
     type
-      PInteger = ^Integer;
-      TT = class N: Integer; end;
+      PInteger = ^Int;
+      TT = class N: Int; end;
       TBase = class public [Unretained] F: TT; [Weak] W: TT; end;
-      TSub = class(TBase) G: Integer; end;
-    function RC(O: TObject): Integer;
+      TSub = class(TBase) G: Int; end;
+    function RC(O: TObject): Int;
     begin
       { the count just past the header, minus this by-value parameter's own }
       Result := PInteger(PChar(Pointer(O)) - 16)^ - 1
@@ -1965,12 +1965,12 @@ const
       IGreet = interface function Hi: string; end;
       TG = class(IGreet) function Hi: string; end;
       TColour = (cRed, cGreen, cBlue);
-      TArr = array[0..3] of Integer;
-      TPt = record X, Y: Integer; S: string; A: TArr; end;
+      TArr = array[0..3] of Int;
+      TPt = record X, Y: Int; S: string; A: TArr; end;
       TObj = class
       public
-        F: Double; Sg: Single; I64: Int64; G: IGreet; C: set of TColour; P: TPt;
-        N: Integer; S: string; D: array of string; Arr: TArr;
+        F: Float64; Sg: Float32; I64: Int64; G: IGreet; C: set of TColour; P: TPt;
+        N: Int; S: string; D: array of string; Arr: TArr;
       end;
     function TG.Hi: string; begin Result := 'hi' + IntToStr(1); end;
     function MkObj: TObj;
@@ -1983,7 +1983,7 @@ const
       Result.Arr[1] := 77;
     end;
     procedure ShowPt(const P: TPt); begin WriteLn(P.X, ' ', P.S); end;
-    var D: Double; P: TPt; S: string; Ds: array of string; X: Integer; Pi: ^Integer;
+    var D: Float64; P: TPt; S: string; Ds: array of string; X: Int; Pi: ^Int;
     begin
       S := MkObj().S; WriteLn(S, ' ', MkObj().S, ' ', MkObj().N);
       Ds := MkObj().D; WriteLn(Length(Ds), ' ', Ds[0], ' ', Length(MkObj().D), ' ', MkObj().D[0]);
@@ -2027,20 +2027,20 @@ const
   Src = '''
     program ForInOwn;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       public
         Arr: TArr;
         D: array of string;
       end;
-    var Calls: Integer;
+    var Calls: Int;
     function MkObj: TObj;
     begin
       Calls := Calls + 1;
       Result := TObj.Create(); Result.Arr[2] := 22;
       SetLength(Result.D, 2); Result.D[0] := 'x' + IntToStr(Calls); Result.D[1] := 'y';
     end;
-    var X, Sum: Integer; S, Acc: string;
+    var X, Sum: Int; S, Acc: string;
     begin
       Sum := 0; for X in MkObj().Arr do Sum := Sum + X; WriteLn('Arr sum=', Sum, ' calls=', Calls);
       Calls := 0;
@@ -2061,7 +2061,7 @@ const
     type
       TC = reference to procedure;
       TFoo = class
-        N: Integer;
+        N: Int;
         constructor Create;
         destructor Destroy; override;
       end;
@@ -2099,12 +2099,12 @@ const
     program C2;
     type
       TFoo = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
     var Keep: TFoo;
-    constructor TFoo.Create(AN: Integer); begin N := AN; if AN = 2 then Keep := Self; end;
+    constructor TFoo.Create(AN: Int); begin N := AN; if AN = 2 then Keep := Self; end;
     destructor TFoo.Destroy; begin WriteLn('destroyed ', N); inherited Destroy(); end;
     begin
       Keep := TFoo.Create(2);
@@ -2129,11 +2129,11 @@ const
     uses SysUtils;
     type
       EFoo = class(Exception)
-        Tag: Integer;
+        Tag: Int;
         destructor Destroy; override;
       end;
     destructor EFoo.Destroy; begin WriteLn('freed ', Tag); inherited Destroy(); end;
-    function MkE(T: Integer): EFoo; begin Result := EFoo.Create('m'); Result.Tag := T; end;
+    function MkE(T: Int): EFoo; begin Result := EFoo.Create('m'); Result.Tag := T; end;
     procedure Inner;
     begin
       try
@@ -2179,14 +2179,14 @@ const
     program P;
     type
       TN = class
-        Tag: Integer;
+        Tag: Int;
         destructor Destroy; override;
       end;
       TRec = record O: TN; end;
     var G: TRec;
     destructor TN.Destroy; begin WriteLn('freed ', Tag); inherited Destroy(); end;
-    function MkN(T: Integer): TN; begin Result := TN.Create(); Result.Tag := T; end;
-    procedure SetVar(var R: TRec; T: Integer); begin R.O := MkN(T); end;
+    function MkN(T: Int): TN; begin Result := TN.Create(); Result.Tag := T; end;
+    procedure SetVar(var R: TRec; T: Int); begin R.O := MkN(T); end;
     begin
       G.O := MkN(1);
       G.O := MkN(2);

@@ -66,7 +66,7 @@ const
   SrcCaseInt =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 2;
           case N of
@@ -80,7 +80,7 @@ const
   SrcCaseElse =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 7;
           case N of
@@ -644,7 +644,7 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type TColor = (Red, Green, Blue);
-    var A: array[0..7] of Integer;
+    var A: array[0..7] of Int;
     begin
       WriteLn(Ord(High(TColor)));
       WriteLn(Ord(Low(TColor)));
@@ -735,7 +735,7 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type TE = (A = 5, B = 10);
-    var e: TE; n: Integer;
+    var e: TE; n: Int;
     begin
       n := 0;
       for e := Low(TE) to High(TE) do n := n + 1;

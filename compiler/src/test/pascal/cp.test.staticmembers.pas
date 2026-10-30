@@ -162,9 +162,9 @@ const
         type
           TFoo = class
           static var
-            FShared: Integer;
+            FShared: Int;
           public
-            FInst: Integer;
+            FInst: Int;
           end;
         begin end.
         ''';
@@ -242,9 +242,9 @@ const
           private static const
             MaxEntries = 256;
           private
-            FCount: Integer;
+            FCount: Int;
           public
-            function GetCount: Integer;
+            function GetCount: Int;
           end;
         begin end.
         ''';
@@ -321,8 +321,8 @@ const
         type
           TFoo = class
           public static
-            function A: Integer;
-            function B: Integer;
+            function A: Int;
+            function B: Int;
           end;
         begin end.
         ''';
@@ -347,9 +347,9 @@ const
         type
           TFoo = class
           public static
-            function A: Integer;
+            function A: Int;
           public
-            function B: Integer;
+            function B: Int;
           end;
         begin end.
         ''';
@@ -374,9 +374,9 @@ const
         type
           TFoo = class
           private
-            FInst: Integer;
+            FInst: Int;
           static
-            function A: Integer;
+            function A: Int;
           end;
         begin end.
         ''';
@@ -491,7 +491,7 @@ const
           TInfo = record
             Category: string;
           static var
-            Count: Integer;
+            Count: Int;
           end;
         begin end.
         ''';
@@ -515,7 +515,7 @@ const
         program P;
         type
           TInfo = record
-            X: Integer;
+            X: Int;
           static const
             Tag = 7;
           end;
@@ -650,7 +650,7 @@ const
         type
           TFoo = class
           private static var
-            FCount: Integer;
+            FCount: Int;
             static procedure Bump;
           end;
         static procedure TFoo.Bump;
@@ -675,9 +675,9 @@ const
         type
           TFoo = class
           private static var
-            FShared: Integer;
+            FShared: Int;
           public
-            FInst: Integer;
+            FInst: Int;
           end;
         var
           F: TFoo;
@@ -711,7 +711,7 @@ const
           TFoo = class
           private static var
             FName: string;
-            FData: array of Integer;
+            FData: array of Int;
           end;
         begin end.
         ''';
@@ -767,7 +767,7 @@ const
         type
           TFoo = class
           public
-            FInst: Integer;
+            FInst: Int;
             static procedure Bad;
           end;
         static procedure TFoo.Bad;
@@ -789,11 +789,11 @@ const
         type
           TFoo = class
           private static var
-            FCount: Integer;
+            FCount: Int;
           public
-            static function GetCount: Integer;
+            static function GetCount: Int;
           end;
-        static function TFoo.GetCount: Integer;
+        static function TFoo.GetCount: Int;
         begin
           Result := FCount;
         end;
@@ -816,7 +816,7 @@ const
             FName: string;
           public
             constructor Create; overload;
-            static var Shared: Integer;
+            static var Shared: Int;
             procedure Log;
           end;
         begin end.
@@ -845,10 +845,10 @@ const
         type
           TFoo = class
           private
-            FVal: Integer;
+            FVal: Int;
           public
-            static var Shared: Integer;
-            property Val: Integer read FVal;
+            static var Shared: Int;
+            property Val: Int read FVal;
           end;
         begin end.
         ''';
@@ -869,15 +869,15 @@ const
   Src = '''
     program P;
     type
-      TPt = record X, Y: Integer; end;
+      TPt = record X, Y: Int; end;
       TC = class
       private static var
-        Slots: array[0..3] of Integer;
+        Slots: array[0..3] of Int;
         Pt: TPt;
       public
-        static procedure Put(I, V: Integer);
+        static procedure Put(I, V: Int);
       end;
-    static procedure TC.Put(I, V: Integer);
+    static procedure TC.Put(I, V: Int);
     begin
       Slots[I] := V;
       Pt.X := V;
@@ -905,33 +905,33 @@ const
     program P;
     type
       TBox = class
-        N: Integer;
+        N: Int;
       end;
       THost = class
       public
         procedure Dummy;
       private static var
-        FFI: Integer;
-        FSD: Double;
+        FFI: Int;
+        FSD: Float64;
         FSO: TBox;
       public
-        static function GetIx(I: Integer): Integer;
-        static procedure SetIx(I: Integer; AV: Integer);
-        static function GetSD: Double;
-        static procedure SetSD(AV: Double);
+        static function GetIx(I: Int): Int;
+        static procedure SetIx(I: Int; AV: Int);
+        static function GetSD: Float64;
+        static procedure SetSD(AV: Float64);
         static function GetSO: TBox;
         static procedure SetSO(AV: TBox);
         static procedure Bump;
-        static property Ix[I: Integer]: Integer read GetIx write SetIx;
-        static property SD: Double read GetSD write SetSD;
+        static property Ix[I: Int]: Int read GetIx write SetIx;
+        static property SD: Float64 read GetSD write SetSD;
         static property SO: TBox read GetSO write SetSO;
-        static property FI: Integer read FFI write FFI;
+        static property FI: Int read FFI write FFI;
       end;
     procedure THost.Dummy; begin end;
-    static function THost.GetIx(I: Integer): Integer; begin Result := I; end;
-    static procedure THost.SetIx(I: Integer; AV: Integer); begin end;
-    static function THost.GetSD: Double; begin Result := FSD; end;
-    static procedure THost.SetSD(AV: Double); begin FSD := AV; end;
+    static function THost.GetIx(I: Int): Int; begin Result := I; end;
+    static procedure THost.SetIx(I: Int; AV: Int); begin end;
+    static function THost.GetSD: Float64; begin Result := FSD; end;
+    static procedure THost.SetSD(AV: Float64); begin FSD := AV; end;
     static function THost.GetSO: TBox; begin Result := FSO; end;
     static procedure THost.SetSO(AV: TBox); begin FSO := AV; end;
     static procedure THost.Bump;
@@ -972,12 +972,12 @@ begin
       THost = class
       public
         procedure Dummy;
-        static function GetSD: Double;
-        static property SD: Double read GetSD;
+        static function GetSD: Float64;
+        static property SD: Float64 read GetSD;
       end;
     procedure THost.Dummy; begin end;
-    static function THost.GetSD: Double; begin Result := 2.5; end;
-    var D: Double;
+    static function THost.GetSD: Float64; begin Result := 2.5; end;
+    var D: Float64;
     begin
       D := THost.SD;
       WriteLn(THost.SD:0:1);
@@ -996,7 +996,7 @@ begin
     program P;
     type
       TBox = class
-        N: Integer;
+        N: Int;
       end;
       THost = class
       public
@@ -1117,7 +1117,7 @@ begin
       public
         procedure Dummy;
       public static var
-        SV: Integer;
+        SV: Int;
       end;
     procedure TC.Dummy; begin end;
     begin end.
@@ -1137,10 +1137,10 @@ const
         program P;
         type
           TC = class
-            static var V: array of Integer;
-            static var S: array[0..2] of Integer;
+            static var V: array of Int;
+            static var S: array[0..2] of Int;
           end;
-        var X: Integer;
+        var X: Int;
         begin
           TC.V[1] := 5;
           TC.S[2] := TC.V[1];
@@ -1152,7 +1152,7 @@ const
         program P;
         type
           TC = class
-            static var V: array of Integer;
+            static var V: array of Int;
           end;
         begin
           TC.V[1] := 'a';

@@ -106,7 +106,7 @@ const
     '''
         program P;
         var s: string;
-        var n: Integer;
+        var n: Int;
         begin
           s := 'hello';
           n := Length(s);
@@ -118,7 +118,7 @@ const
     '''
         program P;
         var s, sub: string;
-        var n: Integer;
+        var n: Int;
         begin
           s   := 'hello world';
           sub := 'world';
@@ -165,7 +165,7 @@ const
   SrcStringIntToStr =
     '''
         program P;
-        var n: Integer;
+        var n: Int;
         var s: string;
         begin
           n := 42;
@@ -178,7 +178,7 @@ const
     '''
         program P;
         var s: string;
-        var n: Integer;
+        var n: Int;
         begin
           s := '123';
           n := StrToInt(s);
@@ -189,7 +189,7 @@ const
   SrcStringStrToIntHex =
     '''
         program P;
-        var n: Integer;
+        var n: Int;
         begin
           n := StrToInt('$FF');
           WriteLn(n)
@@ -222,7 +222,7 @@ const
   SrcFormatIntArg =
     '''
         program P;
-        var n: Integer;
+        var n: Int;
         var s: string;
         begin
           n := 42;
@@ -247,7 +247,7 @@ const
     '''
         program P;
         var name: string;
-        var age: Integer;
+        var age: Int;
         var s: string;
         begin
           name := 'Alice';
@@ -261,7 +261,7 @@ const
   SrcFormatFloatPrecision =
     '''
         program P;
-        var x: Double;
+        var x: Float64;
         begin
           x := 3.14159;
           WriteLn(Format('v=%.2f', x))
@@ -272,7 +272,7 @@ const
   SrcFormatFloatDefault =
     '''
         program P;
-        var x: Double;
+        var x: Float64;
         begin
           x := 3.5;
           WriteLn(Format('v=%f', x))
@@ -283,7 +283,7 @@ const
   SrcFormatFloatWidth =
     '''
         program P;
-        var x: Double;
+        var x: Float64;
         begin
           x := 2.5;
           WriteLn(Format('[%8.2f]', x))
@@ -294,7 +294,7 @@ const
   SrcFormatFloatExp =
     '''
         program P;
-        var x: Double;
+        var x: Float64;
         begin
           x := 12345.678;
           WriteLn(Format('%.2e', x))
@@ -305,7 +305,7 @@ const
   SrcFormatFloatGeneral =
     '''
         program P;
-        var x: Double;
+        var x: Float64;
         begin
           x := 0.0001;
           WriteLn(Format('%g', x))
@@ -316,8 +316,8 @@ const
   SrcFormatFloatMixed =
     '''
         program P;
-        var x: Double;
-        var n: Integer;
+        var x: Float64;
+        var n: Int;
         var nm: string;
         begin
           x  := 1.5;
@@ -373,7 +373,7 @@ const
   { Writable subscript through a var-string parameter. }
   SrcStringSubscriptVarParam = '''
     program P;
-    procedure PutByte(var ABuf: string; AOff: Integer; AVal: Integer);
+    procedure PutByte(var ABuf: string; AOff: Int; AVal: Int);
     begin
       ABuf[AOff] := Chr(AVal)
     end;
@@ -630,23 +630,23 @@ const
     program P;
     type
       TRec = record
-        N: Integer;
+        N: Int;
         S: string;
       end;
       TBox = class
-        Tag: Integer;
+        Tag: Int;
         Data: string;
         constructor Create;
-        function First: Integer;
+        function First: Int;
       end;
       TOuter = class
-        Pad: Integer;
+        Pad: Int;
         Box: TBox;
         constructor Create;
       end;
     constructor TBox.Create;
     begin inherited Create(); Tag := 7; Data := 'ABC' end;
-    function TBox.First: Integer;
+    function TBox.First: Int;
     begin Result := Ord(Data[0]) end;
     constructor TOuter.Create;
     begin inherited Create(); Pad := 9; Box := TBox.Create() end;
@@ -655,7 +655,7 @@ const
     var
       O: TOuter;
       R: TRec;
-      I: Integer;
+      I: Int;
     begin
       O := TOuter.Create();
       WriteLn(Ord(O.Box.Data[0]));
@@ -871,7 +871,7 @@ const
     begin
       S := A + B
     end;
-    var S, T, U, X: string; N: Integer; D: Double;
+    var S, T, U, X: string; N: Int; D: Float64;
     begin
       S := 'Hello' + ' World';
       WriteLn(Length(S), ' ', Pos('World', S), ' ', Pos('xyz', S), ' ', Copy(S, 6, 5));

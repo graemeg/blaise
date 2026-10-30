@@ -136,11 +136,11 @@ const
   SrcVarSet =
     '''
         program VarTest;
-        procedure SetVal(var X: Integer);
+        procedure SetVal(var X: Int);
         begin
           X := 42
         end;
-        var V: Integer;
+        var V: Int;
         begin
           V := 0;
           SetVal(V)
@@ -150,14 +150,14 @@ const
   SrcVarSwap =
     '''
         program SwapTest;
-        procedure Swap(var A, B: Integer);
-        var T: Integer;
+        procedure Swap(var A, B: Int);
+        var T: Int;
         begin
           T := A;
           A := B;
           B := T
         end;
-        var X, Y: Integer;
+        var X, Y: Int;
         begin
           X := 1;
           Y := 2;
@@ -168,11 +168,11 @@ const
   SrcMixed =
     '''
         program MixedTest;
-        procedure P(var A: Integer; B: Integer);
+        procedure P(var A: Int; B: Int);
         begin
           A := B
         end;
-        var X: Integer;
+        var X: Int;
         begin
           P(X, 5)
         end.
@@ -221,7 +221,7 @@ begin
   P := ParseSrc(
     '''
         program T;
-        procedure Q(X: Integer);
+        procedure Q(X: Int);
         begin end;
         begin end.
         ''');
@@ -477,8 +477,8 @@ begin
     '''
         program Prg;
         type
-          TRec = record Count: Integer; end;
-        procedure Bump(var N: Integer);
+          TRec = record Count: Int; end;
+        procedure Bump(var N: Int);
         begin Inc(N) end;
         var R: TRec;
         begin
@@ -498,9 +498,9 @@ begin
     '''
         program Prg;
         type
-          TRec = record Count: Integer; end;
+          TRec = record Count: Int; end;
           PRec = ^TRec;
-        procedure Bump(var N: Integer);
+        procedure Bump(var N: Int);
         begin Inc(N) end;
         var P: PRec; R: TRec;
         begin
@@ -518,10 +518,10 @@ const
   Head = '''
     program P;
     type
-      TSA = array[0..2] of Integer;
-      TR = record X: Integer; DA: array of Integer; SA: TSA; end;
+      TSA = array[0..2] of Int;
+      TR = record X: Int; DA: array of Int; SA: TSA; end;
     var GR: TR; GS: TSA;
-    procedure Bump(var X: Integer); begin X := X + 10 end;
+    procedure Bump(var X: Int); begin X := X + 10 end;
     function MkR(): TR; begin Result := GR end;
     function MkSA(): TSA; begin Result := GS end;
     ''';
@@ -541,27 +541,27 @@ const
   Head = '''
     program P;
     type
-      IK = interface procedure Put(var X: Integer); end;
+      IK = interface procedure Put(var X: Int32); end;
       TK = class(IK)
-        procedure Put(var X: Integer);
+        procedure Put(var X: Int32);
         procedure Own;
       end;
-      TPP = procedure(var X: Integer);
-      TB = class procedure Put2(var X: Integer); end;
+      TPP = procedure(var X: Int32);
+      TB = class procedure Put2(var X: Int32); end;
       TC = class(TB) procedure Call; end;
-      TG<T> = class procedure Put3(var X: Integer); end;
-    procedure SetI(var X: Integer); begin X := 1 end;
-    procedure OutI(out X: Integer); begin X := 2 end;
+      TG<T> = class procedure Put3(var X: Int32); end;
+    procedure SetI(var X: Int32); begin X := 1 end;
+    procedure OutI(out X: Int32); begin X := 2 end;
     procedure SetL(var X: Int64); begin X := 3 end;
-    function GetI(var X: Integer): Integer; begin Result := X end;
-    procedure TK.Put(var X: Integer); begin X := 4 end;
-    procedure TB.Put2(var X: Integer); begin X := 5 end;
-    procedure TG<T>.Put3(var X: Integer); begin X := 6 end;
+    function GetI(var X: Int32): Int32; begin Result := X end;
+    procedure TK.Put(var X: Int32); begin X := 4 end;
+    procedure TB.Put2(var X: Int32); begin X := 5 end;
+    procedure TG<T>.Put3(var X: Int32); begin X := 6 end;
     ''';
   Tail = '''
     var
-      L: Int64; B: Byte; I: Integer; I32: Int32; N: Int;
-      K: TK; IntfK: IK; PP: TPP; G: TG<Integer>;
+      L: Int64; B: Byte; I: Int32; I32: Int32; N: Int;
+      K: TK; IntfK: IK; PP: TPP; G: TG<Int32>;
     ''';
   OwnOk = 'procedure TK.Own; var X: Integer; begin Put(X) end;';
   CallOk = 'procedure TC.Call; var X: Integer; begin inherited Put2(X) end;';

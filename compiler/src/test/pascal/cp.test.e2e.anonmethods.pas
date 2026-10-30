@@ -291,7 +291,7 @@ const Src =
     TProc = reference to procedure;
   procedure Run;
   var
-    Outer: Integer;
+    Outer: Int;
     V: TProc;
   begin
     Outer := 41;
@@ -318,7 +318,7 @@ const Src =
     TProc = reference to procedure;
   procedure Run;
   var
-    Total: Integer;
+    Total: Int;
     V: TProc;
   begin
     Total := 10;
@@ -350,7 +350,7 @@ const
     TProc = reference to procedure;
   procedure Run;
   var
-    Total: Integer;
+    Total: Int;
     Inc10: TProc;
     Show: TProc;
   begin
@@ -388,7 +388,7 @@ const
     G: TProc;
   procedure Make;
   var
-    Secret: Integer;
+    Secret: Int;
   begin
     Secret := 42;
     G := procedure
@@ -417,14 +417,14 @@ const
   '''
   program P;
   type
-    TIntFn = reference to function(A: Integer): Integer;
+    TIntFn = reference to function(A: Int): Int;
     TProc0 = reference to procedure;
-  function MakeAdder(N: Integer): TIntFn;
+  function MakeAdder(N: Int): TIntFn;
   begin
-    Result := function(A: Integer): Integer begin Result := A + N end
+    Result := function(A: Int): Int begin Result := A + N end
   end;
-  function Counter(Start: Integer; const Tag: string): TProc0;
-  var C: Integer;
+  function Counter(Start: Int; const Tag: string): TProc0;
+  var C: Int;
   begin
     C := Start;
     Result := procedure begin C := C + 1; WriteLn(Tag, C) end
@@ -470,7 +470,7 @@ const
     A: TProc;
     B: TProc;
     C: TProc;
-    I: Integer;
+    I: Int;
   begin
     for I := 0 to 2 do
     begin
@@ -500,7 +500,7 @@ const
   program P;
   type
     TProc = reference to procedure;
-  procedure Run(Base: Integer);
+  procedure Run(Base: Int);
   var
     V: TProc;
   begin
@@ -525,14 +525,14 @@ const Src =
   '''
   program P;
   type
-    TStep = reference to function(AInc: Integer): Integer;
+    TStep = reference to function(AInc: Int): Int;
   procedure Run;
   var
-    Acc: Integer;
+    Acc: Int;
     Step: TStep;
   begin
     Acc := 0;
-    Step := function(AInc: Integer): Integer
+    Step := function(AInc: Int): Int
     begin
       Acc := Acc + AInc;
       Result := Acc
@@ -603,7 +603,7 @@ const
   end;
   procedure Run;
   var
-    Flag: Integer;
+    Flag: Int;
     V: TProc;
   begin
     Flag := 0;
@@ -641,12 +641,12 @@ const
   type
     TProc = reference to procedure;
     TCounter = class
-      FCount: Integer;
+      FCount: Int;
       procedure Bump;
     end;
   procedure TCounter.Bump;
   var
-    Step: Integer;
+    Step: Int;
     V: TProc;
   begin
     Step := 40;
@@ -717,7 +717,7 @@ const
   type
     TProc = reference to procedure;
     TBox = class
-      FValue: Integer;
+      FValue: Int;
       procedure Wire;
     end;
   var
@@ -748,12 +748,12 @@ const
   '''
   program P;
   type
-    TShow = reference to procedure(AValue: Integer);
+    TShow = reference to procedure(AValue: Int);
     TScaler = class
-      FFactor: Integer;
-      procedure Show(AValue: Integer);
+      FFactor: Int;
+      procedure Show(AValue: Int);
     end;
-  procedure TScaler.Show(AValue: Integer);
+  procedure TScaler.Show(AValue: Int);
   begin
     WriteLn(AValue * FFactor)
   end;
@@ -817,7 +817,7 @@ const
   procedure Run;
   begin
     begin
-      var X: Integer := 40;
+      var X: Int := 40;
       X := X + 2;
       WriteLn(X)
     end
@@ -840,11 +840,11 @@ const
   program P;
   procedure Run;
   var
-    I: Integer;
+    I: Int;
   begin
     for I := 0 to 2 do
     begin
-      var Acc: Integer := 10;
+      var Acc: Int := 10;
       Acc := Acc + 1;
       WriteLn(Acc)
     end
@@ -874,11 +874,11 @@ const
     C: TProc;
   procedure Run;
   var
-    I: Integer;
+    I: Int;
   begin
     for I := 0 to 2 do
     begin
-      var Snapshot: Integer := I;
+      var Snapshot: Int := I;
       if I = 0 then A := procedure begin WriteLn(Snapshot) end;
       if I = 1 then B := procedure begin WriteLn(Snapshot) end;
       if I = 2 then C := procedure begin WriteLn(Snapshot) end
@@ -910,7 +910,7 @@ const
     B: TProc;
   procedure Run;
   var
-    I: Integer;
+    I: Int;
   begin
     for I := 0 to 2 do
     begin
@@ -940,7 +940,7 @@ const
   type
     TProc = reference to procedure;
     TBox = class
-      FValue: Integer;
+      FValue: Int;
       procedure Wire;
     end;
   var
@@ -982,7 +982,7 @@ const
   type
     TProc = reference to procedure;
     TCounter = class
-      FCount: Integer;
+      FCount: Int;
       procedure Wire;
     end;
   var
@@ -1017,55 +1017,55 @@ procedure TE2EAnonMethodTests.TestRun_AnonMethod_CallsNestedRoutines;
 const Src = '''
     program P;
     type
-      TF = reference to function(X: Integer): Integer;
+      TF = reference to function(X: Int32): Int32;
       TBox = class
-        V: Integer;
+        V: Int32;
         function Make: TF;
       end;
 
     procedure Outer;
     var
       R: TF;
-      K: Integer;
-      function Twice(X: Integer): Integer;
+      K: Int32;
+      function Twice(X: Int32): Int32;
       begin
         Result := X * 2
       end;
-      function AddK(X: Integer): Integer;
+      function AddK(X: Int32): Int32;
       begin
         Result := X + K
       end;
     begin
       K := 100;
-      R := function(X: Integer): Integer
+      R := function(X: Int32): Int32
            begin
              Result := Twice(X) + 1
            end;
       WriteLn(R(20));
-      R := function(X: Integer): Integer
+      R := function(X: Int32): Int32
            begin
              Result := AddK(X)
            end;
-      K := High(Integer) - 5;
+      K := High(Int32) - 5;
       WriteLn(R(5))
     end;
 
-    function MakeAdder(Base: Integer): TF;
+    function MakeAdder(Base: Int32): TF;
     var
-      Count: Integer;
-      function Step(X: Integer): Integer;
+      Count: Int32;
+      function Step(X: Int32): Int32;
       begin
         Count := Count + 1;
         Result := X + Base + Count
       end;
-      procedure Bump(var N: Integer);
+      procedure Bump(var N: Int32);
       begin
         N := N * 10
       end;
     begin
       Count := 0;
-      Result := function(X: Integer): Integer
-                var T: Integer;
+      Result := function(X: Int32): Int32
+                var T: Int32;
                 begin
                   T := X;
                   Bump(T);
@@ -1074,23 +1074,23 @@ const Src = '''
     end;
 
     function TBox.Make: TF;
-      function Scaled(X: Integer): Integer;
+      function Scaled(X: Int32): Int32;
       begin
         Result := X * V
       end;
     begin
-      Result := function(X: Integer): Integer
+      Result := function(X: Int32): Int32
                 begin
                   Result := Scaled(X) + 1
                 end
     end;
 
-    function Adapt(K: Integer): TF;
-      function AddK(X: Integer): Integer;
+    function Adapt(K: Int32): TF;
+      function AddK(X: Int32): Int32;
       begin
         Result := X + K
       end;
-      function Twice(X: Integer): Integer;
+      function Twice(X: Int32): Int32;
       begin
         Result := X * 2
       end;
@@ -1127,13 +1127,13 @@ const
   SrcOk = '''
     program P;
     type
-      TF = function(X: Integer): Integer;
-    procedure Apply(F: TF; X: Integer);
+      TF = function(X: Int): Int;
+    procedure Apply(F: TF; X: Int);
     begin
       WriteLn(F(X))
     end;
     procedure Outer();
-      function Twice(X: Integer): Integer;
+      function Twice(X: Int): Int;
       begin
         Result := X * 2
       end;
@@ -1152,7 +1152,7 @@ const
     type
       TP = procedure;
     procedure Outer();
-    var V: Integer;
+    var V: Int;
       procedure Inner();
       begin
         WriteLn(V)
@@ -1187,8 +1187,8 @@ const Src =
       procedure M();
     end;
   procedure TC.M();
-  var X: Integer;
-    procedure Inner(K: Integer);
+  var X: Int;
+    procedure Inner(K: Int);
     begin
       WriteLn(X + K)
     end;
@@ -1212,7 +1212,7 @@ const Src =
   program P;
   type
     TC = class
-      FVal: Integer;
+      FVal: Int;
       procedure Bump();
       procedure M();
     end;
@@ -1249,7 +1249,7 @@ const Src =
   program P;
   type
     TC = class
-      FVal: Integer;
+      FVal: Int;
       FName: string;
       function Suffix(): string;
       procedure M();
@@ -1259,7 +1259,7 @@ const Src =
     Result := '!'
   end;
   procedure TC.M();
-  var K: Integer;
+  var K: Int;
     procedure Inner();
     begin
       FVal := FVal + K;
@@ -1290,7 +1290,7 @@ const Src =
   program P;
   type
     TR = record
-      X: Integer;
+      X: Int;
       procedure M();
     end;
   procedure TR.M();
@@ -1360,7 +1360,7 @@ const Src =
   program P;
   type
     TBase = class
-      FVal: Integer;
+      FVal: Int;
       function Tag(): string; virtual;
       procedure Bump();
     end;
@@ -1409,13 +1409,13 @@ const Src =
   program P;
   type
     TC = class
-      FVal: Integer;
+      FVal: Int;
       procedure M();
     end;
   procedure TC.M();
-  var X: Integer;
-    function GetVal(): Integer;
-    var I: Integer;
+  var X: Int;
+    function GetVal(): Int;
+    var I: Int;
     begin
       Result := 0;
       I := 0;
@@ -1450,13 +1450,13 @@ const Src =
   program P;
   type
     TC = class
-      FVal: Integer;
+      FVal: Int;
       procedure M();
     end;
   procedure TC.M();
     procedure Inner();
     begin
-      var K: Integer := Self.FVal + 1;
+      var K: Int := Self.FVal + 1;
       WriteLn(K)
     end;
   begin
@@ -1524,10 +1524,10 @@ const Src =
       end;
     end;
   var
-    B: TBox<Integer>;
-    G: TGetter<Integer>;
+    B: TBox<Int>;
+    G: TGetter<Int>;
   begin
-    B := TBox<Integer>.Create();
+    B := TBox<Int>.Create();
     B.FVal := 41;
     G := B.Make();
     WriteLn(G() + 1)
@@ -1588,12 +1588,12 @@ const Src =
       end;
     end;
   var
-    DI: TDup<Integer>;
+    DI: TDup<Int>;
     DS: TDup<string>;
-    GI: TGetter<Integer>;
+    GI: TGetter<Int>;
     GS: TGetter<string>;
   begin
-    DI := TDup<Integer>.Create();
+    DI := TDup<Int>.Create();
     DS := TDup<string>.Create();
     GI := DI.Snapshot(7);
     GS := DS.Snapshot('seven');
@@ -1613,13 +1613,13 @@ procedure TE2EAnonMethodTests.TestRun_CaptureFreeClosure_PassedAndCalled;
 const
   Src = '''
     program P;
-    type TIntFn = reference to function(x: Integer): Integer;
-    function Apply(P: TIntFn; v: Integer): Integer;
+    type TIntFn = reference to function(x: Int): Int;
+    function Apply(P: TIntFn; v: Int): Int;
     begin
       Result := P(v)
     end;
     begin
-      WriteLn(Apply(function(x: Integer): Integer begin Result := x * 2 end, 5))
+      WriteLn(Apply(function(x: Int): Int begin Result := x * 2 end, 5))
     end.
     ''';
 begin
@@ -1631,14 +1631,14 @@ procedure TE2EAnonMethodTests.TestRun_Closure_OwnedTransientStringArg;
 const
   Src = '''
     program P;
-    type TStrFn = reference to function(s: string): Integer;
+    type TStrFn = reference to function(s: string): Int;
     function MakeStr: string; begin Result := 'hello' end;
-    function Apply(P: TStrFn): Integer;
+    function Apply(P: TStrFn): Int;
     begin
       Result := P(MakeStr())
     end;
     begin
-      WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end))
+      WriteLn(Apply(function(s: string): Int begin Result := Length(s) end))
     end.
     ''';
 begin
@@ -1650,13 +1650,13 @@ procedure TE2EAnonMethodTests.TestRun_Closure_StatementPositionCall;
 const
   Src = '''
     program P;
-    type TProc = reference to procedure(x: Integer);
-    procedure Run(P: TProc; v: Integer);
+    type TProc = reference to procedure(x: Int);
+    procedure Run(P: TProc; v: Int);
     begin
       P(v)
     end;
     begin
-      Run(procedure(x: Integer) begin WriteLn(x) end, 42)
+      Run(procedure(x: Int) begin WriteLn(x) end, 42)
     end.
     ''';
 begin
@@ -1700,7 +1700,7 @@ const
     type
       TFn = reference to procedure;
       TR = record
-        Pad: Integer;
+        Pad: Int;
         F: TFn;
       end;
     var
@@ -1726,14 +1726,14 @@ const
   Src = '''
     program P;
     type
-      TFn = reference to procedure(A: Integer; B: Integer);
+      TFn = reference to procedure(A: Int; B: Int);
       TR = record F: TFn; end;
     var
-      Base: Integer;
+      Base: Int;
       R: TR;
     begin
       Base := 100;
-      R.F := procedure(A: Integer; B: Integer)
+      R.F := procedure(A: Int; B: Int)
              begin WriteLn(Base + A + B) end;
       R.F(20, 3)
     end.
@@ -1828,7 +1828,7 @@ const
     type
       TFn = reference to procedure;
       TR = record
-        Tag: Integer;
+        Tag: Int;
         F: TFn;
       end;
     var
@@ -1873,7 +1873,7 @@ const
     type
       TFn = reference to procedure;
       TR = record
-        Tag: Integer;
+        Tag: Int;
         F: TFn;
       end;
     var
@@ -1909,7 +1909,7 @@ const
     program P;
     type
       TR = record
-        Tag: Integer;
+        Tag: Int;
         procedure Show();
       end;
     procedure TR.Show();
@@ -1943,12 +1943,12 @@ const
   Src = '''
     program P;
     type
-      TSel = reference to function(N: Integer): Integer;
-      TRun = reference to procedure(N: Integer);
-      TApply = reference to function(N: Integer; F: TSel): Integer;
+      TSel = reference to function(N: Int): Int;
+      TRun = reference to procedure(N: Int);
+      TApply = reference to function(N: Int; F: TSel): Int;
       TBox = class
       public
-        FBase: Integer;
+        FBase: Int;
         FRun: TRun;
         FApply: TApply;
         procedure Drv();
@@ -1956,23 +1956,23 @@ const
     procedure TBox.Drv();
     begin
       FRun(1);                          { stmt, value arg }
-      WriteLn(FApply(2, function(X: Integer): Integer
+      WriteLn(FApply(2, function(X: Int): Int
         begin
           Result := X + FBase
         end))                           { expr, closure arg }
     end;
     var
       B: TBox;
-      K: Integer;
+      K: Int;
     begin
       K := 100;
       B := TBox.Create();
       B.FBase := 40;
-      B.FRun := procedure(N: Integer)
+      B.FRun := procedure(N: Int)
         begin
           WriteLn(N + K)
         end;
-      B.FApply := function(N: Integer; F: TSel): Integer
+      B.FApply := function(N: Int; F: TSel): Int
         begin
           Result := F(N) + K
         end;
@@ -1992,19 +1992,19 @@ const
   Src = '''
     program P;
     type
-      TBump = procedure(var N: Integer) of object;
-      TScale = function(X: Double; K: Integer): Double of object;
-      TRefBump = reference to procedure(var N: Integer);
+      TBump = procedure(var N: Int) of object;
+      TScale = function(X: Float64; K: Int): Float64 of object;
+      TRefBump = reference to procedure(var N: Int);
       TC = class
       public
-        procedure Bump(var N: Integer);
-        function Scale(X: Double; K: Integer): Double;
+        procedure Bump(var N: Int);
+        function Scale(X: Float64; K: Int): Float64;
       end;
-    procedure TC.Bump(var N: Integer);
+    procedure TC.Bump(var N: Int);
     begin
       N := N + 10
     end;
-    function TC.Scale(X: Double; K: Integer): Double;
+    function TC.Scale(X: Float64; K: Int): Float64;
     begin
       Result := X * K
     end;
@@ -2013,7 +2013,7 @@ const
       B: TBump;
       S: TScale;
       R: TRefBump;
-      N: Integer;
+      N: Int;
     begin
       O := TC.Create();
       B := @O.Bump;
@@ -2022,7 +2022,7 @@ const
       B(N);                             { var through 'of object' }
       WriteLn(N);
       WriteLn(Trunc(S(1.5, 4) * 100));  { Double through 'of object' }
-      R := procedure(var M: Integer)
+      R := procedure(var M: Int)
         begin
           M := M * 3
         end;
@@ -2046,11 +2046,11 @@ const
     '''
     program P;
     type
-      TIntProc = reference to procedure(AValue: Integer);
+      TIntProc = reference to procedure(AValue: Int);
     var
       V: TIntProc;
     begin
-      V := procedure(AValue: Integer)
+      V := procedure(AValue: Int)
       begin
         WriteLn(AValue * 2)
       end;
@@ -2068,11 +2068,11 @@ const
     '''
     program P;
     type
-      TAdd = reference to function(const A, B: Integer): Integer;
+      TAdd = reference to function(const A, B: Int): Int;
     var
       F: TAdd;
     begin
-      F := function(const A, B: Integer): Integer
+      F := function(const A, B: Int): Int
       begin
         Result := A + B
       end;
@@ -2090,8 +2090,8 @@ const
     '''
     program P;
     type
-      TIntProc = reference to procedure(AValue: Integer);
-    procedure Show(AValue: Integer);
+      TIntProc = reference to procedure(AValue: Int);
+    procedure Show(AValue: Int);
     begin
       WriteLn(AValue + 1)
     end;
@@ -2137,10 +2137,10 @@ const
     '''
     program P;
     type
-      TAdd = reference to function(A, B: Integer): Integer;
+      TAdd = reference to function(A, B: Int): Int;
     var
       F: TAdd;
-      Base: Integer;
+      Base: Int;
     begin
       Base := 40;
       F := (A, B) -> A + B + Base;
@@ -2158,7 +2158,7 @@ const
     '''
     program P;
     type
-      TShow = reference to procedure(N: Integer);
+      TShow = reference to procedure(N: Int);
     var
       P1: TShow;
     begin
@@ -2177,7 +2177,7 @@ const
     '''
     program P;
     type
-      TAdd = reference to function(A, B: Integer): Integer;
+      TAdd = reference to function(A, B: Int): Int;
     var
       F: TAdd;
     begin
@@ -2198,10 +2198,10 @@ const
     '''
     program P;
     type
-      TF = reference to function(A: Integer): Integer;
+      TF = reference to function(A: Int): Int;
     var
       F: TF;
-      X: Integer;
+      X: Int;
     begin
       F := (A) -> A - 1;
       X := F(43);
@@ -2220,8 +2220,8 @@ const
     '''
     program P;
     type
-      TSel = reference to function(N: Integer): Integer;
-    function Twice(N: Integer; F: TSel): Integer;
+      TSel = reference to function(N: Int): Int;
+    function Twice(N: Int; F: TSel): Int;
     begin
       Result := F(F(N))
     end;
@@ -2240,9 +2240,9 @@ const
     '''
     program P;
     type
-      TPred = reference to function(N: Integer): Boolean;
+      TPred = reference to function(N: Int): Boolean;
       TC = class
-        function CountIf(A, B, C: Integer; P: TPred): Integer;
+        function CountIf(A, B, C: Int; P: TPred): Int;
         begin
           Result := 0;
           if P(A) then Result := Result + 1;
@@ -2252,7 +2252,7 @@ const
       end;
     var
       C: TC;
-      Limit: Integer;
+      Limit: Int;
     begin
       C := TC.Create();
       Limit := 10;
@@ -2270,12 +2270,12 @@ const
     '''
     program P;
     type
-      TSel = reference to function(N: Integer): Integer;
-    function Pick(N: Integer; V: Integer): string; overload;
+      TSel = reference to function(N: Int): Int;
+    function Pick(N: Int; V: Int): string; overload;
     begin
       Result := 'int:' + IntToStr(V)
     end;
-    function Pick(N: Integer; F: TSel): string; overload;
+    function Pick(N: Int; F: TSel): string; overload;
     begin
       Result := 'fn:' + IntToStr(F(N))
     end;
@@ -2295,9 +2295,9 @@ const
     '''
     program P;
     type
-      TSel = reference to function(N: Integer): Integer;
-      TRun = reference to procedure(N: Integer; F: TSel);
-      TApply = reference to function(N: Integer; F: TSel): Integer;
+      TSel = reference to function(N: Int): Int;
+      TRun = reference to procedure(N: Int; F: TSel);
+      TApply = reference to function(N: Int; F: TSel): Int;
       TBox = class
       public
         FRun: TRun;
@@ -2314,11 +2314,11 @@ const
       Apply: TApply;
       B: TBox;
     begin
-      Run := procedure(N: Integer; F: TSel)
+      Run := procedure(N: Int; F: TSel)
         begin
           WriteLn(F(N))
         end;
-      Apply := function(N: Integer; F: TSel): Integer
+      Apply := function(N: Int; F: TSel): Int
         begin
           Result := F(N)
         end;
@@ -2355,12 +2355,12 @@ const
       Result := F(FVal)
     end;
     var
-      B: TBox<Integer>;
+      B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int>.Create();
       B.FVal := 42;
       WriteLn(B.MapTo<string>(N -> 'v' + IntToStr(N)));
-      WriteLn(B.MapTo<Integer>(N -> N + 1))
+      WriteLn(B.MapTo<Int>(N -> N + 1))
     end.
     ''';
 begin
@@ -2415,14 +2415,14 @@ const
     end;
     var
       C: TC;
-      BI: TBox<Integer>;
+      BI: TBox<Int>;
       BS: TBox<string>;
-      GI: TGetter<Integer>;
+      GI: TGetter<Int>;
       GS: TGetter<string>;
     begin
       C := TC.Create();
       C.M();
-      BI := TBox<Integer>.Create();
+      BI := TBox<Int>.Create();
       BS := TBox<string>.Create();
       BI.FVal := 42;
       BS.FVal := 'forty-two';
@@ -2450,23 +2450,23 @@ const
   Src = '''
     program RefClo;
     type
-      TF = reference to function(X: Integer): Integer;
-      TD = reference to function(X: Double): Double;
+      TF = reference to function(X: Int): Int;
+      TD = reference to function(X: Float64): Float64;
       THolder = class
         FF: TF;
-        function Make(N: Integer): TF;
+        function Make(N: Int): TF;
       end;
-    function MakeAdder(N: Integer): TF;
+    function MakeAdder(N: Int): TF;
     begin
-      Result := function(X: Integer): Integer begin Result := X + N end;
+      Result := function(X: Int): Int begin Result := X + N end;
     end;
-    function MakeScale(K: Double): TD;
+    function MakeScale(K: Float64): TD;
     begin
-      Result := function(X: Double): Double begin Result := X * K end;
+      Result := function(X: Float64): Float64 begin Result := X * K end;
     end;
-    function THolder.Make(N: Integer): TF;
+    function THolder.Make(N: Int): TF;
     begin
-      Result := function(X: Integer): Integer begin Result := X * N end;
+      Result := function(X: Int): Int begin Result := X * N end;
     end;
     var H: THolder;
     begin
@@ -2498,12 +2498,12 @@ const
     program ClosArgs;
     uses SysUtils;
     type
-      TF = reference to function: Integer;
+      TF = reference to function: Int;
       TSA = array[0..1] of TF;
       TR = record F: TF; end;
       TOb = class F: TF; end;
       PF = ^TF;
-    function V(N: Integer): TF; begin Result := function: Integer begin Result := N end end;
+    function V(N: Int): TF; begin Result := function: Int begin Result := N end end;
     function Pr(E: TF): String; begin Result := 'v' + IntToStr(E()) end;
     procedure Run;
     var L: TSA; R: TR; O: TOb; P: PF; F: TF; DA: array of TF;
@@ -2532,16 +2532,16 @@ const
   Src = '''
     program CallArgs;
     type
-      TF = reference to function: Integer;
+      TF = reference to function: Int;
       TOb = class
-        N: Integer;
+        N: Int;
         function Mk: TF;
       end;
-    function TOb.Mk: TF; begin Result := function: Integer begin Result := N end end;
-    function Plain: TF; begin Result := function: Integer begin Result := 3 end end;
-    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
-    function Use(F: TF): Integer; begin Result := F() end;
-    function Use3(A: Integer; F: TF; B: Double): Integer; begin Result := A + F() + Trunc(B) end;
+    function TOb.Mk: TF; begin Result := function: Int begin Result := N end end;
+    function Plain: TF; begin Result := function: Int begin Result := 3 end end;
+    function Cap(K: Int): TF; begin Result := function: Int begin Result := K end end;
+    function Use(F: TF): Int; begin Result := F() end;
+    function Use3(A: Int; F: TF; B: Float64): Int; begin Result := A + F() + Trunc(B) end;
     procedure Run;
     var O: TOb;
     begin
@@ -2566,26 +2566,26 @@ const
     program WideCaps;
     uses SysUtils;
     type
-      TF = reference to function: Integer;
+      TF = reference to function: Int;
       TA = array[0..2] of string;
       TBig = set of 0..99;
-      TRec = record A, B: Integer; S: string; end;
-      IThing = interface function Get: Integer; end;
-      TThing = class(TObject, IThing) function Get: Integer; end;
-      TPlain = function(X: Integer): Integer;
-    function TThing.Get: Integer; begin Result := 42 end;
-    function Dbl(X: Integer): Integer; begin Result := X * 2 end;
-    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
-    function CapFn(G: TF): TF; begin Result := function: Integer begin Result := G() + 100 end end;
-    function CapArr(A: TA): TF; begin Result := function: Integer begin Result := Length(A[0]) + Length(A[2]) end end;
-    function CapCArr(const A: TA): TF; begin Result := function: Integer begin Result := Length(A[1]) end end;
-    function CapSet(S: TBig): TF; begin Result := function: Integer begin if 77 in S then Result := 1 else Result := 0 end end;
-    function CapRec(R: TRec): TF; begin Result := function: Integer begin Result := R.A + R.B + Length(R.S) end end;
-    function CapCRec(const R: TRec): TF; begin Result := function: Integer begin Result := R.A * 10 + Length(R.S) end end;
-    function CapIntf(I: IThing): TF; begin Result := function: Integer begin Result := I.Get() end end;
-    function CapSingle(S: Single): TF; begin Result := function: Integer begin Result := Trunc(S * 10) end end;
-    function CapDouble(S: Double): TF; begin Result := function: Integer begin Result := Trunc(S * 10) end end;
-    function CapPlain(P: TPlain): TF; begin Result := function: Integer begin Result := P(21) end end;
+      TRec = record A, B: Int; S: string; end;
+      IThing = interface function Get: Int; end;
+      TThing = class(TObject, IThing) function Get: Int; end;
+      TPlain = function(X: Int): Int;
+    function TThing.Get: Int; begin Result := 42 end;
+    function Dbl(X: Int): Int; begin Result := X * 2 end;
+    function Cap(K: Int): TF; begin Result := function: Int begin Result := K end end;
+    function CapFn(G: TF): TF; begin Result := function: Int begin Result := G() + 100 end end;
+    function CapArr(A: TA): TF; begin Result := function: Int begin Result := Length(A[0]) + Length(A[2]) end end;
+    function CapCArr(const A: TA): TF; begin Result := function: Int begin Result := Length(A[1]) end end;
+    function CapSet(S: TBig): TF; begin Result := function: Int begin if 77 in S then Result := 1 else Result := 0 end end;
+    function CapRec(R: TRec): TF; begin Result := function: Int begin Result := R.A + R.B + Length(R.S) end end;
+    function CapCRec(const R: TRec): TF; begin Result := function: Int begin Result := R.A * 10 + Length(R.S) end end;
+    function CapIntf(I: IThing): TF; begin Result := function: Int begin Result := I.Get() end end;
+    function CapSingle(S: Float32): TF; begin Result := function: Int begin Result := Trunc(S * 10) end end;
+    function CapDouble(S: Float64): TF; begin Result := function: Int begin Result := Trunc(S * 10) end end;
+    function CapPlain(P: TPlain): TF; begin Result := function: Int begin Result := P(21) end end;
     procedure Run;
     var F: TF; A: TA; S: TBig; R: TRec; T: IThing; Line: string;
     begin
@@ -2616,10 +2616,10 @@ const
   Src = '''
     program Targets;
     type
-      TF = reference to function: Integer;
-      TPI = reference to procedure(X: Integer);
-    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
-    procedure SetLit(var F: TF); begin F := function: Integer begin Result := 9 end end;
+      TF = reference to function: Int;
+      TPI = reference to procedure(X: Int);
+    function Cap(K: Int): TF; begin Result := function: Int begin Result := K end end;
+    procedure SetLit(var F: TF); begin F := function: Int begin Result := 9 end end;
     procedure SetCall(var F: TF); begin F := Cap(10) end;
     procedure SetNil(var F: TF); begin F := nil end;
     procedure Run;
@@ -2628,7 +2628,7 @@ const
       SetLit(F); Write('var ', F());
       SetCall(F); Write(' ', F());
       SetNil(F); Write(' ', Assigned(F));
-      P := procedure(X: Integer) begin G := Cap(X) end;
+      P := procedure(X: Int) begin G := Cap(X) end;
       P(5);
       WriteLn(' captured ', G());
     end;
@@ -2646,10 +2646,10 @@ const
   Src = '''
     program Reassign;
     type
-      TF = reference to function: Integer;
-      TOb = class N: Integer; end;
-    function CapO(O: TOb): TF; begin Result := function: Integer begin Result := O.N end end;
-    function Wrap(G: TF): TF; begin Result := function: Integer begin Result := G() * 2 end end;
+      TF = reference to function: Int;
+      TOb = class N: Int; end;
+    function CapO(O: TOb): TF; begin Result := function: Int begin Result := O.N end end;
+    function Wrap(G: TF): TF; begin Result := function: Int begin Result := G() * 2 end end;
     procedure Run;
     var F: TF; O: TOb;
     begin
@@ -2675,15 +2675,15 @@ const
   Src = '''
     program PtrForms;
     type
-      TF = reference to function: Integer;
+      TF = reference to function: Int;
       PF = ^TF;
       TOb = class
-        N: Integer;
+        N: Int;
         function Mk: TF;
       end;
-    function TOb.Mk: TF; begin Result := function: Integer begin Result := N end end;
-    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
-    function CapO(O: TOb): TF; begin Result := function: Integer begin Result := O.N + 1 end end;
+    function TOb.Mk: TF; begin Result := function: Int begin Result := N end end;
+    function Cap(K: Int): TF; begin Result := function: Int begin Result := K end end;
+    function CapO(O: TOb): TF; begin Result := function: Int begin Result := O.N + 1 end end;
     function MkOb: TOb; begin Result := TOb.Create(); Result.N := 13 end;
     procedure Run;
     var F, G: TF; P: PF; L: array[0..1] of TF; D: array of TF; O: TOb;
@@ -2693,7 +2693,7 @@ const
       O := TOb.Create(); O.N := 10;
       P^ := CapO(O); O := nil; Write(' ', F(), ' ', P^());
       G := Cap(9); P^ := G; Write(' ', F());
-      P^ := function: Integer begin Result := 77 end; Write(' ', P^());
+      P^ := function: Int begin Result := 77 end; Write(' ', P^());
       P^ := P^; Write(' ', F());
       P^ := nil; Write(' ', Assigned(F));
       L[0] := CapO(TOb.Create()); Write(' e ', L[0]());
@@ -2715,14 +2715,14 @@ const
     program BlockVars;
     uses SysUtils;
     type
-      TF = reference to function: Integer;
-      IThing = interface function Get: Integer; end;
-      TThing = class(TObject, IThing) N: Integer; function Get: Integer; end;
-      TRec = record S: string; N: Integer; end;
-    function TThing.Get: Integer; begin Result := N end;
-    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+      TF = reference to function: Int;
+      IThing = interface function Get: Int; end;
+      TThing = class(TObject, IThing) N: Int; function Get: Int; end;
+      TRec = record S: string; N: Int; end;
+    function TThing.Get: Int; begin Result := N end;
+    function Cap(K: Int): TF; begin Result := function: Int begin Result := K end end;
     procedure Run;
-    var I, Sum: Integer; Fs: array[0..2] of TF;
+    var I, Sum: Int; Fs: array[0..2] of TF;
     begin
       Sum := 0;
       for I := 0 to 2 do
@@ -2732,8 +2732,8 @@ const
         var R: TRec;
         R.S := 'x' + IntToStr(I); R.N := I;
         Sum := Sum + G() + Length(R.S) + R.N + T.Get();
-        var J: Integer := I;
-        Fs[I] := function: Integer begin Result := J * 100 end;
+        var J: Int := I;
+        Fs[I] := function: Int begin Result := J * 100 end;
       end;
       WriteLn('blockvars ', Sum, ' ', Fs[0](), ' ', Fs[2]());
     end;
@@ -2752,14 +2752,14 @@ const
     program ExprCalls;
     uses SysUtils;
     type
-      TP = procedure(X: Integer);
-      TR = reference to procedure(X: Integer);
+      TP = procedure(X: Int);
+      TR = reference to procedure(X: Int);
       TS = reference to function: string;
       PR = ^TR;
       TM = procedure of object;
-      TOb = class N: Integer; procedure Hi; end;
+      TOb = class N: Int; procedure Hi; end;
     procedure TOb.Hi; begin Write(' hi', N) end;
-    procedure Show(X: Integer); begin Write(' show', X) end;
+    procedure Show(X: Int); begin Write(' show', X) end;
     var
       A: array[0..1] of TP;
       R: array[0..1] of TR;
@@ -2768,14 +2768,14 @@ const
       P: PR;
       F: TR;
       O: TOb;
-      Total: Integer;
+      Total: Int;
     begin
       A[1] := @Show;
       A[1](7);
-      R[0] := procedure(X: Integer) begin Total := Total + X end;
+      R[0] := procedure(X: Int) begin Total := Total + X end;
       R[0](5); R[0](6);
       Write(' total', Total);
-      F := procedure(X: Integer) begin Write(' deref', X) end;
+      F := procedure(X: Int) begin Write(' deref', X) end;
       P := @F;
       P^(9);
       S[0] := function: string begin Result := 'x' + IntToStr(Total) end;
@@ -2824,11 +2824,11 @@ const Src =
   '''
   program P;
   type
-    TRef = reference to function(X: Double): Double;
-    TRefS = reference to function(X: Single): Single;
+    TRef = reference to function(X: Float64): Float64;
+    TRefS = reference to function(X: Float32): Float32;
     TP = reference to procedure;
-  function Sum(const A: array of Double): Double;
-  var I: Integer;
+  function Sum(const A: array of Float64): Float64;
+  var I: Int;
   begin Result := 0; for I := 0 to High(A) do Result := Result + A[I] end;
   procedure Outer();
   var R: TRef; RS: TRefS; Q: TP;
@@ -2837,8 +2837,8 @@ const Src =
       WriteLn('nested ', R(1):0:2, ' ', RS(1):0:2, ' ', R(2) + 1:0:2)
     end;
   begin
-    R := function(X: Double): Double begin Result := X * 3 end;
-    RS := function(X: Single): Single begin Result := X * 3 end;
+    R := function(X: Float64): Float64 begin Result := X * 3 end;
+    RS := function(X: Float32): Float32 begin Result := X * 3 end;
     Inner();
     Q := procedure
       begin
@@ -2860,13 +2860,13 @@ const
   Src = '''
     program P;
     type
-      TKFn = reference to function(A: Integer): Integer;
+      TKFn = reference to function(A: Int): Int;
       TCFn = reference to function(): TKFn;
     function GetC(): TCFn;
     begin
       Result := function(): TKFn
         begin
-          Result := function(A: Integer): Integer begin Result := A + 1000; end;
+          Result := function(A: Int): Int begin Result := A + 1000; end;
         end;
     end;
     var C: TCFn; K: TKFn;
@@ -2886,13 +2886,13 @@ const
   Src = '''
     program P;
     type
-      TKFn = reference to function(A: Integer): Integer;
+      TKFn = reference to function(A: Int): Int;
       TC = class
-        static function MakeFn(N: Integer): TKFn;
+        static function MakeFn(N: Int): TKFn;
       end;
-    static function TC.MakeFn(N: Integer): TKFn;
+    static function TC.MakeFn(N: Int): TKFn;
     begin
-      Result := function(A: Integer): Integer begin Result := A * N; end;
+      Result := function(A: Int): Int begin Result := A * N; end;
     end;
     var K: TKFn;
     begin
@@ -2910,25 +2910,25 @@ const
   Src = '''
     program P;
     type
-      TShow = reference to procedure(N: Integer);
-      TKFn = reference to function(A: Integer): Integer;
+      TShow = reference to procedure(N: Int);
+      TKFn = reference to function(A: Int): Int;
       TBox = class
-        V: Integer;
+        V: Int;
         procedure Show(Tag: string);
       end;
-      TMaker = reference to function(N: Integer): TBox;
+      TMaker = reference to function(N: Int): TBox;
     procedure TBox.Show(Tag: string); begin WriteLn(Tag, ' ', V); end;
     function GetShow(): TShow;
     begin
-      Result := procedure(N: Integer) begin WriteLn('show ', N); end;
+      Result := procedure(N: Int) begin WriteLn('show ', N); end;
     end;
     function GetFn(): TKFn;
     begin
-      Result := function(A: Integer): Integer begin WriteLn('fn ', A); Result := A; end;
+      Result := function(A: Int): Int begin WriteLn('fn ', A); Result := A; end;
     end;
     function GetMaker(): TMaker;
     begin
-      Result := function(N: Integer): TBox
+      Result := function(N: Int): TBox
         begin
           Result := TBox.Create();
           Result.V := N * 10;
@@ -2951,11 +2951,11 @@ const
   Src = '''
     program CapRec;
     type
-      TArr = array[0..3] of Integer;
-      TInner = record A: TArr; N: Integer; end;
-      TRec = record A: TArr; In1: TInner; N: Integer; S: string; end;
+      TArr = array[0..3] of Int;
+      TInner = record A: TArr; N: Int; end;
+      TRec = record A: TArr; In1: TInner; N: Int; S: string; end;
     procedure Run;
-    var L, L2: TRec; K: Integer; F: reference to procedure;
+    var L, L2: TRec; K: Int; F: reference to procedure;
     begin
       L.N := 3; L.S := 'outer'; L.A[2] := 20;
       F := procedure
@@ -2998,7 +2998,7 @@ const
     constructor TG.Create(const N: string); begin FN := N; end;
     function TG.Hi: string; begin Result := 'hi ' + FN; end;
     procedure Run;
-    var G: IGreet; D: array of Integer; SD: array of string; S, Acc: string; X, Sum: Integer; B: Byte;
+    var G: IGreet; D: array of Int; SD: array of string; S, Acc: string; X, Sum: Int; B: Byte;
         F: reference to procedure;
     begin
       SetLength(D, 2); D[1] := 10; G := TG.Create('a'); S := 'x' + IntToStr(1);
@@ -3044,15 +3044,15 @@ const
     program Q;
     type
       IThing = interface
-        function N(): Integer;
+        function N(): Int;
       end;
       TThing = class(TObject, IThing)
-        FN: Integer;
-        function N(): Integer;
+        FN: Int;
+        function N(): Int;
         destructor Destroy(); override;
       end;
       TProc = reference to procedure;
-    function TThing.N(): Integer; begin Result := FN end;
+    function TThing.N(): Int; begin Result := FN end;
     destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
     procedure WithIntf();
     var [Weak] W: IThing; S: IThing; P: TProc;
@@ -3138,17 +3138,17 @@ const
     program Q;
     type
       IThing = interface
-        function N(): Integer;
+        function N(): Int;
       end;
       TThing = class(TObject, IThing)
-        FN: Integer;
-        function N(): Integer;
+        FN: Int;
+        function N(): Int;
         destructor Destroy(); override;
       end;
       TProc = reference to procedure;
-    function TThing.N(): Integer; begin Result := FN end;
+    function TThing.N(): Int; begin Result := FN end;
     destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
-    function Mk(AN: Integer): TThing; begin Result := TThing.Create(); Result.FN := AN end;
+    function Mk(AN: Int): TThing; begin Result := TThing.Create(); Result.FN := AN end;
     procedure PlainClass();
     var [Unretained] U: TThing; S: TThing;
     begin
@@ -3220,11 +3220,11 @@ const
   Src = '''
     program P;
     type
-      TM = procedure(A: Integer) of object;
+      TM = procedure(A: Int) of object;
       TGet = function: TM of object;
       TImp = class
-        N: Integer;
-        procedure M(A: Integer);
+        N: Int;
+        procedure M(A: Int);
       end;
       TRec = record F: TM; end;
       THold = class
@@ -3236,8 +3236,8 @@ const
         function Mk(): TM;
         procedure Run();
       end;
-    var TI: TImp; Sum: Integer; GArr: array of TM; H: THold;
-    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    var TI: TImp; Sum: Int; GArr: array of TM; H: THold;
+    procedure TImp.M(A: Int); begin Sum := Sum + A * N; end;
     function THold.Mk(): TM; begin Result := @TI.M; end;
     procedure Take(X: TM); begin X(100); end;
     procedure TakeC(const X: TM); begin X(1000); end;
@@ -3278,10 +3278,10 @@ const
   Src = '''
     program P;
     type
-      TC = reference to procedure(A: Integer);
+      TC = reference to procedure(A: Int);
       TGet = function: TC of object;
       TBox = class
-        N: Integer;
+        N: Int;
         destructor Destroy; override;
       end;
       TRec = record F: TC; end;
@@ -3292,13 +3292,13 @@ const
         function Mk(): TC;
         procedure Run();
       end;
-    var Sum: Integer; H: THold;
+    var Sum: Int; H: THold;
     destructor TBox.Destroy; begin WriteLn('freed ', N); inherited Destroy(); end;
-    function MkC(N: Integer): TC;
+    function MkC(N: Int): TC;
     var B: TBox;
     begin
       B := TBox.Create(); B.N := N;
-      Result := procedure(A: Integer) begin Sum := Sum + A * B.N; end;
+      Result := procedure(A: Int) begin Sum := Sum + A * B.N; end;
     end;
     function THold.Mk(): TC; begin Result := MkC(2); end;
     procedure Take(X: TC); begin X(100); end;
@@ -3335,20 +3335,20 @@ const
   Src = '''
     program P;
     type
-      TFn = function(A: Integer): Integer of object;
-      TProc = procedure(A: Integer) of object;
+      TFn = function(A: Int): Int of object;
+      TProc = procedure(A: Int) of object;
       THold = class
-        N: Integer;
+        N: Int;
         FFn: TFn;
         FProc: TProc;
-        function Twice(A: Integer): Integer;
-        procedure Show(A: Integer);
+        function Twice(A: Int): Int;
+        procedure Show(A: Int);
         procedure Run();
       end;
-    function THold.Twice(A: Integer): Integer; begin Result := A * 2 * N; end;
-    procedure THold.Show(A: Integer); begin WriteLn('show ', A * N); end;
+    function THold.Twice(A: Int): Int; begin Result := A * 2 * N; end;
+    procedure THold.Show(A: Int); begin WriteLn('show ', A * N); end;
     procedure THold.Run();
-    var X: Integer;
+    var X: Int;
       procedure Inner();
       begin
         X := FFn(5);
@@ -3374,13 +3374,13 @@ const
   Src = '''
     program P;
     type
-      TM = procedure(A: Integer) of object;
-      TC = reference to procedure(A: Integer);
+      TM = procedure(A: Int) of object;
+      TC = reference to procedure(A: Int);
       TRec = record F: TC; end;
       TImp = class
-        N: Integer;
+        N: Int;
         destructor Destroy; override;
-        procedure M(A: Integer);
+        procedure M(A: Int);
       end;
       THold = class
         FS: TC;
@@ -3388,10 +3388,10 @@ const
         FR: TRec;
         procedure Run(O: TImp; L: TM);
       end;
-    var Sum: Integer; H: THold; GArr: array of TC; PC: ^TC;
+    var Sum: Int; H: THold; GArr: array of TC; PC: ^TC;
     destructor TImp.Destroy; begin WriteLn('freed ', N); inherited Destroy(); end;
-    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
-    procedure Plain(A: Integer); begin Sum := Sum + A * 1000; end;
+    procedure TImp.M(A: Int); begin Sum := Sum + A * N; end;
+    procedure Plain(A: Int); begin Sum := Sum + A * 1000; end;
     procedure Take(X: TC); begin X(1); end;
     procedure THold.Run(O: TImp; L: TM);
     begin
@@ -3427,31 +3427,31 @@ const
   Src = '''
     program Own;
     type
-      TM = procedure(A: Integer) of object;
-      TC = reference to procedure(A: Integer);
+      TM = procedure(A: Int) of object;
+      TC = reference to procedure(A: Int);
       TImp = class
-        N: Integer;
+        N: Int;
         destructor Destroy; override;
-        procedure M(A: Integer); virtual;
+        procedure M(A: Int); virtual;
       end;
       TSub = class(TImp)
-        procedure M(A: Integer); override;
+        procedure M(A: Int); override;
       end;
       THold = class
-        N: Integer;
+        N: Int;
         FO: TImp;
         FS: TM;
         FC: TC;
         destructor Destroy; override;
-        procedure Own(A: Integer);
+        procedure Own(A: Int);
         procedure Run;
       end;
-    var Sum: Integer;
+    var Sum: Int;
     destructor TImp.Destroy; begin WriteLn('imp freed'); inherited Destroy(); end;
-    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
-    procedure TSub.M(A: Integer); begin Sum := Sum + A * N * 2; end;
+    procedure TImp.M(A: Int); begin Sum := Sum + A * N; end;
+    procedure TSub.M(A: Int); begin Sum := Sum + A * N * 2; end;
     destructor THold.Destroy; begin WriteLn('hold freed'); inherited Destroy(); end;
-    procedure THold.Own(A: Integer); begin Sum := Sum + A * N; end;
+    procedure THold.Own(A: Int); begin Sum := Sum + A * N; end;
     procedure Take(X: TM); begin X(1000); end;
     procedure THold.Run;
     var L: TM;
@@ -3492,17 +3492,17 @@ const
   Src = '''
     program P;
     type
-      TC = reference to procedure(A: Integer);
+      TC = reference to procedure(A: Int);
       TImp = class
-        N: Integer;
+        N: Int;
         destructor Destroy; override;
-        procedure M(A: Integer);
+        procedure M(A: Int);
       end;
       THold = class FS: TC; end;
-    var Sum: Integer; H: THold; L: TC; A: array of TC;
+    var Sum: Int; H: THold; L: TC; A: array of TC;
     destructor TImp.Destroy; begin WriteLn('freed ', N); inherited Destroy(); end;
-    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
-    function MkObj(N: Integer): TImp; begin Result := TImp.Create(); Result.N := N; end;
+    procedure TImp.M(A: Int); begin Sum := Sum + A * N; end;
+    function MkObj(N: Int): TImp; begin Result := TImp.Create(); Result.N := N; end;
     procedure Take(X: TC); begin X(1); end;
     begin
       Take(@MkObj(1).M);
@@ -3525,17 +3525,17 @@ const
   Src = '''
     program P;
     type
-      TC = reference to procedure(A: Integer);
+      TC = reference to procedure(A: Int);
       TRec = record
-        N: Integer;
-        function Mk(Z: Integer): TC;
+        N: Int;
+        function Mk(Z: Int): TC;
       end;
-    var Sum: Integer; C: TC; R: TRec; A: array of TC;
-    function TRec.Mk(Z: Integer): TC;
-    var K: Integer;
+    var Sum: Int; C: TC; R: TRec; A: array of TC;
+    function TRec.Mk(Z: Int): TC;
+    var K: Int;
     begin
       K := N;
-      Result := procedure(A: Integer) begin Sum := Sum + A * K * Z end;
+      Result := procedure(A: Int) begin Sum := Sum + A * K * Z end;
     end;
     procedure Take(X: TC); begin X(10); end;
     function MkLocal(): TC;
@@ -3568,31 +3568,31 @@ const
   Src = '''
     program P;
     type
-      TShow = reference to procedure(N: Integer);
-      TKFn = reference to function(A: Integer): Integer;
+      TShow = reference to procedure(N: Int);
+      TKFn = reference to function(A: Int): Int;
       TBox = class
-        Tag: Integer;
+        Tag: Int;
         destructor Destroy; override;
       end;
       THold = class
         function MkShow(): TShow;
-        function MkFn(K: Integer): TKFn;
+        function MkFn(K: Int): TKFn;
         function MkOwned(): TShow;
       end;
     destructor TBox.Destroy; begin WriteLn('box freed ', Tag); inherited Destroy(); end;
     function THold.MkShow(): TShow;
     begin
-      Result := procedure(N: Integer) begin WriteLn('show ', N); end;
+      Result := procedure(N: Int) begin WriteLn('show ', N); end;
     end;
-    function THold.MkFn(K: Integer): TKFn;
+    function THold.MkFn(K: Int): TKFn;
     begin
-      Result := function(A: Integer): Integer begin WriteLn('fn ', A * K); Result := A * K; end;
+      Result := function(A: Int): Int begin WriteLn('fn ', A * K); Result := A * K; end;
     end;
     function THold.MkOwned(): TShow;
     var B: TBox;
     begin
       B := TBox.Create(); B.Tag := 9;
-      Result := procedure(N: Integer) begin WriteLn('owned ', N + B.Tag); end;
+      Result := procedure(N: Int) begin WriteLn('owned ', N + B.Tag); end;
     end;
     var H: THold;
     begin
@@ -3614,19 +3614,19 @@ const
   Src = '''
     program Prg;
     type
-      TM = procedure(A: Integer) of object;
-      TC = reference to procedure(A: Integer);
+      TM = procedure(A: Int) of object;
+      TC = reference to procedure(A: Int);
       TPair = record A, B: Int64; end;
-      TPF = reference to function(N: Integer): TPair;
-      TImp = class N: Integer; procedure M(A: Integer); function GetM(): TM; end;
-    var Sum: Integer; O: TImp; L: TM; C: TC; MR: TMethod; P: TPair; K: Integer;
-    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+      TPF = reference to function(N: Int): TPair;
+      TImp = class N: Int; procedure M(A: Int); function GetM(): TM; end;
+    var Sum: Int; O: TImp; L: TM; C: TC; MR: TMethod; P: TPair; K: Int;
+    procedure TImp.M(A: Int); begin Sum := Sum + A * N; end;
     function TImp.GetM(): TM; begin Result := @Self.M; end;
-    function GetC(): TC; begin Result := procedure(A: Integer) begin Sum := Sum + A end; end;
+    function GetC(): TC; begin Result := procedure(A: Int) begin Sum := Sum + A end; end;
     function GetPF(): TPF;
     begin
       K := 100;
-      Result := function(N: Integer): TPair begin Result.A := N + K; Result.B := N * K; end;
+      Result := function(N: Int): TPair begin Result.A := N + K; Result.B := N * K; end;
     end;
     begin
       O := TImp.Create(); O.N := 2;
@@ -3653,16 +3653,16 @@ const
   Src = '''
     program Prg;
     type
-      TM = procedure(A: Integer) of object;
-      TImp = class N: Integer; procedure M(A: Integer); end;
+      TM = procedure(A: Int) of object;
+      TImp = class N: Int; procedure M(A: Int); end;
       TList = class
         FA: array[0..1] of TM;
-        function Get(I: Integer): TM;
-        property Items[I: Integer]: TM read Get; default;
+        function Get(I: Int): TM;
+        property Items[I: Int]: TM read Get; default;
       end;
-    var Sum: Integer; O: TImp; L: TList; MR: TMethod; X: TM;
-    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
-    function TList.Get(I: Integer): TM; begin Result := FA[I]; end;
+    var Sum: Int; O: TImp; L: TList; MR: TMethod; X: TM;
+    procedure TImp.M(A: Int); begin Sum := Sum + A * N; end;
+    function TList.Get(I: Int): TM; begin Result := FA[I]; end;
     function GetM(): TM; begin Result := @O.M; end;
     begin
       O := TImp.Create(); O.N := 2; L := TList.Create(); L.FA[0] := @O.M;
@@ -3683,13 +3683,13 @@ const
   Src = '''
     program Prg;
     type
-      TM = procedure(A: Integer) of object;
-      TC = reference to procedure(A: Integer);
-      TImp = class N: Integer; procedure M(A: Integer); end;
-    var Sum: Integer; O: TImp;
-    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+      TM = procedure(A: Int) of object;
+      TC = reference to procedure(A: Int);
+      TImp = class N: Int; procedure M(A: Int); end;
+    var Sum: Int; O: TImp;
+    procedure TImp.M(A: Int); begin Sum := Sum + A * N; end;
     function GetM(): TM; begin Result := @O.M; end;
-    function GetC(): TC; begin Result := procedure(A: Integer) begin Sum := Sum + A end; end;
+    function GetC(): TC; begin Result := procedure(A: Int) begin Sum := Sum + A end; end;
     procedure Take(X: TM); begin X(10); end;
     procedure TakeC(const X: TC); begin X(1000); end;
     begin
@@ -3711,10 +3711,10 @@ const
     program P;
     type
       TVec = record
-        FX: Integer;
-        procedure SetX(AV: Integer);
+        FX: Int;
+        procedure SetX(AV: Int);
       end;
-    procedure TVec.SetX(AV: Integer); begin FX := AV; end;
+    procedure TVec.SetX(AV: Int); begin FX := AV; end;
     procedure Captures;
     var
       V: TVec;
@@ -3756,11 +3756,11 @@ const
     procedure Outer;
     var
       B: Byte;
-      S: SmallInt;
-      I, J: Integer;
+      S: Int16;
+      I, J: Int;
       L: Int64;
       Ok: Boolean;
-      K: Integer;
+      K: Int;
       Cl: reference to procedure;
       procedure Init;
       begin

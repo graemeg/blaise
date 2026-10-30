@@ -132,7 +132,7 @@ const
     program P;
     var
       S: string;
-      N: Integer;
+      N: Int;
     begin
       S := 'hello';
       N := Length(S);
@@ -190,11 +190,11 @@ const
   UnitSrc = '''
     unit qsym;
     interface
-    function Add3(N: Integer): Integer;
+    function Add3(N: Int): Int;
     var
-      GBase: Integer;
+      GBase: Int;
     implementation
-    function Add3(N: Integer): Integer;
+    function Add3(N: Int): Int;
     begin
       Result := N + 3
     end;
@@ -228,14 +228,14 @@ const
     interface
     type
       IHi = interface
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
       TMine = class(TObject, IHi)
-        Tag: Integer;
-        function Hi(): Integer;
+        Tag: Int;
+        function Hi(): Int;
       end;
     implementation
-    function TMine.Hi(): Integer;
+    function TMine.Hi(): Int;
     begin
       Result := Tag + 1
     end;
@@ -246,10 +246,10 @@ const
     uses nsq;
     type
       IHi = interface
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
       TMine = class
-        Tag: Integer;
+        Tag: Int;
       end;
     var
       O, Q: TObject;
@@ -279,11 +279,11 @@ const
   UnitSrc = '''
     unit My.Pkg;
     interface
-    function Add3(N: Integer): Integer;
+    function Add3(N: Int): Int;
     var
-      GBase: Integer;
+      GBase: Int;
     implementation
-    function Add3(N: Integer): Integer;
+    function Add3(N: Int): Int;
     begin
       Result := N + 3
     end;
@@ -389,10 +389,10 @@ const
     interface
     type
       TParent = class
-        function Base: Integer;
+        function Base: Int;
       end;
     implementation
-    function TParent.Base: Integer;
+    function TParent.Base: Int;
     begin
       Result := 41
     end;
@@ -403,9 +403,9 @@ const
     uses ua;
     type
       TChild = class(ua.TParent)
-        function Plus1: Integer;
+        function Plus1: Int;
       end;
-    function TChild.Plus1: Integer;
+    function TChild.Plus1: Int;
     begin
       Result := Base() + 1
     end;
@@ -432,10 +432,10 @@ const
   UnitOne = '''
     unit uone;
     interface
-    function GetOne: Integer;
+    function GetOne: Int;
     implementation
-    var G: Integer;
-    function GetOne: Integer;
+    var G: Int;
+    function GetOne: Int;
     begin
       G := 11;
       Result := G
@@ -445,10 +445,10 @@ const
   UnitTwo = '''
     unit utwo;
     interface
-    function GetTwo: Integer;
+    function GetTwo: Int;
     implementation
-    var G: Integer;
-    function GetTwo: Integer;
+    var G: Int;
+    function GetTwo: Int;
     begin
       G := 22;
       Result := G
@@ -478,14 +478,14 @@ const
   UVA_Var = '''
     unit uva;
     interface
-    var V: Integer = 7;
+    var V: Int32 = 7;
     implementation
     end.
     ''';
   UVB_Var = '''
     unit uvb;
     interface
-    var V: Integer = 9;
+    var V: Int32 = 9;
     implementation
     end.
     ''';
@@ -495,20 +495,20 @@ const
     unit ura;
     interface
     function Who(): string;
-    procedure Say(N: Integer);
+    procedure Say(N: Int);
     implementation
     function Who(): string; begin Result := 'A' end;
-    procedure Say(N: Integer); begin WriteLn('ura ', N) end;
+    procedure Say(N: Int); begin WriteLn('ura ', N) end;
     end.
     ''';
   URB_Routine = '''
     unit urb;
     interface
     function Who(): string;
-    procedure Say(N: Integer);
+    procedure Say(N: Int);
     implementation
     function Who(): string; begin Result := 'B' end;
-    procedure Say(N: Integer); begin WriteLn('urb ', N) end;
+    procedure Say(N: Int); begin WriteLn('urb ', N) end;
     end.
     ''';
 
@@ -549,7 +549,7 @@ const
     program P;
     uses ura;
     function Who(): string; begin Result := 'P' end;
-    procedure Say(N: Integer); begin WriteLn('prog ', N) end;
+    procedure Say(N: Int); begin WriteLn('prog ', N) end;
     begin
       WriteLn(Who(), ura.Who());
       Say(1); ura.Say(2)
@@ -637,7 +637,7 @@ const
   UnitC = '''
     unit uvc;
     interface
-    var V: Integer; S: string;
+    var V: Int; S: string;
     procedure SetC;
     function GetC: string;
     implementation
@@ -648,7 +648,7 @@ const
   UnitD = '''
     unit uvd;
     interface
-    var V: Integer; S: string;
+    var V: Int; S: string;
     procedure SetD;
     function GetD: string;
     implementation
@@ -684,10 +684,10 @@ const
     interface
     type
       TShape = class
-        function Sides: Integer;
+        function Sides: Int;
       end;
     implementation
-    function TShape.Sides: Integer;
+    function TShape.Sides: Int;
     begin
       Result := 3
     end;
@@ -698,10 +698,10 @@ const
     interface
     type
       TShape = class
-        function Sides: Integer;
+        function Sides: Int;
       end;
     implementation
-    function TShape.Sides: Integer;
+    function TShape.Sides: Int;
     begin
       Result := 4
     end;
@@ -791,20 +791,20 @@ const
     unit wca;
     interface
     type
-      TShape = class function Sides: Integer; end;
+      TShape = class function Sides: Int; end;
       TPalette = (paOne, paTwo, paThree);
     implementation
-    function TShape.Sides: Integer; begin Result := 3 end;
+    function TShape.Sides: Int; begin Result := 3 end;
     end.
     ''';
   UnitB = '''
     unit wcb;
     interface
     type
-      TShape = class function Sides: Integer; end;
+      TShape = class function Sides: Int; end;
       TPalette = (paZero, paOne);
     implementation
-    function TShape.Sides: Integer; begin Result := 4 end;
+    function TShape.Sides: Int; begin Result := 4 end;
     end.
     ''';
   ProgAB = '''
@@ -1271,10 +1271,10 @@ program P;
       end;
       TDer<T> = class(TBase<T>)
       end;
-    var D: TDer<Integer>; I: IBox;
+    var D: TDer<Int>; I: IBox;
     function TBase<T>.Show: string; begin Result := 'boxed' end;
     begin
-      D := TDer<Integer>.Create();
+      D := TDer<Int>.Create();
       I := D;
       WriteLn(I.Show())
     end.

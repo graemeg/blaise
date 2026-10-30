@@ -122,19 +122,19 @@ const
   USrc = '''
     unit UA;
     interface
-    function Foo(): Integer;
-    procedure Bar(N: Integer);
+    function Foo(): Int;
+    procedure Bar(N: Int);
     implementation
-    function Foo(): Integer; begin Result := 1 end;
-    procedure Bar(N: Integer); begin end;
+    function Foo(): Int; begin Result := 1 end;
+    procedure Bar(N: Int); begin end;
     end.
     ''';
   PSrc = '''
     program P;
     uses UA;
-    var N: Integer;
-    function Foo(): Integer; begin Result := 2 end;
-    procedure Bar(N: Integer); begin end;
+    var N: Int;
+    function Foo(): Int; begin Result := 2 end;
+    procedure Bar(N: Int); begin end;
     begin
       N := Foo() + UA.Foo();
       Bar(N); UA.Bar(N)
@@ -212,7 +212,7 @@ const
         begin
           WriteLn('hello')
         end;
-        procedure Greet(N: Integer); overload;
+        procedure Greet(N: Int); overload;
         begin
           WriteLn(N)
         end;
@@ -228,7 +228,7 @@ const
         procedure Greet;
         begin
         end;
-        procedure Greet(N: Integer);
+        procedure Greet(N: Int);
         begin
         end;
         begin
@@ -241,7 +241,7 @@ const
         procedure Greet; overload;
         begin
         end;
-        procedure Greet(N: Integer);
+        procedure Greet(N: Int);
         begin
         end;
         begin
@@ -254,7 +254,7 @@ const
         procedure Greet; overload;
         begin
         end;
-        procedure Greet(N: Integer); overload;
+        procedure Greet(N: Int); overload;
         begin
         end;
         begin
@@ -265,7 +265,7 @@ const
   SrcTypeDistinct =
     '''
         program P;
-        procedure Show(N: Integer); overload;
+        procedure Show(N: Int); overload;
         begin
           WriteLn(N)
         end;
@@ -284,10 +284,10 @@ const
         program P;
         type
           TFoo = class
-            procedure Show(N: Integer); overload;
+            procedure Show(N: Int); overload;
             procedure Show(S: string); overload;
           end;
-          procedure TFoo.Show(N: Integer); overload;
+          procedure TFoo.Show(N: Int); overload;
           begin WriteLn(N) end;
           procedure TFoo.Show(S: string); overload;
           begin WriteLn(S) end;
@@ -304,10 +304,10 @@ const
         program P;
         type
           TFoo = class
-            procedure Show(N: Integer);
+            procedure Show(N: Int);
             procedure Show(S: string);
           end;
-          procedure TFoo.Show(N: Integer);
+          procedure TFoo.Show(N: Int);
           begin end;
           procedure TFoo.Show(S: string);
           begin end;
@@ -325,12 +325,12 @@ const
         program P;
         type
           TFoo = class
-            constructor Create(A: Integer; B: Integer); overload;
-            constructor Create(A: Integer); overload;
+            constructor Create(A: Int; B: Int); overload;
+            constructor Create(A: Int); overload;
           end;
-          constructor TFoo.Create(A: Integer; B: Integer);
+          constructor TFoo.Create(A: Int; B: Int);
           begin end;
-          constructor TFoo.Create(A: Integer);
+          constructor TFoo.Create(A: Int);
           begin end;
         var F: TFoo;
         begin
@@ -461,12 +461,12 @@ const
       program P;
       type
         TO1 = class
-          procedure M(X: Integer);
+          procedure M(X: Int32);
         end;
-      procedure TO1.M(X: Integer);
+      procedure TO1.M(X: Int32);
       begin
       end;
-      procedure P1(X: Integer);
+      procedure P1(X: Int32);
       begin
       end;
       function F1(X: Int64): Int64;
@@ -476,7 +476,7 @@ const
       procedure U1(X: UInt64);
       begin
       end;
-      var D: Double; I: Int64; O: TO1;
+      var D: Float64; I: Int64; O: TO1;
       begin
       ''';
 begin
@@ -588,7 +588,7 @@ const
     procedure F(X: UInt32); overload;
     begin
     end;
-    procedure F(X: Cardinal); overload;
+    procedure F(X: UInt32); overload;
     begin
     end;
     end.
@@ -610,7 +610,7 @@ const
     procedure F(X: UInt32); overload;
     procedure F(X: Int64); overload;
     implementation
-    procedure F(X: Cardinal);
+    procedure F(X: UInt32);
     begin
     end;
     procedure F(X: Int64);
@@ -628,10 +628,10 @@ const
   Src = '''
     program p;
     type
-      TInts = array of Integer;
+      TInts = array of Int32;
       TStrs = array of string;
-      TPair = array[0..1] of Integer;
-      TTrio = array[0..2] of Integer;
+      TPair = array[0..1] of Int32;
+      TTrio = array[0..2] of Int32;
       TA = class end;
       TAClass = class of TA;
     procedure F(const X: TInts); overload; begin end;
@@ -639,7 +639,7 @@ const
     procedure G(const X: TPair); overload; begin end;
     procedure G(const X: TTrio); overload; begin end;
     procedure H(X: TAClass); overload; begin end;
-    procedure H(X: Integer); overload; begin end;
+    procedure H(X: Int32); overload; begin end;
     begin
     end.
     ''';
@@ -666,8 +666,8 @@ begin
     Pos('has the same parameter signature', SemanticError('''
       program p;
       type
-        TA = array of Integer;
-        TB = array of Integer;
+        TA = array of Int32;
+        TB = array of Int32;
       procedure F(const X: TA); overload; begin end;
       procedure F(const X: TB); overload; begin end;
       begin
@@ -679,14 +679,14 @@ procedure TOverloadTests.TestSem_ProgramOverloadForward_PairsWithBody;
 const
   Src = '''
     program p;
-    procedure F(X: Integer); overload; forward;
+    procedure F(X: Int32); overload; forward;
     procedure F(const X: string); overload; forward;
     procedure G;
     begin
       F(1);
       F('a')
     end;
-    procedure F(X: Integer); overload;
+    procedure F(X: Int32); overload;
     begin
     end;
     procedure F(const X: string);
@@ -720,22 +720,22 @@ procedure TOverloadTests.TestSem_NarrowArg_PicksClosestWidening;
 const
   Head = '''
     program p;
-    procedure A(const M: string; X, Y: Integer); overload; begin end;
+    procedure A(const M: string; X, Y: Int32); overload; begin end;
     procedure A(const M: string; X, Y: Int64); overload; begin end;
-    procedure A(const M: string; X, Y: Double); overload; begin end;
+    procedure A(const M: string; X, Y: Float64); overload; begin end;
     type
       TC = class
         procedure B(X: Int64); overload;
-        procedure B(X: Integer); overload;
+        procedure B(X: Int32); overload;
       end;
     procedure TC.B(X: Int64); begin end;
-    procedure TC.B(X: Integer); begin end;
-    procedure W(X: Word); overload; begin end;
-    procedure W(X: SmallInt); overload; begin end;
-    procedure F(X: Single); overload; begin end;
-    procedure F(X: Double); overload; begin end;
+    procedure TC.B(X: Int32); begin end;
+    procedure W(X: UInt16); overload; begin end;
+    procedure W(X: Int16); overload; begin end;
+    procedure F(X: Float32); overload; begin end;
+    procedure F(X: Float64); overload; begin end;
     var
-      V8: Int8; VB: Byte; VS: SmallInt; VW: Word; VI: Integer; O: TC;
+      V8: Int8; VB: Byte; VS: Int16; VW: UInt16; VI: Int32; O: TC;
     begin
     ''';
 begin

@@ -37,41 +37,41 @@ const
     program P;
     type
       TStack = class
-        FData:     ^Integer;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FData:     ^Int;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        var NewCap, OldCap: Integer;
+        var NewCap, OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 4
           else NewCap := OldCap * 2;
-          Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Integer));
-          ZeroMem(Self.FData + OldCap * SizeOf(Integer), (NewCap - OldCap) * SizeOf(Integer));
+          Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Int));
+          ZeroMem(Self.FData + OldCap * SizeOf(Int), (NewCap - OldCap) * SizeOf(Int));
           Self.FCapacity := NewCap
         end;
-        procedure Push(Value: Integer);
-        var Dest: ^Integer;
+        procedure Push(Value: Int);
+        var Dest: ^Int;
         begin
           if Self.FCount = Self.FCapacity then Self.Grow();
-          Dest        := Self.FData + Self.FCount * SizeOf(Integer);
+          Dest        := Self.FData + Self.FCount * SizeOf(Int);
           Dest^       := Value;
           Self.FCount := Self.FCount + 1
         end;
-        function Pop: Integer;
-        var Src: ^Integer;
+        function Pop: Int;
+        var Src: ^Int;
         begin
           Self.FCount := Self.FCount - 1;
-          Src         := Self.FData + Self.FCount * SizeOf(Integer);
+          Src         := Self.FData + Self.FCount * SizeOf(Int);
           Result      := Src^
         end;
-        function Peek: Integer;
-        var Src: ^Integer;
+        function Peek: Int;
+        var Src: ^Int;
         begin
-          Src    := Self.FData + (Self.FCount - 1) * SizeOf(Integer);
+          Src    := Self.FData + (Self.FCount - 1) * SizeOf(Int);
           Result := Src^
         end;
-        property Count: Integer read FCount;
+        property Count: Int read FCount;
       end;
     ''';
 
@@ -122,7 +122,7 @@ const
   SrcGrowBeyond =
     StackSrc +
     '''
-    var S: TStack; I: Integer;
+    var S: TStack; I: Int;
     begin
       S := TStack.Create();
       I := 1;

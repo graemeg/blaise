@@ -192,7 +192,7 @@ const
         procedure Execute; override;
       end;
     procedure TSlowThread.Execute;
-    var I, Sum: Integer;
+    var I, Sum: Int;
     begin
       Sum := 0;
       for I := 0 to 999999 do
@@ -218,7 +218,7 @@ const
         procedure Execute; override;
       end;
     procedure TLoopThread.Execute;
-    var I: Integer;
+    var I: Int;
     begin
       { Spin until terminated.  The loop must exit *only* via the terminate
         flag so Terminated is guaranteed True when read — an early-break
@@ -277,7 +277,7 @@ const
     type
       TNumThread = class(TThread)
       private
-        FNum: Integer;
+        FNum: Int;
       protected
         procedure Execute; override;
       end;
@@ -310,7 +310,7 @@ const
     type
       TShared = class
         CS: TCriticalSection;
-        Counter: Integer;
+        Counter: Int;
       end;
       TIncThread = class(TThread)
         Shared: TShared;
@@ -318,7 +318,7 @@ const
         procedure Execute; override;
       end;
     procedure TIncThread.Execute;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 999 do
       begin
@@ -440,7 +440,7 @@ const
     '''
     program P;
     threadvar
-      Counter: Integer;
+      Counter: Int;
     begin
       Counter := 42;
       WriteLn(Counter)
@@ -463,9 +463,9 @@ const
     '''
     program P;
     var
-      G: Integer;
+      G: Int;
     threadvar
-      T: Integer;
+      T: Int;
     begin
       G := 10;
       T := 20;
@@ -498,19 +498,19 @@ const
     uses Classes;
     type
       TRec = record
-        Tag: Integer;
+        Tag: Int;
       end;
       TStampThread = class(TThread)
-        MyId: Integer;
+        MyId: Int;
       protected
         procedure Execute; override;
       end;
     threadvar
       TVR: TRec;
     var
-      Corrupt: Integer;
+      Corrupt: Int;
     procedure TStampThread.Execute;
-    var I: Integer;
+    var I: Int;
     begin
       TVR.Tag := Self.MyId;
       for I := 0 to 200000 do
@@ -566,29 +566,29 @@ const
     uses Classes;
     type
       TRec = record
-        N: Integer;
-        procedure Put(V: Integer);
-        function Get: Integer;
+        N: Int;
+        procedure Put(V: Int);
+        function Get: Int;
       end;
       TStampThread = class(TThread)
-        MyId: Integer;
+        MyId: Int;
       protected
         procedure Execute; override;
       end;
-    procedure TRec.Put(V: Integer);
+    procedure TRec.Put(V: Int);
     begin
       N := V
     end;
-    function TRec.Get: Integer;
+    function TRec.Get: Int;
     begin
       Result := N
     end;
     threadvar
       GR: TRec;
     var
-      Corrupt: Integer;
+      Corrupt: Int;
     procedure TStampThread.Execute;
-    var I: Integer;
+    var I: Int;
     begin
       GR.Put(Self.MyId);
       for I := 0 to 200000 do
@@ -647,22 +647,22 @@ const
     type
       TAddrThread = class(TThread)
         MyId: Int64;
-        Slot: Integer;
+        Slot: Int;
       protected
         procedure Execute; override;
       end;
     threadvar
       TV: Int64;
     var
-      Corrupt, Ready: Integer;
+      Corrupt, Ready: Int;
       Addrs: array[0..2] of Int64;
     procedure TAddrThread.Execute;
     var
       P: ^Int64;
-      I: Integer;
+      I: Int;
     begin
       P := @TV;
-      Addrs[Self.Slot] := Int64(PtrUInt(P));
+      Addrs[Self.Slot] := Int64(UInt(P));
       { stay alive until all three have taken @TV: a thread that has already
         exited may hand its thread-local block to a later one, so distinct
         addresses are only guaranteed among threads alive together }
@@ -722,14 +722,14 @@ const
     type
       TAllocThread = class(TThread)
       private
-        FOk: Integer;
+        FOk: Int;
       protected
         procedure Execute; override;
       end;
     procedure TAllocThread.Execute;
     var
       P1, P2: Pointer;
-      I1, I2: ^Integer;
+      I1, I2: ^Int;
     begin
       P1 := GetMem(32);
       P2 := GetMem(64);
@@ -775,7 +775,7 @@ const
     uses Classes;
     type
       TSharedData = class
-        Value: Integer;
+        Value: Int;
       end;
       TArcThread = class(TThread)
         Shared: TSharedData;
@@ -785,7 +785,7 @@ const
     procedure TArcThread.Execute;
     var
       Local: TSharedData;
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 999 do
       begin

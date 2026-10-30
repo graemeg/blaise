@@ -267,8 +267,8 @@ const
   Src = '''
     program P;
     type
-      TArr = array of Integer;
-      IFoo = interface function Val: Integer; end;
+      TArr = array of Int;
+      IFoo = interface function Val: Int; end;
     procedure SC(const S: string); begin WriteLn(Length(S)) end;
     procedure SV(var S: string); begin WriteLn(Length(S)) end;
     procedure DC(const A: TArr); begin WriteLn(Length(A)) end;

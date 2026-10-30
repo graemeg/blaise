@@ -175,8 +175,8 @@ const
   SrcHighLow =
     '''
         program OA;
-        function Len(const A: array of string): Integer;
-        var H, L: Integer;
+        function Len(const A: array of string): Int;
+        var H, L: Int;
         begin
           H := High(A);
           L := Low(A);
@@ -209,7 +209,7 @@ const
     '''
         program OA;
         procedure Show(const A: array of string);
-        var N: Integer;
+        var N: Int;
         begin
           N := Length(A)
         end;
@@ -221,8 +221,8 @@ const
   SrcLengthStaticArray =
     '''
         program OA;
-        var A: array[1..5] of Integer;
-        var N: Integer;
+        var A: array[1..5] of Int;
+        var N: Int;
         begin
           N := Length(A)
         end.
@@ -271,7 +271,7 @@ begin
   P := ParseSrc(
     '''
         program T;
-        procedure Sum(const A: array of Integer);
+        procedure Sum(const A: array of Int32);
         begin end;
         begin end.
         ''');
@@ -279,7 +279,7 @@ begin
     MD  := TMethodDecl(P.Block.ProcDecls[0]);
     Par := TMethodParam(MD.Params[0]);
     AssertTrue('A is open array', Par.IsOpenArray);
-    AssertEquals('element type is Integer', 'Integer', Par.TypeName);
+    AssertEquals('element type is Integer', 'Int32', Par.TypeName);
   finally P.Free(); end;
 end;
 
@@ -289,7 +289,7 @@ begin
   P := ParseSrc(
     '''
         program T;
-        procedure Foo(X: Integer);
+        procedure Foo(X: Int);
         begin end;
         begin end.
         ''');
@@ -445,12 +445,12 @@ const
   SrcStaticToOpen =
     '''
         program P;
-        procedure Show(const A: array of Integer);
-        var N: Integer;
+        procedure Show(const A: array of Int);
+        var N: Int;
         begin
           N := Length(A)
         end;
-        var B: array[0..3] of Integer;
+        var B: array[0..3] of Int;
         begin
           Show(B)
         end.
@@ -459,12 +459,12 @@ const
   SrcStaticToOpenNonZero =
     '''
         program P;
-        procedure Show(const A: array of Integer);
-        var N: Integer;
+        procedure Show(const A: array of Int);
+        var N: Int;
         begin
           N := Length(A)
         end;
-        var B: array[3..7] of Integer;
+        var B: array[3..7] of Int;
         begin
           Show(B)
         end.
@@ -522,7 +522,7 @@ begin
           procedure Show(const A: array of Byte);
           begin
           end;
-          var N: Integer;
+          var N: Int32;
           begin
             Show([N, 1])
           end.
@@ -544,9 +544,9 @@ const
   SrcNestedOpenArray =
     '''
         program P;
-        procedure Show(const A: array of Integer);
+        procedure Show(const A: array of Int);
           procedure Inner;
-          var I: Integer;
+          var I: Int;
           begin
             for I := 0 to High(A) do
               WriteLn(A[I])
@@ -593,7 +593,7 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..2] of Integer;
+      TArr = array[0..2] of Int;
       TC = class
         A: TArr;
         function GetA: TArr;
@@ -601,8 +601,8 @@ const
       TR = record A: TArr; end;
       PRec = ^TR;
     function TC.GetA: TArr; begin Result := A end;
-    procedure Show(const V: array of Integer);
-    var I: Integer;
+    procedure Show(const V: array of Int);
+    var I: Int;
     begin
       for I := 0 to High(V) do Write(V[I], ' ');
       WriteLn(High(V))
@@ -634,8 +634,8 @@ procedure TOpenArrayTests.TestCodegen_StaticArrayCallResult_GetsBuffer;
 const
   Src = '''
     program P;
-    type TArr = array[0..2] of Integer;
-    function MakeA(K: Integer): TArr; begin Result[2] := K * 2 end;
+    type TArr = array[0..2] of Int;
+    function MakeA(K: Int): TArr; begin Result[2] := K * 2 end;
     begin
       WriteLn(MakeA(3)[2])
     end.
@@ -651,8 +651,8 @@ procedure TOpenArrayTests.TestCodegen_StaticArrayParamToOpenArray_LoadsSlot;
 const
   Src = '''
     program P;
-    type TArr = array[0..2] of Integer;
-    procedure Show(const V: array of Integer); begin WriteLn(V[0]) end;
+    type TArr = array[0..2] of Int32;
+    procedure Show(const V: array of Int32); begin WriteLn(V[0]) end;
     procedure ByVar(var X: TArr); begin Show(X) end;
     var G: TArr;
     begin
@@ -673,12 +673,12 @@ procedure TOpenArrayTests.TestCodegen_OpenArrayArg_SpillsToStack;
 const
   Src = '''
     program P;
-    function F8(A, B, C, D, E, G, H, K: Integer; const V: array of Integer;
-      L: Integer): Integer;
+    function F8(A, B, C, D, E, G, H, K: Int; const V: array of Int;
+      L: Int): Int;
     begin Result := A + K + L + High(V) end;
-    function F7(A, B, C, D, E, G, H: Integer; const V: array of Integer): Integer;
+    function F7(A, B, C, D, E, G, H: Int; const V: array of Int): Int;
     begin Result := A + High(V) end;
-    var Arr: array[0..3] of Integer;
+    var Arr: array[0..3] of Int;
     begin
       WriteLn(F8(1, 2, 3, 4, 5, 6, 7, 8, Arr, 3));
       WriteLn(F7(1, 2, 3, 4, 5, 6, 7, [9, 9]))
@@ -700,10 +700,10 @@ begin
     AnalyseSrc(
       '''
           program P;
-          type TF = reference to function: Integer;
-          function Make(const A: array of Integer): TF;
+          type TF = reference to function: Int;
+          function Make(const A: array of Int): TF;
           begin
-            Result := function: Integer begin Result := High(A) end
+            Result := function: Int begin Result := High(A) end
           end;
           begin
             WriteLn(Make([1])())
@@ -722,7 +722,7 @@ const
   Src = '''
     program Prg;
     procedure Show(const A: array of string); begin WriteLn(A[1]) end;
-    function Mk(N: Integer): string; begin Result := 'f' + IntToStr(N) end;
+    function Mk(N: Int): string; begin Result := 'f' + IntToStr(N) end;
     begin
       Show(['a', Mk(1)])
     end.
@@ -740,13 +740,13 @@ const
     program P;
     type
       TSvc = class
-        function Total(var A: array of Integer): Integer;
+        function Total(var A: array of Int): Int;
       end;
-    function TSvc.Total(var A: array of Integer): Integer;
+    function TSvc.Total(var A: array of Int): Int;
     begin
       Result := High(A)
     end;
-    var T: TSvc; Arr: array[0..2] of Integer; N: Integer;
+    var T: TSvc; Arr: array[0..2] of Int; N: Int;
     begin
       N := T.Total(Arr)
     end.
@@ -762,11 +762,11 @@ procedure TOpenArrayTests.TestCodegen_LiteralFloatElements_StoredAsFloats;
 const
   Src = '''
     program P;
-    function Sum(const A: array of Double): Double;
+    function Sum(const A: array of Float64): Float64;
     begin Result := A[0] end;
-    function SumS(const A: array of Single): Single;
+    function SumS(const A: array of Float32): Float32;
     begin Result := A[0] end;
-    var D: Double; S: Single;
+    var D: Float64; S: Float32;
     begin
       WriteLn(Sum([1.0, D * 2]):0:2);
       WriteLn(SumS([S + S]):0:2);
@@ -785,7 +785,7 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       private
         function GetArr: TArr;
@@ -793,7 +793,7 @@ const
         property AG: TArr read GetArr;
       end;
     function TObj.GetArr: TArr; begin end;
-    procedure ShowOpen(const A: array of Integer); begin end;
+    procedure ShowOpen(const A: array of Int); begin end;
     var O: TObj;
     begin
       ShowOpen(O.AG)
@@ -820,18 +820,18 @@ const
       procedure Kinds(const L: array of TAC);
       begin
       end;
-      procedure Nums(const L: array of Double);
+      procedure Nums(const L: array of Float64);
       begin
       end;
-      function Pick(const L: array of Integer): Integer; overload;
+      function Pick(const L: array of Int): Int; overload;
       begin
         Result := 1
       end;
-      function Pick(const L: array of Double): Integer; overload;
+      function Pick(const L: array of Float64): Int; overload;
       begin
         Result := 2
       end;
-      var X: TA; Y: TB; N: Integer;
+      var X: TA; Y: TB; N: Int;
       begin
         Objs([X, Y]);
         Objs([Y]);
@@ -866,16 +866,16 @@ const
     program P;
     type
       IFoo = interface
-        function N(): Integer;
+        function N(): Int32;
       end;
       TRec = record S: string; end;
-      TSA = array[0..1] of Integer;
-      TProc = reference to function(): Integer;
+      TSA = array[0..1] of Int32;
+      TProc = reference to function(): Int32;
     procedure SR(const A: array of TRec); begin end;
     procedure SI(const A: array of IFoo); begin end;
     procedure SS(const A: array of TSA); begin end;
     procedure SP(const A: array of TProc); begin end;
-    procedure SN(const A: array of Integer); begin end;
+    procedure SN(const A: array of Int32); begin end;
     var R: TRec; X: IFoo; T: TSA; F: TProc;
     begin
       SR([R]);
@@ -912,12 +912,12 @@ const
     program P;
     type
       ISink = interface
-        procedure TakeI(const A: array of Integer);
+        procedure TakeI(const A: array of Int);
       end;
       TSink = class(TObject, ISink)
-        procedure TakeI(const A: array of Integer);
+        procedure TakeI(const A: array of Int);
       end;
-    procedure TSink.TakeI(const A: array of Integer); begin WriteLn(Length(A)); end;
+    procedure TSink.TakeI(const A: array of Int); begin WriteLn(Length(A)); end;
     var I: ISink;
     begin
       I := TSink.Create();
@@ -944,7 +944,7 @@ const
   Src = '''
     program P;
     type
-      TSI = array[0..1] of Integer;
+      TSI = array[0..1] of Int32;
     procedure SI(const A: array of TSI); begin WriteLn(A[1][0]); end;
     var D: array of TSI;
     begin

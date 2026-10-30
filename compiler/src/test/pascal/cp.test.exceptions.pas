@@ -168,7 +168,7 @@ const
   SrcTryFinally =
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           X := 0;
           try
@@ -182,8 +182,8 @@ const
   SrcTryFinallyMulti =
     '''
         program P;
-        var X: Integer;
-        var Y: Integer;
+        var X: Int;
+        var Y: Int;
         begin
           try
             X := 1;
@@ -198,7 +198,7 @@ const
   SrcTryExcept =
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           X := 0;
           try
@@ -214,7 +214,7 @@ const
         program P;
         type
           TError = class
-            Code: Integer;
+            Code: Int;
           end;
         var E: TError;
         begin
@@ -226,7 +226,7 @@ const
   SrcBareRaise =
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           try
             X := 1
@@ -428,7 +428,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           X := 1;
           raise X
@@ -503,7 +503,7 @@ const
   SrcTypedExceptSingle =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           try
             X := 1
@@ -517,7 +517,7 @@ const
   SrcTypedExceptTwo =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           try
             X := 1
@@ -533,7 +533,7 @@ const
   SrcTypedExceptWithElse =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           try
             X := 1
@@ -549,7 +549,7 @@ const
   SrcTypedExceptNoVar =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           try
             X := 1
@@ -659,12 +659,12 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           try
             X := 1
           except
-            on E: Integer do
+            on E: Int do
               X := 0
           end
         end.
@@ -682,7 +682,7 @@ begin
   AnalyseSrc(
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           try
             X := 1

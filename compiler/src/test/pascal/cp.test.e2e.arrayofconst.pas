@@ -57,7 +57,7 @@ const Src =
   '''
   program P;
   procedure Dump(args: array of const);
-  var i: Integer;
+  var i: Int;
   begin
     for i := 0 to High(args) do
       WriteLn(args[i].VType)
@@ -78,13 +78,13 @@ procedure TE2EArrayOfConstTests.TestRun_ReadValues;
 const Src =
   '''
   program P;
-  type PDouble = ^Double;
+  type PDouble = ^Float64;
   procedure Dump(args: array of const);
-  var i: Integer;
+  var i: Int;
   begin
     for i := 0 to High(args) do
       case args[i].VType of
-        vtInteger:    WriteLn(Integer(args[i].VValue));
+        vtInteger:    WriteLn(Int32(args[i].VValue));
         vtBoolean:    if Boolean(args[i].VValue) then WriteLn('true')
                       else WriteLn('false');
         vtExtended:   WriteLn(PDouble(args[i].VValue)^);
@@ -107,7 +107,7 @@ procedure TE2EArrayOfConstTests.TestRun_EmptyList;
 const Src =
   '''
   program P;
-  function Count(args: array of const): Integer;
+  function Count(args: array of const): Int;
   begin
     Result := High(args) + 1
   end;
@@ -124,13 +124,13 @@ procedure TE2EArrayOfConstTests.TestRun_HomogeneousList;
 const Src =
   '''
   program P;
-  function SumInts(args: array of const): Integer;
-  var i: Integer;
+  function SumInts(args: array of const): Int;
+  var i: Int;
   begin
     Result := 0;
     for i := 0 to High(args) do
       if args[i].VType = vtInteger then
-        Result := Result + Integer(args[i].VValue)
+        Result := Result + Int32(args[i].VValue)
   end;
   begin
     WriteLn(SumInts([10, 20, 30]))
@@ -146,7 +146,7 @@ const Src =
   '''
   program P;
   procedure Show(args: array of const);
-  var i: Integer;
+  var i: Int;
   begin
     for i := 0 to High(args) do
       if args[i].VType = vtAnsiString then
@@ -169,7 +169,7 @@ procedure TE2EArrayOfConstTests.TestRun_Count;
 const Src =
   '''
   program P;
-  function Count(args: array of const): Integer;
+  function Count(args: array of const): Int;
   begin
     Result := High(args) + 1
   end;
@@ -186,15 +186,15 @@ procedure TE2EArrayOfConstTests.TestRun_SingleElement_BoxedAsDouble;
 const Src =
   '''
   program P;
-  type PDouble = ^Double;
+  type PDouble = ^Float64;
   procedure Dump(args: array of const);
-  var i: Integer;
+  var i: Int;
   begin
     for i := 0 to High(args) do
       if args[i].VType = vtExtended then
         WriteLn(PDouble(args[i].VValue)^)
   end;
-  var S: Single;
+  var S: Float32;
   begin
     S := 2.5;
     Dump([S])

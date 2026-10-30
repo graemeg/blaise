@@ -935,7 +935,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses StrUtils;
-    var SB: TStringBuilder; I: Integer;
+    var SB: TStringBuilder; I: Int;
     begin
       SB := TStringBuilder.Create();
       for I := 1 to 1000 do

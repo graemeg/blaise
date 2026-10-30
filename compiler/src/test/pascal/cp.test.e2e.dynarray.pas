@@ -127,55 +127,55 @@ end;
 const
   SrcFillSum = '''
     program Prg;
-    var a: array of Integer; i, sum: Integer;
+    var a: array of Int; i, sum: Int;
     begin SetLength(a, 5); for i := 0 to 4 do a[i] := i * 2;
       sum := 0; for i := 0 to High(a) do sum := sum + a[i]; WriteLn(sum) end.
     ''';
 
   SrcLenHigh = '''
     program Prg;
-    var a: array of Integer;
+    var a: array of Int;
     begin SetLength(a, 7); WriteLn(Length(a), ' ', High(a)) end.
     ''';
 
   SrcGrow = '''
     program Prg;
-    var a: array of Integer; i: Integer;
+    var a: array of Int; i: Int;
     begin SetLength(a, 3); for i := 0 to 2 do a[i] := i + 1;
       SetLength(a, 6); WriteLn(a[0], a[1], a[2], ' ', Length(a)) end.
     ''';
 
   SrcOfString = '''
     program Prg;
-    var a: array of string; i: Integer;
+    var a: array of string; i: Int;
     begin SetLength(a, 3); a[0] := 'x'; a[1] := 'y'; a[2] := 'z';
       for i := 0 to 2 do Write(a[i]); WriteLn() end.
     ''';
 
   SrcRefSem = '''
     program Prg;
-    var a, b: array of Integer;
+    var a, b: array of Int;
     begin SetLength(a, 3); a[0] := 7; b := a; b[0] := 99; WriteLn(a[0]) end.
     ''';
 
   SrcReturn = '''
     program Prg;
-    type TIntArr = array of Integer;
-    function MakeArr(n: Integer): TIntArr; var i: Integer; begin SetLength(Result, n); for i := 0 to n-1 do Result[i] := i end;
+    type TIntArr = array of Int;
+    function MakeArr(n: Int): TIntArr; var i: Int; begin SetLength(Result, n); for i := 0 to n-1 do Result[i] := i end;
     var a: TIntArr;
     begin a := MakeArr(5); WriteLn(Length(a), ' ', a[4]) end.
     ''';
 
   SrcRagged = '''
     program Prg;
-    var m: array of array of Integer;
+    var m: array of array of Int;
     begin SetLength(m, 3); SetLength(m[0], 1); SetLength(m[1], 2); SetLength(m[2], 3);
       WriteLn(Length(m[0]), Length(m[1]), Length(m[2])) end.
     ''';
 
   SrcFillViaRow = '''
     program Prg;
-    var m: array of array of Integer; row: array of Integer; i, sum: Integer;
+    var m: array of array of Int; row: array of Int; i, sum: Int;
     begin SetLength(m, 2); SetLength(m[0], 3);
       row := m[0]; for i := 0 to 2 do row[i] := i + 1;
       sum := 0; for i := 0 to 2 do sum := sum + m[0][i];
@@ -184,7 +184,7 @@ const
 
   SrcChainedInt2D = '''
     program Prg;
-    var m: array of array of Integer; i, j: Integer;
+    var m: array of array of Int; i, j: Int;
     begin
       SetLength(m, 2); SetLength(m[0], 2); SetLength(m[1], 2);
       m[0][0] := 1; m[0][1] := 2; m[1][0] := 3; m[1][1] := 4;
@@ -195,7 +195,7 @@ const
 
   SrcChainedString2D = '''
     program Prg;
-    var m: array of array of string; i, j: Integer;
+    var m: array of array of string; i, j: Int;
     begin
       SetLength(m, 2); SetLength(m[0], 2); SetLength(m[1], 2);
       m[0][0] := 'a'; m[0][1] := 'b'; m[1][0] := 'c'; m[1][1] := 'd';
@@ -207,7 +207,7 @@ const
 
   SrcChainedInt3D = '''
     program Prg;
-    var c: array of array of array of Integer; i, j, k: Integer;
+    var c: array of array of array of Int; i, j, k: Int;
     begin
       SetLength(c, 2);
       for i := 0 to 1 do begin
@@ -229,7 +229,7 @@ const
     program Prg;
     type TA = array of UInt32;
     function F(const A, B: TA): TA;
-    var I: Integer;
+    var I: Int;
     begin
       SetLength(Result, Length(A));
       I := 0;
@@ -250,7 +250,7 @@ const
     program Prg;
     type TA = array of UInt32;
     function Diff(const A, B: TA): TA;
-    var I: Integer;
+    var I: Int;
     begin
       SetLength(Result, Length(A));
       I := 0;
@@ -269,7 +269,7 @@ const
     the global (%rip-relative) store-back path, not the local one. }
   SrcGlobalFromGlobalLen = '''
     program Prg;
-    var G, H: array of Integer; I: Integer;
+    var G, H: array of Int; I: Int;
     begin
       SetLength(H, 4);
       for I := 0 to 3 do H[I] := I + 1;
@@ -284,7 +284,7 @@ const
     call must not clobber A's pointer before the resize. }
   SrcLocalFromLocalLen = '''
     program Prg;
-    var A, B: array of Integer; I: Integer;
+    var A, B: array of Int; I: Int;
     begin
       SetLength(B, 3);
       SetLength(A, Length(B));
@@ -298,8 +298,8 @@ const
     SetLength(A, Pick()) where Pick() returns an Integer via its own call. }
   SrcFromUserFuncCall = '''
     program Prg;
-    var A: array of Integer; I: Integer;
-    function Pick: Integer;
+    var A: array of Int; I: Int;
+    function Pick: Int;
     begin Result := 3 end;
     begin
       SetLength(A, Pick());
@@ -411,7 +411,7 @@ const
     program p;
     type
       TRec = record
-        Offset: Integer;
+        Offset: Int;
         Pad: Int64;
       end;
       THolder = class
@@ -421,7 +421,7 @@ const
     var
       H: THolder;
       R: TRec;
-      K: Integer;
+      K: Int;
       V: Int64;
     begin
       H := THolder.Create();
@@ -449,8 +449,8 @@ begin
     var-param address), so after the call Length(Ctx.Arr)=3 and Ctx.Arr[0]=42. }
   AssertRunsOnAll('''
     program Prg;
-    type TCtx = record Arr: array of Integer; end;
-    procedure Grow(var C: TCtx; N: Integer);
+    type TCtx = record Arr: array of Int; end;
+    procedure Grow(var C: TCtx; N: Int);
     begin SetLength(C.Arr, N); C.Arr[0] := 42 end;
     var Ctx: TCtx;
     begin
@@ -471,11 +471,11 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TRec = record S: string; N: Integer; end;
-      TCtx = record Ints: array of Integer; Recs: array of TRec; end;
-    procedure SetInt(var C: TCtx; I, V: Integer);
+      TRec = record S: string; N: Int; end;
+      TCtx = record Ints: array of Int; Recs: array of TRec; end;
+    procedure SetInt(var C: TCtx; I, V: Int);
     begin C.Ints[I] := V end;
-    procedure SetRec(var C: TCtx; I: Integer; const R: TRec);
+    procedure SetRec(var C: TCtx; I: Int; const R: TRec);
     begin C.Recs[I] := R end;
     var Ctx: TCtx; R: TRec;
     begin
@@ -497,9 +497,9 @@ procedure TE2EDynArrayTests.TestRun_ByValueDynArrayParam;
 const
   Src = '''
     program P;
-    type TA = array of Integer;
-    function SumV(A: TA): Integer;
-    var i: Integer;
+    type TA = array of Int;
+    function SumV(A: TA): Int;
+    var i: Int;
     begin Result := 0; for i := 0 to Length(A) - 1 do Result := Result + A[i] end;
     var d: TA;
     begin
@@ -521,10 +521,10 @@ const
     type
       THold = class
       public
-        FNest: array[0..1] of array of Integer;
+        FNest: array[0..1] of array of Int;
         FStrs: array[0..1] of string;
         FObjs: array[0..1] of TObject;
-        FDD: array of array of Integer;
+        FDD: array of array of Int;
       end;
     var H: THold;
     begin
@@ -565,8 +565,8 @@ const
   Src = '''
     program P;
     var
-      A: array[0..3] of Integer;
-      D: array of Integer;
+      A: array[0..3] of Int;
+      D: array of Int;
     begin
       A[0] := 5; A[1] := 40;
       Inc(A[1], 2);
@@ -589,8 +589,8 @@ const
     program Prg;
     var
       B: array[0..3] of Byte;
-      W: array[0..3] of Word;
-      SI: array[0..3] of SmallInt;
+      W: array[0..3] of UInt16;
+      SI: array[0..3] of Int16;
     begin
       B[0] := 10; B[1] := 255; B[2] := 20; B[3] := 30;
       Inc(B[1]);                { wraps to 0; B[2] must stay 20 }
@@ -616,8 +616,8 @@ const
     program Prg;
     var
       GA: Byte; GB: Byte; GC: Byte;
-      WA: Word; WB: Word; WC: Word;
-      GS: SmallInt;
+      WA: UInt16; WB: UInt16; WC: UInt16;
+      GS: Int16;
     begin
       GA := 1; GB := 255; GC := 2;
       Inc(GB);              { wraps to 0; GC must stay 2, not carry to 3 }
@@ -644,12 +644,12 @@ const
     program Prg;
     type
       TRec = record
-        A: Byte; B: Byte; C: Word; D: SmallInt; E: Integer; F: Integer;
+        A: Byte; B: Byte; C: UInt16; D: Int16; E: Int32; F: Int32;
       end;
     procedure DecB(var X: Byte); begin Dec(X) end;
-    procedure IncW(var X: Word); begin Inc(X, 3) end;
-    procedure DecS(var X: SmallInt); begin Dec(X, 2) end;
-    procedure IncI(var X: Integer); begin Inc(X) end;
+    procedure IncW(var X: UInt16); begin Inc(X, 3) end;
+    procedure DecS(var X: Int16); begin Dec(X, 2) end;
+    procedure IncI(var X: Int32); begin Inc(X) end;
     var R: TRec;
     begin
       R.A := 0; R.B := 7; R.C := 65534; R.D := -32767; R.E := 2147483647;
@@ -670,7 +670,7 @@ const
     so `G := G + 10` on a Byte holding 250 read back 260, silently. }
   Src = '''
     program Prg;
-    var G: Byte; I: Integer; Wd: Word; S: SmallInt; C: Cardinal;
+    var G: Byte; I: Int32; Wd: UInt16; S: Int16; C: UInt32;
     begin
       G := 250; G := G + 10;
       I := 2147483647; I := I + 1;
@@ -696,11 +696,11 @@ const
   Src = '''
     program vd;
     type
-      TEntry = record Token: Int64; Events: Integer; end;
+      TEntry = record Token: Int64; Events: Int; end;
       TList = array of TEntry;
-      TInts = array of Integer;
-    procedure Fill(var A: TList; N: Integer);
-    var I: Integer;
+      TInts = array of Int;
+    procedure Fill(var A: TList; N: Int);
+    var I: Int;
     begin
       if Length(A) < N then SetLength(A, N);
       for I := 0 to N - 1 do
@@ -736,9 +736,9 @@ const
     procedure P;
     var
       LB: Byte;
-      LW: Word;
-      LS: SmallInt;
-      LI: Integer;
+      LW: UInt16;
+      LS: Int16;
+      LI: Int32;
       L6: Int64;
     begin
       LB := 255; Inc(LB);        { wraps to 0 }
@@ -786,14 +786,14 @@ const
     type
       TRec = record
         Name: string;
-        Number: Integer;
+        Number: Int;
       end;
       PRec = ^TRec;
-      PInt = ^Integer;
+      PInt = ^Int;
       THolder = record
         Items: array of TRec;
       end;
-      TIA = array of Integer;
+      TIA = array of Int;
       TR = record
         A: TIA;
       end;
@@ -802,7 +802,7 @@ const
       end;
     procedure Run;
     var
-      A: array of Integer;
+      A: array of Int;
       RA: array of TRec;
       R: TRec;
       H: THolder;
@@ -810,7 +810,7 @@ const
       PI: PInt;
       Rec: TR;
       C: TC;
-      I: Integer;
+      I: Int;
     begin
       WriteLn(Length(A));
       SetLength(A, 4);
@@ -871,32 +871,32 @@ const
     program DynScalar;
     type
       TBox = class
-        V: Integer;
-        constructor Create(AV: Integer);
+        V: Int;
+        constructor Create(AV: Int);
         destructor Destroy; override;
       end;
       IVal = interface
-        function Get: Integer;
+        function Get: Int;
       end;
       TVal = class(TObject, IVal)
-        N: Integer;
-        function Get: Integer;
+        N: Int;
+        function Get: Int;
         destructor Destroy; override;
       end;
       TStrs = array of string;
-    constructor TBox.Create(AV: Integer); begin V := AV end;
+    constructor TBox.Create(AV: Int); begin V := AV end;
     destructor TBox.Destroy;
     begin
       WriteLn('box ', V, ' gone');
       inherited Destroy()
     end;
-    function TVal.Get: Integer; begin Result := N end;
+    function TVal.Get: Int; begin Result := N end;
     destructor TVal.Destroy;
     begin
       WriteLn('val ', N, ' gone');
       inherited Destroy()
     end;
-    function MakeVal(AN: Integer): IVal;
+    function MakeVal(AN: Int): IVal;
     var V: TVal;
     begin
       V := TVal.Create();
@@ -980,8 +980,8 @@ const
     program DynAggregate;
     type
       TBox = class
-        V: Integer;
-        constructor Create(AV: Integer);
+        V: Int;
+        constructor Create(AV: Int);
         destructor Destroy; override;
       end;
       TInner = record
@@ -993,14 +993,14 @@ const
         Inner: TInner;
       end;
       TPair = array[0..1] of string;
-    constructor TBox.Create(AV: Integer); begin V := AV end;
+    constructor TBox.Create(AV: Int); begin V := AV end;
     destructor TBox.Destroy;
     begin
       WriteLn('box ', V, ' gone');
       inherited Destroy()
     end;
     procedure Run;
-    var R, Copy2: array of TRec; P: array of TPair; I: Integer;
+    var R, Copy2: array of TRec; P: array of TPair; I: Int;
     begin
       SetLength(R, 3);
       for I := 0 to 2 do
@@ -1055,23 +1055,23 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TIntArr = array of Integer;
-      PInt32 = ^Integer;
+      TIntArr = array of Int32;
+      PInt32 = ^Int32;
     var
       G: TIntArr;
     function GetG: TIntArr;
     begin
       Result := G;
     end;
-    function RC: Integer;
+    function RC: Int32;
     begin
       Result := PInt32(Pointer(@G[0]) - 12)^;   { the header's RefCount }
     end;
     procedure UseArr(A: TIntArr); begin end;
     procedure UseConst(const A: TIntArr); begin end;
-    procedure UseOpen(const A: array of Integer); begin end;
+    procedure UseOpen(const A: array of Int32); begin end;
     var
-      N: Integer;
+      N: Int32;
     begin
       SetLength(G, 3);
       WriteLn(RC());
@@ -1090,29 +1090,29 @@ const
   SrcTargets = '''
     program P;
     type
-      TIA = array of Integer;
-      TDA = array of Double;
+      TIA = array of Int;
+      TDA = array of Float64;
       TObj = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
       end;
       TRec = record
-        A: Integer;
+        A: Int;
         S: string;
       end;
       THolder = class
         Items: TIA;
       end;
-    constructor TObj.Create(AN: Integer);
+    constructor TObj.Create(AN: Int);
     begin
       N := AN;
     end;
-    function MkS(I: Integer): string;
+    function MkS(I: Int): string;
     begin
       Result := 'm' + IntToStr(I);
     end;
-    function SumD(D: TIA): Integer;
-    var I: Integer;
+    function SumD(D: TIA): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(D) do Result := Result + D[I];
@@ -1122,7 +1122,7 @@ const
       Result := [7, 8, 9];
     end;
     var
-      C: array of Integer;
+      C: array of Int;
       E: TIA;
       D: TDA;
       S: array of string;
@@ -1165,28 +1165,28 @@ const
     program P;
     type
       IThing = interface
-        function Id: Integer;
+        function Id: Int;
       end;
       TThing = class(TObject, IThing)
-        FId: Integer;
-        constructor Create(AId: Integer);
-        function Id: Integer;
+        FId: Int;
+        constructor Create(AId: Int);
+        function Id: Int;
       end;
-      TIA = array of Integer;
+      TIA = array of Int;
       TRec = record
-        A: Integer;
+        A: Int;
         S: string;
       end;
       TProc = procedure of object;
       TRunner = class
-        N: Integer;
+        N: Int;
         procedure Run;
       end;
-    constructor TThing.Create(AId: Integer);
+    constructor TThing.Create(AId: Int);
     begin
       FId := AId;
     end;
-    function TThing.Id: Integer;
+    function TThing.Id: Int;
     begin
       Result := FId;
     end;
@@ -1194,12 +1194,12 @@ const
     begin
       WriteLn('run ', N);
     end;
-    function MkRec(I: Integer): TRec;
+    function MkRec(I: Int): TRec;
     begin
       Result.A := I;
       Result.S := 's' + IntToStr(I);
     end;
-    function Make(N: Integer): TIA;
+    function Make(N: Int): TIA;
     begin
       Result := [N, N + 1];
     end;
@@ -1208,11 +1208,11 @@ const
       T: IThing;
       Rs: array of TRec;
       M: array of TIA;
-      Fs: array of Single;
+      Fs: array of Float32;
       Ps: array of TProc;
       R: TRunner;
       S: array of string;
-      I: Integer;
+      I: Int;
     begin
       T := TThing.Create(5);
       Ints := [T, TThing.Create(6)];
@@ -1261,10 +1261,10 @@ const
   Src = '''
     program P;
     type
-      TInts = array of Integer;
+      TInts = array of Int;
       TStrs = array of string;
-      TPair = array[0..1] of Integer;
-      TTrio = array[0..2] of Integer;
+      TPair = array[0..1] of Int;
+      TTrio = array[0..2] of Int;
       TA = class end;
       TB = class end;
       TAClass = class of TA;
@@ -1297,7 +1297,7 @@ const
     '''
     program P;
     type
-      TIA = array of Integer;
+      TIA = array of Int;
       TSA = array of string;
       THolder = class
         F: TSA;
@@ -1312,12 +1312,12 @@ const
       Rc: TRec;
       Nested: array of TIA;
 
-    function Count(A: TIA): Integer;
+    function Count(A: TIA): Int;
     begin
       Result := Length(A)
     end;
 
-    function MakeNil(N: Integer): TIA;
+    function MakeNil(N: Int): TIA;
     begin
       SetLength(Result, N);
       Result := nil

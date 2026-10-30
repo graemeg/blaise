@@ -46,13 +46,13 @@ const
 const
   SrcLeaf = '''
       program P;
-      function Clamp(V, Lo, Hi: Integer): Integer;
+      function Clamp(V, Lo, Hi: Int): Int;
       begin
         if V < Lo then Exit(Lo);
         if V > Hi then Exit(Hi);
         Result := V
       end;
-      function Use(A: Integer): Integer;
+      function Use(A: Int): Int;
       begin
         Result := Clamp(A, 0, 100)
       end;
@@ -87,7 +87,7 @@ procedure TNativeInlineTests.TestRecursiveCallee_NotInlined;
 const
   Src = '''
       program P;
-      function Fib(N: Integer): Int64;
+      function Fib(N: Int): Int64;
       begin
         if N < 2 then
           Result := N

@@ -141,7 +141,7 @@ end;
 const
   SrcReadWrite = '''
     program Prg;
-    type TC = class FX: Integer; property X: Integer read FX write FX; end;
+    type TC = class FX: Int; property X: Int read FX write FX; end;
     var c: TC;
     begin c := TC.Create(); c.X := 17; WriteLn(c.X); c.Free() end.
     ''';
@@ -149,10 +149,10 @@ const
   SrcGetterSetter = '''
     program Prg;
     type TC = class
-      FX: Integer;
-      function GetX: Integer; begin Result := FX * 2 end;
-      procedure SetX(V: Integer); begin FX := V + 1 end;
-      property X: Integer read GetX write SetX;
+      FX: Int;
+      function GetX: Int; begin Result := FX * 2 end;
+      procedure SetX(V: Int); begin FX := V + 1 end;
+      property X: Int read GetX write SetX;
     end;
     var c: TC;
     begin c := TC.Create(); c.X := 10; WriteLn(c.X); c.Free() end.
@@ -160,7 +160,7 @@ const
 
   SrcReadOnly = '''
     program Prg;
-    type TC = class FW, FH: Integer; function GetArea: Integer; begin Result := FW * FH end; property Area: Integer read GetArea; end;
+    type TC = class FW, FH: Int; function GetArea: Int; begin Result := FW * FH end; property Area: Int read GetArea; end;
     var c: TC;
     begin c := TC.Create(); c.FW := 4; c.FH := 5; WriteLn(c.Area); c.Free() end.
     ''';
@@ -174,14 +174,14 @@ const
 
   SrcDefaultZero = '''
     program Prg;
-    type TC = class FX: Integer; property X: Integer read FX write FX; end;
+    type TC = class FX: Int; property X: Int read FX write FX; end;
     var c: TC;
     begin c := TC.Create(); WriteLn(c.X); c.Free() end.
     ''';
 
   SrcInherited = '''
     program Prg;
-    type TBase = class FX: Integer; property X: Integer read FX write FX; end;
+    type TBase = class FX: Int; property X: Int read FX write FX; end;
       TDer = class(TBase) end;
     var d: TDer;
     begin d := TDer.Create(); d.X := 55; WriteLn(d.X); d.Free() end.
@@ -190,10 +190,10 @@ const
   SrcIndexed = '''
     program Prg;
     type TC = class
-      FData: array[0..9] of Integer;
-      function GetItem(I: Integer): Integer; begin Result := FData[I] end;
-      procedure SetItem(I, V: Integer); begin FData[I] := V end;
-      property Items[I: Integer]: Integer read GetItem write SetItem;
+      FData: array[0..9] of Int;
+      function GetItem(I: Int): Int; begin Result := FData[I] end;
+      procedure SetItem(I, V: Int); begin FData[I] := V end;
+      property Items[I: Int]: Int read GetItem write SetItem;
     end;
     var c: TC;
     begin c := TC.Create(); c.Items[3] := 99; WriteLn(c.Items[3]); c.Free() end.
@@ -202,10 +202,10 @@ const
   SrcStringIndexed = '''
     program Prg;
     type TC = class
-      FVal: Integer;
-      function GetItem(const Key: string): Integer; begin Result := FVal end;
-      procedure SetItem(const Key: string; V: Integer); begin FVal := V end;
-      property Items[Key: string]: Integer read GetItem write SetItem;
+      FVal: Int;
+      function GetItem(const Key: string): Int; begin Result := FVal end;
+      procedure SetItem(const Key: string; V: Int); begin FVal := V end;
+      property Items[Key: string]: Int read GetItem write SetItem;
     end;
     var c: TC;
     begin c := TC.Create(); c.Items['k'] := 88; WriteLn(c.Items['k']); c.Free() end.
@@ -221,11 +221,11 @@ const
   SrcRecordIndexed = '''
     program Prg;
     type
-      TRec = record A: Integer; S: string; end;
+      TRec = record A: Int; S: string; end;
       TC = class
-        FA: Integer; FS: string;
-        procedure SetItem(K: Integer; const R: TRec); begin FA := R.A + K; FS := R.S end;
-        property Items[K: Integer]: TRec write SetItem;
+        FA: Int; FS: string;
+        procedure SetItem(K: Int; const R: TRec); begin FA := R.A + K; FS := R.S end;
+        property Items[K: Int]: TRec write SetItem;
       end;
     var c: TC; r: TRec;
     begin
@@ -246,14 +246,14 @@ const
       TC = class
         FItems: array[0..3] of string;
         FCur: string;
-        procedure SetItem(K: Integer; const V: string);
-        function GetItem(K: Integer): string;
+        procedure SetItem(K: Int; const V: string);
+        function GetItem(K: Int): string;
         procedure SetCur(const V: string);
-        property Items[K: Integer]: string read GetItem write SetItem;
+        property Items[K: Int]: string read GetItem write SetItem;
         property Cur: string write SetCur;
       end;
-      procedure TC.SetItem(K: Integer; const V: string); begin FItems[K] := V end;
-      function TC.GetItem(K: Integer): string; begin Result := FItems[K] end;
+      procedure TC.SetItem(K: Int; const V: string); begin FItems[K] := V end;
+      function TC.GetItem(K: Int): string; begin Result := FItems[K] end;
       procedure TC.SetCur(const V: string); begin FCur := V end;
     var c: TC; a, b: string;
     begin
@@ -271,11 +271,11 @@ const
   SrcRecordDefaultIndexed = '''
     program Prg;
     type
-      TRec = record A: Integer; S: string; end;
+      TRec = record A: Int; S: string; end;
       TC = class
-        FA: Integer; FS: string;
-        procedure SetItem(K: Integer; const R: TRec); begin FA := R.A + K; FS := R.S end;
-        property Items[K: Integer]: TRec write SetItem; default;
+        FA: Int; FS: string;
+        procedure SetItem(K: Int; const R: TRec); begin FA := R.A + K; FS := R.S end;
+        property Items[K: Int]: TRec write SetItem; default;
       end;
     var c: TC; r: TRec;
     begin
@@ -288,7 +288,7 @@ const
 
   SrcArrFieldRead = '''
     program Prg;
-    type TC = class FD: array[0..4] of Integer; function At(i: Integer): Integer; begin Result := FD[i] end; end;
+    type TC = class FD: array[0..4] of Int; function At(i: Int): Int; begin Result := FD[i] end; end;
     var c: TC;
     begin c := TC.Create(); c.FD[2] := 88; WriteLn(c.At(2)); c.Free() end.
     ''';
@@ -296,9 +296,9 @@ const
   SrcArrFieldWrite = '''
     program Prg;
     type TC = class
-      FD: array[0..4] of Integer;
-      procedure Init; var i: Integer; begin for i := 0 to 4 do FD[i] := i * 10 end;
-      function Get(i: Integer): Integer; begin Result := FD[i] end;
+      FD: array[0..4] of Int;
+      procedure Init; var i: Int; begin for i := 0 to 4 do FD[i] := i * 10 end;
+      function Get(i: Int): Int; begin Result := FD[i] end;
     end;
     var c: TC;
     begin c := TC.Create(); c.Init(); WriteLn(c.Get(3)); c.Free() end.
@@ -307,20 +307,20 @@ const
   SrcArrFieldSum = '''
     program Prg;
     type TC = class
-      FD: array[0..9] of Integer;
-      function Sum: Integer; var i: Integer; begin Result := 0; for i := 0 to 9 do Result := Result + FD[i] end;
+      FD: array[0..9] of Int;
+      function Sum: Int; var i: Int; begin Result := 0; for i := 0 to 9 do Result := Result + FD[i] end;
     end;
-    var c: TC; k: Integer;
+    var c: TC; k: Int;
     begin c := TC.Create(); for k := 0 to 9 do c.FD[k] := k; WriteLn(c.Sum()); c.Free() end.
     ''';
 
   SrcArrOfRecord = '''
     program Prg;
-    type TP = record X: Integer; end;
+    type TP = record X: Int; end;
       TC = class
         FD: array[0..2] of TP;
-        function GetX(i: Integer): Integer; begin Result := FD[i].X end;
-        procedure SetX(i, v: Integer); begin FD[i].X := v end;
+        function GetX(i: Int): Int; begin Result := FD[i].X end;
+        procedure SetX(i, v: Int); begin FD[i].X := v end;
       end;
     var c: TC;
     begin c := TC.Create(); c.SetX(1, 77); WriteLn(c.GetX(1)); c.Free() end.
@@ -421,10 +421,10 @@ const
     program P;
     type
       TVec = class
-        FData: array[0..4] of Integer;
-        function Get(i: Integer): Integer; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: Integer); begin FData[i] := v end;
-        property Items[i: Integer]: Integer read Get write Put; default;
+        FData: array[0..4] of Int;
+        function Get(i: Int): Int; begin Result := FData[i] end;
+        procedure Put(i: Int; v: Int); begin FData[i] := v end;
+        property Items[i: Int]: Int read Get write Put; default;
       end;
     var v: TVec;
     begin
@@ -440,9 +440,9 @@ const
     type
       TBag = class
         FData: array[0..2] of string;
-        function Get(i: Integer): string; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: string); begin FData[i] := v end;
-        property Items[i: Integer]: string read Get write Put; default;
+        function Get(i: Int): string; begin Result := FData[i] end;
+        procedure Put(i: Int; v: string); begin FData[i] := v end;
+        property Items[i: Int]: string read Get write Put; default;
       end;
     var b: TBag;
     begin
@@ -457,10 +457,10 @@ const
     program P;
     type
       TBase = class
-        FData: array[0..2] of Integer;
-        function Get(i: Integer): Integer; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: Integer); begin FData[i] := v end;
-        property Items[i: Integer]: Integer read Get write Put; default;
+        FData: array[0..2] of Int;
+        function Get(i: Int): Int; begin Result := FData[i] end;
+        procedure Put(i: Int; v: Int); begin FData[i] := v end;
+        property Items[i: Int]: Int read Get write Put; default;
       end;
       TDerived = class(TBase) end;
     var d: TDerived;
@@ -497,10 +497,10 @@ const
     program P;
     type
       TVec = class
-        FData: array[0..4] of Integer;
-        function Get(i: Integer): Integer; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: Integer); begin FData[i] := v end;
-        property Items[i: Integer]: Integer read Get write Put; default;
+        FData: array[0..4] of Int;
+        function Get(i: Int): Int; begin Result := FData[i] end;
+        procedure Put(i: Int; v: Int); begin FData[i] := v end;
+        property Items[i: Int]: Int read Get write Put; default;
       end;
       TOwner = class
         FVec: TVec;
@@ -526,10 +526,10 @@ const
     program P;
     type
       TVec = class
-        FData: array[0..4] of Integer;
-        function Get(i: Integer): Integer; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: Integer); begin FData[i] := v end;
-        property Items[i: Integer]: Integer read Get write Put; default;
+        FData: array[0..4] of Int;
+        function Get(i: Int): Int; begin Result := FData[i] end;
+        procedure Put(i: Int; v: Int); begin FData[i] := v end;
+        property Items[i: Int]: Int read Get write Put; default;
       end;
       TOwner = class
         FVec: TVec;
@@ -569,10 +569,10 @@ const
     program P;
     type
       TVec = class
-        FData: array[0..4] of Integer;
-        function Get(i: Integer): Integer; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: Integer); begin FData[i] := v end;
-        property Items[i: Integer]: Integer read Get write Put; default;
+        FData: array[0..4] of Int;
+        function Get(i: Int): Int; begin Result := FData[i] end;
+        procedure Put(i: Int; v: Int); begin FData[i] := v end;
+        property Items[i: Int]: Int read Get write Put; default;
       end;
       TOwner = class
         FVec: TVec;
@@ -595,10 +595,10 @@ const
     program P;
     type
       TVec = class
-        FData: array[0..4] of Integer;
-        function Get(i: Integer): Integer; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: Integer); begin FData[i] := v end;
-        property Items[i: Integer]: Integer read Get write Put; default;
+        FData: array[0..4] of Int;
+        function Get(i: Int): Int; begin Result := FData[i] end;
+        procedure Put(i: Int; v: Int); begin FData[i] := v end;
+        property Items[i: Int]: Int read Get write Put; default;
       end;
       TOwner = class
         FVec: TVec;
@@ -633,20 +633,20 @@ const
     program P;
     type
       TVec = class
-        FData: array[0..4] of Integer;
-        function Get(i: Integer): Integer; begin Result := FData[i] end;
-        procedure Put(i: Integer; v: Integer); begin FData[i] := v end;
-        property Items[i: Integer]: Integer read Get write Put; default;
+        FData: array[0..4] of Int;
+        function Get(i: Int): Int; begin Result := FData[i] end;
+        procedure Put(i: Int; v: Int); begin FData[i] := v end;
+        property Items[i: Int]: Int read Get write Put; default;
       end;
       TOwner = class
         FVec: TVec;
         constructor Create;
         procedure Fill;
-        function Sum: Integer;
+        function Sum: Int;
       end;
     constructor TOwner.Create; begin inherited Create(); FVec := TVec.Create end;
     procedure TOwner.Fill; begin FVec[0] := 3; FVec[1] := 4; end;
-    function TOwner.Sum: Integer; begin Result := FVec[0] + FVec[1]; end;
+    function TOwner.Sum: Int; begin Result := FVec[0] + FVec[1]; end;
     var o: TOwner;
     begin
       o := TOwner.Create;
@@ -674,23 +674,23 @@ const
     program P;
     type
       TVec = class
-        FBase: Integer;
+        FBase: Int;
         constructor Create;
-        function Get(i: Integer): Integer;
-        property Items[i: Integer]: Integer read Get; default;
+        function Get(i: Int): Int;
+        property Items[i: Int]: Int read Get; default;
       end;
       TMid = class
-        M1: Integer;
+        M1: Int;
         Vec: TVec;
         constructor Create;
       end;
       TTop = class
-        T1: Integer;
+        T1: Int;
         Mid: TMid;
         constructor Create;
       end;
     constructor TVec.Create; begin inherited Create(); FBase := 5 end;
-    function TVec.Get(i: Integer): Integer; begin Result := FBase + i * 4 end;
+    function TVec.Get(i: Int): Int; begin Result := FBase + i * 4 end;
     constructor TMid.Create;
     begin inherited Create(); M1 := 111; Vec := TVec.Create() end;
     constructor TTop.Create;
@@ -754,20 +754,20 @@ begin
     program P;
     type
       TInner = class
-        FA: Integer;
-        FB: Integer;
-        procedure SetSlot(AIndex: Integer; AValue: Integer);
-        function GetSlot(AIndex: Integer): Integer;
-        property Slot[AIndex: Integer]: Integer read GetSlot write SetSlot;
+        FA: Int;
+        FB: Int;
+        procedure SetSlot(AIndex: Int; AValue: Int);
+        function GetSlot(AIndex: Int): Int;
+        property Slot[AIndex: Int]: Int read GetSlot write SetSlot;
       end;
       TOuter = class
         Inner: TInner;
       end;
-    procedure TInner.SetSlot(AIndex: Integer; AValue: Integer);
+    procedure TInner.SetSlot(AIndex: Int; AValue: Int);
     begin
       if AIndex = 0 then FA := AValue else FB := AValue
     end;
-    function TInner.GetSlot(AIndex: Integer): Integer;
+    function TInner.GetSlot(AIndex: Int): Int;
     begin
       if AIndex = 0 then Result := FA else Result := FB
     end;
@@ -788,7 +788,7 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TIntArr = array of Integer;
+      TIntArr = array of Int;
       TStrArr = array of string;
       THolder = class
         FS: string;
@@ -828,7 +828,7 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TSA = array[0..2] of Integer;
+      TSA = array[0..2] of Int;
       TC = class
         FSA: TSA;
         function GetSA: TSA;
@@ -855,30 +855,30 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TPt = record X, Y, Z: Integer; end;
-      TSA = array[0..2] of Integer;
+      TPt = record X, Y, Z: Int; end;
+      TSA = array[0..2] of Int;
       TBase = class
         FP: TPt;
         FSA: TSA;
         function GetP: TPt;
         function GetSA: TSA;
-        function GetN: Integer; virtual;
+        function GetN: Int; virtual;
         function GetStr: string; virtual;
         property P: TPt read GetP;
         property SA: TSA read GetSA;
-        property N: Integer read GetN;
+        property N: Int read GetN;
         property Str: string read GetStr;
         procedure Show;
       end;
       TKid = class(TBase)
-        function GetN: Integer; override;
+        function GetN: Int; override;
         function GetStr: string; override;
       end;
     function TBase.GetP: TPt; begin Result := FP end;
     function TBase.GetSA: TSA; begin Result := FSA end;
-    function TBase.GetN: Integer; begin Result := 1 end;
+    function TBase.GetN: Int; begin Result := 1 end;
     function TBase.GetStr: string; begin Result := 'base' end;
-    function TKid.GetN: Integer; begin Result := 2 end;
+    function TKid.GetN: Int; begin Result := 2 end;
     function TKid.GetStr: string; begin Result := 'kid' end;
     procedure TBase.Show;
     var Q: TPt; A: TSA;
@@ -907,32 +907,32 @@ begin
     program Prg;
     type
       IThing = interface
-        function Val: Integer;
+        function Val: Int;
       end;
       TThing = class(TObject, IThing)
-        N: Integer;
-        function Val: Integer;
+        N: Int;
+        function Val: Int;
       end;
       THolder = class
         FThing: IThing;
         FS0, FS1: IThing;
         procedure SetThing(V: IThing);
-        function GetSlot(I: Integer): IThing;
-        procedure SetSlot(I: Integer; V: IThing);
+        function GetSlot(I: Int): IThing;
+        procedure SetSlot(I: Int; V: IThing);
         property Thing: IThing read FThing write SetThing;
-        property Slot[I: Integer]: IThing read GetSlot write SetSlot;
+        property Slot[I: Int]: IThing read GetSlot write SetSlot;
       end;
-    function TThing.Val: Integer; begin Result := N end;
+    function TThing.Val: Int; begin Result := N end;
     procedure THolder.SetThing(V: IThing); begin FThing := V end;
-    function THolder.GetSlot(I: Integer): IThing;
+    function THolder.GetSlot(I: Int): IThing;
     begin
       if I = 0 then Result := FS0 else Result := FS1
     end;
-    procedure THolder.SetSlot(I: Integer; V: IThing);
+    procedure THolder.SetSlot(I: Int; V: IThing);
     begin
       if I = 0 then FS0 := V else FS1 := V
     end;
-    function MakeThing(N: Integer): IThing;
+    function MakeThing(N: Int): IThing;
     var T: TThing;
     begin
       T := TThing.Create();
@@ -965,26 +965,26 @@ begin
     program Prg;
     type
       TInner = class
-        FN: Integer;
-        procedure SetN(V: Integer);
-        property N: Integer read FN write SetN;
+        FN: Int;
+        procedure SetN(V: Int);
+        property N: Int read FN write SetN;
       end;
       TC = class
-        FM: Integer;
-        FK: Integer;
+        FM: Int;
+        FK: Int;
         FIn: TInner;
-        procedure SetK(V: Integer); virtual;
-        property K: Integer read FK write SetK;
-        property M: Integer read FM write FM;
+        procedure SetK(V: Int); virtual;
+        property K: Int read FK write SetK;
+        property M: Int read FM write FM;
         property Inner: TInner read FIn;
         procedure Go;
       end;
       TKid = class(TC)
-        procedure SetK(V: Integer); override;
+        procedure SetK(V: Int); override;
       end;
-    procedure TInner.SetN(V: Integer); begin FN := V * 10 end;
-    procedure TC.SetK(V: Integer); begin FK := V end;
-    procedure TKid.SetK(V: Integer); begin FK := V + 100 end;
+    procedure TInner.SetN(V: Int); begin FN := V * 10 end;
+    procedure TC.SetK(V: Int); begin FK := V end;
+    procedure TKid.SetK(V: Int); begin FK := V + 100 end;
     procedure TC.Go;
     begin
       K := 1;
@@ -1007,34 +1007,34 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      IFoo = interface function Get: Integer; end;
+      IFoo = interface function Get: Int; end;
       THold = class(TObject, IFoo)
-        N: Integer;
-        function Get: Integer;
+        N: Int;
+        function Get: Int;
       end;
       TObj = class
         FV: IFoo;
-        FA: array[0..3] of Integer;
-        FD: Double;
-        function GetP(I: Integer): IFoo;
-        function GetA(I: Integer): Integer;
-        procedure SetA(I: Integer; V: Integer);
-        function GetD(K: String): Double;
-        function GetS(I: Integer): Single;
-        property P[I: Integer]: IFoo read GetP;
-        property A[I: Integer]: Integer read GetA write SetA; default;
-        property D[K: String]: Double read GetD;
-        property S[I: Integer]: Single read GetS;
+        FA: array[0..3] of Int;
+        FD: Float64;
+        function GetP(I: Int): IFoo;
+        function GetA(I: Int): Int;
+        procedure SetA(I: Int; V: Int);
+        function GetD(K: String): Float64;
+        function GetS(I: Int): Float32;
+        property P[I: Int]: IFoo read GetP;
+        property A[I: Int]: Int read GetA write SetA; default;
+        property D[K: String]: Float64 read GetD;
+        property S[I: Int]: Float32 read GetS;
         procedure Run;
       end;
       TRec = record O: TObj; end;
     var G: TObj;
-    function THold.Get: Integer; begin Result := N end;
-    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
-    function TObj.GetA(I: Integer): Integer; begin Result := FA[I] end;
-    procedure TObj.SetA(I: Integer; V: Integer); begin FA[I] := V end;
-    function TObj.GetD(K: String): Double; begin Result := FD end;
-    function TObj.GetS(I: Integer): Single; begin Result := 1.5 * I end;
+    function THold.Get: Int; begin Result := N end;
+    function TObj.GetP(I: Int): IFoo; begin Result := FV end;
+    function TObj.GetA(I: Int): Int; begin Result := FA[I] end;
+    procedure TObj.SetA(I: Int; V: Int); begin FA[I] := V end;
+    function TObj.GetD(K: String): Float64; begin Result := FD end;
+    function TObj.GetS(I: Int): Float32; begin Result := 1.5 * I end;
     function MkObj: TObj; begin Result := G end;
     procedure TObj.Run;
     var L: IFoo;
@@ -1070,7 +1070,7 @@ const
   Src = '''
     program BQ;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       private
         FArr: TArr;
@@ -1107,7 +1107,7 @@ const
   Src = '''
     program BP;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       private
         FArr: TArr;
@@ -1143,27 +1143,27 @@ const
     program P;
     type
       TPair = record A, B: Int64; end;
-      TV2 = record X, Y: Double; end;
+      TV2 = record X, Y: Float64; end;
       TBag = class
-        FI: Integer;
-        function GetD(D: Double): Integer;
-        function GetP(const R: TPair): Integer;
-        function GetV(const V: TV2): Double;
-        function GetS(S: Single): Integer;
+        FI: Int;
+        function GetD(D: Float64): Int;
+        function GetP(const R: TPair): Int;
+        function GetV(const V: TV2): Float64;
+        function GetS(S: Float32): Int;
         procedure Show;
-        property ByD[D: Double]: Integer read GetD; default;
-        property ByP[const R: TPair]: Integer read GetP;
-        property ByV[const V: TV2]: Double read GetV;
-        property ByS[S: Single]: Integer read GetS;
+        property ByD[D: Float64]: Int read GetD; default;
+        property ByP[const R: TPair]: Int read GetP;
+        property ByV[const V: TV2]: Float64 read GetV;
+        property ByS[S: Float32]: Int read GetS;
       end;
       THost = class
         FBag: TBag;
         procedure Inside;
       end;
-    function TBag.GetD(D: Double): Integer; begin Result := Trunc(D * 10) + FI; end;
-    function TBag.GetP(const R: TPair): Integer; begin Result := R.A * 10 + R.B + FI; end;
-    function TBag.GetV(const V: TV2): Double; begin Result := V.X + V.Y; end;
-    function TBag.GetS(S: Single): Integer; begin Result := Trunc(S * 2); end;
+    function TBag.GetD(D: Float64): Int; begin Result := Trunc(D * 10) + FI; end;
+    function TBag.GetP(const R: TPair): Int; begin Result := R.A * 10 + R.B + FI; end;
+    function TBag.GetV(const V: TV2): Float64; begin Result := V.X + V.Y; end;
+    function TBag.GetS(S: Float32): Int; begin Result := Trunc(S * 2); end;
     procedure TBag.Show; begin WriteLn('self ', ByD[1.5], ' ', Self[0.5]); end;
     var G: TBag;
     function MkB: TBag; begin Result := G; end;
@@ -1179,7 +1179,7 @@ const
       H: THost;
       PR: TPair;
       V: TV2;
-      D: Double;
+      D: Float64;
     begin
       G := TBag.Create();
       G.FI := 1;
@@ -1211,20 +1211,20 @@ const
   Src = '''
     program P;
     type
-      TIA = array of Integer;
+      TIA = array of Int;
       TRows = array of TIA;
       TObj = class
         FRows: TRows;
-        FN: Integer;
+        FN: Int;
         function GetRows(): TRows;
         property Rows: TRows read GetRows;
-        property NF: Integer read FN write FN;
+        property NF: Int read FN write FN;
       end;
     function TObj.GetRows(): TRows;
     begin
       Result := FRows
     end;
-    procedure Bump(var X: Integer);
+    procedure Bump(var X: Int);
     begin
       X := X + 1
     end;
@@ -1251,34 +1251,34 @@ const
     uses SysUtils;
     type
       TItem = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
       TVec = record
       private
-        FX, FY: Integer;
+        FX, FY: Int;
         FTag: string;
         FItem: TItem;
-        FD: Double;
-        function GetLen2: Integer;
-        procedure SetX(AV: Integer);
+        FD: Float64;
+        function GetLen2: Int;
+        procedure SetX(AV: Int);
         procedure SetItem(AV: TItem);
-        function GetAt(I: Integer): Integer;
-        procedure SetAt(I: Integer; AV: Integer);
-        function GetScaled(F: Double): Double;
+        function GetAt(I: Int): Int;
+        procedure SetAt(I: Int; AV: Int);
+        function GetScaled(F: Float64): Float64;
       private static var
-        FCount: Integer;
+        FCount: Int;
       public
-        property X: Integer read FX write SetX;
-        property Y: Integer read FY write FY;
-        property Len2: Integer read GetLen2;
+        property X: Int read FX write SetX;
+        property Y: Int read FY write FY;
+        property Len2: Int read GetLen2;
         property Tag: string read FTag write FTag;
         property Item: TItem read FItem write SetItem;
-        property D: Double read FD write FD;
-        property At[I: Integer]: Integer read GetAt write SetAt; default;
-        property Scaled[F: Double]: Double read GetScaled;
-        static property Count: Integer read FCount write FCount;
+        property D: Float64 read FD write FD;
+        property At[I: Int]: Int read GetAt write SetAt; default;
+        property Scaled[F: Float64]: Float64 read GetScaled;
+        static property Count: Int read FCount write FCount;
         procedure Inside;
       end;
       THolder = class
@@ -1292,14 +1292,14 @@ const
       public
         property V: T read GetV write SetV;
       end;
-    constructor TItem.Create(AN: Integer); begin N := AN; end;
+    constructor TItem.Create(AN: Int); begin N := AN; end;
     destructor TItem.Destroy; begin WriteLn('free ', N); end;
-    function TVec.GetLen2: Integer; begin Result := FX * FX + FY * FY; end;
-    procedure TVec.SetX(AV: Integer); begin FX := AV; FCount := FCount + 1; end;
+    function TVec.GetLen2: Int; begin Result := FX * FX + FY * FY; end;
+    procedure TVec.SetX(AV: Int); begin FX := AV; FCount := FCount + 1; end;
     procedure TVec.SetItem(AV: TItem); begin FItem := AV; end;
-    function TVec.GetAt(I: Integer): Integer; begin if I = 0 then Result := FX else Result := FY; end;
-    procedure TVec.SetAt(I: Integer; AV: Integer); begin if I = 0 then X := AV else FY := AV; end;
-    function TVec.GetScaled(F: Double): Double; begin Result := FX * F; end;
+    function TVec.GetAt(I: Int): Int; begin if I = 0 then Result := FX else Result := FY; end;
+    procedure TVec.SetAt(I: Int; AV: Int); begin if I = 0 then X := AV else FY := AV; end;
+    function TVec.GetScaled(F: Float64): Float64; begin Result := FX * F; end;
     procedure TVec.Inside;
     begin
       X := 2;
@@ -1311,7 +1311,7 @@ const
     end;
     function TBox<T>.GetV: T; begin Result := FV; end;
     procedure TBox<T>.SetV(const AV: T); begin FV := AV; end;
-    function MkVec(AX, AY: Integer): TVec; begin Result.FX := AX; Result.FY := AY; end;
+    function MkVec(AX, AY: Int): TVec; begin Result.FX := AX; Result.FY := AY; end;
     procedure Bump(var V: TVec); begin V.X := V.X + 1; V[1] := V[1] + 1; end;
     var
       G: TVec;
@@ -1333,7 +1333,7 @@ const
     var
       V: TVec;
       H: THolder;
-      B: TBox<Integer>;
+      B: TBox<Int>;
       S: TBox<string>;
     begin
       V.X := 3;
@@ -1393,18 +1393,18 @@ const
       private
         FA: array[0..3] of string;
         FTag: string;
-        function GetS(I: Integer): string;
-        procedure SetS(I: Integer; const V: string);
+        function GetS(I: Int): string;
+        procedure SetS(I: Int; const V: string);
       public
         constructor Create(const ATag: string);
         destructor Destroy; override;
-        property S[I: Integer]: string read GetS write SetS; default;
+        property S[I: Int]: string read GetS write SetS; default;
       end;
       TRec = record
-        FA: array[0..3] of Integer;
-        function GetI(I: Integer): Integer;
-        procedure SetI(I: Integer; V: Integer);
-        property Items[I: Integer]: Integer read GetI write SetI; default;
+        FA: array[0..3] of Int;
+        function GetI(I: Int): Int;
+        procedure SetI(I: Int; V: Int);
+        property Items[I: Int]: Int read GetI write SetI; default;
       end;
       TFac = class
         H: TSHolder;
@@ -1416,14 +1416,14 @@ const
       RA: array[0..1] of TRec;
     constructor TSHolder.Create(const ATag: string); begin FTag := ATag; end;
     destructor TSHolder.Destroy; begin WriteLn('free ', FTag, ' ', FA[3]); end;
-    function TSHolder.GetS(I: Integer): string; begin Result := FA[I]; end;
-    procedure TSHolder.SetS(I: Integer; const V: string); begin FA[I] := V; end;
-    function TRec.GetI(I: Integer): Integer; begin Result := FA[I]; end;
-    procedure TRec.SetI(I: Integer; V: Integer); begin FA[I] := V; WriteLn('rset ', I, ' ', V); end;
+    function TSHolder.GetS(I: Int): string; begin Result := FA[I]; end;
+    procedure TSHolder.SetS(I: Int; const V: string); begin FA[I] := V; end;
+    function TRec.GetI(I: Int): Int; begin Result := FA[I]; end;
+    procedure TRec.SetI(I: Int; V: Int); begin FA[I] := V; WriteLn('rset ', I, ' ', V); end;
     function TFac.Get(): TSHolder; begin Result := H; end;
     function MkS(): TSHolder; begin Result := G; end;
     function MkR(): TRec; begin Result.FA[0] := 0; end;
-    function Idx(): Integer; begin Result := 2; end;
+    function Idx(): Int; begin Result := 2; end;
     begin
       G := TSHolder.Create('g');
       F := TFac.Create();
@@ -1464,29 +1464,29 @@ const
     type
       TVec = record
       private
-        FX, FY: Integer;
+        FX, FY: Int;
         FTag: string;
-        function GetLen2: Integer;
-        procedure SetX(AV: Integer);
-        function GetAt(I: Integer): Integer;
-        procedure SetAt(I: Integer; AV: Integer);
+        function GetLen2: Int;
+        procedure SetX(AV: Int);
+        function GetAt(I: Int): Int;
+        procedure SetAt(I: Int; AV: Int);
       private static var
-        FCount: Integer;
+        FCount: Int;
       public
-        property X: Integer read FX write SetX;
-        property Y: Integer read FY write FY;
-        property Len2: Integer read GetLen2;
+        property X: Int read FX write SetX;
+        property Y: Int read FY write FY;
+        property Len2: Int read GetLen2;
         property Tag: string read FTag write FTag;
-        property At[I: Integer]: Integer read GetAt write SetAt; default;
-        static property Count: Integer read FCount write FCount;
+        property At[I: Int]: Int read GetAt write SetAt; default;
+        static property Count: Int read FCount write FCount;
       end;
-    function MkVec(AX, AY: Integer): TVec;
+    function MkVec(AX, AY: Int): TVec;
     implementation
-    function TVec.GetLen2: Integer; begin Result := FX * FX + FY * FY; end;
-    procedure TVec.SetX(AV: Integer); begin FX := AV; FCount := FCount + 1; end;
-    function TVec.GetAt(I: Integer): Integer; begin if I = 0 then Result := FX else Result := FY; end;
-    procedure TVec.SetAt(I: Integer; AV: Integer); begin if I = 0 then X := AV else FY := AV; end;
-    function MkVec(AX, AY: Integer): TVec; begin Result.FX := AX; Result.FY := AY; end;
+    function TVec.GetLen2: Int; begin Result := FX * FX + FY * FY; end;
+    procedure TVec.SetX(AV: Int); begin FX := AV; FCount := FCount + 1; end;
+    function TVec.GetAt(I: Int): Int; begin if I = 0 then Result := FX else Result := FY; end;
+    procedure TVec.SetAt(I: Int; AV: Int); begin if I = 0 then X := AV else FY := AV; end;
+    function MkVec(AX, AY: Int): TVec; begin Result.FX := AX; Result.FY := AY; end;
     end.
     ''';
   Src = '''
@@ -1523,21 +1523,21 @@ const
   Src = '''
     program P;
     type
-      TA = class N: Integer; Arr: array[0..2] of Integer; procedure Show(); end;
-      TRec = record V: Integer; G: array[0..1] of array[0..1] of Integer; end;
+      TA = class N: Int; Arr: array[0..2] of Int; procedure Show(); end;
+      TRec = record V: Int; G: array[0..1] of array[0..1] of Int; end;
       THolder = class
         FA: TA;
         Recs: array[0..1] of TRec;
         Objs: array of TA;
-        Grid: array[0..1] of array[0..1] of Integer;
+        Grid: array[0..1] of array[0..1] of Int;
         Sub: THolder;
-        function GetItem(I: Integer): TA;
-        procedure SetItem(I: Integer; V: TA);
-        property Items[I: Integer]: TA read GetItem write SetItem;
+        function GetItem(I: Int): TA;
+        procedure SetItem(I: Int; V: TA);
+        property Items[I: Int]: TA read GetItem write SetItem;
       end;
     procedure TA.Show(); begin WriteLn('show ', N, ' ', Arr[1]) end;
-    function THolder.GetItem(I: Integer): TA; begin Result := FA end;
-    procedure THolder.SetItem(I: Integer; V: TA); begin FA := V end;
+    function THolder.GetItem(I: Int): TA; begin Result := FA end;
+    procedure THolder.SetItem(I: Int; V: TA); begin FA := V end;
     var H: THolder;
     begin
       H := THolder.Create(); H.FA := TA.Create(); H.FA.N := 5;

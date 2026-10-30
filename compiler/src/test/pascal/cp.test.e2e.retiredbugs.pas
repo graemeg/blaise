@@ -120,17 +120,17 @@ const
     program P;
     type
       ICalc = interface
-        function F(a: Single; n: Integer): Integer;
-        function G(d: Double; n: Integer): Integer;
+        function F(a: Float32; n: Int): Int;
+        function G(d: Float64; n: Int): Int;
       end;
       TCalc = class(TObject, ICalc)
       public
-        function F(a: Single; n: Integer): Integer;
-        function G(d: Double; n: Integer): Integer;
+        function F(a: Float32; n: Int): Int;
+        function G(d: Float64; n: Int): Int;
       end;
-    function TCalc.F(a: Single; n: Integer): Integer;
+    function TCalc.F(a: Float32; n: Int): Int;
     begin Result := Trunc(a * 10) + n end;
-    function TCalc.G(d: Double; n: Integer): Integer;
+    function TCalc.G(d: Float64; n: Int): Int;
     begin Result := Trunc(d * 10) + n end;
     var C: ICalc;
     begin
@@ -149,23 +149,23 @@ const
   Src = '''
     program P;
     type
-      TM = function(a: Double): Double of object;
-      TR = reference to function(a: Double): Double;
+      TM = function(a: Float64): Float64 of object;
+      TR = reference to function(a: Float64): Float64;
       TOb = class
-        FP: function(a: Double): Double of object;
-        K: Double;
-        function Twice(a: Double): Double;
+        FP: function(a: Float64): Float64 of object;
+        K: Float64;
+        function Twice(a: Float64): Float64;
         procedure Go;
       end;
-    function TOb.Twice(a: Double): Double; begin Result := a * K end;
+    function TOb.Twice(a: Float64): Float64; begin Result := a * K end;
     procedure TOb.Go; begin WriteLn(Trunc(FP(3.5) * 10)) end;
-    var O: TOb; M: TM; R: TR; V, W, Z: Double;
+    var O: TOb; M: TM; R: TR; V, W, Z: Float64;
     begin
       O := TOb.Create(); O.K := 2.0;
       M := @O.Twice;
       V := 3.5; W := 99.0; Z := W;
       WriteLn(Trunc(M(V) * 10), ' ', Trunc(M(1.25) * 100));
-      R := function(a: Double): Double begin Result := a * 2.0 end;
+      R := function(a: Float64): Float64 begin Result := a * 2.0 end;
       WriteLn(Trunc(R(V) * 10), ' ', Trunc(R(0.5) * 10));
       O.FP := @O.Twice;
       WriteLn(Trunc(O.FP(4.5) * 10));
@@ -181,10 +181,10 @@ const
   Src = '''
     program KD;
     type
-      TR = record S: string; A, B, C, D: Integer; end;
+      TR = record S: string; A, B, C, D: Int; end;
       TFn = function: TR;
       TFoo = class
-        N: Integer;
+        N: Int;
         FMk: TFn;
         function MakeR: TR;
         procedure Run;
@@ -193,7 +193,7 @@ const
     function TFoo.MakeR: TR; begin Result.S := 'y' + IntToStr(N); Result.D := N end;
     procedure TFoo.Run; begin MakeR(); MakeR(); FMk(); WriteLn('run ', N) end;
     procedure Outer;
-    var X: Integer; R: TR;
+    var X: Int; R: TR;
       function Nest: TR; begin Result.A := X; Result.S := 'n' end;
     begin
       X := 7; R := Nest(); WriteLn('nest ', R.A); Nest()
@@ -216,14 +216,14 @@ const
   Src = '''
     program B30;
     type
-      TBig = record A, B, C, D, E: Integer; S: string; end;
+      TBig = record A, B, C, D, E: Int; S: string; end;
       TObj = class
-        N: Integer;
-        function Run(K: Integer): Integer;
+        N: Int;
+        function Run(K: Int): Int;
       end;
-    function TObj.Run(K: Integer): Integer;
-    var L: Integer; R: TBig;
-      function Mk(X: Integer): TBig;
+    function TObj.Run(K: Int): Int;
+    var L: Int; R: TBig;
+      function Mk(X: Int): TBig;
       begin Result.A := N + X + L; Result.E := K; Result.S := 's' + IntToStr(N) end;
     begin
       L := 100;
@@ -232,7 +232,7 @@ const
       Result := R.A
     end;
     procedure Outer;
-    var X: Integer; R: TBig;
+    var X: Int; R: TBig;
       function Nest: TBig; begin Result.A := X; Result.D := X * 2 end;
     begin X := 7; R := Nest(); WriteLn(R.A, ' ', R.D, ' ', Nest().D) end;
     var O: TObj;
@@ -253,12 +253,12 @@ const
     type
       TC = class
       public
-        const Names: array[0..1] of Integer = (7, 8);
+        const Names: array[0..1] of Int32 = (7, 8);
       end;
       TRc = record
-        const Vals: array[0..2] of Integer = (4, 5, 6);
+        const Vals: array[0..2] of Int32 = (4, 5, 6);
       end;
-    var I: Integer;
+    var I: Int;
     begin
       I := 1;
       WriteLn(TC.Names[0], ' ', TC.Names[I], ' ', TRc.Vals[2], ' ', TRc.Vals[I])
@@ -273,9 +273,9 @@ const
   Src = '''
     program A2;
     type
-      IG = interface function N: Integer; end;
-      TG = class(TObject, IG) V: Integer; function N: Integer; end;
-    function TG.N: Integer; begin Result := V end;
+      IG = interface function N: Int; end;
+      TG = class(TObject, IG) V: Int; function N: Int; end;
+    function TG.N: Int; begin Result := V end;
     procedure Swap(var X: IG; out Y: IG);
     var T: TG;
     begin
@@ -300,9 +300,9 @@ const
     type
       TR = record Name: string; O: TObject; function Get: string; end;
     function TR.Get: string; begin Result := Name end;
-    function F(I: Integer): TR;
+    function F(I: Int): TR;
     begin Result.Name := 'n' + IntToStr(I); Result.O := TObject.Create() end;
-    var L: TList<TR>; R: TR; I, N: Integer; S: string;
+    var L: TList<TR>; R: TR; I, N: Int; S: string;
     begin
       L := TList<TR>.Create(); R.Name := 'x' + IntToStr(1);
       R.O := TObject.Create(); L.Add(R);
@@ -326,7 +326,7 @@ const
     program A4;
     uses Generics.Collections;
     type
-      TTok = record Line: Integer; S: string; end;
+      TTok = record Line: Int; S: string; end;
       THolder = record Toks: TList<TTok>; end;
     procedure Show(var AH: THolder);
     begin WriteLn(AH.Toks[0].Line, ' ', AH.Toks[0].S) end;

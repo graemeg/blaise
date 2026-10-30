@@ -85,7 +85,7 @@ const
     procedure TW.Execute;
     begin
     end;
-    function SpawnJoin: Integer;
+    function SpawnJoin: Int;
     var T: TW;
     begin
       T := TW.Create(True);
@@ -98,8 +98,8 @@ const
   SrcOddPinned =
     'program P;' + LE + ThreadPreamble +
     '''
-    function Add2(A, B: Integer): Integer; begin Result := A + B end;
-    var X: Integer;
+    function Add2(A, B: Int): Int; begin Result := A + B end;
+    var X: Int;
     begin
       X := Add2(1, SpawnJoin());
       WriteLn(X)
@@ -109,9 +109,9 @@ const
   SrcTwoLevel =
     'program P;' + LE + ThreadPreamble +
     '''
-    function Add2(A, B: Integer): Integer; begin Result := A + B end;
-    function Add3(A, B, C: Integer): Integer; begin Result := A + B + C end;
-    var X: Integer;
+    function Add2(A, B: Int): Int; begin Result := A + B end;
+    function Add3(A, B, C: Int): Int; begin Result := A + B + C end;
+    var X: Int;
     begin
       X := Add3(1, 2, Add2(3, SpawnJoin()));
       WriteLn(X)
@@ -121,12 +121,12 @@ const
   SrcFloatArg =
     'program P;' + LE + ThreadPreamble +
     '''
-    function FAdd(D: Double; I: Integer): Integer;
+    function FAdd(D: Float64; I: Int): Int;
     begin
       Result := Trunc(D) + I
     end;
-    function Add2(A, B: Integer): Integer; begin Result := A + B end;
-    var X: Integer;
+    function Add2(A, B: Int): Int; begin Result := A + B end;
+    var X: Int;
     begin
       X := Add2(1, FAdd(2.0, SpawnJoin()));
       WriteLn(X)
@@ -136,12 +136,12 @@ const
   SrcOverflowArgs =
     'program P;' + LE + ThreadPreamble +
     '''
-    function Sum8(A, B, C, D, E, F, G, H: Integer): Integer;
+    function Sum8(A, B, C, D, E, F, G, H: Int): Int;
     begin
       Result := A + B + C + D + E + F + G + H
     end;
-    function Add2(A, B: Integer): Integer; begin Result := A + B end;
-    var X: Integer;
+    function Add2(A, B: Int): Int; begin Result := A + B end;
+    var X: Int;
     begin
       X := Add2(1, Sum8(1, 2, 3, 4, 5, 6, 7, SpawnJoin()));
       WriteLn(X)
@@ -157,9 +157,9 @@ const
   Src9Single =
     '''
     program P;
-    function F(a, b, c, d, e, f, g, h, i: Single): Single;
+    function F(a, b, c, d, e, f, g, h, i: Float32): Float32;
     begin Result := i + a end;
-    var r: Single;
+    var r: Float32;
     begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5); WriteLn(Trunc(r*10)) end.
     ''';
 
@@ -168,9 +168,9 @@ const
   Src9Double =
     '''
     program P;
-    function F(a, b, c, d, e, f, g, h, i: Double): Double;
+    function F(a, b, c, d, e, f, g, h, i: Float64): Float64;
     begin Result := i + a end;
-    var r: Double;
+    var r: Float64;
     begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5); WriteLn(Trunc(r*10)) end.
     ''';
 
@@ -182,13 +182,13 @@ const
     type
       TCalc = class
       public
-        function F(a, b, c, d, e, f, g, h, i: Double): Double;
+        function F(a, b, c, d, e, f, g, h, i: Float64): Float64;
       end;
-    function TCalc.F(a, b, c, d, e, f, g, h, i: Double): Double;
+    function TCalc.F(a, b, c, d, e, f, g, h, i: Float64): Float64;
     begin Result := i + a end;
     var
       C: TCalc;
-      r: Double;
+      r: Float64;
     begin
       C := TCalc.Create();
       r := C.F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5);
@@ -202,17 +202,17 @@ const
     program P;
     type
       ICalc = interface
-        function F(a, b, c, d, e, f, g, h, i: Double): Double;
+        function F(a, b, c, d, e, f, g, h, i: Float64): Float64;
       end;
       TCalc = class(TObject, ICalc)
       public
-        function F(a, b, c, d, e, f, g, h, i: Double): Double;
+        function F(a, b, c, d, e, f, g, h, i: Float64): Float64;
       end;
-    function TCalc.F(a, b, c, d, e, f, g, h, i: Double): Double;
+    function TCalc.F(a, b, c, d, e, f, g, h, i: Float64): Float64;
     begin Result := i + a end;
     var
       C: ICalc;
-      r: Double;
+      r: Float64;
     begin
       C := TCalc.Create();
       r := C.F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5);
@@ -231,17 +231,17 @@ const
     type
       TCalc = class
       public
-        function F(s1, s2, s3, s4, s5, s6, s7, s8: Single;
-                   n1, n2, n3, n4, n5: Integer;
-                   s9: Single; n6: Integer; s10: Single): Integer;
+        function F(s1, s2, s3, s4, s5, s6, s7, s8: Float32;
+                   n1, n2, n3, n4, n5: Int;
+                   s9: Float32; n6: Int; s10: Float32): Int;
       end;
-    function TCalc.F(s1, s2, s3, s4, s5, s6, s7, s8: Single;
-                     n1, n2, n3, n4, n5: Integer;
-                     s9: Single; n6: Integer; s10: Single): Integer;
+    function TCalc.F(s1, s2, s3, s4, s5, s6, s7, s8: Float32;
+                     n1, n2, n3, n4, n5: Int;
+                     s9: Float32; n6: Int; s10: Float32): Int;
     begin Result := Trunc((s9 + s10) * 10) + n6 end;
     var
       C: TCalc;
-      r: Integer;
+      r: Int;
     begin
       C := TCalc.Create();
       r := C.F(1,2,3,4,5,6,7,8, 10,20,30,40,50, 9.5, 100, 10.5);
@@ -261,23 +261,23 @@ const
     program P;
     type
       ICalc = interface
-        function F(d1, d2, d3, d4, d5, d6, d7, d8: Double;
-                   n1, n2, n3, n4, n5: Integer;
-                   d9: Double; n6: Integer; d10: Double): Integer;
+        function F(d1, d2, d3, d4, d5, d6, d7, d8: Float64;
+                   n1, n2, n3, n4, n5: Int;
+                   d9: Float64; n6: Int; d10: Float64): Int;
       end;
       TCalc = class(TObject, ICalc)
       public
-        function F(d1, d2, d3, d4, d5, d6, d7, d8: Double;
-                   n1, n2, n3, n4, n5: Integer;
-                   d9: Double; n6: Integer; d10: Double): Integer;
+        function F(d1, d2, d3, d4, d5, d6, d7, d8: Float64;
+                   n1, n2, n3, n4, n5: Int;
+                   d9: Float64; n6: Int; d10: Float64): Int;
       end;
-    function TCalc.F(d1, d2, d3, d4, d5, d6, d7, d8: Double;
-                     n1, n2, n3, n4, n5: Integer;
-                     d9: Double; n6: Integer; d10: Double): Integer;
+    function TCalc.F(d1, d2, d3, d4, d5, d6, d7, d8: Float64;
+                     n1, n2, n3, n4, n5: Int;
+                     d9: Float64; n6: Int; d10: Float64): Int;
     begin Result := Trunc((d9 + d10) * 10) + n6 end;
     var
       C: ICalc;
-      r: Integer;
+      r: Int;
     begin
       C := TCalc.Create();
       r := C.F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5, 10,20,30,40,50, 9.5, 100, 10.5);
@@ -289,9 +289,9 @@ const
   Src8Double1Single =
     '''
     program P;
-    function F(a, b, c, d, e, f, g, h: Double; i: Single): Single;
+    function F(a, b, c, d, e, f, g, h: Float64; i: Float32): Float32;
     begin Result := i + a end;
-    var r: Single;
+    var r: Float32;
     begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5); WriteLn(Trunc(r*10)) end.
     ''';
 
@@ -299,9 +299,9 @@ const
   Src11Single =
     '''
     program P;
-    function F(a, b, c, d, e, f, g, h, i, j, k: Single): Single;
+    function F(a, b, c, d, e, f, g, h, i, j, k: Float32): Float32;
     begin Result := (i + j + k) + a end;
-    var r: Single;
+    var r: Float32;
     begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5); WriteLn(Trunc(r*10)) end.
     ''';
 
@@ -311,11 +311,11 @@ const
   SrcInterspersedOverflow =
     '''
     program P;
-    function F(s1, s2, s3, s4, s5, s6, s7, s8: Single;
-               n1, n2, n3, n4, n5, n6: Integer;
-               s9: Single; n7: Integer; s10: Single): Integer;
+    function F(s1, s2, s3, s4, s5, s6, s7, s8: Float32;
+               n1, n2, n3, n4, n5, n6: Int;
+               s9: Float32; n7: Int; s10: Float32): Int;
     begin Result := Trunc((s9 + s10) * 10) + n7 end;
-    var r: Integer;
+    var r: Int;
     begin
       r := F(1,2,3,4,5,6,7,8, 10,20,30,40,50,60, 9.5, 100, 10.5);
       WriteLn(r)

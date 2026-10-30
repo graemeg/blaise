@@ -161,7 +161,7 @@ const Src = '''
     type
       TPacked = packed record
         A: Byte;
-        B: Integer;
+        B: Int;
       end;
     var R: TPacked;
     begin
@@ -181,11 +181,11 @@ const Src = '''
     type
       TPacked = packed record
         A: Byte;
-        B: Integer;
+        B: Int32;
       end;
       TNormal = record
         A: Byte;
-        B: Integer;
+        B: Int32;
       end;
     begin
       WriteLn(SizeOf(TPacked));
@@ -228,7 +228,7 @@ end;
 procedure TE2EGapTests.TestRun_Sar_PositiveInteger;
 const Src = '''
     program T;
-    var V: Integer;
+    var V: Int;
     begin
       V := 100;
       WriteLn(V sar 2)
@@ -375,7 +375,7 @@ const Src = '''
     program T;
     type
       TNode = class(TObject)
-        Value: Integer;
+        Value: Int;
         [Unretained] Next: TNode;
       end;
     var
@@ -405,17 +405,17 @@ const Src = '''
       TMap<K, V> = class
         FKeys:     ^K;
         FValues:   ^V;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        function  FindKey(Key: K): Integer;
+        function  FindKey(Key: K): Int;
         procedure Add(Key: K; Value: V);
         function  GetItem(Key: K): V;
         procedure SetItem(Key: K; Value: V);
         property Items[Key: K]: V read GetItem write SetItem; default;
       end;
     procedure TMap<K, V>.Grow;
-    var NewCap: Integer;
+    var NewCap: Int;
     begin
       if Self.FCapacity = 0 then NewCap := 8
       else NewCap := Self.FCapacity * 2;
@@ -423,8 +423,8 @@ const Src = '''
       Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(V));
       Self.FCapacity := NewCap
     end;
-    function TMap<K, V>.FindKey(Key: K): Integer;
-    var I: Integer; Ptr: ^K;
+    function TMap<K, V>.FindKey(Key: K): Int;
+    var I: Int; Ptr: ^K;
     begin
       Result := -1;
       I := 0;
@@ -436,7 +436,7 @@ const Src = '''
       end
     end;
     procedure TMap<K, V>.Add(Key: K; Value: V);
-    var Idx: Integer; KPtr: ^K; VPtr: ^V;
+    var Idx: Int; KPtr: ^K; VPtr: ^V;
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
@@ -450,7 +450,7 @@ const Src = '''
       end
     end;
     function TMap<K, V>.GetItem(Key: K): V;
-    var Idx: Integer; VPtr: ^V;
+    var Idx: Int; VPtr: ^V;
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
@@ -459,9 +459,9 @@ const Src = '''
     end;
     procedure TMap<K, V>.SetItem(Key: K; Value: V);
     begin Self.Add(Key, Value) end;
-    var D: TMap<Integer, Integer>;
+    var D: TMap<Int, Int>;
     begin
-      D := TMap<Integer, Integer>.Create();
+      D := TMap<Int, Int>.Create();
       D[1] := 100;
       D[2] := 200;
       WriteLn(D[1]);
@@ -480,17 +480,17 @@ const Src = '''
       TMap<K, V> = class
         FKeys:     ^K;
         FValues:   ^V;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        function  FindKey(Key: K): Integer;
+        function  FindKey(Key: K): Int;
         procedure Add(Key: K; Value: V);
         function  GetItem(Key: K): V;
         procedure SetItem(Key: K; Value: V);
         property Items[Key: K]: V read GetItem write SetItem; default;
       end;
     procedure TMap<K, V>.Grow;
-    var NewCap: Integer;
+    var NewCap: Int;
     begin
       if Self.FCapacity = 0 then NewCap := 8
       else NewCap := Self.FCapacity * 2;
@@ -498,8 +498,8 @@ const Src = '''
       Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(V));
       Self.FCapacity := NewCap
     end;
-    function TMap<K, V>.FindKey(Key: K): Integer;
-    var I: Integer; Ptr: ^K;
+    function TMap<K, V>.FindKey(Key: K): Int;
+    var I: Int; Ptr: ^K;
     begin
       Result := -1;
       I := 0;
@@ -511,7 +511,7 @@ const Src = '''
       end
     end;
     procedure TMap<K, V>.Add(Key: K; Value: V);
-    var Idx: Integer; KPtr: ^K; VPtr: ^V;
+    var Idx: Int; KPtr: ^K; VPtr: ^V;
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
@@ -525,7 +525,7 @@ const Src = '''
       end
     end;
     function TMap<K, V>.GetItem(Key: K): V;
-    var Idx: Integer; VPtr: ^V;
+    var Idx: Int; VPtr: ^V;
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
@@ -534,9 +534,9 @@ const Src = '''
     end;
     procedure TMap<K, V>.SetItem(Key: K; Value: V);
     begin Self.Add(Key, Value) end;
-    var D: TMap<string, Integer>;
+    var D: TMap<string, Int>;
     begin
-      D := TMap<string, Integer>.Create();
+      D := TMap<string, Int>.Create();
       D['one'] := 1;
       D['two'] := 2;
       WriteLn(D['one']);
@@ -555,17 +555,17 @@ const Src = '''
       TMap<K, V> = class
         FKeys:     ^K;
         FValues:   ^V;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        function  FindKey(Key: K): Integer;
+        function  FindKey(Key: K): Int;
         procedure Add(Key: K; Value: V);
         function  GetItem(Key: K): V;
         procedure SetItem(Key: K; Value: V);
         property Items[Key: K]: V read GetItem write SetItem; default;
       end;
     procedure TMap<K, V>.Grow;
-    var NewCap: Integer;
+    var NewCap: Int;
     begin
       if Self.FCapacity = 0 then NewCap := 8
       else NewCap := Self.FCapacity * 2;
@@ -573,8 +573,8 @@ const Src = '''
       Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(V));
       Self.FCapacity := NewCap
     end;
-    function TMap<K, V>.FindKey(Key: K): Integer;
-    var I: Integer; Ptr: ^K;
+    function TMap<K, V>.FindKey(Key: K): Int;
+    var I: Int; Ptr: ^K;
     begin
       Result := -1;
       I := 0;
@@ -586,7 +586,7 @@ const Src = '''
       end
     end;
     procedure TMap<K, V>.Add(Key: K; Value: V);
-    var Idx: Integer; KPtr: ^K; VPtr: ^V;
+    var Idx: Int; KPtr: ^K; VPtr: ^V;
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
@@ -600,7 +600,7 @@ const Src = '''
       end
     end;
     function TMap<K, V>.GetItem(Key: K): V;
-    var Idx: Integer; VPtr: ^V;
+    var Idx: Int; VPtr: ^V;
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
@@ -609,9 +609,9 @@ const Src = '''
     end;
     procedure TMap<K, V>.SetItem(Key: K; Value: V);
     begin Self.Add(Key, Value) end;
-    var D: TMap<string, Integer>;
+    var D: TMap<string, Int>;
     begin
-      D := TMap<string, Integer>.Create();
+      D := TMap<string, Int>.Create();
       D['x'] := 10;
       D['x'] := 42;
       WriteLn(D['x']);
@@ -632,7 +632,7 @@ const Src = '''
         Key: K;
         Value: V;
       end;
-    var P: TPair<Integer, string>;
+    var P: TPair<Int, string>;
     begin
       P.Key := 42;
       P.Value := 'hello';
@@ -656,7 +656,7 @@ const Src = '''
     begin
       Result := Self.Data
     end;
-    var B: TBox<Integer>;
+    var B: TBox<Int>;
     begin
       B.Data := 99;
       WriteLn(B.GetData())
@@ -724,8 +724,8 @@ const
   Src =
     '''
     program P;
-    type TVec3 = array[0..2] of Integer;
-    function MakeVec(A, B, C: Integer): TVec3;
+    type TVec3 = array[0..2] of Int;
+    function MakeVec(A, B, C: Int): TVec3;
     begin
       Result[0] := A;
       Result[1] := B;
@@ -773,7 +773,7 @@ const
     type
       PRec = ^TRec;
       TRec = record
-        DA: array of Integer;
+        DA: array of Int;
       end;
     var
       Ptr: PRec;
@@ -801,12 +801,12 @@ const
     type
       PRec = ^TRec;
       TRec = record
-        DA: array of Integer;
+        DA: array of Int;
       end;
     var
       Ptr: PRec;
       R: TRec;
-      I: Integer;
+      I: Int;
     begin
       Ptr := @R;
       SetLength(R.DA, 2);
@@ -830,7 +830,7 @@ const
         FVal: T;
         procedure SetVal(AVal: T);
       end;
-      TIntHolder = THolder<Integer>;
+      TIntHolder = THolder<Int>;
       procedure THolder<T>.SetVal(AVal: T);
       begin
         FVal := AVal
@@ -850,7 +850,7 @@ const Src = '''
     program T;
     var
       S: string;
-      I: Integer;
+      I: Int;
       B: Boolean;
     begin
       S := 'val';
@@ -869,9 +869,9 @@ const
   Src =
     '''
     program P;
-    type TArr = array[0..2] of Integer;
+    type TArr = array[0..2] of Int;
     const Vals: TArr = (10, 20, 30);
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 2 do
         WriteLn(Vals[I])
@@ -893,8 +893,8 @@ const
       TI = array[0..2] of Int64;
       TC = array[0..2] of TColor;
       TF = array[0..1] of Boolean;
-      TD = array[0..1] of Double;
-      TW = array[1..2] of Word;
+      TD = array[0..1] of Float64;
+      TW = array[1..2] of UInt16;
     const
       cS: TS = ('K', 'M', '<BK>');
       cB: TB = (1, 2, 3, 250);
@@ -907,13 +907,13 @@ const
     const
       cL: TS = ('x', 'y', 'z');
     var
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 2 do
         Write(cL[I]);
       WriteLn()
     end;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 2 do Write(cS[I], ' ');
       WriteLn();
@@ -952,7 +952,7 @@ const
     '''
     program P;
     const Flags: array[0..3] of Boolean = (False, True, False, True);
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 3 do
         if Flags[I] then WriteLn('T') else WriteLn('F')
@@ -974,10 +974,10 @@ const
     const N = 7;
     const
       Palette: array[0..2] of TColor = (Blue, Red, Green);
-      WithConst: array[0..1] of Integer = (N, 99);
-    var I: Integer;
+      WithConst: array[0..1] of Int32 = (N, 99);
+    var I: Int;
     begin
-      for I := 0 to 2 do WriteLn(Integer(Palette[I]));
+      for I := 0 to 2 do WriteLn(Int32(Palette[I]));
       WriteLn(WithConst[0]);
       WriteLn(WithConst[1])
     end.
@@ -998,9 +998,9 @@ const
     program P;
     const
       B: array[0..2] of Byte = (0, 255, 128);
-      W: array[0..2] of Word = (1, 65535, 256);
+      W: array[0..2] of UInt16 = (1, 65535, 256);
       L: array[0..1] of Int64 = (9000000000, 5);
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 2 do WriteLn(B[I]);
       for I := 0 to 2 do WriteLn(W[I]);
@@ -1022,8 +1022,8 @@ const
   Src =
     '''
     program P;
-    const Vals: array[0..2] of Integer = (-1, -100, 42);
-    var I: Integer;
+    const Vals: array[0..2] of Int32 = (-1, -100, 42);
+    var I: Int;
     begin
       for I := 0 to 2 do WriteLn(Vals[I])
     end.
@@ -1147,20 +1147,20 @@ const
     program P;
     type
       IFoo = interface
-        function Make(a, b, c, d, e, f: Integer): IFoo;
-        function Sum: Integer;
+        function Make(a, b, c, d, e, f: Int): IFoo;
+        function Sum: Int;
       end;
       TFoo = class(TObject, IFoo)
-        FTotal: Integer;
-        function Make(a, b, c, d, e, f: Integer): IFoo;
-        function Sum: Integer;
+        FTotal: Int;
+        function Make(a, b, c, d, e, f: Int): IFoo;
+        function Sum: Int;
       end;
-    function TFoo.Make(a, b, c, d, e, f: Integer): IFoo;
+    function TFoo.Make(a, b, c, d, e, f: Int): IFoo;
     begin
       FTotal := a + b + c + d + e + f;
       Result := Self;
     end;
-    function TFoo.Sum: Integer;
+    function TFoo.Sum: Int;
     begin
       Result := FTotal;
     end;
@@ -1186,20 +1186,20 @@ const
     program P;
     type
       IFoo = interface
-        function Make(a, b, c, d, e, f: Integer): IFoo;
-        function Sum: Integer;
+        function Make(a, b, c, d, e, f: Int): IFoo;
+        function Sum: Int;
       end;
       TFoo = class(TObject, IFoo)
-        FTotal: Integer;
-        function Make(a, b, c, d, e, f: Integer): IFoo;
-        function Sum: Integer;
+        FTotal: Int;
+        function Make(a, b, c, d, e, f: Int): IFoo;
+        function Sum: Int;
       end;
-    function TFoo.Make(a, b, c, d, e, f: Integer): IFoo;
+    function TFoo.Make(a, b, c, d, e, f: Int): IFoo;
     begin
       FTotal := a + b + c + d + e + f;
       Result := Self;
     end;
-    function TFoo.Sum: Integer;
+    function TFoo.Sum: Int;
     begin
       Result := FTotal;
     end;
@@ -1224,20 +1224,20 @@ const
     program P;
     type
       IFoo = interface
-        function Make(a, b, c, d, e, f, g: Integer): IFoo;
-        function Sum: Integer;
+        function Make(a, b, c, d, e, f, g: Int): IFoo;
+        function Sum: Int;
       end;
       TFoo = class(TObject, IFoo)
-        FTotal: Integer;
-        function Make(a, b, c, d, e, f, g: Integer): IFoo;
-        function Sum: Integer;
+        FTotal: Int;
+        function Make(a, b, c, d, e, f, g: Int): IFoo;
+        function Sum: Int;
       end;
-    function TFoo.Make(a, b, c, d, e, f, g: Integer): IFoo;
+    function TFoo.Make(a, b, c, d, e, f, g: Int): IFoo;
     begin
       FTotal := a + b + c + d + e + f + g;
       Result := Self;
     end;
-    function TFoo.Sum: Integer;
+    function TFoo.Sum: Int;
     begin
       Result := FTotal;
     end;
@@ -1264,15 +1264,15 @@ const
     program P;
     type
       IFoo = interface
-        function Val: Integer;
+        function Val: Int;
       end;
       TFoo = class(TObject, IFoo)
-        FN: Integer;
-        function Val: Integer;
+        FN: Int;
+        function Val: Int;
       end;
-    function TFoo.Val: Integer;
+    function TFoo.Val: Int;
     begin Result := FN end;
-    function MakeFoo(N: Integer): IFoo;
+    function MakeFoo(N: Int): IFoo;
     var F: TFoo;
     begin
       F := TFoo.Create();
@@ -1304,17 +1304,17 @@ const
     program P;
     type
       TR = record
-        A, B, C: Integer;
+        A, B, C: Int;
       end;
-    function Make(N: Integer): TR;
+    function Make(N: Int): TR;
     begin
       Result.A := N; Result.B := N + 1; Result.C := N + 2
     end;
-    function Use(R: TR; D: Double): Double;
+    function Use(R: TR; D: Float64): Float64;
     begin
       Result := Sqrt(D) + R.A + R.B + R.C
     end;
-    var X: Double;
+    var X: Float64;
     begin
       X := Use(Make(10), 16.0);
       WriteLn(X)
@@ -1336,12 +1336,12 @@ const
   Src = '''
     program Widths;
     var
-      I: Integer;
-      D: Double;
-      S: Single;
+      I: Int;
+      D: Float64;
+      S: Float32;
       U: UInt64;
       B: Boolean;
-      W, P: Integer;
+      W, P: Int;
     begin
       I := 42;
       D := 3.14159;

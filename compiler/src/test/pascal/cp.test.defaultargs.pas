@@ -43,19 +43,19 @@ const
     program P;
     type
       TBase = class
-        function F(A: Integer; B: Integer = 5): Integer; virtual;
-        procedure Q(A: Integer; B: Integer = 5); virtual;
+        function F(A: Int32; B: Int32 = 5): Int32; virtual;
+        procedure Q(A: Int32; B: Int32 = 5); virtual;
       end;
       TA = class(TBase)
-        function F(A: Integer; B: Integer = 5): Integer; override;
-        procedure Q(A: Integer; B: Integer = 5); override;
-        function G<T>(A: T; B: Integer = 7): Integer;
+        function F(A: Int32; B: Int32 = 5): Int32; override;
+        procedure Q(A: Int32; B: Int32 = 5); override;
+        function G<T>(A: T; B: Int32 = 7): Int32;
         procedure Run();
       end;
-    var X: TA; N: Integer;
-    function TBase.F(A: Integer; B: Integer): Integer; begin Result := A + B end;
-    procedure TBase.Q(A: Integer; B: Integer); begin end;
-    function TA.G<T>(A: T; B: Integer): Integer; begin Result := B end;
+    var X: TA; N: Int32;
+    function TBase.F(A: Int32; B: Int32): Int32; begin Result := A + B end;
+    procedure TBase.Q(A: Int32; B: Int32); begin end;
+    function TA.G<T>(A: T; B: Int32): Int32; begin Result := B end;
     ''';
 begin
   AssertEquals('Self.F(1)', '', SemanticError(Head +

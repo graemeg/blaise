@@ -107,10 +107,10 @@ const
             end;
           end;
         var
-          C: TColl<Integer>;
-          X: Integer;
+          C: TColl<Int32>;
+          X: Int32;
         begin
-          C := TColl<Integer>.Create();
+          C := TColl<Int32>.Create();
           for X in C do
             WriteLn(X)
         end.
@@ -124,8 +124,8 @@ const
         type
           TListEnumerator<T> = class
             FList:  ^T;
-            FIndex: Integer;
-            FCount: Integer;
+            FIndex: Int;
+            FCount: Int;
             function MoveNext: Boolean;
             begin
               Self.FIndex := Self.FIndex + 1;
@@ -139,7 +139,7 @@ const
           end;
           TMyList<T> = class
             FData:  ^T;
-            FCount: Integer;
+            FCount: Int;
             function GetEnumerator: TListEnumerator<T>;
             begin
               Result := TListEnumerator<T>.Create()
@@ -154,8 +154,8 @@ const
         type
           TListEnumerator<T> = class
             FList:  ^T;
-            FIndex: Integer;
-            FCount: Integer;
+            FIndex: Int32;
+            FCount: Int32;
             function MoveNext: Boolean;
             begin
               Self.FIndex := Self.FIndex + 1;
@@ -169,17 +169,17 @@ const
           end;
           TMyList<T> = class
             FData:  ^T;
-            FCount: Integer;
+            FCount: Int32;
             function GetEnumerator: TListEnumerator<T>;
             begin
               Result := TListEnumerator<T>.Create()
             end;
           end;
         var
-          L: TMyList<Integer>;
-          X: Integer;
+          L: TMyList<Int32>;
+          X: Int32;
         begin
-          L := TMyList<Integer>.Create();
+          L := TMyList<Int32>.Create();
           for X in L do
             WriteLn(X)
         end.

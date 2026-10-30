@@ -37,23 +37,23 @@ const
     program P;
     type
       TQueue = class
-        FData:     ^Integer;
-        FCount:    Integer;
-        FCapacity: Integer;
-        FHead:     Integer;
-        FTail:     Integer;
+        FData:     ^Int;
+        FCount:    Int;
+        FCapacity: Int;
+        FHead:     Int;
+        FTail:     Int;
         procedure Grow;
-        var NewCap, OldCap, I: Integer; NewData, Src, Dst: ^Integer;
+        var NewCap, OldCap, I: Int; NewData, Src, Dst: ^Int;
         begin
           OldCap  := Self.FCapacity;
           if OldCap = 0 then NewCap := 4 else NewCap := OldCap * 2;
-          NewData := GetMem(NewCap * SizeOf(Integer));
-          ZeroMem(NewData, NewCap * SizeOf(Integer));
+          NewData := GetMem(NewCap * SizeOf(Int));
+          ZeroMem(NewData, NewCap * SizeOf(Int));
           I := 0;
           while I < Self.FCount do
           begin
-            Src  := Self.FData + ((Self.FHead + I) mod OldCap) * SizeOf(Integer);
-            Dst  := NewData + I * SizeOf(Integer);
+            Src  := Self.FData + ((Self.FHead + I) mod OldCap) * SizeOf(Int);
+            Dst  := NewData + I * SizeOf(Int);
             Dst^ := Src^;
             I    := I + 1
           end;
@@ -63,30 +63,30 @@ const
           Self.FTail     := Self.FCount;
           Self.FCapacity := NewCap
         end;
-        procedure Enqueue(Value: Integer);
-        var Dest: ^Integer;
+        procedure Enqueue(Value: Int);
+        var Dest: ^Int;
         begin
           if Self.FCount = Self.FCapacity then Self.Grow();
-          Dest        := Self.FData + Self.FTail * SizeOf(Integer);
+          Dest        := Self.FData + Self.FTail * SizeOf(Int);
           Dest^       := Value;
           Self.FTail  := (Self.FTail + 1) mod Self.FCapacity;
           Self.FCount := Self.FCount + 1
         end;
-        function Dequeue: Integer;
-        var Src: ^Integer;
+        function Dequeue: Int;
+        var Src: ^Int;
         begin
-          Src         := Self.FData + Self.FHead * SizeOf(Integer);
+          Src         := Self.FData + Self.FHead * SizeOf(Int);
           Result      := Src^;
           Self.FHead  := (Self.FHead + 1) mod Self.FCapacity;
           Self.FCount := Self.FCount - 1
         end;
-        function Peek: Integer;
-        var Src: ^Integer;
+        function Peek: Int;
+        var Src: ^Int;
         begin
-          Src    := Self.FData + Self.FHead * SizeOf(Integer);
+          Src    := Self.FData + Self.FHead * SizeOf(Int);
           Result := Src^
         end;
-        property Count: Integer read FCount;
+        property Count: Int read FCount;
       end;
     ''';
 
@@ -136,7 +136,7 @@ const
   SrcGrowBeyond =
     QueueSrc +
     '''
-    var Q: TQueue; I: Integer;
+    var Q: TQueue; I: Int;
     begin
       Q := TQueue.Create();
       I := 1;

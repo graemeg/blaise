@@ -63,17 +63,17 @@ const
           TDictionary<K, V> = class
             FKeys:     ^K;
             FValues:   ^V;
-            FCount:    Integer;
-            FCapacity: Integer;
+            FCount:    Int;
+            FCapacity: Int;
             procedure Grow;
-            function  FindKey(Key: K): Integer;
+            function  FindKey(Key: K): Int;
             procedure Add(Key: K; Value: V);
             function  GetItem(Key: K): V;
             procedure SetItem(Key: K; Value: V);
             function  TryGetValue(Key: K; var Value: V): Boolean;
             function  ContainsKey(Key: K): Boolean;
             procedure Remove(Key: K);
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
             property Items[Key: K]: V read GetItem write SetItem; default;
           end;
         ''';
@@ -83,7 +83,7 @@ const
     '''
         procedure TDictionary<K, V>.Grow;
         var
-          NewCap: Integer;
+          NewCap: Int;
         begin
           if Self.FCapacity = 0 then
             NewCap := 8
@@ -93,9 +93,9 @@ const
           Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(V));
           Self.FCapacity := NewCap
         end;
-        function TDictionary<K, V>.FindKey(Key: K): Integer;
+        function TDictionary<K, V>.FindKey(Key: K): Int;
         var
-          I:   Integer;
+          I:   Int;
           Ptr: ^K;
         begin
           Result := -1;
@@ -114,7 +114,7 @@ const
         end;
         procedure TDictionary<K, V>.Add(Key: K; Value: V);
         var
-          Idx:  Integer;
+          Idx:  Int;
           KPtr: ^K;
           VPtr: ^V;
         begin
@@ -137,7 +137,7 @@ const
         end;
         function TDictionary<K, V>.GetItem(Key: K): V;
         var
-          Idx:  Integer;
+          Idx:  Int;
           VPtr: ^V;
         begin
           Idx := Self.FindKey(Key);
@@ -155,7 +155,7 @@ const
         end;
         function TDictionary<K, V>.TryGetValue(Key: K; var Value: V): Boolean;
         var
-          Idx:  Integer;
+          Idx:  Int;
           VPtr: ^V;
         begin
           Idx    := Self.FindKey(Key);
@@ -172,8 +172,8 @@ const
         end;
         procedure TDictionary<K, V>.Remove(Key: K);
         var
-          Idx:  Integer;
-          I:    Integer;
+          Idx:  Int;
+          I:    Int;
           KDst: ^K;
           KSrc: ^K;
           VDst: ^V;
@@ -205,9 +205,9 @@ const
     DictDecl +
     DictImpls +
     '''
-        var D: TDictionary<Integer, Integer>;
+        var D: TDictionary<Int, Int>;
         begin
-          D := TDictionary<Integer, Integer>.Create()
+          D := TDictionary<Int, Int>.Create()
         end.
         ''';
 
@@ -217,10 +217,10 @@ const
     DictImpls +
     '''
         var
-          D:  TDictionary<Integer, Integer>;
+          D:  TDictionary<Int, Int>;
           OK: Boolean;
         begin
-          D := TDictionary<Integer, Integer>.Create();
+          D := TDictionary<Int, Int>.Create();
           D.Add(1, 100);
           D.Add(2, 200);
           OK := D.ContainsKey(1)
@@ -233,11 +233,11 @@ const
     DictImpls +
     '''
         var
-          D:  TDictionary<Integer, Integer>;
-          V:  Integer;
+          D:  TDictionary<Int, Int>;
+          V:  Int;
           OK: Boolean;
         begin
-          D := TDictionary<Integer, Integer>.Create();
+          D := TDictionary<Int, Int>.Create();
           D.Add(42, 99);
           OK := D.TryGetValue(42, V)
         end.
@@ -249,10 +249,10 @@ const
     DictImpls +
     '''
         var
-          D:  TDictionary<Integer, Integer>;
+          D:  TDictionary<Int, Int>;
           OK: Boolean;
         begin
-          D := TDictionary<Integer, Integer>.Create();
+          D := TDictionary<Int, Int>.Create();
           D.Add(7, 70);
           D.Remove(7);
           OK := D.ContainsKey(7)
@@ -265,10 +265,10 @@ const
     DictImpls +
     '''
         var
-          D: TDictionary<Integer, Integer>;
-          V: Integer;
+          D: TDictionary<Int, Int>;
+          V: Int;
         begin
-          D := TDictionary<Integer, Integer>.Create();
+          D := TDictionary<Int, Int>.Create();
           D[1] := 100;
           V := D[1]
         end.

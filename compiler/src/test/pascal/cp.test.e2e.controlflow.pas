@@ -79,7 +79,7 @@ const
 
   SrcForUp = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 1 to 3 do
         WriteLn(I)
@@ -91,7 +91,7 @@ const
     case where no Exit(X) fires. }
   SrcExitValue = '''
     program P;
-    function Classify(n: Integer): Integer;
+    function Classify(n: Int): Int;
     begin
       if n < 0 then Exit(-1);
       if n = 0 then Exit(0);
@@ -113,7 +113,7 @@ const
 
   SrcForDown = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 3 downto 1 do
         WriteLn(I)
@@ -122,7 +122,7 @@ const
 
   SrcWhile = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       I := 1;
       while I <= 3 do
@@ -139,7 +139,7 @@ const
     must now treat the empty body as a valid no-op. }
   SrcForEmptyBody = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 9 do;
       WriteLn('done')
@@ -148,7 +148,7 @@ const
 
   SrcWhileEmptyBody = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       I := 0;
       while I < 0 do;
@@ -158,7 +158,7 @@ const
 
   SrcRepeat = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       I := 1;
       repeat
@@ -170,7 +170,7 @@ const
 
   SrcForBreakE2E = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 1 to 10 do
       begin
@@ -182,7 +182,7 @@ const
 
   SrcForContinue = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 1 to 5 do
       begin
@@ -194,7 +194,7 @@ const
 
   SrcNestedFor = '''
     program P;
-    var I, J: Integer;
+    var I, J: Int;
     begin
       for I := 1 to 2 do
         for J := 1 to 2 do
@@ -210,7 +210,7 @@ const
     program P;
     procedure Outer;
     var
-      Counter: Integer;
+      Counter: Int;
       procedure Inner;
       begin
         Inc(Counter);
@@ -251,7 +251,7 @@ const
     join point after it.  Replaces the QBE IR checks in cp.test.control. }
   Src = '''
     program P;
-    procedure Check(N: Integer);
+    procedure Check(N: Int);
     begin
       if N > 5 then
       begin
@@ -286,7 +286,7 @@ const
     down through zero. }
   Src = '''
     program P;
-    var A, B, N: Integer;
+    var A, B, N: Int;
     procedure Show(const S: string; V: Boolean);
     begin
       if V then
@@ -406,7 +406,7 @@ end;
 const
   SrcCaseRanges = '''
     program P;
-    var i, r: Integer;
+    var i, r: Int;
     begin
       for i := 0 to 6 do
       begin
@@ -423,7 +423,7 @@ const
 
   SrcCaseRangeMixed = '''
     program P;
-    var i: Integer;
+    var i: Int;
     begin
       for i := 0 to 10 do
         case i of
@@ -449,7 +449,7 @@ const
 
   SrcSuccPredInt = '''
     program P;
-    var i: Integer;
+    var i: Int32;
     begin i := 10; WriteLn(Succ(i)); WriteLn(Pred(i)); WriteLn(Succ(Succ(i))) end.
     ''';
 
@@ -501,7 +501,7 @@ const
     Replaces the QBE IR checks in cp.test.forloop. }
   Src = '''
     program P;
-    var I, S, Lo, Hi: Integer;
+    var I, S, Lo, Hi: Int;
     begin
       Lo := -2;
       Hi := 1;
@@ -555,19 +555,19 @@ const
       i8: Int8;
       i16: Int16;
       b: Byte;
-      w: Word;
+      w: UInt16;
       u32: UInt32;
       i64: Int64;
       u64: UInt64;
       gA: Int8;
       gB: Int8;
-      c: Integer;
+      c: Int;
       big: UInt64;
 
     procedure Captured;
     var
       k: Int8;
-      n: Integer;
+      n: Int;
       F: reference to procedure;
     begin
       n := 0;
@@ -589,7 +589,7 @@ const
     procedure Nested;
     var
       k: Int16;
-      n: Integer;
+      n: Int;
       procedure Bump;
       begin
         n := n + 1;
@@ -609,7 +609,7 @@ const
     var
       k: Int8;
       q: UInt64;
-      n: Integer;
+      n: Int;
     begin
       n := 0;
       for k := Low(Int8) to High(Int8) do
@@ -671,7 +671,7 @@ const
       end;
       WriteLn('bd ', c);
       c := 0;
-      for w := High(Word) - 2 to High(Word) do
+      for w := High(UInt16) - 2 to High(UInt16) do
       begin
         c := c + 1;
         if c > 3000 then
@@ -782,7 +782,7 @@ const
     Replaces the QBE IR checks in cp.test.repeatloop. }
   Src = '''
     program P;
-    var I, N: Integer;
+    var I, N: Int;
     begin
       N := 0;
       repeat
@@ -812,7 +812,7 @@ const
     leaves.  Replaces the QBE IR checks in cp.test.flowjumps. }
   Src = '''
     program P;
-    function Abs1(X: Integer): Integer;
+    function Abs1(X: Int): Int;
     begin
       if X < 0 then
       begin
@@ -821,12 +821,12 @@ const
       end;
       Result := X
     end;
-    function Classify(N: Integer): Integer;
+    function Classify(N: Int): Int;
     begin
       if N < 0 then Exit(-1);
       Result := 1
     end;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 1 to 10 do
       begin
@@ -874,7 +874,7 @@ const
       TColorA = (Red, Green);
       TColorB = (Amber, Red);
       TRec = record c: TColorB; end;
-    procedure Pick(N: Integer);
+    procedure Pick(N: Int);
     begin
       case N of
         1: WriteLn('one');
@@ -946,20 +946,20 @@ const
     type
       TColor = (Red, Green, Blue);
       TColorSet = set of TColor;
-      TRec = record Name: string; Number: Integer; end;
+      TRec = record Name: string; Number: Int32; end;
       TItem = record S: string; end;
       TMyEnum = class
-        FI, FMax: Integer;
+        FI, FMax: Int32;
         function MoveNext: Boolean;
-        function GetCurrent: Integer;
-        property Current: Integer read GetCurrent;
+        function GetCurrent: Int32;
+        property Current: Int32 read GetCurrent;
       end;
       TMyCol = class
-        Count: Integer;
+        Count: Int32;
         function GetEnumerator: TMyEnum;
       end;
       TItemEnum = class
-        FI: Integer;
+        FI: Int32;
         function GetCurrent: TItem;
         function GetEnumerator: TItemEnum;
         function MoveNext: Boolean;
@@ -970,7 +970,7 @@ const
       FI := FI + 1;
       Result := FI <= FMax
     end;
-    function TMyEnum.GetCurrent: Integer; begin Result := FI * 10 end;
+    function TMyEnum.GetCurrent: Int32; begin Result := FI * 10 end;
     function TMyCol.GetEnumerator: TMyEnum;
     begin
       Result := TMyEnum.Create();
@@ -987,8 +987,8 @@ const
       Result := FI <= 3
     end;
     var
-      Col: TMyCol; X, I: Integer; Arr: array[0..4] of Integer;
-      NZ: array[3..7] of Integer; DA: array of Integer; S: string; B: Byte;
+      Col: TMyCol; X, I: Int32; Arr: array[0..4] of Int32;
+      NZ: array[3..7] of Int32; DA: array of Int32; S: string; B: Byte;
       Recs: array[0..2] of TRec; R: TRec; CS: TColorSet; C: TColor;
       E: TItemEnum; It: TItem;
     begin
@@ -1052,12 +1052,12 @@ const
   Src = '''
     program P;
     type
-      TIn = record X: Integer; end;
-      TC = class F: Integer; end;
-      TSA = array[0..1] of Integer;
-      TR = record F: Integer; Arr: array[0..1] of TIn;
+      TIn = record X: Int32; end;
+      TC = class F: Int32; end;
+      TSA = array[0..1] of Int32;
+      TR = record F: Int32; Arr: array[0..1] of TIn;
         D: array of TIn; C: TC; end;
-    procedure Mut(var V: Integer); begin V := 9 end;
+    procedure Mut(var V: Int32); begin V := 9 end;
     var A: array of TR; r: TR; S: array of string; t: string;
       SA: array of TSA; sa1: TSA;
     begin
@@ -1089,13 +1089,13 @@ const
     program P;
     type
       TRangeEnum = record
-        Cur, Last: Integer;
+        Cur, Last: Int;
         function MoveNext(): Boolean;
-        function GetCurrent(): Integer;
-        property Current: Integer read GetCurrent;
+        function GetCurrent(): Int;
+        property Current: Int read GetCurrent;
       end;
       TRange = record
-        Lo, Hi: Integer;
+        Lo, Hi: Int;
         function GetEnumerator(): TRangeEnum;
       end;
       IWordEnum = interface
@@ -1105,7 +1105,7 @@ const
       end;
       TWordEnum = class(TObject, IWordEnum)
         Words: array of string;
-        N: Integer;
+        N: Int;
         function MoveNext(): Boolean;
         function GetCurrent(): string;
       end;
@@ -1116,7 +1116,7 @@ const
       { a record enumerator carrying a managed field }
       TTagEnum = record
         Prefix: string;
-        N: Integer;
+        N: Int;
         function MoveNext(): Boolean;
         function GetCurrent(): string;
         property Current: string read GetCurrent;
@@ -1128,10 +1128,10 @@ const
         function GetEnumerator(): TTagEnum;
       end;
     var
-      Calls: Integer;
+      Calls: Int;
 
     function TRangeEnum.MoveNext(): Boolean; begin Cur := Cur + 1; Result := Cur <= Last end;
-    function TRangeEnum.GetCurrent(): Integer; begin Result := Cur end;
+    function TRangeEnum.GetCurrent(): Int; begin Result := Cur end;
     function TRange.GetEnumerator(): TRangeEnum; begin Result.Cur := Lo - 1; Result.Last := Hi end;
     function TWordEnum.MoveNext(): Boolean; begin N := N + 1; Result := N <= Length(Words) end;
     function TWordEnum.GetCurrent(): string; begin Result := Words[N - 1] + '!' end;
@@ -1146,7 +1146,7 @@ const
     function TTagEnum.GetCurrent(): string; begin Result := Prefix + IntToStr(N) end;
     function TTagged.GetEnumerator(): TTagEnum; begin Result.Prefix := 'tag' + '-'; Result.N := 0 end;
 
-    function MakeRange(L, H: Integer): TRange;
+    function MakeRange(L, H: Int): TRange;
     begin
       Calls := Calls + 1;
       Result.Lo := L;
@@ -1154,7 +1154,7 @@ const
     end;
 
     procedure InProc(W: TWords);
-    var S: string; X: Integer; T: ITagged;
+    var S: string; X: Int; T: ITagged;
     begin
       for S in W do
       begin
@@ -1175,7 +1175,7 @@ const
 
     var
       R: TRange;
-      X, Y: Integer;
+      X, Y: Int;
       W: TWords;
       S: string;
     begin
@@ -1218,8 +1218,8 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
-      TRec = record A: TArr; D: array of Integer; end;
+      TArr = array[0..3] of Int;
+      TRec = record A: TArr; D: array of Int; end;
       TObj = class
       public
         Arr: TArr;
@@ -1227,15 +1227,15 @@ const
         function GetR: TRec;
         property R: TRec read GetR;
       end;
-    var Calls: Integer; Pool: array of TRec; Keep: TObj;
-    function F(N: Integer): TRec;
+    var Calls: Int; Pool: array of TRec; Keep: TObj;
+    function F(N: Int): TRec;
     begin
       Calls := Calls + 1;
       Result.A[1] := N; SetLength(Result.D, 2); Result.D[1] := N * 10;
     end;
     function TObj.GetR: TRec; begin Result := F(7); end;
     function MkArr: TArr; begin Calls := Calls + 1; Result[3] := 33; end;
-    function G: Integer; begin Calls := Calls + 1; Result := 1; end;
+    function G: Int; begin Calls := Calls + 1; Result := 1; end;
     function MkObj: TObj;
     begin
       Calls := Calls + 1;
@@ -1243,12 +1243,12 @@ const
       SetLength(Result.D, 2); Result.D[0] := 'x' + IntToStr(Calls); Result.D[1] := 'y';
     end;
     function GetKeep: TObj; begin Calls := Calls + 1; Result := Keep; end;
-    procedure Report(const AWhat: string; ASum: Integer);
+    procedure Report(const AWhat: string; ASum: Int);
     begin
       WriteLn(AWhat, ' sum=', ASum, ' calls=', Calls);
       Calls := 0;
     end;
-    var O: TObj; X, Sum: Integer; S, Acc: string;
+    var O: TObj; X, Sum: Int; S, Acc: string;
     begin
       O := TObj.Create();
       SetLength(Pool, 2); Pool[1].A[0] := 5;

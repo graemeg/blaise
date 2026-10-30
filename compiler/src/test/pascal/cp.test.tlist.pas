@@ -54,16 +54,16 @@ const
   SrcSizeOfInteger =
     '''
         program Prg;
-        var N: Integer;
+        var N: Int32;
         begin
-          N := SizeOf(Integer)
+          N := SizeOf(Int32)
         end.
         ''';
 
   SrcSizeOfInt64 =
     '''
         program Prg;
-        var N: Integer;
+        var N: Int;
         begin
           N := SizeOf(Int64)
         end.
@@ -72,7 +72,7 @@ const
   SrcNilToTypedPtr =
     '''
         program Prg;
-        var P: ^Integer;
+        var P: ^Int;
         begin
           P := nil
         end.
@@ -82,7 +82,7 @@ const
     '''
         program Prg;
         var
-          P: ^Integer;
+          P: ^Int;
           Q: Pointer;
         begin
           Q := GetMem(4);
@@ -96,8 +96,8 @@ const
         type
           TList<T> = class
             FData: ^T;
-            FCount: Integer;
-            FCapacity: Integer;
+            FCount: Int;
+            FCapacity: Int;
             procedure Add(Value: T);
             var
               Dest: ^T;
@@ -106,19 +106,19 @@ const
               Dest^ := Value;
               Self.FCount := Self.FCount + 1
             end;
-            function Get(AIndex: Integer): T;
+            function Get(AIndex: Int): T;
             var
               Src: ^T;
             begin
               Src := Self.FData + AIndex * SizeOf(T);
               Result := Src^
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         var
-          L: TList<Integer>;
+          L: TList<Int>;
         begin
-          L := TList<Integer>.Create();
+          L := TList<Int>.Create();
           L.Add(10);
           L.Add(20)
         end.
@@ -130,8 +130,8 @@ const
         type
           TList<T> = class
             FData: ^T;
-            FCount: Integer;
-            FCapacity: Integer;
+            FCount: Int;
+            FCapacity: Int;
             procedure Add(Value: T);
             var
               Dest: ^T;
@@ -140,20 +140,20 @@ const
               Dest^ := Value;
               Self.FCount := Self.FCount + 1
             end;
-            function Get(AIndex: Integer): T;
+            function Get(AIndex: Int): T;
             var
               Src: ^T;
             begin
               Src := Self.FData + AIndex * SizeOf(T);
               Result := Src^
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         var
-          L: TList<Integer>;
-          V: Integer;
+          L: TList<Int>;
+          V: Int;
         begin
-          L := TList<Integer>.Create();
+          L := TList<Int>.Create();
           L.Add(42);
           V := L.Get(0)
         end.
@@ -165,11 +165,11 @@ const
         type
           TList<T> = class
             FData: ^T;
-            FCount: Integer;
-            FCapacity: Integer;
+            FCount: Int;
+            FCapacity: Int;
             procedure Grow;
             var
-              NewCap: Integer;
+              NewCap: Int;
             begin
               if Self.FCapacity = 0 then
                 NewCap := 4
@@ -189,20 +189,20 @@ const
               Dest^ := Value;
               Self.FCount := Self.FCount + 1
             end;
-            function Get(AIndex: Integer): T;
+            function Get(AIndex: Int): T;
             var
               Src: ^T;
             begin
               Src := Self.FData + AIndex * SizeOf(T);
               Result := Src^
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         var
-          L: TList<Integer>;
-          V: Integer;
+          L: TList<Int>;
+          V: Int;
         begin
-          L := TList<Integer>.Create();
+          L := TList<Int>.Create();
           L.Add(10);
           L.Add(20);
           V := L.Get(0)

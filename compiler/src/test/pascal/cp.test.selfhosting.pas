@@ -82,11 +82,11 @@ const
         program P;
         type
           TA = class
-            FX: Integer;
+            FX: Int;
           end;
         type
           TB = class
-            FY: Integer;
+            FY: Int;
           end;
         begin
         end.
@@ -97,13 +97,13 @@ const
         program P;
         type
           TA = class
-            FX: Integer;
+            FX: Int;
           end;
         var
           A: TA;
         type
           TB = class
-            FY: Integer;
+            FY: Int;
           end;
         var
           B: TB;
@@ -115,10 +115,10 @@ const
     '''
         program P;
         var
-          N: Integer;
+          N: Int;
         type
           TA = class
-            FX: Integer;
+            FX: Int;
           end;
         begin
         end.
@@ -129,11 +129,11 @@ const
         program P;
         type
           TA = class
-            FX: Integer;
+            FX: Int;
           end;
         type
           TB = class
-            FY: Integer;
+            FY: Int;
           end;
         var
           A: TA;
@@ -148,7 +148,7 @@ const
   SrcParamCount =
     '''
         program P;
-        var N: Integer;
+        var N: Int32;
         begin
           N := ParamCount()
         end.
@@ -221,7 +221,7 @@ const
   SrcExec =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := Exec('echo hello')
         end.

@@ -186,7 +186,7 @@ begin
   Prog := ParseSrc(
     '''
         program Test;
-        function c_strlen(S: PChar): Integer; external 'c' name 'strlen';
+        function c_strlen(S: PChar): Int32; external 'c' name 'strlen';
         begin
         end.
         '''
@@ -215,7 +215,7 @@ begin
   Prog := ParseSrc(
     '''
         program Test;
-        function Bar: Integer; external;
+        function Bar: Int32; external;
         begin
         end.
         '''
@@ -237,7 +237,7 @@ begin
   Prog := ParseSrc(
     '''
         program Test;
-        function Bar: Integer; external name 'c_bar';
+        function Bar: Int32; external name 'c_bar';
         begin
         end.
         '''
@@ -259,7 +259,7 @@ begin
         unit MyLib;
         interface
         procedure Foo; external;
-        function Bar: Integer; external;
+        function Bar: Int32; external;
         implementation
         end.
         '''
@@ -310,8 +310,8 @@ begin
   Prog := ParseSrc(
     '''
         program Test;
-        function Bar: Integer; external;
-        var x: Integer;
+        function Bar: Int32; external;
+        var x: Int;
         begin
           x := Bar()
         end.
@@ -400,8 +400,8 @@ begin
   AssertEquals('Word FFI return zero-extended from 16 bits', '', AsmMissing(
     '''
         program Test;
-        function Foo: Word; external;
-        var v: Word;
+        function Foo: UInt16; external;
+        var v: UInt16;
         begin
           v := Foo();
           if Foo() <> 0 then
@@ -415,8 +415,8 @@ begin
   AssertEquals('SmallInt FFI return sign-extended from 16 bits', '', AsmMissing(
     '''
         program Test;
-        function Foo: SmallInt; external;
-        var v: SmallInt;
+        function Foo: Int16; external;
+        var v: Int16;
         begin
           v := Foo();
           if Foo() <> 0 then
@@ -430,8 +430,8 @@ const
   Src =
     '''
         program Test;
-        function Foo: Integer; external;
-        var v: Integer;
+        function Foo: Int32; external;
+        var v: Int32;
         begin
           v := Foo();
           if Foo() <> 0 then
@@ -458,8 +458,8 @@ begin
     AsmMissing(
     '''
         program Test;
-        function sinf(x: Single): Single; cdecl; external name 'sinf';
-        var s: Single;
+        function sinf(x: Float32): Float32; cdecl; external name 'sinf';
+        var s: Float32;
         begin
           s := sinf(1.5707964);
         end.
@@ -496,8 +496,8 @@ const
     '''
         program Test;
         type
-          TBox = record x, y, w: Integer; end;
-        procedure Take(b: TBox; n: Integer); cdecl; external name 'take';
+          TBox = record x, y, w: Int32; end;
+        procedure Take(b: TBox; n: Int32); cdecl; external name 'take';
         var b: TBox;
         begin
           b.x := 1; b.y := 2; b.w := 3;
@@ -525,7 +525,7 @@ const
     '''
         program Test;
         type
-          TVec = record x, y: Single; end;
+          TVec = record x, y: Float32; end;
         procedure Take(v: TVec); cdecl; external name 'take';
         var v: TVec;
         begin
@@ -536,7 +536,7 @@ const
     '''
         program Test;
         type
-          TMix = record x: Single; y: Double; end;
+          TMix = record x: Float32; y: Float64; end;
         procedure Take(v: TMix); cdecl; external name 'take';
         var v: TMix;
         begin
@@ -608,11 +608,11 @@ const
   Src = '''
     program P;
     type
-      TM8 = record X: Single; N: Integer; end;
-      TM16 = record A: Integer; F: Single; D: Double; end;
-      TII = record A: Integer; F: Single; B, C: Integer; end;
-      TDL = record X: Double; N: Int64; end;
-      TFF = record X, Y, Z: Single; end;
+      TM8 = record X: Float32; N: Int32; end;
+      TM16 = record A: Int32; F: Float32; D: Float64; end;
+      TII = record A: Int32; F: Float32; B, C: Int32; end;
+      TDL = record X: Float64; N: Int64; end;
+      TFF = record X, Y, Z: Float32; end;
     var A: TM8; B: TM16; C: TII; D: TDL; E: TFF;
     begin
     end.
@@ -646,7 +646,7 @@ const
     type
       TBig = 0..199;
       TJumbo = set of TBig;
-    function GetJ(N: Integer): TJumbo; external 'libjs';
+    function GetJ(N: Int32): TJumbo; external 'libjs';
     var J: TJumbo;
     begin
       J := GetJ(3)

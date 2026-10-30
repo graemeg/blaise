@@ -184,7 +184,7 @@ const
     program P;
     type
       TVec = record
-        X, Y: Integer;
+        X, Y: Int;
         class operator Negative(const A: TVec): TVec;
       end;
     class operator TVec.Negative(const A: TVec): TVec;
@@ -229,10 +229,10 @@ begin
     program P;
     type
       TVec = record
-        X: Integer;
-        class operator Subtract(const A: Integer; const B: TVec): TVec;
+        X: Int;
+        class operator Subtract(const A: Int; const B: TVec): TVec;
       end;
-    class operator TVec.Subtract(const A: Integer; const B: TVec): TVec;
+    class operator TVec.Subtract(const A: Int; const B: TVec): TVec;
     begin
       Result.X := A - B.X
     end;
@@ -291,9 +291,9 @@ const
   Src = '''
     unit U;
     interface
-    procedure F(A: Integer = -1; B: Double = -0.0);
+    procedure F(A: Int = -1; B: Float64 = -0.0);
     implementation
-    procedure F(A: Integer; B: Double); begin end;
+    procedure F(A: Int; B: Float64); begin end;
     end.
     ''';
 var

@@ -80,7 +80,7 @@ const
     uses Streams;
     var M: TMemoryInputStream;
         Buf: array[0..3] of Byte;
-        N: Integer;
+        N: Int;
     begin
       M := TMemoryInputStream.Create('ABC');
       try
@@ -104,8 +104,8 @@ const
     var Fout: TFileOutputStream;
         Fin:  TFileInputStream;
         Buf:  array[0..15] of Byte;
-        N:    Integer;
-        I:    Integer;
+        N:    Int;
+        I:    Int;
     begin
       for I := 0 to 4 do Buf[I] := 65 + I;
       Fout := TFileOutputStream.Create('/tmp/blaise_streams_e2e.txt');
@@ -166,7 +166,7 @@ const
         Fin:  TFileInputStream;
         Bin:  TBufferedInputStream;
         Buf:  array[0..31] of Byte;
-        N, I: Integer;
+        N, I: Int;
     begin
       for I := 0 to 9 do Buf[I] := 65 + I;
       Fout := TFileOutputStream.Create('/tmp/blaise_buf_e2e.txt');
@@ -201,7 +201,7 @@ const
         Bout: TBufferedOutputStream;
         Fin:  TFileInputStream;
         Buf:  array[0..7] of Byte;
-        N, I: Integer;
+        N, I: Int;
     begin
       Buf[0] := 1; Buf[1] := 2; Buf[2] := 3;
       Buf[3] := 4; Buf[4] := 5;
@@ -261,7 +261,7 @@ const
         Bin:  TBufferedInputStream;
         R:    TStreamReader;
         Line: string;
-        Count: Integer;
+        Count: Int;
     begin
       Fout := TFileOutputStream.Create('/tmp/blaise_text_e2e.txt');
       Bout := TBufferedOutputStream.Create(Fout);
@@ -346,7 +346,7 @@ const
     var B: TBuffer;
         Buf: array[0..15] of Byte;
         Dst: array[0..31] of Byte;
-        I, N: Integer;
+        I, N: Int;
     begin
       B := TBuffer.Create();
       try
@@ -371,7 +371,7 @@ const
     var Src, Dst: TBuffer;
         Buf: array[0..15] of Byte;
         Got: array[0..31] of Byte;
-        I, N: Integer;
+        I, N: Int;
     begin
       Src := TBuffer.Create();
       Dst := TBuffer.Create();
@@ -399,7 +399,7 @@ const
     uses Streams;
     var B: TBuffer;
         Buf: array[0..15] of Byte;
-        I: Integer;
+        I: Int;
     begin
       B := TBuffer.Create();
       try
@@ -523,7 +523,7 @@ const
         R:    TStreamReader;
         Buf:  array[0..15] of Byte;
         N:    Int64;
-        I:    Integer;
+        I:    Int;
     begin
       Wri := TFileOutputStream.Create('/tmp/blaise_copy_src_e2e.txt');
       try

@@ -2261,11 +2261,11 @@ const
     interface
     type
       TC = (cRed, cGreen, cBlue);
-      TB = array[boolean] of Integer;
-      TE = array[TC] of Integer;
-      TY = array[Byte] of Word;
+      TB = array[boolean] of Int32;
+      TE = array[TC] of Int32;
+      TY = array[Byte] of UInt16;
       TL = array[False..True] of Int64;
-      TM = array[Boolean, 0..1] of Integer;
+      TM = array[Boolean, 0..1] of Int32;
     implementation
     end.
     ''';
@@ -2312,10 +2312,10 @@ const
           PP = PNode;
           PNode = ^TNode;
           TNode = record
-            Val: Integer;
+            Val: Int32;
             Next: PP;
           end;
-          TCount = Integer;
+          TCount = Int32;
         var
           Head: PNode;
       end;

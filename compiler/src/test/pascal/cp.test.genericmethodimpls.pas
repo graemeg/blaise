@@ -71,9 +71,9 @@ const
         begin
           Result := Self.FVal
         end;
-        var B: TBox<Integer>;
+        var B: TBox<Int>;
         begin
-          B := TBox<Integer>.Create()
+          B := TBox<Int>.Create()
         end.
         ''';
 
@@ -93,9 +93,9 @@ const
               Result := Self.FVal
             end;
           end;
-        var B: TBox<Integer>;
+        var B: TBox<Int>;
         begin
-          B := TBox<Integer>.Create()
+          B := TBox<Int>.Create()
         end.
         ''';
 

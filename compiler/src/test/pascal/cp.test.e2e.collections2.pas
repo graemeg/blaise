@@ -100,10 +100,10 @@ const
     type
       TObjectList = class
         FData:     ^Pointer;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        var OldCap, NewCap: Integer;
+        var OldCap, NewCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 4
@@ -111,7 +111,7 @@ const
           Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Pointer));
           Self.FCapacity := NewCap
         end;
-        function Add(AObject: Pointer): Integer;
+        function Add(AObject: Pointer): Int;
         var Dest: ^Pointer;
         begin
           if Self.FCount = Self.FCapacity then Self.Grow();
@@ -120,14 +120,14 @@ const
           Self.FCount := Self.FCount + 1;
           Result      := Self.FCount - 1
         end;
-        function Get(AIndex: Integer): Pointer;
+        function Get(AIndex: Int): Pointer;
         var Src: ^Pointer;
         begin
           Src    := Self.FData + AIndex * SizeOf(Pointer);
           Result := Src^
         end;
-        procedure Delete(AIndex: Integer);
-        var I: Integer; Dst, Src: ^Pointer;
+        procedure Delete(AIndex: Int);
+        var I: Int; Dst, Src: ^Pointer;
         begin
           I := AIndex;
           while I < Self.FCount - 1 do
@@ -139,7 +139,7 @@ const
           end;
           Self.FCount := Self.FCount - 1
         end;
-        property Count: Integer read FCount;
+        property Count: Int read FCount;
       end;
     var
       L:  TObjectList;
@@ -162,10 +162,10 @@ const
     type
       TObjectList = class
         FData:     ^Pointer;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        var OldCap, NewCap: Integer;
+        var OldCap, NewCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 4
@@ -173,7 +173,7 @@ const
           Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Pointer));
           Self.FCapacity := NewCap
         end;
-        function Add(AObject: Pointer): Integer;
+        function Add(AObject: Pointer): Int;
         var Dest: ^Pointer;
         begin
           if Self.FCount = Self.FCapacity then Self.Grow();
@@ -182,8 +182,8 @@ const
           Self.FCount := Self.FCount + 1;
           Result      := Self.FCount - 1
         end;
-        procedure Delete(AIndex: Integer);
-        var I: Integer; Dst, Src: ^Pointer;
+        procedure Delete(AIndex: Int);
+        var I: Int; Dst, Src: ^Pointer;
         begin
           I := AIndex;
           while I < Self.FCount - 1 do
@@ -195,7 +195,7 @@ const
           end;
           Self.FCount := Self.FCount - 1
         end;
-        property Count: Integer read FCount;
+        property Count: Int read FCount;
       end;
     var L: TObjectList;
     begin
@@ -213,16 +213,16 @@ const
         program P;
         type
           TObjectList = class
-            FData: ^Pointer; FCount: Integer; FCapacity: Integer;
+            FData: ^Pointer; FCount: Int; FCapacity: Int;
             procedure Grow;
-            var OldCap, NewCap: Integer;
+            var OldCap, NewCap: Int;
             begin
               OldCap := Self.FCapacity;
               if OldCap = 0 then NewCap := 4 else NewCap := OldCap * 2;
               Self.FData := ReallocMem(Self.FData, NewCap * SizeOf(Pointer));
               Self.FCapacity := NewCap
             end;
-            function Add(AObject: Pointer): Integer;
+            function Add(AObject: Pointer): Int;
             var Dest: ^Pointer;
             begin
               if Self.FCount = Self.FCapacity then Self.Grow();
@@ -236,13 +236,13 @@ const
               FreeMem(Self.FData);
               Self.FData := nil; Self.FCount := 0; Self.FCapacity := 0
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
           TStringList = class
             FStrings: ^string; FObjects: ^Pointer;
-            FCount: Integer; FCapacity: Integer;
+            FCount: Int; FCapacity: Int;
             procedure Grow;
-            var OldCap, NewCap: Integer;
+            var OldCap, NewCap: Int;
             begin
               OldCap := Self.FCapacity;
               if OldCap = 0 then NewCap := 4 else NewCap := OldCap * 2;
@@ -253,7 +253,7 @@ const
               Self.FCapacity := NewCap
             end;
             procedure Destroy;
-            var I: Integer; Ptr: ^string;
+            var I: Int; Ptr: ^string;
             begin
               I := 0;
               while I < Self.FCount do
@@ -264,7 +264,7 @@ const
               Self.FStrings := nil; Self.FObjects := nil;
               Self.FCount := 0; Self.FCapacity := 0
             end;
-            function Add(S: string): Integer;
+            function Add(S: string): Int;
             var StrP: ^string; ObjP: ^Pointer;
             begin
               if Self.FCount = Self.FCapacity then Self.Grow();
@@ -273,12 +273,12 @@ const
               StrP^ := S; ObjP^ := nil;
               Result := Self.FCount; Self.FCount := Self.FCount + 1
             end;
-            function Get(AIndex: Integer): string;
+            function Get(AIndex: Int): string;
             var Ptr: ^string;
             begin
               Ptr := Self.FStrings + AIndex * SizeOf(string); Result := Ptr^
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         var OL: TObjectList; SL: TStringList;
         begin
@@ -339,21 +339,21 @@ const
     type
       THolder = class
       public
-        Ints:  TDictionary<string, Integer>;
+        Ints:  TDictionary<string, Int>;
         Bools: TDictionary<string, Boolean>;
         procedure Fill;
-        function Total: Integer;
+        function Total: Int;
       end;
     implementation
     procedure THolder.Fill;
     begin
-      Self.Ints  := TDictionary<string, Integer>.Create();
+      Self.Ints  := TDictionary<string, Int>.Create();
       Self.Bools := TDictionary<string, Boolean>.Create();
       Self.Ints.Add('a', 10);
       Self.Ints.Add('b', 20);
       Self.Bools.Add('x', True)
     end;
-    function THolder.Total: Integer;
+    function THolder.Total: Int;
     begin
       Result := Self.Ints.Count + Self.Bools.Count
     end;
@@ -398,20 +398,20 @@ const
     type
       THolder = class
       public
-        D: TDictionary<string, Integer>;
+        D: TDictionary<string, Int>;
         procedure Init;
         // Look receives Key as a BORROWED const param and passes it BY VALUE
         // into the dictionary lookups — the exact FFrame.TryGetValue(const
         // AName) shape that over-released on arm64.
-        function Look(const Key: string): Integer;
+        function Look(const Key: string): Int;
       end;
     implementation
     procedure THolder.Init;
     begin
-      Self.D := TDictionary<string, Integer>.Create()
+      Self.D := TDictionary<string, Int>.Create()
     end;
-    function THolder.Look(const Key: string): Integer;
-    var V: Integer;
+    function THolder.Look(const Key: string): Int;
+    var V: Int;
     begin
       Result := -1;
       if Self.D.ContainsKey(Key) then
@@ -456,11 +456,11 @@ const
     program P;
     uses Generics.Collections;
     var
-      D: TDictionary<string, Integer>;
-      V, I: Integer;
+      D: TDictionary<string, Int>;
+      V, I: Int;
       Acc: string;
     begin
-      D := TDictionary<string, Integer>.Create();
+      D := TDictionary<string, Int>.Create();
       D.Add('key_7', 99);
       Acc := '';
       for I := 0 to 3 do
@@ -538,7 +538,7 @@ const
   Src = '''
     program P;
     uses classes, contnrs;
-    var SL: TStringList; OL: TObjectList; i: Integer;
+    var SL: TStringList; OL: TObjectList; i: Int;
     begin
       SL := TStringList.Create;
       SL.Add('alpha');
@@ -573,19 +573,19 @@ const
     program P;
     type
       IFoo = interface
-        function Value: Integer;
+        function Value: Int;
       end;
       TFoo = class(IFoo)
-        FN: Integer;
-        constructor Create(AN: Integer);
+        FN: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
-        function Value: Integer;
+        function Value: Int;
       end;
-    constructor TFoo.Create(AN: Integer);
+    constructor TFoo.Create(AN: Int);
     begin FN := AN end;
     destructor TFoo.Destroy;
     begin WriteLn('d', FN) end;
-    function TFoo.Value: Integer;
+    function TFoo.Value: Int;
     begin Result := FN end;
     var
       Slot: ^IFoo;
@@ -613,7 +613,7 @@ const
   SrcPointerWriteDynArray = '''
     program P;
     type
-      TArr = array of Integer;
+      TArr = array of Int;
     var
       Slot: ^TArr;
     procedure Fill;
@@ -661,19 +661,19 @@ const
     program P;
     type
       IFoo = interface
-        function Value: Integer;
+        function Value: Int;
       end;
       TFoo = class(IFoo)
-        FN: Integer;
-        constructor Create(AN: Integer);
+        FN: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
-        function Value: Integer;
+        function Value: Int;
       end;
-    constructor TFoo.Create(AN: Integer);
+    constructor TFoo.Create(AN: Int);
     begin FN := AN end;
     destructor TFoo.Destroy;
     begin WriteLn('d', FN) end;
-    function TFoo.Value: Integer;
+    function TFoo.Value: Int;
     begin Result := FN end;
     var
       Slot: ^IFoo;
@@ -763,19 +763,19 @@ const
     uses generics.collections;
     type
       IFoo = interface
-        function Value: Integer;
+        function Value: Int;
       end;
       TFoo = class(IFoo)
-        FN: Integer;
-        constructor Create(AN: Integer);
+        FN: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
-        function Value: Integer;
+        function Value: Int;
       end;
-    constructor TFoo.Create(AN: Integer);
+    constructor TFoo.Create(AN: Int);
     begin FN := AN end;
     destructor TFoo.Destroy;
     begin WriteLn('d', FN) end;
-    function TFoo.Value: Integer;
+    function TFoo.Value: Int;
     begin Result := FN end;
     var
       L: TList<IFoo>;
@@ -804,21 +804,21 @@ const
     program P;
     type
       IFoo = interface
-        function Value: Integer;
+        function Value: Int;
       end;
       TFoo = class(IFoo)
-        FN: Integer;
-        constructor Create(AN: Integer);
-        function Value: Integer;
+        FN: Int;
+        constructor Create(AN: Int);
+        function Value: Int;
       end;
       TBox<T> = class
         FItem: T;
         procedure Put(const A: T);
         function Get: T;
       end;
-    constructor TFoo.Create(AN: Integer);
+    constructor TFoo.Create(AN: Int);
     begin FN := AN end;
-    function TFoo.Value: Integer;
+    function TFoo.Value: Int;
     begin Result := FN end;
     procedure TBox<T>.Put(const A: T);
     begin FItem := A end;

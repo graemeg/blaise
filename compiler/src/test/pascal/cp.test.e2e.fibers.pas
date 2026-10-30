@@ -62,7 +62,7 @@ const
       MainF, FA, FB: PFiber;
     procedure ProcA(AArg: Pointer);
     var
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 2 do
       begin
@@ -73,7 +73,7 @@ const
     end;
     procedure ProcB(AArg: Pointer);
     var
-      J: Integer;
+      J: Int;
     begin
       J := 0;
       while True do
@@ -104,7 +104,7 @@ const
       B1, B2: Pointer;
     procedure Work(AArg: Pointer);
     begin
-      WriteLn('W', Integer(AArg));
+      WriteLn('W', Int32(AArg));
     end;
     begin
       MainF := FiberCreateMain();
@@ -130,13 +130,13 @@ const
     '''
     program fiberguard;
     uses async.fibers.context;
-    function fork: Integer; external name 'fork';
-    function waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer;
+    function fork: Int32; external name 'fork';
+    function waitpid(Pid: Int32; Status: Pointer; Options: Int32): Int32;
       external name 'waitpid';
-    procedure _exit(Code: Integer); external name '_exit';
+    procedure _exit(Code: Int32); external name '_exit';
     var
       F: PFiber;
-      Pid, Status, Sig: Integer;
+      Pid, Status, Sig: Int;
       P: ^Byte;
     begin
       F := FiberSpawn(nil, nil, 0);

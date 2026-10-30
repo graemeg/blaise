@@ -462,7 +462,7 @@ begin
       program P;
       type
         TInner = class
-          N: Integer;
+          N: Int;
         end;
         TOuter = class
           Inner: TInner;
@@ -493,8 +493,8 @@ var
 begin
   L := TLexer.Create('''
       program P;
-      function Twice(X: Integer): Integer;
-      var H: Integer;
+      function Twice(X: Int): Int;
+      var H: Int;
       begin
         H := X * 2;
         Result := H;
@@ -547,13 +547,13 @@ var
 begin
   L := TLexer.Create('''
       program P;
-      procedure Twice(X: Integer; var R: Integer);
-      var H: Integer;
+      procedure Twice(X: Int; var R: Int);
+      var H: Int;
       begin
         H := X * 2;
         R := H;
       end;
-      var G: Integer;
+      var G: Int;
       begin
         Twice(4, G);
         WriteLn(G);
@@ -609,12 +609,12 @@ const
         procedure M;
       end;
     procedure Other;
-    var Q: Integer;
+    var Q: Int;
     begin
       Q := 7; WriteLn(Q)
     end;
     procedure Outer;
-    var X: Integer;
+    var X: Int;
       procedure Inner;
       begin
         WriteLn(X)
@@ -699,7 +699,7 @@ var
 begin
   Asm_ := GenAsm('''
       program P;
-      function Twice(X: Integer): Integer;
+      function Twice(X: Int): Int;
       begin
         Result := X * 2;
       end;
@@ -724,9 +724,9 @@ begin
   L := TLexer.Create('''
       program P;
       type
-        TPt = record X, Y: Integer; end;
+        TPt = record X, Y: Int; end;
         TW = class
-          N: Integer;
+          N: Int;
           procedure Track(Q: TPt);
         end;
       procedure TW.Track(Q: TPt);
@@ -773,8 +773,8 @@ procedure TNativeConstArgTests.TestMethodFloatArg_LoadedIntoXmm;
 const
   Src = '''
       program P;
-      type TX = class procedure Take(d: Double); end;
-      procedure TX.Take(d: Double); begin end;
+      type TX = class procedure Take(d: Float64); end;
+      procedure TX.Take(d: Float64); begin end;
       var x: TX;
       begin
         x := TX.Create();
@@ -796,7 +796,7 @@ procedure TNativeConstArgTests.TestInlineAsm_VerbatimBody_NoPrologue;
 const
   Src = '''
       program P;
-      function GetFortyTwo: Integer; assembler; nostackframe;
+      function GetFortyTwo: Int32; assembler; nostackframe;
       asm
           movl $42, %eax
           ret
@@ -824,14 +824,14 @@ const
       program P;
       type
         TW = class
-          function C(a, b, c, d, e, f, g: Integer): Integer;
-          function D(): Integer;
+          function C(a, b, c, d, e, f, g: Int): Int;
+          function D(): Int;
         end;
-      function TW.C(a, b, c, d, e, f, g: Integer): Integer;
+      function TW.C(a, b, c, d, e, f, g: Int): Int;
       begin
         Result := a;
       end;
-      function TW.D(): Integer;
+      function TW.D(): Int;
       begin
         Result := C(1, 2, 3, 4, 5, 6, 7);
       end;

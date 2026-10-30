@@ -85,7 +85,7 @@ const
         Result.B := 22;
         Result.C := 33;
       end;
-      function UseRec(R: TR; X: Integer): Int64;
+      function UseRec(R: TR; X: Int): Int64;
       begin
         Result := R.A + R.C + X;
       end;
@@ -106,7 +106,7 @@ const
         Result.B := 200;
         Result.C := 300;
       end;
-      function Use7(A, B, C, D, E, F: Integer; R: TR): Int64;
+      function Use7(A, B, C, D, E, F: Int; R: TR): Int64;
       begin
         Result := A + B + C + D + E + F + R.B;
       end;
@@ -165,12 +165,12 @@ const
   SrcProcPtrArgCall = '''
       program P;
       type
-        TFn = procedure(X: Integer);
-      procedure Show(X: Integer);
+        TFn = procedure(X: Int);
+      procedure Show(X: Int);
       begin
         WriteLn(X);
       end;
-      function Bump(X: Integer): Integer;
+      function Bump(X: Int): Int;
       begin
         Result := X + 1;
       end;
@@ -184,16 +184,16 @@ const
   SrcMethodPtrArgCall = '''
       program P;
       type
-        TMeth = procedure(X: Integer) of object;
+        TMeth = procedure(X: Int) of object;
         TObj = class
         public
-          procedure Show(X: Integer);
+          procedure Show(X: Int);
         end;
-      procedure TObj.Show(X: Integer);
+      procedure TObj.Show(X: Int);
       begin
         WriteLn(X);
       end;
-      function Bump(X: Integer): Integer;
+      function Bump(X: Int): Int;
       begin
         Result := X + 1;
       end;
@@ -284,7 +284,7 @@ const
 
   SrcSeventhSlot = '''
       program P;
-      procedure Show7(A, B, C, D, E, F: Integer; const S: string);
+      procedure Show7(A, B, C, D, E, F: Int; const S: string);
       begin
         WriteLn(A + B + C + D + E + F);
         WriteLn(S);
@@ -472,10 +472,10 @@ const
       type
         TWorker = class
         public
-          procedure Fill(A, B, C, D, E: Integer; out S: string);
+          procedure Fill(A, B, C, D, E: Int; out S: string);
           procedure Run(out S: string);
         end;
-      procedure TWorker.Fill(A, B, C, D, E: Integer; out S: string);
+      procedure TWorker.Fill(A, B, C, D, E: Int; out S: string);
       begin
         S := 'sum=' + IntToStr(A + B + C + D + E);
       end;
@@ -497,7 +497,7 @@ const
       program P;
       var
         S: string;
-        I, N: Integer;
+        I, N: Int;
       begin
         S := 'a,b,c';
         N := 0;

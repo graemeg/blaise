@@ -223,7 +223,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Double;
+    var R: Float64;
     begin
       R := Sqrt(4.0);
       WriteLn(DoubleToStr(R))
@@ -240,7 +240,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Double;
+    var R: Float64;
     begin
       R := Sqrt(0.0);
       WriteLn(DoubleToStr(R))
@@ -261,7 +261,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Ceil(2.3);
       WriteLn(IntToStr(R))
@@ -278,7 +278,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Ceil(-2.7);
       WriteLn(IntToStr(R))
@@ -295,7 +295,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Floor(2.9);
       WriteLn(IntToStr(R))
@@ -312,7 +312,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Floor(-2.3);
       WriteLn(IntToStr(R))
@@ -328,7 +328,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(2.5);
       WriteLn(IntToStr(R))
@@ -342,7 +342,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(-2.5);
       WriteLn(IntToStr(R))
@@ -357,9 +357,9 @@ begin
     '''
     program P;
     const
-      V: array[0..12] of Double = (0.5, 1.5, 2.5, 3.5, 6.5, -0.5, -1.5,
+      V: array[0..12] of Float64 = (0.5, 1.5, 2.5, 3.5, 6.5, -0.5, -1.5,
         -2.5, -3.5, 2.4, 2.6, -2.6, 0.49999999999999994);
-    var I: Integer; S: Single; D: Double; Q: Int64;
+    var I: Int; S: Float32; D: Float64; Q: Int64;
     begin
       for I := 0 to 12 do Write(Round(V[I]), ' ');
       WriteLn();
@@ -379,7 +379,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: Single; I: Integer;
+    var D: Float64; S: Float32; I: Int;
     begin
       D := 40000000000.5;
       WriteLn(Round(D));
@@ -400,7 +400,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: Single; I: Integer;
+    var D: Float64; S: Float32; I: Int;
     begin
       D := 40000000000.5;
       WriteLn(Ceil(D));
@@ -424,7 +424,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Trunc(3.9);
       WriteLn(IntToStr(R))
@@ -441,7 +441,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Trunc(-3.9);
       WriteLn(IntToStr(R))
@@ -462,7 +462,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Ln(2.71828182845904523536));
       WriteLn(IntToStr(R))
@@ -479,7 +479,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Log2(8.0));
       WriteLn(IntToStr(R))
@@ -496,7 +496,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Log10(100.0));
       WriteLn(IntToStr(R))
@@ -517,7 +517,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Power(3.0, 2.0));
       WriteLn(IntToStr(R))
@@ -534,7 +534,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Power(5.0, 0.0));
       WriteLn(IntToStr(R))
@@ -555,7 +555,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Sin(0.0));
       WriteLn(IntToStr(R))
@@ -572,7 +572,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Cos(0.0));
       WriteLn(IntToStr(R))
@@ -589,7 +589,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Tan(0.0));
       WriteLn(IntToStr(R))
@@ -606,7 +606,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(ArcTan(0.0));
       WriteLn(IntToStr(R))
@@ -623,7 +623,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Double;
+    var R: Float64;
     begin
       { ArcTan2(1, 1) = pi/4, roughly 0.785 -- verify positive and < 1 }
       R := ArcTan2(1.0, 1.0);
@@ -645,7 +645,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(ArcSin(0.0));
       WriteLn(IntToStr(R))
@@ -662,7 +662,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(ArcCos(1.0));
       WriteLn(IntToStr(R))
@@ -679,7 +679,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Sinh(0.0));
       WriteLn(IntToStr(R))
@@ -696,7 +696,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Cosh(0.0));
       WriteLn(IntToStr(R))
@@ -713,7 +713,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var R: Integer;
+    var R: Int;
     begin
       R := Round(Tanh(0.0));
       WriteLn(IntToStr(R))
@@ -734,7 +734,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var X: Double;
+    var X: Float64;
     begin
       X := 0.0 / 0.0;
       if IsNaN(X) then WriteLn('yes') else WriteLn('no')
@@ -751,7 +751,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var X: Double;
+    var X: Float64;
     begin
       X := 42.0;
       if IsNaN(X) then WriteLn('yes') else WriteLn('no')
@@ -768,7 +768,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var X: Double;
+    var X: Float64;
     begin
       X := 1.0 / 0.0;
       if IsInfinite(X) then WriteLn('yes') else WriteLn('no')
@@ -785,7 +785,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var X: Double;
+    var X: Float64;
     begin
       X := 42.0;
       if IsInfinite(X) then WriteLn('yes') else WriteLn('no')
@@ -806,7 +806,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var A, B: Integer;
+    var A, B: Int;
     begin A := 7; B := 3; WriteLn(IntToStr(Min(A, B))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -820,7 +820,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var A, B: Integer;
+    var A, B: Int;
     begin A := 7; B := 3; WriteLn(IntToStr(Max(A, B))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -834,7 +834,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var A, B: Integer;
+    var A, B: Int;
     begin A := 5; B := 5; WriteLn(IntToStr(Min(A, B))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -852,7 +852,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var A, B, R: Double;
+    var A, B, R: Float64;
     begin
       A := 1.5;
       B := 2.5;
@@ -871,7 +871,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var A, B, R: Double;
+    var A, B, R: Float64;
     begin
       A := 1.5;
       B := 2.5;
@@ -894,7 +894,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var X: Integer;
+    var X: Int;
     begin X := 42; WriteLn(IntToStr(Sign(X))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -908,7 +908,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var X: Integer;
+    var X: Int;
     begin X := -7; WriteLn(IntToStr(Sign(X))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -922,7 +922,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var X: Integer;
+    var X: Int;
     begin X := 0; WriteLn(IntToStr(Sign(X))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -980,7 +980,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Integer;
+    var V, Lo, Hi: Int;
     begin
       V := 5; Lo := 1; Hi := 10;
       if InRange(V, Lo, Hi) then WriteLn('yes') else WriteLn('no')
@@ -997,7 +997,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Integer;
+    var V, Lo, Hi: Int;
     begin
       V := 1; Lo := 1; Hi := 10;
       if InRange(V, Lo, Hi) then WriteLn('yes') else WriteLn('no')
@@ -1014,7 +1014,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Integer;
+    var V, Lo, Hi: Int;
     begin
       V := 11; Lo := 1; Hi := 10;
       if InRange(V, Lo, Hi) then WriteLn('yes') else WriteLn('no')
@@ -1035,7 +1035,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Integer;
+    var V, Lo, Hi: Int;
     begin V := 5; Lo := 1; Hi := 10; WriteLn(IntToStr(EnsureRange(V, Lo, Hi))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -1049,7 +1049,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Integer;
+    var V, Lo, Hi: Int;
     begin V := -3; Lo := 1; Hi := 10; WriteLn(IntToStr(EnsureRange(V, Lo, Hi))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -1063,7 +1063,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Integer;
+    var V, Lo, Hi: Int;
     begin V := 15; Lo := 1; Hi := 10; WriteLn(IntToStr(EnsureRange(V, Lo, Hi))) end.
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
@@ -1081,7 +1081,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var R: Integer;
+    var R: Int;
     begin
       { Pi is approximately 3.14159 -- Round gives 3 }
       R := Round(Pi);
@@ -1099,7 +1099,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var M: Int64; D: Double;
+    var M: Int64; D: Float64;
     begin
       M := 123456789012345;
       D := M * 1.0;
@@ -1117,7 +1117,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := 3.14159;
       WriteLn(DoubleToStr(D))
@@ -1149,7 +1149,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := -42.5;
       WriteLn(DoubleToStr(D))
@@ -1250,7 +1250,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: String;
+    var D: Float64; S: String;
     begin
       S := '3.14';
       D := StrToDouble(S);
@@ -1265,7 +1265,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: String;
+    var D: Float64; S: String;
     begin
       S := '-1.5';
       D := StrToDouble(S);
@@ -1280,7 +1280,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: String;
+    var D: Float64; S: String;
     begin
       S := '1e10';
       D := StrToDouble(S);
@@ -1295,7 +1295,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: String;
+    var D: Float64; S: String;
     begin
       S := '1e-10';
       D := StrToDouble(S);
@@ -1310,7 +1310,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: String;
+    var D: Float64; S: String;
     begin
       S := '1234567890.12345';
       D := StrToDouble(S);
@@ -1325,7 +1325,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double; S: String;
+    var D: Float64; S: String;
     begin
       S := '0';
       D := StrToDouble(S);
@@ -1340,7 +1340,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := StrToDouble(DoubleToStr(3.14159265358979));
       WriteLn(DoubleToStr(D))
@@ -1389,7 +1389,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := 4345;
       WriteLn(DoubleToStr(D))
@@ -1406,8 +1406,8 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var S: Single;
-        D: Double;
+    var S: Float32;
+        D: Float64;
     begin
       S := 42;
       D := S;
@@ -1426,7 +1426,7 @@ begin
     '''
     program P;
     var N: Int64;
-        D: Double;
+        D: Float64;
     begin
       N := 123456789;
       D := N;
@@ -1444,8 +1444,8 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var S: Single;
-        D: Double;
+    var S: Float32;
+        D: Float64;
     begin
       S := 3.5;
       D := S * 2.0;
@@ -1463,8 +1463,8 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var A, B, C: Single;
-        D: Double;
+    var A, B, C: Float32;
+        D: Float64;
     begin
       A := 1.5;
       B := 2.5;
@@ -1484,7 +1484,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var A, B: Single;
+    var A, B: Float32;
     begin
       A := 1.5;
       B := 2.5;
@@ -1505,7 +1505,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var X, Y, Z: Integer;
+    var X, Y, Z: Int;
     begin
       X := 3;
       Y := 10;
@@ -1526,7 +1526,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var X, Y: Integer; D: Double;
+    var X, Y: Int; D: Float64;
     begin
       X := 4;
       Y := 10;
@@ -1549,7 +1549,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := 3.14;
       WriteLn(D)
@@ -1566,7 +1566,7 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var S: Single;
+    var S: Float32;
     begin
       S := 1.5;
       WriteLn(S)
@@ -1584,9 +1584,9 @@ begin
     '''
     program P;
     var
-      d: Double;
-      s: Single;
-      i: Integer;
+      d: Float64;
+      s: Float32;
+      i: Int;
     begin
       i := 32;
       d := Tanh(i);
@@ -1607,16 +1607,16 @@ begin
     '''
     program P;
     var
-      d: Double;
-      s: Single;
-      i: Integer;
+      d: Float64;
+      s: Float32;
+      i: Int;
     begin
       i := 32;
-      d := Double(i);
-      s := Single(i);
+      d := Float64(i);
+      s := Float32(i);
       WriteLn(Round(d));
       WriteLn(Round(s * 2));
-      d := Tanh(Single(i));
+      d := Tanh(Float32(i));
       WriteLn(Round(d * 1000));
     end.
     ''', '32' + LE + '64' + LE + '1000' + LE, 0);
@@ -1684,7 +1684,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll('''
     program P;
-    const X: Double = 2 * 3;
+    const X: Float64 = 2 * 3;
     begin
       WriteLn(X)
     end.
@@ -1696,7 +1696,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll('''
     program P;
-    var Y: Double = 2 * 3;
+    var Y: Float64 = 2 * 3;
     begin
       WriteLn(Y)
     end.
@@ -1714,10 +1714,10 @@ begin
   AssertTrue('compile+run', CompileAndRun(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := 3.14159265358979;
-      D := Double(Single(D));
+      D := Float64(Float32(D));
       WriteLn(DoubleToStr(D))
     end.
     ''', Output, RCode));
@@ -1742,8 +1742,8 @@ begin
     '''
     program P;
     var
-      X: Integer;
-      R: Double;
+      X: Int;
+      R: Float64;
     begin
       X := 5;
       R := Power(3, X);
@@ -1759,7 +1759,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var X: Double;
+    var X: Float64;
     begin
       X := -2.5;
       WriteLn(DoubleToStr(Abs(X)));
@@ -1780,7 +1780,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var X: Single;
+    var X: Float32;
     begin
       X := -34.45;
       WriteLn(SingleToStr(Abs(X)));
@@ -1803,7 +1803,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var X: Single;
+    var X: Float32;
     begin
       X := 34.45;
       WriteLn(IntToStr(Trunc(StrToDouble(DoubleToStr(X)) * 1000000.0)))
@@ -1827,7 +1827,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var X: Single;
+    var X: Float32;
     begin
       X := -34.45;
       WriteLn(IntToStr(Trunc(StrToDouble(DoubleToStr(Abs(X))) * 1000000.0)))
@@ -1844,7 +1844,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := 34.45;
       WriteLn(SingleToStr(D))
@@ -1864,7 +1864,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var D: Double;
+    var D: Float64;
     begin
       D := -34.45;
       WriteLn(SingleToStr(Abs(D)))
@@ -1880,7 +1880,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var X, R: Single;
+    var X, R: Float32;
     begin
       X := 0.5;
       R := Sin(X);
@@ -1897,7 +1897,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    var X: Double;
+    var X: Float64;
     begin
       X := 1.0e300;
       WriteLn(IntToStr(Trunc(Sin(X) * 1000000.0)))
@@ -1915,10 +1915,10 @@ begin
     '''
     program P;
     const
-      C: array[0..2] of Double = (0.25, 0.5, 1.66666666666666019037e-01);
+      C: array[0..2] of Float64 = (0.25, 0.5, 1.66666666666666019037e-01);
     var
-      X: Double;
-      K: Integer;
+      X: Float64;
+      K: Int;
     begin
       K := 1;
       X := C[0] + C[K] * 2.0;
@@ -1937,7 +1937,7 @@ const
   Src = '''
     program P;
     uses Math;
-    var A, B, Z: Integer; X, Y: Double;
+    var A, B, Z: Int; X, Y: Float64;
     begin
       A := -3; B := 5; Z := 0;
       WriteLn(Min(A, B), ' ', Max(A, B));
@@ -1967,10 +1967,10 @@ const
   Src = '''
     program MathGaps;
     type
-      TR = record A, B: Integer; end;
+      TR = record A, B: Int; end;
       TH = procedure(const R: TR);
-    procedure Q(var V: Double; out W: Double);
-    var X: Double;
+    procedure Q(var V: Float64; out W: Float64);
+    var X: Float64;
     begin
       X := V;
       W := X * 2
@@ -1980,7 +1980,7 @@ const
       WriteLn(R.A, ' ', R.B)
     end;
     var
-      D, E: Double; S, T: Single; H: TH; V: TR; I: Integer;
+      D, E: Float64; S, T: Float32; H: TH; V: TR; I: Int;
     begin
       D := 1.25;
       Q(D, E);
@@ -1996,7 +1996,7 @@ const
       T := ArcSin(S); Write(T:0:4, ' ');
       T := ArcCos(S); WriteLn(T:0:4);
       I := 3;
-      WriteLn(Sin(I):0:4, ' ', Power(2, 10):0:0, ' ', Double(I):0:1, ' ', Single(I):0:1, ' ', (I / 2):0:1)
+      WriteLn(Sin(I):0:4, ' ', Power(2, 10):0:0, ' ', Float64(I):0:1, ' ', Float32(I):0:1, ' ', (I / 2):0:1)
     end.
     ''';
 begin
@@ -2013,23 +2013,23 @@ const
   SrcOk = '''
     program P;
     type TC = (cA, cB, cC);
-    var D: Double; I: Integer; E: TC;
+    var D: Float64; I: Int32; E: TC;
     begin
       D := 3.7; I := 7; E := cC;
       WriteLn(Trunc(D), ' ', Round(D), ' ', Trunc(I / 2), ' ',
-        Integer(E), ' ', Byte(I + 250), ' ', Double(I) / 2:0:1)
+        Int32(E), ' ', Byte(I + 250), ' ', Float64(I) / 2:0:1)
     end.
     ''';
   SrcCast = '''
     program P;
-    var D: Double; I: Integer;
+    var D: Float64; I: Int32;
     begin
-      D := 3.7; I := Integer(D); WriteLn(I)
+      D := 3.7; I := Int32(D); WriteLn(I)
     end.
     ''';
   SrcOrd = '''
     program P;
-    var I: Integer;
+    var I: Int32;
     begin
       I := 7; WriteLn(Ord(I / 2))
     end.
@@ -2037,14 +2037,14 @@ const
   SrcIntToStr = '''
     program P;
     uses SysUtils;
-    var D: Double;
+    var D: Float64;
     begin
       D := 2.5; WriteLn(IntToStr(D))
     end.
     ''';
   SrcXor = '''
     program P;
-    var I: Integer; D: Double;
+    var I: Int32; D: Float64;
     begin
       I := 1; D := 2.5; WriteLn(I xor D)
     end.
@@ -2076,9 +2076,9 @@ procedure TE2EMathTests.TestRun_FloatCompare_NaNAndOrdered;
 const
   Src = '''
     program P;
-    var Z, NaN, A, B: Double; S, T: Single;
+    var Z, NaN, A, B: Float64; S, T: Float32;
 
-    procedure Row(const ATag: string; X, Y: Double);
+    procedure Row(const ATag: string; X, Y: Float64);
     begin
       Write(ATag, ' ', X = Y, X <> Y, X < Y, X <= Y, X > Y, X >= Y, ' ');
       if X = Y then Write('E') else Write('e');

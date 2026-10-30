@@ -98,7 +98,7 @@ const
   SrcRepeatSingle =
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         begin
           I := 0;
           repeat
@@ -110,8 +110,8 @@ const
   SrcRepeatMulti =
     '''
         program P;
-        var I: Integer;
-        var S: Integer;
+        var I: Int;
+        var S: Int;
         begin
           I := 0;
           S := 0;
@@ -125,7 +125,7 @@ const
   SrcRepeatBadCond =
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         begin
           I := 0;
           repeat

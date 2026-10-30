@@ -36,7 +36,7 @@ implementation
 const
   SrcHello = '''
     program P;
-    var X: Integer;
+    var X: Int;
     begin
       X := 41;
       WriteLn(X + 1)
@@ -123,8 +123,8 @@ const
     registers; a debug build keeps them in their frame slots. }
   Src = '''
     program P;
-    function Sum(N: Integer): Integer;
-    var I, S: Integer;
+    function Sum(N: Int): Int;
+    var I, S: Int;
     begin
       S := 0;
       for I := 1 to N do

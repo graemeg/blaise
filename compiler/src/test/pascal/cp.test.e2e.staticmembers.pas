@@ -104,9 +104,9 @@ const Src =
   type
     TMath = class
     public
-      static function Square(X: Integer): Integer;
+      static function Square(X: Int): Int;
     end;
-  static function TMath.Square(X: Integer): Integer;
+  static function TMath.Square(X: Int): Int;
   begin
     Result := X * X;
   end;
@@ -126,11 +126,11 @@ const Src =
   type
     TCounter = class
     private static var
-      FN: Integer;
+      FN: Int;
     public
-      static function Next: Integer;
+      static function Next: Int;
     end;
-  static function TCounter.Next: Integer;
+  static function TCounter.Next: Int;
   begin
     FN := FN + 1;
     Result := FN;
@@ -155,7 +155,7 @@ const Src =
   type
     TCounter = class
     public static var
-      Total: Integer;
+      Total: Int;
       static procedure Bump;
     end;
   static procedure TCounter.Bump;
@@ -180,7 +180,7 @@ const Src =
   type
     TFoo = class
     public static var
-      GCount: Integer;
+      GCount: Int;
     end;
   begin
     TFoo.GCount := 5;
@@ -200,7 +200,7 @@ const Src =
   type
     TObj = class
     public
-      V: Integer;
+      V: Int;
     end;
     THolder = class
     public static var
@@ -236,7 +236,7 @@ const Src =
     end;
     TThing = class(IThing)
     public
-      Tag: Integer;
+      Tag: Int;
       procedure Speak;
     end;
     THolder = class
@@ -286,7 +286,7 @@ const Src =
   type
     TObj = class
     public
-      V: Integer;
+      V: Int;
       procedure Bump;
     end;
     THolder = class
@@ -328,16 +328,16 @@ const Src =
   type
     TObj = class
     public
-      V: Integer;
+      V: Int;
     end;
     THolder = class
     public static var
-      Counter: Integer;
+      Counter: Int;
       GObj: TObj;
     end;
-  procedure Bump(var X: Integer);
+  procedure Bump(var X: Int);
   begin X := X + 10 end;
-  var Ptr: ^Integer;
+  var Ptr: ^Int;
   begin
     THolder.Counter := 0;
     Inc(THolder.Counter);          { Inc: static var by reference }
@@ -363,12 +363,12 @@ const Src =
   type
     TRegistry = class
     private static var
-      FCounter: Integer;
+      FCounter: Int;
     public
-      static function NextId: Integer;
-      static property Counter: Integer read NextId;
+      static function NextId: Int;
+      static property Counter: Int read NextId;
     end;
-  static function TRegistry.NextId: Integer;
+  static function TRegistry.NextId: Int;
   begin
     FCounter := FCounter + 1;
     Result := FCounter;
@@ -394,7 +394,7 @@ const Src =
     private static var
       FInstance: TConfig;
     public
-      FValue: Integer;
+      FValue: Int;
       static function Instance: TConfig;
     end;
   static function TConfig.Instance: TConfig;
@@ -437,10 +437,10 @@ const Src =
   program P;
   type
     TPoint = record
-      X, Y: Integer;
-      static function Make(AX, AY: Integer): TPoint;
+      X, Y: Int;
+      static function Make(AX, AY: Int): TPoint;
     end;
-  static function TPoint.Make(AX, AY: Integer): TPoint;
+  static function TPoint.Make(AX, AY: Int): TPoint;
   begin
     Result.X := AX;
     Result.Y := AY;
@@ -466,7 +466,7 @@ const
         FName: string;
       public
         constructor Create(AName: string); overload;
-        static var Level: Integer;
+        static var Level: Int;
         procedure Log;
       end;
     constructor TLogger.Create(AName: string);
@@ -495,16 +495,16 @@ const
     program prg;
     type
       TVal = record
-        X: Integer;
-        static function Make(A: Integer): TVal;
-        static procedure Note(A: Integer);
+        X: Int;
+        static function Make(A: Int): TVal;
+        static procedure Note(A: Int);
       end;
-    static function TVal.Make(A: Integer): TVal;
+    static function TVal.Make(A: Int): TVal;
     begin
       WriteLn('make ', A);
       Result.X := A
     end;
-    static procedure TVal.Note(A: Integer);
+    static procedure TVal.Note(A: Int);
     begin
       WriteLn('note ', A)
     end;
@@ -537,8 +537,8 @@ begin
   AssertLeakFreeOnAll(
     '''
     program P;
-    type THolder = class static var DA: array of Integer; end;
-    var Local: array of Integer; L: Integer;
+    type THolder = class static var DA: array of Int; end;
+    var Local: array of Int; L: Int;
     begin
       SetLength(Local, 3);
       THolder.DA := Local;
@@ -604,18 +604,18 @@ const
     type
       TC = class
       private static var
-        FA: array[0..3] of Integer;
+        FA: array[0..3] of Int;
       public
-        static function GetA(I: Integer): Integer;
+        static function GetA(I: Int): Int;
         static function GetS(const K: String): String;
-        static property A[I: Integer]: Integer read GetA;
+        static property A[I: Int]: Int read GetA;
         static property S[K: String]: String read GetS;
         procedure Run;
       end;
-    static function TC.GetA(I: Integer): Integer; begin Result := FA[I] + I end;
+    static function TC.GetA(I: Int): Int; begin Result := FA[I] + I end;
     static function TC.GetS(const K: String): String; begin Result := K + '!' end;
     procedure TC.Run; begin WriteLn(TC.A[1], ' ', TC.S['in']) end;
-    var X: Integer; Str: String; O: TC;
+    var X: Int; Str: String; O: TC;
     begin
       X := TC.A[2];
       Str := TC.S['k'];
@@ -635,7 +635,7 @@ const
     program k;
     type
       TBig = record A, B, C: Int64; S: string; end;
-      TKFn = reference to function(A: Integer): Integer;
+      TKFn = reference to function(A: Int): Int;
       IThing = interface
         function Name(): string;
       end;
@@ -660,7 +660,7 @@ const
     function TC.GetT(): IThing; var C: TC; begin C := TC.Create(); C.FN := 'base'; Result := C; end;
     procedure TC.Touch(); begin end;
     static function TC.GetSB(): TBig; begin Result.S := 'sb' + IntToStr(1); Result.B := 9; end;
-    static function TC.GetSF(): TKFn; begin Result := function(A: Integer): Integer begin Result := A * 7; end; end;
+    static function TC.GetSF(): TKFn; begin Result := function(A: Int): Int begin Result := A * 7; end; end;
     function TD.GetT(): IThing; begin inherited GetT(); end;
     procedure TD.Touch(); begin inherited GetT(); end;
     procedure Show(const B: TBig); begin WriteLn('show ', B.S, ' ', B.B); end;
@@ -698,25 +698,25 @@ const
   Src = '''
     program P;
     type
-      TIA = array of Integer;
+      TIA = array of Int;
       TItems = class
-        FData: array[0..3] of Integer;
-        function GetItem(I: Integer): Integer;
-        procedure SetItem(I: Integer; V: Integer);
-        property Items[I: Integer]: Integer read GetItem write SetItem; default;
+        FData: array[0..3] of Int;
+        function GetItem(I: Int): Int;
+        procedure SetItem(I: Int; V: Int);
+        property Items[I: Int]: Int read GetItem write SetItem; default;
       end;
       TC = class
         static var V: TIA;
-        static var S: array[0..2] of Integer;
+        static var S: array[0..2] of Int;
         static var Names: array of string;
         static var Box: TItems;
         static procedure Show;
       end;
-    function TItems.GetItem(I: Integer): Integer;
+    function TItems.GetItem(I: Int): Int;
     begin
       Result := FData[I];
     end;
-    procedure TItems.SetItem(I: Integer; V: Integer);
+    procedure TItems.SetItem(I: Int; V: Int);
     begin
       FData[I] := V;
     end;
@@ -725,7 +725,7 @@ const
       WriteLn(V[0], ' ', S[2], ' ', Names[1]);
     end;
     var
-      X: Integer;
+      X: Int;
       N: string;
     begin
       SetLength(TC.V, 2);
@@ -765,27 +765,27 @@ procedure TE2EStaticMembersTests.TestRun_StaticVar_BareWritesInsideMethods;
 const
   Decls = '''
     type
-      TPt = record X, Y: Integer; end;
+      TPt = record X, Y: Int; end;
       THost = class
       private static var
-        FSArr: array[0..3] of Integer;
+        FSArr: array[0..3] of Int;
         FDyn: array of string;
         FPt: TPt;
-        FN: Integer;
+        FN: Int;
       public
-        static procedure Put(I, V: Integer);
-        static function Take(I: Integer): Integer;
+        static procedure Put(I, V: Int);
+        static function Take(I: Int): Int;
         procedure Fill;
-        function Sum: Integer;
+        function Sum: Int;
       end;
     ''';
   Impl = '''
-    static procedure THost.Put(I, V: Integer);
+    static procedure THost.Put(I, V: Int);
     begin
       FSArr[I] := V;
       FN := FN + 1;
     end;
-    static function THost.Take(I: Integer): Integer;
+    static function THost.Take(I: Int): Int;
     begin
       Result := FSArr[I];
     end;
@@ -798,7 +798,7 @@ const
       FPt.Y := FPt.X + 1;
       FSArr[3] := 40;
     end;
-    function THost.Sum: Integer;
+    function THost.Sum: Int;
     begin
       Result := FSArr[0] + FSArr[3] + FPt.X + FPt.Y + Length(FDyn[1]) + FN;
     end;
@@ -842,12 +842,12 @@ const
       private static var
         FSS: string;
       public
-        static function GetIx(I: Integer): Integer;
+        static function GetIx(I: Int): Int;
         static procedure SetSS(const AV: string);
         static function GetSS: string;
       end;
     procedure THost.Dummy; begin end;
-    static function THost.GetIx(I: Integer): Integer; begin Result := I * 10; end;
+    static function THost.GetIx(I: Int): Int; begin Result := I * 10; end;
     static procedure THost.SetSS(const AV: string); begin FSS := AV; end;
     static function THost.GetSS: string; begin Result := FSS; end;
     var
@@ -875,13 +875,13 @@ const
       THost = class
       public
         procedure Dummy;
-        static function GetSD: Double;
-        static property SD: Double read GetSD;
+        static function GetSD: Float64;
+        static property SD: Float64 read GetSD;
       end;
     procedure THost.Dummy; begin end;
-    static function THost.GetSD: Double; begin Result := 2.5; end;
+    static function THost.GetSD: Float64; begin Result := 2.5; end;
     var
-      D: Double;
+      D: Float64;
     begin
       WriteLn(THost.SD:0:1);
       D := THost.SD + 1.0;
@@ -902,8 +902,8 @@ const
     program P;
     type
       TItem = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
       THost = class
@@ -916,7 +916,7 @@ const
         static function GetSO: TItem;
         static property SO: TItem read GetSO;
       end;
-    constructor TItem.Create(AN: Integer); begin N := AN; end;
+    constructor TItem.Create(AN: Int); begin N := AN; end;
     destructor TItem.Destroy; begin WriteLn('free ', N); end;
     procedure THost.Dummy; begin end;
     static procedure THost.SetSO(AV: TItem); begin FSO := AV; end;
@@ -954,8 +954,8 @@ const
     uses SysUtils;
     type
       TItem = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
       TPair = record A, B: Int64; end;
@@ -963,42 +963,42 @@ const
       private static var
         FSS: string;
         FSO: TItem;
-        FSD: Double;
+        FSD: Float64;
         FSP: TPair;
-        FArr: array[0..3] of Integer;
-        FFI: Integer;
+        FArr: array[0..3] of Int;
+        FFI: Int;
       public
         procedure Inside;
         static function GetSS: string;
         static procedure SetSS(const AV: string);
         static function GetSO: TItem;
         static procedure SetSO(AV: TItem);
-        static function GetSD: Double;
-        static procedure SetSD(AV: Double);
+        static function GetSD: Float64;
+        static procedure SetSD(AV: Float64);
         static function GetSP: TPair;
         static procedure SetSP(const AV: TPair);
-        static function GetIx(I: Integer): Integer;
-        static procedure SetIx(I: Integer; AV: Integer);
+        static function GetIx(I: Int): Int;
+        static procedure SetIx(I: Int; AV: Int);
         static property SS: string read GetSS write SetSS;
         static property SO: TItem read GetSO write SetSO;
-        static property SD: Double read GetSD write SetSD;
+        static property SD: Float64 read GetSD write SetSD;
         static property SP: TPair read GetSP write SetSP;
-        static property Ix[I: Integer]: Integer read GetIx write SetIx;
-        static property FI: Integer read FFI write FFI;
+        static property Ix[I: Int]: Int read GetIx write SetIx;
+        static property FI: Int read FFI write FFI;
         static procedure SInside;
       end;
-    constructor TItem.Create(AN: Integer); begin N := AN; end;
+    constructor TItem.Create(AN: Int); begin N := AN; end;
     destructor TItem.Destroy; begin WriteLn('free ', N); end;
     static function THost.GetSS: string; begin Result := FSS; end;
     static procedure THost.SetSS(const AV: string); begin FSS := AV; end;
     static function THost.GetSO: TItem; begin Result := FSO; end;
     static procedure THost.SetSO(AV: TItem); begin FSO := AV; end;
-    static function THost.GetSD: Double; begin Result := FSD; end;
-    static procedure THost.SetSD(AV: Double); begin FSD := AV; end;
+    static function THost.GetSD: Float64; begin Result := FSD; end;
+    static procedure THost.SetSD(AV: Float64); begin FSD := AV; end;
     static function THost.GetSP: TPair; begin Result := FSP; end;
     static procedure THost.SetSP(const AV: TPair); begin FSP := AV; end;
-    static function THost.GetIx(I: Integer): Integer; begin Result := FArr[I]; end;
-    static procedure THost.SetIx(I: Integer; AV: Integer); begin FArr[I] := AV; end;
+    static function THost.GetIx(I: Int): Int; begin Result := FArr[I]; end;
+    static procedure THost.SetIx(I: Int; AV: Int); begin FArr[I] := AV; end;
     procedure THost.Inside;
     begin
       SS := 'in' + IntToStr(1);
@@ -1018,7 +1018,7 @@ const
       WriteLn('sinside ', SS, ' ', SO.N, ' ', Ix[2], ' ', FI);
       SO := nil;
     end;
-    function MkS(N: Integer): string; begin Result := 'v' + IntToStr(N); end;
+    function MkS(N: Int): string; begin Result := 'v' + IntToStr(N); end;
     function MkP: TPair; begin Result.A := 7; Result.B := 8; end;
     var
       H: THost;
@@ -1067,7 +1067,7 @@ const
       public
         procedure Dummy;
       public static var
-        SV: Integer;
+        SV: Int;
         SName: string;
       end;
     implementation

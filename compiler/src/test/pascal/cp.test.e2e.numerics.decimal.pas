@@ -771,11 +771,11 @@ begin
     program P; uses Numerics.Decimal;
     type
       TTrunc = class(TObject, IRoundingStrategy)
-        function RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;
-          DiscardedCompareHalf: Integer; AnyDiscarded: Boolean): Boolean;
+        function RoundIncrement(Negative: Boolean; LastKeptDigit: Int;
+          DiscardedCompareHalf: Int; AnyDiscarded: Boolean): Boolean;
       end;
-    function TTrunc.RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;
-      DiscardedCompareHalf: Integer; AnyDiscarded: Boolean): Boolean;
+    function TTrunc.RoundIncrement(Negative: Boolean; LastKeptDigit: Int;
+      DiscardedCompareHalf: Int; AnyDiscarded: Boolean): Boolean;
     begin Result := False end;
     var A, B, C: TDecimal; S: IRoundingStrategy;
     begin
@@ -918,7 +918,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Numerics.Decimal;
-    var A, B, S: TDecimal; I: Integer;
+    var A, B, S: TDecimal; I: Int;
     begin
       A := DecFromStr('1.25');
       B := DecFromStr('0.5');

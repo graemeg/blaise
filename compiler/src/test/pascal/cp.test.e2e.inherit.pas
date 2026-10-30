@@ -110,12 +110,12 @@ const
     program P;
     type
       TBase = class
-        FX: Integer;
-        constructor Create(ax: Integer); begin FX := ax; end;
+        FX: Int;
+        constructor Create(ax: Int); begin FX := ax; end;
       end;
       TDerived = class(TBase)
-        FY: Integer;
-        constructor Create(ax, ay: Integer); begin inherited Create(ax); FY := ay; end;
+        FY: Int;
+        constructor Create(ax, ay: Int); begin inherited Create(ax); FY := ay; end;
       end;
     var d: TDerived;
     begin
@@ -129,19 +129,19 @@ const
     program P;
     type
       TShape = class
-        function Area: Integer; virtual; begin Result := 0; end;
+        function Area: Int; virtual; begin Result := 0; end;
       end;
       TSquare = class(TShape)
-        FS: Integer;
-        constructor Create(s: Integer); begin FS := s; end;
-        function Area: Integer; override; begin Result := FS * FS; end;
+        FS: Int;
+        constructor Create(s: Int); begin FS := s; end;
+        function Area: Int; override; begin Result := FS * FS; end;
       end;
       TRect = class(TShape)
-        FW, FH: Integer;
-        constructor Create(w, h: Integer); begin FW := w; FH := h; end;
-        function Area: Integer; override; begin Result := FW * FH; end;
+        FW, FH: Int;
+        constructor Create(w, h: Int); begin FW := w; FH := h; end;
+        function Area: Int; override; begin Result := FW * FH; end;
       end;
-    var shapes: array[0..1] of TShape; i, total: Integer;
+    var shapes: array[0..1] of TShape; i, total: Int;
     begin
       shapes[0] := TSquare.Create(4);
       shapes[1] := TRect.Create(3, 5);
@@ -180,12 +180,12 @@ const
     program P;
     type
       TBase = class
-        FInit: Integer;
+        FInit: Int;
         constructor Create; begin FInit := Self.Compute(); end;
-        function Compute: Integer; virtual; begin Result := 1; end;
+        function Compute: Int; virtual; begin Result := 1; end;
       end;
       TDerived = class(TBase)
-        function Compute: Integer; override; begin Result := 42; end;
+        function Compute: Int; override; begin Result := 42; end;
       end;
     var b: TBase;
     begin
@@ -198,10 +198,10 @@ const
   SrcFourLevelFields = '''
     program P;
     type
-      T1 = class FA: Integer; end;
-      T2 = class(T1) FB: Integer; end;
-      T3 = class(T2) FC: Integer; end;
-      T4 = class(T3) FD: Integer; end;
+      T1 = class FA: Int; end;
+      T2 = class(T1) FB: Int; end;
+      T3 = class(T2) FC: Int; end;
+      T4 = class(T3) FD: Int; end;
     var o: T4;
     begin
       o := T4.Create;
@@ -253,11 +253,11 @@ const
     program P;
     type
       TBase = class
-        function GetVal: Integer; virtual; begin Result := 1; end;
-        property Val: Integer read GetVal;
+        function GetVal: Int; virtual; begin Result := 1; end;
+        property Val: Int read GetVal;
       end;
       TDerived = class(TBase)
-        function GetVal: Integer; override; begin Result := 99; end;
+        function GetVal: Int; override; begin Result := 99; end;
       end;
     var b: TBase;
     begin
@@ -273,12 +273,12 @@ const
     program P;
     type
       TBase = class
-        FStore: Integer;
-        procedure SetVal(AValue: Integer); virtual; begin FStore := AValue; end;
-        property Val: Integer write SetVal;
+        FStore: Int;
+        procedure SetVal(AValue: Int); virtual; begin FStore := AValue; end;
+        property Val: Int write SetVal;
       end;
       TDerived = class(TBase)
-        procedure SetVal(AValue: Integer); override; begin FStore := AValue * 2; end;
+        procedure SetVal(AValue: Int); override; begin FStore := AValue * 2; end;
       end;
     var b: TBase;
     begin
@@ -295,7 +295,7 @@ const
     program P;
     type
       TBase = class
-        function F(x: Integer): string; overload; begin Result := 'int:' + IntToStr(x); end;
+        function F(x: Int): string; overload; begin Result := 'int:' + IntToStr(x); end;
       end;
       TDerived = class(TBase)
         function F(s: string): string; overload; begin Result := 'str:' + s; end;
@@ -433,25 +433,25 @@ const
     program Overloads;
     type
       TFoo = class
-        FA: Integer;
-        procedure Show(N: Integer); overload;
+        FA: Int;
+        procedure Show(N: Int); overload;
         procedure Show(S: string); overload;
-        constructor Create(A: Integer; B: Integer); overload;
-        constructor Create(A: Integer); overload;
+        constructor Create(A: Int; B: Int); overload;
+        constructor Create(A: Int); overload;
       end;
       TBase = class
-        procedure Greet(N: Integer); overload; virtual;
+        procedure Greet(N: Int); overload; virtual;
         procedure Greet(S: string); overload; virtual;
       end;
       TChild = class(TBase)
-        procedure Greet(N: Integer); overload; override;
+        procedure Greet(N: Int); overload; override;
         procedure Greet(S: string); overload; override;
       end;
       THelper = class
-        function Run(const S: string; out R: string; out N: Integer;
+        function Run(const S: string; out R: string; out N: Int;
                      const Args: array of string): Boolean; overload;
         function Run(const S: string; out R: string;
-                     out N: Integer): Boolean; overload;
+                     out N: Int): Boolean; overload;
       end;
       TOwner = class
         FHelper: THelper;
@@ -459,38 +459,38 @@ const
       end;
     procedure Greet; overload;
     begin WriteLn('hello') end;
-    procedure Greet(N: Integer); overload;
+    procedure Greet(N: Int); overload;
     begin WriteLn('greet ', N) end;
-    procedure F(N: Integer); overload;
+    procedure F(N: Int); overload;
     begin WriteLn('F int ', N) end;
-    procedure F(D: Double); overload;
+    procedure F(D: Float64); overload;
     begin WriteLn('F double') end;
-    procedure G(D: Double); overload;
+    procedure G(D: Float64); overload;
     begin WriteLn('G double') end;
-    procedure TFoo.Show(N: Integer);
+    procedure TFoo.Show(N: Int);
     begin WriteLn('show int ', N) end;
     procedure TFoo.Show(S: string);
     begin WriteLn('show str ', S) end;
-    constructor TFoo.Create(A: Integer; B: Integer);
+    constructor TFoo.Create(A: Int; B: Int);
     begin FA := A + B end;
-    constructor TFoo.Create(A: Integer);
+    constructor TFoo.Create(A: Int);
     begin FA := -A end;
-    procedure TBase.Greet(N: Integer);
+    procedure TBase.Greet(N: Int);
     begin WriteLn('base int ', N) end;
     procedure TBase.Greet(S: string);
     begin WriteLn('base str ', S) end;
-    procedure TChild.Greet(N: Integer);
+    procedure TChild.Greet(N: Int);
     begin WriteLn('child int ', N) end;
     procedure TChild.Greet(S: string);
     begin WriteLn('child str ', S) end;
-    function THelper.Run(const S: string; out R: string; out N: Integer;
+    function THelper.Run(const S: string; out R: string; out N: Int;
                          const Args: array of string): Boolean;
     begin R := 'with-args'; N := 1; Result := True end;
     function THelper.Run(const S: string; out R: string;
-                         out N: Integer): Boolean;
+                         out N: Int): Boolean;
     begin R := 'no-args'; N := 0; Result := True end;
     procedure TOwner.DoIt;
-    var S: string; N: Integer; Ok: Boolean;
+    var S: string; N: Int; Ok: Boolean;
     begin
       Ok := FHelper.Run('x', S, N);
       WriteLn(S, ' ', N, ' ', Ok)
@@ -549,31 +549,31 @@ const
     program Inherit;
     type
       TAnimal = class
-        Age: Integer;
+        Age: Int;
       end;
       TDog = class(TAnimal)
-        Legs: Integer;
+        Legs: Int;
       end;
       TBase = class
-        X: Integer;
-        procedure SetX(V: Integer);
+        X: Int;
+        procedure SetX(V: Int);
         procedure Init; virtual;
       end;
       TChild = class(TBase)
-        Y: Integer;
-        procedure SetX(V: Integer);
+        Y: Int;
+        procedure SetX(V: Int);
         procedure Init; override;
       end;
       TNode = class
-        Value: Integer;
+        Value: Int;
         Next: TNode;
       end;
       TBaseClass = class of TBase;
-    procedure TBase.SetX(V: Integer);
+    procedure TBase.SetX(V: Int);
     begin Self.X := V end;
     procedure TBase.Init;
     begin Self.X := 100 end;
-    procedure TChild.SetX(V: Integer);
+    procedure TChild.SetX(V: Int);
     begin inherited SetX(V * 2) end;
     procedure TChild.Init;
     begin
@@ -702,16 +702,16 @@ const
     program P;
     type
       TBase = class
-        function D(N: Integer): Double; virtual;
+        function D(N: Int): Float64; virtual;
       end;
       TDeriv = class(TBase)
-        function D(N: Integer): Double; override;
+        function D(N: Int): Float64; override;
       end;
-    function TBase.D(N: Integer): Double;
+    function TBase.D(N: Int): Float64;
     begin
       Result := N + 0.25
     end;
-    function TDeriv.D(N: Integer): Double;
+    function TDeriv.D(N: Int): Float64;
     begin
       inherited D(N)
     end;

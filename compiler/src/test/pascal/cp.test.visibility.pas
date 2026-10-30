@@ -166,7 +166,7 @@ const
         type
           TFoo = class
           private
-            FX: Integer;
+            FX: Int;
           end;
         begin end.
         ''';
@@ -190,7 +190,7 @@ const
         type
           TFoo = class
           protected
-            FX: Integer;
+            FX: Int;
           end;
         begin end.
         ''';
@@ -214,7 +214,7 @@ const
         type
           TFoo = class
           published
-            FX: Integer;
+            FX: Int;
           end;
         begin end.
         ''';
@@ -237,7 +237,7 @@ const
         program P;
         type
           TFoo = class
-            FX: Integer;
+            FX: Int;
           end;
         begin end.
         ''';
@@ -261,7 +261,7 @@ const
         type
           TFoo = class
           strict private
-            FX: Integer;
+            FX: Int;
           end;
         begin end.
         ''';
@@ -285,7 +285,7 @@ const
         type
           TFoo = class
           strict protected
-            FX: Integer;
+            FX: Int;
           end;
         begin end.
         ''';
@@ -309,7 +309,7 @@ const
         type
           TFoo = class
           strict private static var
-            FInst: Integer;
+            FInst: Int;
           end;
         begin end.
         ''';
@@ -334,7 +334,7 @@ const
         type
           TFoo = class
           strict public
-            FX: Integer;
+            FX: Int;
           end;
         begin end.
         ''';
@@ -370,7 +370,7 @@ const
     '''
         program P;
         var
-          strict: Integer;
+          strict: Int;
         begin
           strict := 1;
         end.
@@ -439,7 +439,7 @@ const
         type
           TB = class
           private
-            FSecret: Integer;
+            FSecret: Int;
           end;
         procedure Touch(b: TB);
         begin
@@ -463,7 +463,7 @@ const
         type
           TB = class
           private
-            FSecret: Integer;
+            FSecret: Int;
           public
             procedure Bump;
           end;
@@ -510,7 +510,7 @@ const
         type
           TC = class
           strict private
-            FX: Integer;
+            FX: Int;
           end;
           TD = class
           public
@@ -534,7 +534,7 @@ const
         type
           TC = class
           strict private
-            FX: Integer;
+            FX: Int;
           public
             procedure Bump;
           end;
@@ -581,7 +581,7 @@ const
         type
           TBase = class
           protected
-            FProt: Integer;
+            FProt: Int;
           end;
           TDeriv = class(TBase)
           public
@@ -609,7 +609,7 @@ const
         type
           TBase = class
           protected
-            FProt: Integer;
+            FProt: Int;
           end;
           TOther = class
           public
@@ -633,7 +633,7 @@ const
         type
           TE = class
           strict protected
-            FY: Integer;
+            FY: Int;
           end;
           TSub = class(TE)
           public
@@ -657,7 +657,7 @@ const
         type
           TE = class
           strict protected
-            FY: Integer;
+            FY: Int;
           end;
           TOther = class
           public
@@ -681,7 +681,7 @@ const
         type
           TF = class
           public
-            FOpen: Integer;
+            FOpen: Int;
           end;
           TUser = class
           public
@@ -705,7 +705,7 @@ const
         type
           TS = class
           strict private static var
-            FInst: Integer;
+            FInst: Int;
           public
             static procedure Init;
           end;
@@ -727,7 +727,7 @@ const
         type
           TS = class
           strict private static var
-            FInst: Integer;
+            FInst: Int;
           end;
           TOther = class
           public
@@ -755,7 +755,7 @@ const
         type
           TS = class
           strict private static var
-            FInst: Integer;
+            FInst: Int;
           end;
           TOther = class
           public
@@ -781,7 +781,7 @@ const
         type
           TS = class
           strict private static var
-            FInst: Integer;
+            FInst: Int;
           end;
         begin
           FInst := 1;
@@ -801,7 +801,7 @@ const
         type
           TS = class
           private static var
-            FInst: Integer;
+            FInst: Int;
           end;
         begin
           FInst := 7;
@@ -820,13 +820,13 @@ const
         type
           TS = class
           public static var
-            GVal: Integer;
+            GVal: Int;
           end;
           TUser = class
           public
-            function R: Integer;
+            function R: Int;
           end;
-        function TUser.R: Integer;
+        function TUser.R: Int;
         begin
           Result := TS.GVal;
         end;
@@ -845,15 +845,15 @@ const
         type
           TG = class
           private
-            FVal: Integer;
+            FVal: Int;
           private
-            property Val: Integer read FVal write FVal;
+            property Val: Int read FVal write FVal;
           end;
           TUser = class
           public
-            function Read(g: TG): Integer;
+            function Read(g: TG): Int;
           end;
-        function TUser.Read(g: TG): Integer;
+        function TUser.Read(g: TG): Int;
         begin
           Result := g.Val;
         end;
@@ -871,14 +871,14 @@ const
         type
           TG = class
           strict private
-            FVal: Integer;
-            property Val: Integer read FVal write FVal;
+            FVal: Int;
+            property Val: Int read FVal write FVal;
           end;
           TUser = class
           public
-            function Read(g: TG): Integer;
+            function Read(g: TG): Int;
           end;
-        function TUser.Read(g: TG): Integer;
+        function TUser.Read(g: TG): Int;
         begin
           Result := g.Val;
         end;
@@ -904,9 +904,9 @@ const
           end;
           TOther = class
           public
-            function Peek: Integer;
+            function Peek: Int;
           end;
-        function TOther.Peek: Integer;
+        function TOther.Peek: Int;
         begin
           Result := TOwner.Secret;
         end;
@@ -926,9 +926,9 @@ const
           strict private
             const Secret = 42;
           public
-            function Reveal: Integer;
+            function Reveal: Int;
           end;
-        function TOwner.Reveal: Integer;
+        function TOwner.Reveal: Int;
         begin
           Result := TOwner.Secret;
         end;
@@ -948,7 +948,7 @@ const
           public
             const Limit = 99;
           end;
-        var x: Integer;
+        var x: Int;
         begin
           x := TOwner.Limit
         end.
@@ -967,7 +967,7 @@ const
           public
             const Limit = 99;
           end;
-        var x: Integer;
+        var x: Int;
         begin
           x := Limit
         end.
@@ -990,9 +990,9 @@ const
           end;
           TOther = class
           public
-            function Peek: Integer;
+            function Peek: Int;
           end;
-        function TOther.Peek: Integer;
+        function TOther.Peek: Int;
         begin
           Result := Limit;
         end;
@@ -1012,9 +1012,9 @@ const
           private
             const MaxCount = 10;
           public
-            function Limit: Integer;
+            function Limit: Int;
           end;
-        function TThing.Limit: Integer;
+        function TThing.Limit: Int;
         begin
           Result := MaxCount;
         end;
@@ -1040,9 +1040,9 @@ const
           end;
           TKid = class(TBase)
           public
-            function Ask: Integer;
+            function Ask: Int;
           end;
-        function TKid.Ask: Integer;
+        function TKid.Ask: Int;
         begin
           Result := Answer;
         end;
@@ -1067,9 +1067,9 @@ const
           end;
           TKid = class(TBase)
           public
-            function Ask: Integer;
+            function Ask: Int;
           end;
-        function TKid.Ask: Integer;
+        function TKid.Ask: Int;
         begin
           Result := TBase.Answer;
         end;
@@ -1090,7 +1090,7 @@ const
           public
             const MaxItems = 42;
           end;
-        var x: Integer;
+        var x: Int;
         begin
           x := TRec.MaxItems
         end.
@@ -1113,9 +1113,9 @@ const
           private
             const MaxItems = 42;
           public
-            function Cap: Integer;
+            function Cap: Int;
           end;
-        function TRec.Cap: Integer;
+        function TRec.Cap: Int;
         begin
           Result := MaxItems;
         end;
@@ -1135,7 +1135,7 @@ const
           public
             const MaxItems = 42;
           end;
-        var x: Integer;
+        var x: Int;
         begin
           x := MaxItems
         end.
@@ -1156,9 +1156,9 @@ const
           end;
           TOther = class
           public
-            function Peek: Integer;
+            function Peek: Int;
           end;
-        function TOther.Peek: Integer;
+        function TOther.Peek: Int;
         begin
           Result := TRec.Secret;
         end;

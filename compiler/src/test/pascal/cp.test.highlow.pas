@@ -112,7 +112,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var D: Double;
+        var D: Float64;
         begin D := High(D) end.
         ''',
     'floating-point');
@@ -123,7 +123,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var S: Single;
+        var S: Float32;
         begin S := Low(S) end.
         ''',
     'floating-point');
@@ -143,8 +143,8 @@ const
     '''
         program P;
         begin
-          WriteLn(High(Integer));
-          WriteLn(Low(Integer))
+          WriteLn(High(Int32));
+          WriteLn(Low(Int32))
         end.
         ''';
 var Output: string; RCode: Int;
@@ -200,14 +200,14 @@ const
   Src =
     '''
         program P;
-        var I, N: Integer;
+        var I, N: Int;
         begin
           N := 0;
           for I := 1 to 5 do
             N := N + I;
-          if N < High(Integer) then
+          if N < High(Int) then
             WriteLn(N);
-          if N > Low(Integer) then
+          if N > Low(Int) then
             WriteLn('ok')
         end.
         ''';

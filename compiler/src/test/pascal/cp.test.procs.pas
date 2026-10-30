@@ -146,8 +146,8 @@ const
   SrcWithProc =
     '''
         program P;
-        var N: Integer;
-        procedure PrintIt(X: Integer);
+        var N: Int32;
+        procedure PrintIt(X: Int32);
         begin
           WriteLn(X)
         end;
@@ -160,9 +160,9 @@ const
   SrcWithFunc =
     '''
         program P;
-        var N: Integer;
-        function Add(A, B: Integer): Integer;
-        var Tmp: Integer;
+        var N: Int32;
+        function Add(A, B: Int32): Int32;
+        var Tmp: Int32;
         begin
           Tmp := A + B;
           Result := Tmp
@@ -175,12 +175,12 @@ const
   SrcTwoProcs =
     '''
         program P;
-        var N: Integer;
-        procedure Inner(X: Integer);
+        var N: Int;
+        procedure Inner(X: Int);
         begin
           WriteLn(X)
         end;
-        procedure Outer(Y: Integer);
+        procedure Outer(Y: Int);
         begin
           Inner(Y)
         end;
@@ -260,7 +260,7 @@ begin
   try
     MD  := TMethodDecl(Prog.Block.ProcDecls[0]);
     Par := TMethodParam(MD.Params[0]);
-    AssertEquals('param type', 'Integer', Par.TypeName);
+    AssertEquals('param type', 'Int32', Par.TypeName);
   finally
     Prog.Free();
   end;
@@ -316,7 +316,7 @@ begin
   Prog := ParseSrc(SrcWithFunc);
   try
     MD := TMethodDecl(Prog.Block.ProcDecls[0]);
-    AssertEquals('return type', 'Integer', MD.ReturnTypeName);
+    AssertEquals('return type', 'Int32', MD.ReturnTypeName);
   finally
     Prog.Free();
   end;
@@ -405,8 +405,8 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var N: Integer;
-        procedure Foo(X: Integer);
+        var N: Int;
+        procedure Foo(X: Int);
         begin
           WriteLn(X)
         end;
@@ -421,8 +421,8 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var N: Integer;
-        procedure Foo(X: Integer);
+        var N: Int;
+        procedure Foo(X: Int);
         begin
           WriteLn(X)
         end;
@@ -479,8 +479,8 @@ const
   Src = '''
     program P;
     procedure Outer;
-    var A, B, C, D, E, F, G, H, I, J: Integer;
-      function Inner(K: Integer): Integer;
+    var A, B, C, D, E, F, G, H, I, J: Int;
+      function Inner(K: Int): Int;
       begin Result := A + B + C + D + E + F + G + H + I + J + K end;
     begin
       A := 1; J := 10;
@@ -503,8 +503,8 @@ procedure TProcFuncTests.TestCodegen_CapturedRecordParams_ReachTheRecord;
 const
   Src = '''
     program P;
-    type TRec = record N: Integer; end;
-    procedure Outer(var R: TRec; V: TRec; I: Integer);
+    type TRec = record N: Int32; end;
+    procedure Outer(var R: TRec; V: TRec; I: Int32);
       procedure Inner;
       begin
         WriteLn(R.N, V.N);
@@ -536,7 +536,7 @@ procedure TProcFuncTests.TestCodegen_CapturedDynArray_ElementAndSetLength;
 const
   Src = '''
     program P;
-    type TDyn = array of Integer;
+    type TDyn = array of Int;
     procedure Outer;
     var L: TDyn;
       procedure Inner;
@@ -569,7 +569,7 @@ procedure TProcFuncTests.TestCodegen_VarAndCapturedInterface_PairThroughPointer;
 const
   Src = '''
     program P;
-    type IFoo = interface function Get: Integer; end;
+    type IFoo = interface function Get: Int; end;
     procedure Show(const F: IFoo); begin end;
     procedure Outer(var V: IFoo);
       procedure Inner; begin Show(V) end;

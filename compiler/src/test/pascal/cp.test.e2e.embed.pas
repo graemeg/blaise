@@ -207,7 +207,7 @@ begin
     '''
     program P;
     const B: array of Byte = {$EMBED '/tmp/blaise-embed-e2e/large.bin'};
-    var I, Total: Integer;
+    var I, Total: Int;
     begin
       Total := 0;
       for I := Low(B) to High(B) do
@@ -227,7 +227,7 @@ begin
   AssertRunsOnAll(
     '''
     program P;
-    const A: array of Integer = (10, 20, 30);
+    const A: array of Int32 = (10, 20, 30);
     begin
       WriteLn(High(A) - Low(A) + 1);
       WriteLn(A[0] + A[2])

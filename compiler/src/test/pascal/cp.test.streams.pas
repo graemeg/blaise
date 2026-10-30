@@ -52,10 +52,10 @@ const
         procedure Close;
       end;
       IInputStream = interface(ICloseable)
-        function Read(Buf: Pointer; Count: Integer): Integer;
+        function Read(Buf: Pointer; Count: Int): Int;
       end;
       TInputStream = class(TObject, IInputStream, ICloseable)
-        function Read(Buf: Pointer; Count: Integer): Integer; virtual; abstract;
+        function Read(Buf: Pointer; Count: Int): Int; virtual; abstract;
         procedure Close; virtual; abstract;
       end;
     begin end.
@@ -69,17 +69,17 @@ const
         procedure Close;
       end;
       IInputStream = interface(ICloseable)
-        function Read(Buf: Pointer; Count: Integer): Integer;
+        function Read(Buf: Pointer; Count: Int): Int;
       end;
       TInputStream = class(TObject, IInputStream, ICloseable)
-        function Read(Buf: Pointer; Count: Integer): Integer; virtual; abstract;
+        function Read(Buf: Pointer; Count: Int): Int; virtual; abstract;
         procedure Close; virtual; abstract;
       end;
       TMemoryInput = class(TInputStream, IInputStream, ICloseable)
-        function Read(Buf: Pointer; Count: Integer): Integer; override;
+        function Read(Buf: Pointer; Count: Int): Int; override;
         procedure Close; override;
       end;
-    function TMemoryInput.Read(Buf: Pointer; Count: Integer): Integer;
+    function TMemoryInput.Read(Buf: Pointer; Count: Int): Int;
     begin Result := 0 end;
     procedure TMemoryInput.Close;
     begin end;

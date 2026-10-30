@@ -87,17 +87,17 @@ const
         type
           TObjectList = class
             FData:     ^Pointer;
-            FCount:    Integer;
-            FCapacity: Integer;
+            FCount:    Int;
+            FCapacity: Int;
             procedure Grow;
-            var NewCap: Integer;
+            var NewCap: Int;
             begin
               if Self.FCapacity = 0 then NewCap := 4
               else NewCap := Self.FCapacity * 2;
               Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Pointer));
               Self.FCapacity := NewCap
             end;
-            function Add(AObject: Pointer): Integer;
+            function Add(AObject: Pointer): Int;
             var Dest: ^Pointer;
             begin
               if Self.FCount = Self.FCapacity then Self.Grow();
@@ -106,13 +106,13 @@ const
               Self.FCount := Self.FCount + 1;
               Result      := Self.FCount - 1
             end;
-            function Get(AIndex: Integer): Pointer;
+            function Get(AIndex: Int): Pointer;
             var Src: ^Pointer;
             begin
               Src    := Self.FData + AIndex * SizeOf(Pointer);
               Result := Src^
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         ''';
 
@@ -131,7 +131,7 @@ const
   SrcCompareStr =
     '''
         program Prg;
-        var N: Integer;
+        var N: Int32;
         begin
           N := CompareStr('abc', 'abd')
         end.
@@ -140,7 +140,7 @@ const
   SrcCompareText =
     '''
         program Prg;
-        var N: Integer;
+        var N: Int;
         begin
           N := CompareText('ABC', 'abc')
         end.
@@ -165,11 +165,11 @@ const
           TStringList = class
             FStrings:    ^string;
             FObjects:    ^Pointer;
-            FCount:      Integer;
-            FCapacity:   Integer;
+            FCount:      Int;
+            FCapacity:   Int;
             FSorted:     Boolean;
             procedure Grow;
-            var OldCap, NewCap: Integer;
+            var OldCap, NewCap: Int;
             begin
               OldCap := Self.FCapacity;
               if OldCap = 0 then NewCap := 4
@@ -179,7 +179,7 @@ const
               ZeroMem(Self.FStrings + OldCap * SizeOf(string), (NewCap - OldCap) * SizeOf(string));
               Self.FCapacity := NewCap
             end;
-            function Add(S: string): Integer;
+            function Add(S: string): Int;
             var
               StrP: ^string;
               ObjP: ^Pointer;
@@ -192,15 +192,15 @@ const
               Result      := Self.FCount;
               Self.FCount := Self.FCount + 1
             end;
-            function Get(AIndex: Integer): string;
+            function Get(AIndex: Int): string;
             var Ptr: ^string;
             begin
               Ptr    := Self.FStrings + AIndex * SizeOf(string);
               Result := Ptr^
             end;
-            function Find(S: string; var Index: Integer): Boolean;
+            function Find(S: string; var Index: Int): Boolean;
             var
-              Lo, Hi, Mid, Cmp: Integer;
+              Lo, Hi, Mid, Cmp: Int;
               Ptr: ^string;
               MStr: string;
             begin
@@ -226,7 +226,7 @@ const
               Index  := Lo;
               Result := False
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         ''';
 
@@ -342,12 +342,12 @@ const
           TStringList = class
             FStrings:  ^string;
             FObjects:  ^Pointer;
-            FCount:    Integer;
-            FCapacity: Integer;
+            FCount:    Int;
+            FCapacity: Int;
             procedure Grow;
             begin
             end;
-            function Add(S: string): Integer;
+            function Add(S: string): Int;
             begin
               Result := 0
             end;
@@ -355,25 +355,25 @@ const
             begin
               Self.FCount := 0
             end;
-            function Get(AIndex: Integer): string;
+            function Get(AIndex: Int): string;
             var Ptr: ^string;
             begin
               Ptr := Self.FStrings + AIndex * SizeOf(string);
               Result := Ptr^
             end;
-            procedure Put(AIndex: Integer; S: string);
+            procedure Put(AIndex: Int; S: string);
             var Ptr: ^string;
             begin
               Ptr := Self.FStrings + AIndex * SizeOf(string);
               Ptr^ := S
             end;
-            function GetObject(AIndex: Integer): Pointer;
+            function GetObject(AIndex: Int): Pointer;
             var Ptr: ^Pointer;
             begin
               Ptr := Self.FObjects + AIndex * SizeOf(Pointer);
               Result := Ptr^
             end;
-            procedure SetObject(AIndex: Integer; AObject: Pointer);
+            procedure SetObject(AIndex: Int; AObject: Pointer);
             var Ptr: ^Pointer;
             begin
               Ptr := Self.FObjects + AIndex * SizeOf(Pointer);
@@ -394,10 +394,10 @@ const
             begin
               WriteFile(APath, Self.GetText() + #10)
             end;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
             property Text: string read GetText write SetText;
-            property Strings[Index: Integer]: string read Get write Put;
-            property Objects[Index: Integer]: Pointer read GetObject write SetObject;
+            property Strings[Index: Int]: string read Get write Put;
+            property Objects[Index: Int]: Pointer read GetObject write SetObject;
           end;
         ''';
 

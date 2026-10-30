@@ -53,22 +53,22 @@ const
     '''
     program errnoprobe;
 
-    function pipe(Fds: Pointer): Integer; external name 'pipe';
+    function pipe(Fds: Pointer): Int32; external name 'pipe';
     { fcntl is VARIADIC in C: declared as a plain 3-argument function, Apple
       arm64 passes Arg in x2 where fcntl reads its variadic slot from the
       stack -- F_SETFL got garbage flags and the read blocked forever.  On
       System V the two conventions coincide, which is why this only bit on
       macOS. }
-    function fcntl(Fd, Cmd: Integer): Integer; cdecl; varargs; external name 'fcntl';
-    function xread(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+    function fcntl(Fd, Cmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
+    function xread(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
       external name 'read';
     function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
     function Interrupted(N: Int64): Boolean; external name 'Interrupted';
 
     var
-      Fds: array[0..1] of Integer;
+      Fds: array[0..1] of Int;
       Buf: array[0..7] of Byte;
-      Flags: Integer;
+      Flags: Int;
       N: Int64;
     begin
       if pipe(@Fds[0]) <> 0 then

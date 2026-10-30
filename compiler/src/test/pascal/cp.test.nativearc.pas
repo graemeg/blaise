@@ -158,7 +158,7 @@ begin
     program P;
     type
       TWide = set of 0..40;
-    function WideOf(K: Integer): TWide;
+    function WideOf(K: Int): TWide;
     begin
       Result := [K, 40];
     end;
@@ -185,7 +185,7 @@ begin
     program P;
     type
       TCls = set of Byte;
-    function Count(S: TCls): Integer;
+    function Count(S: TCls): Int;
     begin
       Result := 0;
     end;
@@ -314,11 +314,11 @@ const
     type
       TObjX = class
       public
-        Tag: Integer;
+        Tag: Int;
       end;
     var
       A: array[0..2] of TObjX;
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 2 do
         A[I] := TObjX.Create();
@@ -330,7 +330,7 @@ const
     program P;
     var
       A: array[0..2] of string;
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 2 do
         A[I] := 'x';
@@ -355,7 +355,7 @@ const
   SrcProgArrayOfInteger = '''
     program P;
     var
-      A: array[0..2] of Integer;
+      A: array[0..2] of Int;
     begin
       A[0] := 7;
       WriteLn(A[0]);
@@ -367,7 +367,7 @@ const
     type
       TObjX = class
       public
-        Tag: Integer;
+        Tag: Int;
       end;
     var
       G: TObjX;
@@ -486,12 +486,12 @@ const
     type
       TL = class
         procedure Hello();
-        function Num(): Integer;
+        function Num(): Int;
         destructor Destroy(); override;
       end;
-    var Frees: Integer;
+    var Frees: Int;
     procedure TL.Hello(); begin WriteLn('hi') end;
-    function TL.Num(): Integer; begin Result := 5 end;
+    function TL.Num(): Int; begin Result := 5 end;
     destructor TL.Destroy(); begin Frees := Frees + 1; inherited Destroy() end;
     function MakeL(): TL; begin Result := TL.Create() end;
     begin
@@ -512,8 +512,8 @@ procedure TNativeArcTests.TestAddrOfOwnedTransientField_ReleasedAtStatementEnd;
 const
   Src = '''
     program P;
-    type TObj = class N: Integer; end;
-    var Q: ^Integer;
+    type TObj = class N: Int; end;
+    var Q: ^Int;
     function MakeObj(): TObj; begin Result := TObj.Create() end;
     begin
       Q := @MakeObj().N;
@@ -529,7 +529,7 @@ procedure TNativeArcTests.TestFieldStoreOwnedReceiver_Released;
 const
   Src = '''
     program P;
-    type TObj = class N: Integer; end;
+    type TObj = class N: Int; end;
     function MakeObj(): TObj; begin Result := TObj.Create() end;
     begin
       MakeObj().N := 5;
@@ -547,8 +547,8 @@ const
   Src = '''
     program P;
     uses SysUtils;
-    function A(I: Integer): string; begin Result := 'a' + IntToStr(I) end;
-    function O(I: Integer): TObject; begin Result := TObject.Create() end;
+    function A(I: Int): string; begin Result := 'a' + IntToStr(I) end;
+    function O(I: Int): TObject; begin Result := TObject.Create() end;
     procedure Ten(const S0, S1, S2, S3, S4, S5, S6, S7, S8, S9: string);
     begin WriteLn(S0, S9) end;
     procedure TenO(O0, O1, O2, O3, O4, O5, O6, O7, O8, O9: TObject);
@@ -569,7 +569,7 @@ procedure TNativeArcTests.TestCall_OwnedClassTransientArg_ReleasedAfterCall;
 const
   Src = '''
     program P;
-    function O(I: Integer): TObject; begin Result := TObject.Create() end;
+    function O(I: Int): TObject; begin Result := TObject.Create() end;
     procedure One(O0: TObject); begin WriteLn(O0 <> nil) end;
     begin
       One(O(1))
@@ -625,8 +625,8 @@ procedure TNativeArcTests.TestRecordCallFieldRead_PinsThenReleasesTemp;
 const
   Src = '''
     program P;
-    type TT = record K: Integer; V: string; end;
-    function F(N: Integer): TT;
+    type TT = record K: Int; V: string; end;
+    function F(N: Int): TT;
     begin
       Result.K := N;
       Result.V := 'v'
@@ -649,13 +649,13 @@ const
   Src = '''
     program P;
     type
-      TB = class V: Integer; end;
+      TB = class V: Int; end;
       TA = class
         B: TB;
         constructor Create();
         destructor Destroy(); override;
       end;
-    var Frees: Integer;
+    var Frees: Int;
     constructor TA.Create();
     begin
       B := TB.Create();
@@ -677,7 +677,7 @@ const
       if A + B + C + D + E + F + G + H = 0 then WriteLn('x')
     end;
     procedure Run(First: Boolean);
-    var I, Hits: Integer;
+    var I, Hits: Int;
     begin
       Hits := 0;
       for I := 0 to 5 do
@@ -711,13 +711,13 @@ begin
     program P;
     type
       IGreet = interface
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
       TG = class(TObject, IGreet)
       public
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
-    function TG.Hi(): Integer;
+    function TG.Hi(): Int;
     begin
       Result := 1;
     end;
@@ -748,8 +748,8 @@ begin
     '''
     program P;
     type
-      TA = array of Integer;
-    function SumV(A: TA): Integer;
+      TA = array of Int;
+    function SumV(A: TA): Int;
     begin
       Result := Length(A);
     end;
@@ -831,7 +831,7 @@ const
     type
       TT = class end;
       TBase = class public [Unretained] F: TT; end;
-      TSub = class(TBase) G: Integer; end;
+      TSub = class(TBase) G: Int; end;
     procedure ViaCast(AObj: TObject; V: TT);
     begin
       TSub(AObj).F := V
@@ -870,14 +870,14 @@ const
     program P;
     type
       IThing = interface
-        function Val: Integer;
+        function Val: Int;
       end;
       TThing = class(TObject, IThing)
-        function Val: Integer;
+        function Val: Int;
       end;
-    function TThing.Val: Integer; begin Result := 1 end;
+    function TThing.Val: Int; begin Result := 1 end;
     function MkT: TThing; begin Result := TThing.Create() end;
-    function Use(T: IThing): Integer; begin Result := T.Val() end;
+    function Use(T: IThing): Int; begin Result := T.Val() end;
     var T: IThing;
     begin
       T := MkT();
@@ -908,11 +908,11 @@ const
   SrcOwnedDynArray = '''
     program P;
     type
-      TIntArr = array of Integer;
+      TIntArr = array of Int;
     function MakeArr: TIntArr; begin SetLength(Result, 2) end;
     function MakeStr: string; begin Result := 'ab' end;
     procedure UseConst(const A: TIntArr); begin end;
-    var N: Integer;
+    var N: Int;
     begin
       UseConst(MakeArr());
       N := Length(MakeArr());
@@ -954,18 +954,18 @@ const
     program P;
     type
       IThing = interface
-        function Val: Integer;
+        function Val: Int;
       end;
       TThing = class(TObject, IThing)
-        function Val: Integer;
+        function Val: Int;
         procedure Go;
       end;
-    function TThing.Val: Integer; begin Result := 3 end;
+    function TThing.Val: Int; begin Result := 3 end;
     procedure TThing.Go; begin end;
     function MkObj: TObject; begin Result := TThing.Create() end;
     function MkI: IThing; begin Result := TThing.Create() end;
     function MkS: string; begin Result := 'ab' end;
-    var B: Boolean; N: Integer; [Weak] WI: IThing;
+    var B: Boolean; N: Int; [Weak] WI: IThing;
     begin
       B := Supports(MkObj(), IThing);
       N := OrdAt(MkS(), 1);
@@ -1063,12 +1063,12 @@ const
   Src = '''
     program P;
     type
-      IFoo = interface function Get: Integer; end;
+      IFoo = interface function Get: Int; end;
       TObj = class
         FV: IFoo;
-        function GetP(I: Integer): IFoo;
+        function GetP(I: Int): IFoo;
       end;
-    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
+    function TObj.GetP(I: Int): IFoo; begin Result := FV end;
     var G: TObj;
     begin
       G := TObj.Create();
@@ -1089,12 +1089,12 @@ const
   Src = '''
     program P;
     type
-      IFoo = interface function Get: Integer; end;
+      IFoo = interface function Get: Int; end;
       TObj = class
         FV: IFoo;
-        function GetP(I: Integer): IFoo;
+        function GetP(I: Int): IFoo;
       end;
-    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
+    function TObj.GetP(I: Int): IFoo; begin Result := FV end;
     var G: TObj; L: IFoo;
     function MkObj: TObj; begin Result := G end;
     begin
@@ -1118,10 +1118,10 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class Arr: TArr; S: string; end;
     function MkObj: TObj; begin Result := TObj.Create(); end;
-    var X: Integer; S: string;
+    var X: Int; S: string;
     begin
       X := MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] +
            MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1];

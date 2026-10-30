@@ -64,7 +64,7 @@ const
             function  TryGetValue(Key: K; var Value: V): Boolean;
             function  ContainsKey(Key: K): Boolean;
             procedure Remove(Key: K);
-            function  GetCount: Integer;
+            function  GetCount: Int;
           end;
         ''';
 
@@ -73,24 +73,24 @@ const
           TDictionary<K, V> = class(IMap<K, V>)
             FKeys:     ^K;
             FValues:   ^V;
-            FCount:    Integer;
-            FCapacity: Integer;
+            FCount:    Int;
+            FCapacity: Int;
             procedure Grow;
-            function  FindKey(Key: K): Integer;
+            function  FindKey(Key: K): Int;
             procedure Add(Key: K; Value: V);
             function  TryGetValue(Key: K; var Value: V): Boolean;
             function  ContainsKey(Key: K): Boolean;
             procedure Remove(Key: K);
-            function  GetCount: Integer;
+            function  GetCount: Int;
             procedure Destroy;
-            property Count: Integer read GetCount;
+            property Count: Int read GetCount;
           end;
         ''';
 
   DictImpls =
     '''
         procedure TDictionary<K, V>.Grow;
-        var NewCap, OldCap: Integer;
+        var NewCap, OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 8 else NewCap := OldCap * 2;
@@ -100,8 +100,8 @@ const
           ZeroMem(Self.FValues + OldCap * SizeOf(V), (NewCap - OldCap) * SizeOf(V));
           Self.FCapacity := NewCap
         end;
-        function TDictionary<K, V>.FindKey(Key: K): Integer;
-        var I: Integer; Ptr: ^K;
+        function TDictionary<K, V>.FindKey(Key: K): Int;
+        var I: Int; Ptr: ^K;
         begin
           Result := -1; I := 0;
           while I < Self.FCount do begin
@@ -111,7 +111,7 @@ const
           end
         end;
         procedure TDictionary<K, V>.Add(Key: K; Value: V);
-        var Idx: Integer; KPtr: ^K; VPtr: ^V;
+        var Idx: Int; KPtr: ^K; VPtr: ^V;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
@@ -125,7 +125,7 @@ const
           end
         end;
         function TDictionary<K, V>.TryGetValue(Key: K; var Value: V): Boolean;
-        var Idx: Integer; VPtr: ^V;
+        var Idx: Int; VPtr: ^V;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
@@ -135,7 +135,7 @@ const
         function TDictionary<K, V>.ContainsKey(Key: K): Boolean;
         begin Result := Self.FindKey(Key) >= 0 end;
         procedure TDictionary<K, V>.Remove(Key: K);
-        var Idx, I: Integer; KDst, KSrc: ^K; VDst, VSrc: ^V;
+        var Idx, I: Int; KDst, KSrc: ^K; VDst, VSrc: ^V;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
@@ -148,7 +148,7 @@ const
             Self.FCount := Self.FCount - 1
           end
         end;
-        function TDictionary<K, V>.GetCount: Integer;
+        function TDictionary<K, V>.GetCount: Int;
         begin Result := Self.FCount end;
         procedure TDictionary<K, V>.Destroy;
         begin
@@ -163,28 +163,28 @@ const
           TOrderedDictionary<K, V> = class(IMap<K, V>)
             FKeys:     ^K;
             FValues:   ^V;
-            FCount:    Integer;
-            FCapacity: Integer;
+            FCount:    Int;
+            FCapacity: Int;
             procedure Grow;
-            function  FindKey(Key: K): Integer;
+            function  FindKey(Key: K): Int;
             procedure Add(Key: K; Value: V);
             function  TryGetValue(Key: K; var Value: V): Boolean;
             function  ContainsKey(Key: K): Boolean;
             procedure Remove(Key: K);
-            function  GetCount: Integer;
-            function  GetKey(AIndex: Integer): K;
-            function  GetValue(AIndex: Integer): V;
+            function  GetCount: Int;
+            function  GetKey(AIndex: Int): K;
+            function  GetValue(AIndex: Int): V;
             procedure Destroy;
-            property Count: Integer read GetCount;
-            property Keys[Index: Integer]: K read GetKey;
-            property Values[Index: Integer]: V read GetValue;
+            property Count: Int read GetCount;
+            property Keys[Index: Int]: K read GetKey;
+            property Values[Index: Int]: V read GetValue;
           end;
         ''';
 
   OrdDictImpls =
     '''
         procedure TOrderedDictionary<K, V>.Grow;
-        var NewCap, OldCap: Integer;
+        var NewCap, OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 8 else NewCap := OldCap * 2;
@@ -194,8 +194,8 @@ const
           ZeroMem(Self.FValues + OldCap * SizeOf(V), (NewCap - OldCap) * SizeOf(V));
           Self.FCapacity := NewCap
         end;
-        function TOrderedDictionary<K, V>.FindKey(Key: K): Integer;
-        var I: Integer; Ptr: ^K;
+        function TOrderedDictionary<K, V>.FindKey(Key: K): Int;
+        var I: Int; Ptr: ^K;
         begin
           Result := -1; I := 0;
           while I < Self.FCount do begin
@@ -205,7 +205,7 @@ const
           end
         end;
         procedure TOrderedDictionary<K, V>.Add(Key: K; Value: V);
-        var Idx: Integer; KPtr: ^K; VPtr: ^V;
+        var Idx: Int; KPtr: ^K; VPtr: ^V;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
@@ -219,7 +219,7 @@ const
           end
         end;
         function TOrderedDictionary<K, V>.TryGetValue(Key: K; var Value: V): Boolean;
-        var Idx: Integer; VPtr: ^V;
+        var Idx: Int; VPtr: ^V;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
@@ -229,7 +229,7 @@ const
         function TOrderedDictionary<K, V>.ContainsKey(Key: K): Boolean;
         begin Result := Self.FindKey(Key) >= 0 end;
         procedure TOrderedDictionary<K, V>.Remove(Key: K);
-        var Idx, I: Integer; KDst, KSrc: ^K; VDst, VSrc: ^V;
+        var Idx, I: Int; KDst, KSrc: ^K; VDst, VSrc: ^V;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
@@ -242,11 +242,11 @@ const
             Self.FCount := Self.FCount - 1
           end
         end;
-        function TOrderedDictionary<K, V>.GetCount: Integer;
+        function TOrderedDictionary<K, V>.GetCount: Int;
         begin Result := Self.FCount end;
-        function TOrderedDictionary<K, V>.GetKey(AIndex: Integer): K;
+        function TOrderedDictionary<K, V>.GetKey(AIndex: Int): K;
         var Ptr: ^K; begin Ptr := Self.FKeys + AIndex * SizeOf(K); Result := Ptr^ end;
-        function TOrderedDictionary<K, V>.GetValue(AIndex: Integer): V;
+        function TOrderedDictionary<K, V>.GetValue(AIndex: Int): V;
         var Ptr: ^V; begin Ptr := Self.FValues + AIndex * SizeOf(V); Result := Ptr^ end;
         procedure TOrderedDictionary<K, V>.Destroy;
         begin
@@ -261,7 +261,7 @@ const
     'program P;' + #10 +
     IMapDecl +
     '''
-        var M: IMap<Integer, Integer>;
+        var M: IMap<Int, Int>;
         begin end.
         ''';
 
@@ -273,9 +273,9 @@ const
     DictDecl +
     DictImpls +
     '''
-        var M: IMap<Integer, Integer>;
+        var M: IMap<Int, Int>;
         begin
-          M := TDictionary<Integer, Integer>.Create()
+          M := TDictionary<Int, Int>.Create()
         end.
         ''';
 
@@ -287,9 +287,9 @@ const
     OrdDictDecl +
     OrdDictImpls +
     '''
-        var M: IMap<Integer, Integer>;
+        var M: IMap<Int, Int>;
         begin
-          M := TOrderedDictionary<Integer, Integer>.Create()
+          M := TOrderedDictionary<Int, Int>.Create()
         end.
         ''';
 
@@ -301,9 +301,9 @@ const
     DictDecl +
     DictImpls +
     '''
-        var M: IMap<Integer, Integer>;
+        var M: IMap<Int, Int>;
         begin
-          M := TDictionary<Integer, Integer>.Create();
+          M := TDictionary<Int, Int>.Create();
           M.Add(1, 100)
         end.
         ''';
@@ -316,9 +316,9 @@ const
     DictDecl +
     DictImpls +
     '''
-        var M: IMap<Integer, Integer>; V: Integer; OK: Boolean;
+        var M: IMap<Int, Int>; V: Int; OK: Boolean;
         begin
-          M := TDictionary<Integer, Integer>.Create();
+          M := TDictionary<Int, Int>.Create();
           M.Add(42, 99);
           OK := M.TryGetValue(42, V)
         end.
@@ -332,9 +332,9 @@ const
     DictDecl +
     DictImpls +
     '''
-        var M: IMap<Integer, Integer>; OK: Boolean;
+        var M: IMap<Int, Int>; OK: Boolean;
         begin
-          M := TDictionary<Integer, Integer>.Create();
+          M := TDictionary<Int, Int>.Create();
           M.Add(7, 70);
           OK := M.ContainsKey(7)
         end.
@@ -348,9 +348,9 @@ const
     DictDecl +
     DictImpls +
     '''
-        var M: IMap<Integer, Integer>;
+        var M: IMap<Int, Int>;
         begin
-          M := TDictionary<Integer, Integer>.Create();
+          M := TDictionary<Int, Int>.Create();
           M.Add(3, 30);
           M.Remove(3)
         end.
@@ -367,11 +367,11 @@ const
     OrdDictImpls +
     '''
         var
-          M1: IMap<Integer, Integer>;
-          M2: IMap<Integer, Integer>;
+          M1: IMap<Int, Int>;
+          M2: IMap<Int, Int>;
         begin
-          M1 := TDictionary<Integer, Integer>.Create();
-          M2 := TOrderedDictionary<Integer, Integer>.Create();
+          M1 := TDictionary<Int, Int>.Create();
+          M2 := TOrderedDictionary<Int, Int>.Create();
           M1.Add(1, 10);
           M2.Add(2, 20)
         end.

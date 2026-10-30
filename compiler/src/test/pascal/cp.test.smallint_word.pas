@@ -92,7 +92,7 @@ procedure TSmallIntWordTests.TestSemantic_SmallInt_TypeRegistered;
 const
   Src = '''
         program P;
-        var X: SmallInt;
+        var X: Int16;
         begin end.
         ''';
 var
@@ -113,7 +113,7 @@ procedure TSmallIntWordTests.TestSemantic_Word_TypeRegistered;
 const
   Src = '''
         program P;
-        var X: Word;
+        var X: UInt16;
         begin end.
         ''';
 var
@@ -134,7 +134,7 @@ procedure TSmallIntWordTests.TestSemantic_Int16_AliasOfSmallInt;
 const
   Src = '''
         program P;
-        var A: SmallInt;
+        var A: Int16;
         var B: Int16;
         begin end.
         ''';
@@ -155,7 +155,7 @@ procedure TSmallIntWordTests.TestSemantic_UInt16_AliasOfWord;
 const
   Src = '''
         program P;
-        var A: Word;
+        var A: UInt16;
         var B: UInt16;
         begin end.
         ''';
@@ -178,10 +178,10 @@ const
         program P;
         type
           TFour = record
-            A: SmallInt;
-            B: SmallInt;
-            C: SmallInt;
-            D: SmallInt;
+            A: Int16;
+            B: Int16;
+            C: Int16;
+            D: Int16;
           end;
         var R: TFour;
         begin end.
@@ -211,8 +211,8 @@ const
         type
           TMixed = record
             Tag: Byte;
-            ID:  SmallInt;
-            Val: Integer;
+            ID:  Int16;
+            Val: Int32;
           end;
         var R: TMixed;
         begin end.
@@ -246,7 +246,7 @@ const
 
   SrcSmallIntRoundTrip = '''
     program P;
-    var X: SmallInt;
+    var X: Int16;
     begin
       X := 12345;
       WriteLn(X)
@@ -255,7 +255,7 @@ const
 
   SrcWordRoundTrip = '''
     program P;
-    var X: Word;
+    var X: UInt16;
     begin
       X := 60000;
       WriteLn(X)
@@ -264,7 +264,7 @@ const
 
   SrcSmallIntNegative = '''
     program P;
-    var X: SmallInt;
+    var X: Int16;
     begin
       X := -1;
       WriteLn(X)
@@ -273,7 +273,7 @@ const
 
   SrcWordMax = '''
     program P;
-    var X: Word;
+    var X: UInt16;
     begin
       X := 65535;
       WriteLn(X)
@@ -312,8 +312,8 @@ const
     program P;
     type
       TFoo = class
-        A: SmallInt;
-        B: Word;
+        A: Int16;
+        B: UInt16;
         procedure SetAll;
         procedure Show;
       end;
@@ -342,11 +342,11 @@ const
     changed control flow. }
   SrcVarParamSmallInt = '''
     program P;
-    procedure SetIt(var X: SmallInt);
+    procedure SetIt(var X: Int16);
     begin
       X := -300
     end;
-    var S: SmallInt;
+    var S: Int16;
     var L: Int64;
     begin
       SetIt(S);
@@ -359,11 +359,11 @@ const
 
   SrcOutParamSmallInt = '''
     program P;
-    procedure SetIt(out X: SmallInt);
+    procedure SetIt(out X: Int16);
     begin
       X := -300
     end;
-    var S: SmallInt;
+    var S: Int16;
     var L: Int64;
     begin
       SetIt(S);
@@ -380,16 +380,16 @@ const
     program P;
     procedure SetB(var X: Byte);
     begin X := 200 end;
-    procedure SetW(var X: Word);
+    procedure SetW(var X: UInt16);
     begin X := 60000 end;
-    procedure SetS(var X: SmallInt);
+    procedure SetS(var X: Int16);
     begin X := -300 end;
-    procedure SetI(var X: Integer);
+    procedure SetI(var X: Int);
     begin X := -8 end;
     var B: Byte;
-    var W: Word;
-    var S: SmallInt;
-    var I: Integer;
+    var W: UInt16;
+    var S: Int16;
+    var I: Int;
     var L: Int64;
     begin
       SetB(B); L := B; WriteLn(L);
@@ -404,8 +404,8 @@ const
     type
       TMixed = record
         Tag: Byte;
-        ID:  SmallInt;
-        Val: Integer;
+        ID:  Int16;
+        Val: Int32;
       end;
     var R: TMixed;
     begin
@@ -527,13 +527,13 @@ const
     checks in cp.test.smallint_word. }
   Src = '''
     program P;
-    type TR = record V: SmallInt; W: Word; end;
-    var R: TR; X: Integer;
-    procedure SetS(var X: SmallInt);
+    type TR = record V: Int16; W: UInt16; end;
+    var R: TR; X: Int;
+    procedure SetS(var X: Int16);
     begin
       X := -300
     end;
-    procedure SetW(var X: Word);
+    procedure SetW(var X: UInt16);
     begin
       X := 60000
     end;
@@ -541,9 +541,9 @@ const
     begin
       X := 200
     end;
-    var S: SmallInt; W: Word; B: Byte; L: Int64;
+    var S: Int16; W: UInt16; B: Byte; L: Int64;
     begin
-      WriteLn(SizeOf(SmallInt), ' ', SizeOf(Word));
+      WriteLn(SizeOf(Int16), ' ', SizeOf(UInt16));
       R.V := -42;
       R.W := 65000;
       X := R.V;

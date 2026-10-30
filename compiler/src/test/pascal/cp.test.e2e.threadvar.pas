@@ -74,7 +74,7 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    threadvar A: array of Integer;
+    threadvar A: array of Int;
     begin SetLength(A, 3); A[1] := 7; A[2] := A[1] * 2; WriteLn(Length(A), ' ', A[1], ' ', A[2]); SetLength(A, 0); WriteLn(Length(A)); end.
     ''', '3 7 14' + LE + '0' + LE, 0);
 end;
@@ -98,7 +98,7 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    threadvar F: Single;
+    threadvar F: Float32;
     begin F := 1.5; F := F * 2; WriteLn(F:0:2); end.
     ''', '3.00' + LE, 0);
 end;
@@ -110,7 +110,7 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    type TR = record S: string; N: Integer; end;
+    type TR = record S: string; N: Int; end;
     threadvar R: TR;
     var L: TR;
     begin R.S := 'hi'; R.N := 4; WriteLn(R.S, R.N); L := R; L.S := L.S + '!'; WriteLn(L.S, ' ', R.S); R := L; WriteLn(R.S); end.
@@ -140,7 +140,7 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    type TC = class N: Integer; end;
+    type TC = class N: Int; end;
     threadvar C: TC;
     begin C := TC.Create(); C.N := 9; WriteLn(C.N); C.Free(); WriteLn(C = nil); end.
     ''', '9' + LE + 'True' + LE, 0);
@@ -153,9 +153,9 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    threadvar N: Integer;
-    var P: ^Integer;
-    procedure Bump(var X: Integer); begin X := X + 10; end;
+    threadvar N: Int;
+    var P: ^Int;
+    procedure Bump(var X: Int); begin X := X + 10; end;
     begin N := 1; P := @N; P^ := 2; WriteLn(N); Bump(N); WriteLn(N); end.
     ''', '2' + LE + '12' + LE, 0);
 end;
@@ -168,7 +168,7 @@ begin
     '''
     program tvprobe;
     threadvar A: array[0..3] of string;
-    var I: Integer;
+    var I: Int;
     begin for I := 0 to 3 do A[I] := IntToStr(I * I); WriteLn(A[0], A[1], A[2], A[3]); end.
     ''', '0149' + LE, 0);
 end;
@@ -180,8 +180,8 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    threadvar A: array of Integer;
-    var X, T: Integer;
+    threadvar A: array of Int;
+    var X, T: Int;
     begin SetLength(A, 3); A[0] := 1; A[1] := 2; A[2] := 3; T := 0; for X in A do T := T + X; WriteLn(T); end.
     ''', '6' + LE, 0);
 end;
@@ -193,7 +193,7 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    threadvar N: Integer;
+    threadvar N: Int;
     var F: reference to procedure;
     begin N := 1; F := procedure begin N := N + 41; end; F(); WriteLn(N); end.
     ''', '42' + LE, 0);
@@ -206,7 +206,7 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    type TR = record A: array of Integer; end;
+    type TR = record A: array of Int; end;
     threadvar R: TR;
     begin SetLength(R.A, 2); R.A[1] := 6; WriteLn(Length(R.A), R.A[1]); end.
     ''', '26' + LE, 0);
@@ -219,9 +219,9 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    type TR = record S: string; A, B: Integer; end;
+    type TR = record S: string; A, B: Int; end;
     threadvar R: TR;
-    function Mk(const S: string; A, B: Integer): TR; begin Result.S := S; Result.A := A; Result.B := B; end;
+    function Mk(const S: string; A, B: Int): TR; begin Result.S := S; Result.A := A; Result.B := B; end;
     begin R := Mk('pq', 3, 4); WriteLn(R.S, ' ', R.A, ' ', R.B); end.
     ''', 'pq 3 4' + LE, 0);
 end;
@@ -246,9 +246,9 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    threadvar F: reference to function(X: Integer): Integer;
-    threadvar K: Integer;
-    begin K := 99; F := function(X: Integer): Integer begin Result := X + 4; end; WriteLn(F(3)); end.
+    threadvar F: reference to function(X: Int): Int;
+    threadvar K: Int;
+    begin K := 99; F := function(X: Int): Int begin Result := X + 4; end; WriteLn(F(3)); end.
     ''', '7' + LE, 0);
 end;
 
@@ -264,7 +264,7 @@ begin
       TGreet = class(IGreet) function Hi(): string; end;
     function TGreet.Hi(): string; begin Result := 'hi'; end;
     threadvar G: IGreet;
-    threadvar After: Integer;
+    threadvar After: Int;
     procedure Fill(var X: IGreet); begin X := TGreet.Create(); end;
     procedure Show(const X: IGreet); begin WriteLn(X.Hi()); end;
     begin After := 0; Fill(G); WriteLn(G.Hi()); Show(G); end.
@@ -278,11 +278,11 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    type TC = class N: Integer; function Get(): Integer; end;
-      TGetter = function(): Integer of object;
-    function TC.Get(): Integer; begin Result := N; end;
+    type TC = class N: Int; function Get(): Int; end;
+      TGetter = function(): Int of object;
+    function TC.Get(): Int; begin Result := N; end;
     threadvar M: TGetter;
-    threadvar Guard: Integer;
+    threadvar Guard: Int;
     var C: TC;
     begin C := TC.Create(); C.N := 5; M := @C.Get; Guard := 1; WriteLn(M()); end.
     ''', '5' + LE, 0);
@@ -310,7 +310,7 @@ begin
   AssertRunsOnAll(
     '''
     program tvprobe;
-    threadvar N: Integer = 5;
+    threadvar N: Int32 = 5;
     begin WriteLn(N); N := N + 1; WriteLn(N); end.
     ''', '5' + LE + '6' + LE, 0);
 end;
@@ -335,10 +335,10 @@ begin
     '''
     program tvprobe;
     uses Classes;
-    threadvar N: Integer = 5;
+    threadvar N: Int32 = 5;
     threadvar S: string;
     type TW = class(TThread) procedure Execute(); override; end;
-    var Got: Integer; GotS: string;
+    var Got: Int; GotS: string;
     procedure TW.Execute(); begin Got := N; N := 99; S := 'w'; GotS := S; end;
     var T: TW;
     begin S := 'main'; T := TW.Create(False); T.WaitFor(); WriteLn(Got, ' ', N, ' ', GotS, ' ', S); end.
@@ -353,11 +353,11 @@ begin
     '''
     program tvprobe;
     threadvar
-      D: Double = 2.5;
+      D: Float64 = 2.5;
       B: Boolean = True;
-      W: Word = 513;
+      W: UInt16 = 513;
       Q: Int64 = 1099511627776;
-      A: array[0..2] of Integer = (4, 5, 6);
+      A: array[0..2] of Int32 = (4, 5, 6);
       T: array[0..1] of string = ('x', 'yz');
     begin WriteLn(D:0:1, ' ', B, ' ', W, ' ', Q, ' ', A[0] + A[1] + A[2], ' ', T[0], T[1]); A[1] := 0; WriteLn(A[0] + A[1] + A[2]); end.
     ''', '2.5 True 513 1099511627776 15 xyz' + LE + '10' + LE, 0);
@@ -375,7 +375,7 @@ const
       IGreet = interface function Hi(): string; end;
       TGreet = class(IGreet) function Hi(): string; end;
     threadvar
-      X: Integer;
+      X: Int;
       S: string;
       G: IGreet;
     implementation
@@ -413,13 +413,13 @@ const
     unit tvu;
     interface
     threadvar
-      Counter: Integer = 40;
+      Counter: Int32 = 40;
       Tag: string = 'u';
-    function Bump(): Integer;
+    function Bump(): Int;
     implementation
     threadvar
-      Step: Integer = 2;
-    function Bump(): Integer;
+      Step: Int32 = 2;
+    function Bump(): Int;
     begin
       Counter := Counter + Step;
       Result := Counter
@@ -464,9 +464,9 @@ begin
       TNoisy = class destructor Destroy; override; end;
       IGreet = interface function Hi(): string; end;
       TGreet = class(IGreet) function Hi(): string; destructor Destroy; override; end;
-      TRec = record O: TNoisy; N: Integer; end;
+      TRec = record O: TNoisy; N: Int; end;
       TProc = reference to procedure;
-    var Freed: Integer;
+    var Freed: Int;
     destructor TNoisy.Destroy; begin Freed := Freed + 1 end;
     function TGreet.Hi(): string; begin Result := 'hi' end;
     destructor TGreet.Destroy; begin Freed := Freed + 1 end;
@@ -542,7 +542,7 @@ const
     interface
     type TNoisy = class destructor Destroy; override; end;
     threadvar Held: TNoisy;
-    var Freed: Integer;
+    var Freed: Int;
     implementation
     destructor TNoisy.Destroy; begin Freed := Freed + 1 end;
     end.
@@ -575,9 +575,9 @@ const
   Src = '''
     program tvprobe;
     threadvar
-      N: Integer = 40;
+      N: Int32 = 40;
       S: string = 'u';
-      M: Integer = 2;
+      M: Int32 = 2;
     begin WriteLn(N + M, ' ', S) end.
     ''';
 var

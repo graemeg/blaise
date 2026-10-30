@@ -52,12 +52,12 @@ const
         program P;
         type
           TInner = record
-            Value: Integer;
+            Value: Int32;
           end;
           TOuter = record
             Inner: TInner;
           end;
-        var O: TOuter; N: Integer;
+        var O: TOuter; N: Int32;
         begin
           N := O.Inner.Value
         end.
@@ -67,10 +67,10 @@ const
     '''
         program P;
         type
-          TA = record X: Integer; end;
+          TA = record X: Int; end;
           TB = record A: TA; end;
           TC = record B: TB; end;
-        var C: TC; N: Integer;
+        var C: TC; N: Int;
         begin
           N := C.B.A.X
         end.
@@ -81,12 +81,12 @@ const
         program P;
         type
           TThing = class(TObject)
-            Inner: Integer;
+            Inner: Int;
           end;
           TBox = record
             Thing: TThing;
           end;
-        var B: TBox; N: Integer; T: TThing;
+        var B: TBox; N: Int; T: TThing;
         begin
           B.Thing := TThing.Create();
           N := B.Thing.Inner;

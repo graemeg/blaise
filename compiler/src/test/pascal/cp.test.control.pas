@@ -139,7 +139,7 @@ const
   SrcIfOnly =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 5;
           if N = 5 then
@@ -150,7 +150,7 @@ const
   SrcIfElse =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 3;
           if N > 0 then
@@ -163,7 +163,7 @@ const
   SrcCompound =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 10;
           if N > 5 then
@@ -446,7 +446,7 @@ begin
   Prog := AnalyseSrc(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 1;
           if N <> 0 then
@@ -468,7 +468,7 @@ begin
   Prog := AnalyseSrc(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 1;
           if N < 5 then
@@ -503,7 +503,7 @@ begin
   Prog := AnalyseSrc(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 1;
           if N <= 5 then
@@ -525,7 +525,7 @@ begin
   Prog := AnalyseSrc(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 1;
           if N >= 1 then
@@ -544,7 +544,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 1;
           if N = 'hello' then
@@ -558,7 +558,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 1;
           if N then
@@ -584,7 +584,7 @@ const
   SrcWhile =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 5;
           while N > 0 do
@@ -595,7 +595,7 @@ const
   SrcWhileCompound =
     '''
         program P;
-        var N, S: Integer;
+        var N, S: Int;
         begin
           N := 3;
           S := 0;
@@ -679,7 +679,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 1;
           while N do

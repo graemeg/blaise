@@ -90,15 +90,15 @@ const
     type
       TSmall = record A, B: Int64; end;
       TBig = record A, B, C: Int64; end;
-      TFnS = reference to function(X: Integer): TSmall;
-      TFnB = reference to function(X: Integer): TBig;
+      TFnS = reference to function(X: Int): TSmall;
+      TFnB = reference to function(X: Int): TBig;
     procedure ShowS(const R: TSmall); begin WriteLn(R.A + R.B) end;
     procedure ShowB(const R: TBig); begin WriteLn(R.A + R.C) end;
     var GS: TFnS; GB: TFnB; S: TSmall; B: TBig;
     begin
-      GS := function(X: Integer): TSmall
+      GS := function(X: Int): TSmall
         begin Result.A := X; Result.B := X + 1 end;
-      GB := function(X: Integer): TBig
+      GB := function(X: Int): TBig
         begin Result.A := X; Result.B := 2; Result.C := X + 3 end;
       S := GS(1);
       WriteLn(GS(2).B);
@@ -150,7 +150,7 @@ procedure TRecordReturnTests.TestReturnAbi_OneDouble_FloatRegister;
 const
   Src = '''
     program P;
-    type T1D = record X: Double; end;
+    type T1D = record X: Float64; end;
     function MakeD: T1D; begin Result.X := 1.5 end;
     begin end.
     ''';
@@ -165,7 +165,7 @@ procedure TRecordReturnTests.TestReturnAbi_TwoDoubles_FloatRegisterPair;
 const
   Src = '''
     program P;
-    type T2D = record X, Y: Double; end;
+    type T2D = record X, Y: Float64; end;
     function MakeD: T2D; begin Result.X := 1.5; Result.Y := 2.5 end;
     begin end.
     ''';
@@ -180,7 +180,7 @@ procedure TRecordReturnTests.TestReturnAbi_IntegerPlusDouble_PerIsaClassificatio
 const
   Src = '''
     program P;
-    type TID = record I: Integer; D: Double; end;
+    type TID = record I: Int; D: Float64; end;
     function MakeID: TID; begin Result.I := 3; Result.D := 4.5 end;
     begin end.
     ''';
@@ -234,9 +234,9 @@ const
   Src = '''
     program P;
     type
-      TRect = record Name: string; N: Integer; end;
+      TRect = record Name: string; N: Int; end;
       IShape = interface
-        function MakeRect(AN: Integer): TRect;
+        function MakeRect(AN: Int): TRect;
       end;
       TUser = class
         FS: IShape;
@@ -264,13 +264,13 @@ const
     type
       TBig = record A, B, C: Int64; end;
       TBase = class
-        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; virtual;
+        function Calc(A, B, C, D, E: Int; var Z: Int): TBig; virtual;
       end;
-    function TBase.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    function TBase.Calc(A, B, C, D, E: Int; var Z: Int): TBig;
     begin Result.A := A + E; Z := 1 end;
-    function OA(const V: array of Integer; K: Integer): TBig;
+    function OA(const V: array of Int; K: Int): TBig;
     begin Result.A := High(V); Result.C := K end;
-    var O: TBase; R: TBig; Z: Integer;
+    var O: TBase; R: TBig; Z: Int;
     begin
       O := TBase.Create();
       R := O.Calc(1, 2, 3, 4, 5, Z);
@@ -292,11 +292,11 @@ const
     type
       TBig = record A, B, C: Int64; end;
       TBase = class
-        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; virtual;
+        function Calc(A, B, C, D, E: Int; var Z: Int): TBig; virtual;
       end;
-    function TBase.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    function TBase.Calc(A, B, C, D, E: Int; var Z: Int): TBig;
     begin Result.A := A + E; Z := 1 end;
-    var O: TBase; R: TBig; Z: Integer;
+    var O: TBase; R: TBig; Z: Int;
     begin
       O := TBase.Create();
       R := O.Calc(1, 2, 3, 4, 5, Z);
@@ -315,12 +315,12 @@ const
   Src = '''
     program P;
     type
-      IS1 = interface function V: Integer; end;
-      TS = class(TObject, IS1) N: Integer; function V: Integer; end;
+      IS1 = interface function V: Int; end;
+      TS = class(TObject, IS1) N: Int; function V: Int; end;
       TBig = record A, B, C: Int64; end;
-    function TS.V: Integer; begin Result := N end;
-    function MkS(K: Integer): IS1; var T: TS; begin T := TS.Create(); T.N := K; Result := T end;
-    function SR(const I: IS1; K: Integer): TBig; begin Result.A := I.V(); Result.B := K end;
+    function TS.V: Int; begin Result := N end;
+    function MkS(K: Int): IS1; var T: TS; begin T := TS.Create(); T.N := K; Result := T end;
+    function SR(const I: IS1; K: Int): TBig; begin Result.A := I.V(); Result.B := K end;
     var R: TBig;
     begin
       R := SR(MkS(9), 8);
@@ -381,8 +381,8 @@ begin
   AssertEquals('external record return lowers', '',
     AsmMissing('''
       program P;
-      type TDiv = record Quot, Rem: Integer; end;
-      function c_div(N, D: Integer): TDiv; external name 'div';
+      type TDiv = record Quot, Rem: Int; end;
+      function c_div(N, D: Int32): TDiv; external name 'div';
       var A: TDiv;
       begin A := c_div(17, 5); WriteLn(A.Quot) end.
       ''', 'call', 'bl _div'));
@@ -422,11 +422,11 @@ begin
       program P;
       type
         TC = class
-          function Half(X: Double): Double;
+          function Half(X: Float64): Float64;
           procedure Go;
         end;
-      function TC.Half(X: Double): Double; begin Result := X / 2.0 end;
-      procedure TC.Go; var I: Integer; begin I := Trunc(Half(9.0)); WriteLn(I) end;
+      function TC.Half(X: Float64): Float64; begin Result := X / 2.0 end;
+      procedure TC.Go; var I: Int; begin I := Trunc(Half(9.0)); WriteLn(I) end;
       var C: TC;
       begin C := TC.Create(); C.Go() end.
       ''', 'call', 'fcvtzs'));
@@ -439,11 +439,11 @@ begin
       program P;
       type
         TBase = class
-          function Half(X: Double): Double; virtual;
+          function Half(X: Float64): Float64; virtual;
           procedure Go;
         end;
-      function TBase.Half(X: Double): Double; begin Result := X / 2.0 end;
-      procedure TBase.Go; var D: Double; begin D := Half(5.0) + 1.0; WriteLn(D:0:1) end;
+      function TBase.Half(X: Float64): Float64; begin Result := X / 2.0 end;
+      procedure TBase.Go; var D: Float64; begin D := Half(5.0) + 1.0; WriteLn(D:0:1) end;
       var B: TBase;
       begin B := TBase.Create(); B.Go() end.
       ''', 'callq *', 'blr x'));
@@ -455,10 +455,10 @@ const
     program P;
     type
       TBig = record A, B, C: Int64; S: string; end;
-      TBFn = reference to function(A: Integer): TBig;
+      TBFn = reference to function(A: Int): TBig;
     function GetB(): TBFn;
     begin
-      Result := function(A: Integer): TBig begin Result.S := 'B'; end;
+      Result := function(A: Int): TBig begin Result.S := 'B'; end;
     end;
     begin
       WriteLn(GetB()(5).S)
@@ -507,15 +507,15 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TRec = record A: TArr; end;
       TObj = class
       public
-        function MkRec(N: Integer): TRec;
+        function MkRec(N: Int): TRec;
       end;
-    function F(N: Integer): TRec; begin Result.A[1] := N; end;
-    function TObj.MkRec(N: Integer): TRec; begin Result.A[2] := N; end;
-    var O: TObj; X: Integer;
+    function F(N: Int): TRec; begin Result.A[1] := N; end;
+    function TObj.MkRec(N: Int): TRec; begin Result.A[2] := N; end;
+    var O: TObj; X: Int;
     begin
       X := F(1).A[1] + F(2).A[1] + F(3).A[1];
       X := O.MkRec(3).A[2];
@@ -536,12 +536,12 @@ const
   Src = '''
     program P;
     type
-      TBig = record A, B, C: Integer; end;
+      TBig = record A, B, C: Int32; end;
       TH = record
         V: TBig;
-        function Scaled(K: Integer): TBig;
+        function Scaled(K: Int32): TBig;
       end;
-    function TH.Scaled(K: Integer): TBig;
+    function TH.Scaled(K: Int32): TBig;
     begin
       Result.A := V.A * K; Result.B := V.B * K; Result.C := V.C * K
     end;

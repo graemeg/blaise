@@ -122,8 +122,8 @@ const
   SrcForUpward =
     '''
         program P;
-        var I: Integer;
-        var S: Integer;
+        var I: Int;
+        var S: Int;
         begin
           S := 0;
           for I := 1 to 5 do
@@ -134,8 +134,8 @@ const
   SrcForDownto =
     '''
         program P;
-        var I: Integer;
-        var S: Integer;
+        var I: Int;
+        var S: Int;
         begin
           S := 0;
           for I := 5 downto 1 do
@@ -146,8 +146,8 @@ const
   SrcForCompound =
     '''
         program P;
-        var I: Integer;
-        var S: Integer;
+        var I: Int;
+        var S: Int;
         begin
           S := 0;
           for I := 1 to 3 do
@@ -312,7 +312,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         var S: string;
         begin
           for I := S to 5 do
@@ -326,7 +326,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var I: Integer;
+        var I: Int;
         var S: string;
         begin
           for I := 1 to S do
@@ -343,7 +343,7 @@ procedure TForTests.TestCodegen_For_ExitTestBeforeStep;
 const
   Src = '''
     program P;
-    var I: Int8; C: Integer;
+    var I: Int8; C: Int;
     begin
       for I := Low(Int8) to High(Int8) do
         C := C + 1;
@@ -358,7 +358,7 @@ procedure TForTests.TestCodegen_For_UnsignedCounter_UnsignedGuard;
 const
   Src = '''
     program P;
-    var U, Hi: UInt64; C: Integer;
+    var U, Hi: UInt64; C: Int;
     begin
       Hi := 5;
       for U := 1 to Hi do
@@ -374,7 +374,7 @@ procedure TForTests.TestCodegen_For_Int8GlobalCounter_ByteStore;
 const
   Src = '''
     program P;
-    var I: Int8; C: Integer;
+    var I: Int8; C: Int;
     begin
       for I := 1 to 3 do
         C := C + 1;

@@ -91,7 +91,7 @@ const
     '''
         program P;
         var H: Pointer;
-            N: Integer;
+            N: Int32;
         begin
           H := ProcessCreate();
           N := ProcessExitCode(H)

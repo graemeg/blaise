@@ -69,13 +69,13 @@ const Src = '''
       ITransform<T> = interface
         function Apply(V: T): T;
       end;
-      TDoubler = class(ITransform<Integer>)
-        function Apply(V: Integer): Integer;
+      TDoubler = class(ITransform<Int>)
+        function Apply(V: Int): Int;
         begin Result := V * 2 end;
       end;
     var
       Obj: TDoubler;
-      Intf: ITransform<Integer>;
+      Intf: ITransform<Int>;
     begin
       Obj := TDoubler.Create();
       Intf := Obj;
@@ -94,24 +94,24 @@ const Src = '''
         function GetKey: K;
         function GetValue: V;
       end;
-      TIntPair = class(IPair<Integer, Integer>)
-        FA: Integer;
-        FB: Integer;
-        constructor Create(A, B: Integer);
-        function GetKey: Integer;
-        function GetValue: Integer;
+      TIntPair = class(IPair<Int, Int>)
+        FA: Int;
+        FB: Int;
+        constructor Create(A, B: Int);
+        function GetKey: Int;
+        function GetValue: Int;
       end;
-    constructor TIntPair.Create(A, B: Integer);
+    constructor TIntPair.Create(A, B: Int);
     begin
       Self.FA := A;
       Self.FB := B;
     end;
-    function TIntPair.GetKey: Integer;
+    function TIntPair.GetKey: Int;
     begin Result := Self.FA end;
-    function TIntPair.GetValue: Integer;
+    function TIntPair.GetValue: Int;
     begin Result := Self.FB end;
     var
-      P: IPair<Integer, Integer>;
+      P: IPair<Int, Int>;
     begin
       P := TIntPair.Create(10, 20);
       WriteLn(P.GetKey());
@@ -128,16 +128,16 @@ const Src = '''
     type
       IEqualityComparer<T> = interface
         function Equals(A, B: T): Boolean;
-        function GetHashCode(Value: T): Integer;
+        function GetHashCode(Value: T): Int32;
       end;
-      TIntEqCmp = class(IEqualityComparer<Integer>)
-        function Equals(A, B: Integer): Boolean;
+      TIntEqCmp = class(IEqualityComparer<Int>)
+        function Equals(A, B: Int): Boolean;
         begin Result := A = B end;
-        function GetHashCode(Value: Integer): Integer;
+        function GetHashCode(Value: Int): Int32;
         begin Result := Value end;
       end;
     var
-      C: IEqualityComparer<Integer>;
+      C: IEqualityComparer<Int>;
     begin
       C := TIntEqCmp.Create();
       if C.Equals(42, 42) then
@@ -160,16 +160,16 @@ const Src = '''
     type
       IEqualityComparer<T> = interface
         function Equals(A, B: T): Boolean;
-        function GetHashCode(Value: T): Integer;
+        function GetHashCode(Value: T): Int32;
       end;
-      TIntEqCmp = class(IEqualityComparer<Integer>)
-        function Equals(A, B: Integer): Boolean;
+      TIntEqCmp = class(IEqualityComparer<Int>)
+        function Equals(A, B: Int): Boolean;
         begin Result := A = B end;
-        function GetHashCode(Value: Integer): Integer;
+        function GetHashCode(Value: Int): Int32;
         begin Result := Value end;
       end;
     var
-      C: IEqualityComparer<Integer>;
+      C: IEqualityComparer<Int>;
     begin
       C := TIntEqCmp.Create();
       WriteLn(C.GetHashCode(99))
@@ -184,10 +184,10 @@ const Src = '''
     program T;
     type
       IComparer<T> = interface
-        function Compare(A, B: T): Integer;
+        function Compare(A, B: T): Int32;
       end;
-      TIntCmp = class(IComparer<Integer>)
-        function Compare(A, B: Integer): Integer;
+      TIntCmp = class(IComparer<Int>)
+        function Compare(A, B: Int): Int32;
         begin
           if A < B then
             Result := -1
@@ -198,7 +198,7 @@ const Src = '''
         end;
       end;
     var
-      C: IComparer<Integer>;
+      C: IComparer<Int>;
     begin
       C := TIntCmp.Create();
       WriteLn(C.Compare(1, 2));
@@ -239,15 +239,15 @@ const Src = '''
       ITransform<T> = interface
         function Apply(V: T): T;
       end;
-      TDoubler = class(ITransform<Integer>)
-        function Apply(V: Integer): Integer;
+      TDoubler = class(ITransform<Int>)
+        function Apply(V: Int): Int;
         begin Result := V * 2 end;
       end;
-      TTripler = class(ITransform<Integer>)
-        function Apply(V: Integer): Integer;
+      TTripler = class(ITransform<Int>)
+        function Apply(V: Int): Int;
         begin Result := V * 3 end;
       end;
-    procedure PrintResult(Tr: ITransform<Integer>; V: Integer);
+    procedure PrintResult(Tr: ITransform<Int>; V: Int);
     begin
       WriteLn(Tr.Apply(V))
     end;
@@ -270,19 +270,19 @@ const Src = '''
     program T;
     type
       IHolder = interface
-        function Get: Integer;
+        function Get: Int;
       end;
       TBox<T> = class(TObject, IHolder)
-        FVal: Integer;
-        function Get: Integer;
+        FVal: Int;
+        function Get: Int;
       end;
-      function TBox<T>.Get: Integer;
+      function TBox<T>.Get: Int;
       begin Result := FVal end;
     var
-      B: TBox<Integer>;
+      B: TBox<Int>;
       H: IHolder;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int>.Create();
       B.FVal := 42;
       H := B;
       WriteLn(H.Get())
@@ -301,20 +301,20 @@ const
     interface
     type
       IHolder = interface
-        function Get: Integer;
+        function Get: Int;
       end;
       TBox<T> = class(TObject, IHolder)
-        FVal: Integer;
-        function Get: Integer;
+        FVal: Int;
+        function Get: Int;
       end;
-    function MakeHolder(V: Integer): IHolder;
+    function MakeHolder(V: Int): IHolder;
     implementation
-    function TBox<T>.Get: Integer;
+    function TBox<T>.Get: Int;
     begin Result := FVal end;
-    function MakeHolder(V: Integer): IHolder;
-    var B: TBox<Integer>;
+    function MakeHolder(V: Int): IHolder;
+    var B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int>.Create();
       B.FVal := V;
       Result := B
     end;
@@ -369,18 +369,18 @@ const Src = '''
       IBox<T> = interface
         function Get: T;
       end;
-      TBox = class(IBox<TList<Integer>>)
-        FInner: TList<Integer>;
-        function Get: TList<Integer>;
+      TBox = class(IBox<TList<Int>>)
+        FInner: TList<Int>;
+        function Get: TList<Int>;
         begin Result := FInner end;
-        constructor Create(AValue: Integer);
+        constructor Create(AValue: Int);
         begin
-          FInner := TList<Integer>.Create();
+          FInner := TList<Int>.Create();
           FInner.Item := AValue
         end;
       end;
     var
-      B: IBox<TList<Integer>>;
+      B: IBox<TList<Int>>;
     begin
       B := TBox.Create(7);
       WriteLn(B.Get().Item)
@@ -406,9 +406,9 @@ const Src = '''
       IBox<T> = interface
         function Get: T;
       end;
-      IIntBox = IBox<Integer>;
-      TBox = class(IBox<Integer>)
-        function Get: Integer;
+      IIntBox = IBox<Int>;
+      TBox = class(IBox<Int>)
+        function Get: Int;
         begin Result := 7 end;
       end;
     var
@@ -442,16 +442,16 @@ const Src = '''
         function Get: T;
       end;
       IDeriv<T> = interface(IBase<T>)
-        function Extra: Integer;
+        function Extra: Int;
       end;
-      TImpl = class(IDeriv<Integer>)
-        function Get: Integer;
+      TImpl = class(IDeriv<Int>)
+        function Get: Int;
         begin Result := 3 end;
-        function Extra: Integer;
+        function Extra: Int;
         begin Result := 4 end;
       end;
     var
-      D: IDeriv<Integer>;
+      D: IDeriv<Int>;
     begin
       D := TImpl.Create();
       WriteLn(D.Get());
@@ -474,13 +474,13 @@ const Src = '''
         function Get: T;
       end;
       IDeriv<T> = interface(IBase<T>)
-        function Extra: Integer;
+        function Extra: Int;
       end;
-      IIntBase = IBase<Integer>;
-      TImpl = class(IDeriv<Integer>)
-        function Get: Integer;
+      IIntBase = IBase<Int>;
+      TImpl = class(IDeriv<Int>)
+        function Get: Int;
         begin Result := 3 end;
-        function Extra: Integer;
+        function Extra: Int;
         begin Result := 4 end;
       end;
     var

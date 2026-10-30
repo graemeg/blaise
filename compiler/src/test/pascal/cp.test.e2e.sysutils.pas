@@ -247,7 +247,7 @@ const
   SrcBuiltinFunctionStmtsLeak =
     '''
         program P;
-        var I: Integer; S: string;
+        var I: Int; S: string;
         begin
           S := 'dir/name.pas';
           for I := 0 to 99 do
@@ -301,7 +301,7 @@ const
         program P;
         var
           H:    Pointer;
-          Code: Integer;
+          Code: Int;
           Chunk: string;
         begin
           H := ProcessCreate();
@@ -1023,7 +1023,7 @@ const
         program P;
         uses SysUtils;
         var
-          N: Integer;
+          N: Int;
         begin
           { valid input still parses }
           WriteLn(StrToInt('42'));

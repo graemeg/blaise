@@ -391,7 +391,7 @@ begin
   AssertTrue('variable value is not diagnosed', Accepts('''
     program P;
     type TStd = 1..5;
-    var v: TStd; i: Integer;
+    var v: TStd; i: Int;
     begin i := 99; v := i end.
     '''));
 end;
@@ -537,7 +537,7 @@ begin
     type
       TE = (eA, eB, eC);
       TMid = eB..eC;
-    var m: TMid; eB: Integer;
+    var m: TMid; eB: Int;
     begin eB := 2; m := eB end.
     '''));
 end;
@@ -550,7 +550,7 @@ begin
       TE = (eA, eB, eC);
       TMid = eB..eC;
     var m: TMid;
-    procedure Q(eA: Integer);
+    procedure Q(eA: Int);
     begin m := eA end;
     begin Q(2) end.
     '''));
@@ -566,7 +566,7 @@ begin
       TE = (eA, eB, eC);
       TMid = eB..eC;
       TC = class
-        eA: Integer;
+        eA: Int;
         FM: TMid;
         procedure Go();
       end;

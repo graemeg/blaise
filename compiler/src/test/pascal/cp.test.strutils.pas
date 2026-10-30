@@ -377,7 +377,7 @@ begin
   SemanticOK(
     '''
     program P; uses StrUtils;
-    var S, Sub: string; N: Integer;
+    var S, Sub: string; N: Int;
     begin N := PosEx(Sub, S, 2) end.
     ''');
 end;
@@ -428,7 +428,7 @@ begin
   SemanticOK(
     '''
     program P; uses StrUtils;
-    var S: string; I: Integer;
+    var S: string; I: Int;
     var Arr: array[0..2] of string;
     begin
       Arr[0] := 'a'; Arr[1] := 'b'; Arr[2] := 'c';
@@ -442,7 +442,7 @@ begin
   SemanticOK(
     '''
     program P; uses StrUtils;
-    var S: string; I: Integer;
+    var S: string; I: Int;
     var Arr: array[0..2] of string;
     begin
       Arr[0] := 'a'; Arr[1] := 'b'; Arr[2] := 'c';
@@ -715,7 +715,7 @@ begin
   SemanticOK(
     '''
     program P; uses StrUtils;
-    var S, Sub: string; N: Integer;
+    var S, Sub: string; N: Int;
     begin N := CountOccurrences(Sub, S) end.
     ''');
 end;
@@ -964,7 +964,7 @@ begin
   SemanticOK(
     '''
     program P; uses StrUtils;
-    var SB: TStringBuilder; N: Integer;
+    var SB: TStringBuilder; N: Int;
     begin
       SB := TStringBuilder.Create();
       SB.Append('hi');

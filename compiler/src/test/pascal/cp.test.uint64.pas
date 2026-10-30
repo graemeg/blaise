@@ -138,7 +138,7 @@ const
   Src =
     '''
         program P;
-        var X: QWord;
+        var X: UInt64;
         begin end.
         ''';
 var
@@ -161,7 +161,7 @@ const
     '''
         program P;
         var A: UInt64;
-        var B: QWord;
+        var B: UInt64;
         begin end.
         ''';
 var
@@ -182,7 +182,7 @@ const
   Src =
     '''
         program P;
-        var P1: PtrUInt;
+        var P1: UInt;
         begin end.
         ''';
 var
@@ -253,7 +253,7 @@ const
   SrcQWordAlias =
     '''
     program P;
-    var Q: QWord;
+    var Q: UInt64;
     begin
       Q := 100;
       WriteLn(Q)
@@ -335,7 +335,7 @@ const
     procedure Show(N: Int64);
     begin WriteLn(N) end;
     var
-      C:   Cardinal;
+      C:   UInt32;
       V:   Int64;
       R:   TRec;
       Arr: array[0..1] of Int64;
@@ -359,7 +359,7 @@ const
     program P;
     uses sysutils;
     var
-      C:   Cardinal;
+      C:   UInt32;
       I64: Int64;
     begin
       C := 4000000000;
@@ -484,11 +484,11 @@ const
     checks in cp.test.uint64. }
   Src = '''
     program P;
-    var A, B, Big: UInt64; Q: QWord; C: Cardinal; V, N: Int64; S: string;
+    var A, B, Big: UInt64; Q: UInt64; C: UInt32; V, N: Int64; S: string;
     type TRec = record V: Int64; end;
     var R: TRec;
     begin
-      WriteLn(SizeOf(UInt64), ' ', SizeOf(QWord), ' ', SizeOf(Q));
+      WriteLn(SizeOf(UInt64), ' ', SizeOf(UInt64), ' ', SizeOf(Q));
       Big := 1;
       Big := Big shl 63;
       A := Big;

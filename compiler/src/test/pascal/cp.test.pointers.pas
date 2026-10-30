@@ -149,7 +149,7 @@ const
   SrcTypedPtrDecl =
     '''
         program Prg;
-        var P: ^Integer;
+        var P: ^Int32;
         begin
         end.
         ''';
@@ -181,8 +181,8 @@ const
     '''
         program Prg;
         var
-          Ptr: ^Integer;
-          V: Integer;
+          Ptr: ^Int32;
+          V: Int32;
         begin
           Ptr^ := 42;
           V := Ptr^
@@ -242,7 +242,7 @@ begin
   Prog := ParseSrc(SrcTypedPtrDecl);
   try
     Decl := TVarDecl(Prog.Block.Decls[0]);
-    AssertEquals('^Integer', Decl.TypeName);
+    AssertEquals('^Int32', Decl.TypeName);
   finally
     Prog.Free();
   end;
@@ -375,7 +375,7 @@ const
     program P;
     var
       A: PInteger;
-      B: ^Integer;
+      B: ^Int32;
       C: PCardinal;
       D: PUInt32;
     begin
@@ -406,8 +406,8 @@ const
     '''
     program P;
     type
-      PInteger = ^Integer;
-      PByte = ^Integer;
+      PInteger = ^Int32;
+      PByte = ^Int32;
     var
       A: PInteger;
       B: PByte;
@@ -627,7 +627,7 @@ const
     type
       PRec = ^TRec;
       TRec = record
-        DA: array of Integer;
+        DA: array of Int;
       end;
     var
       Ptr: PRec;
@@ -754,7 +754,7 @@ const
   SrcMoveOk = '''
     program P;
     var
-      A, B: array[0..3] of Integer;
+      A, B: array[0..3] of Int;
     begin
       Move(A, B, SizeOf(A));
     end.
@@ -789,8 +789,8 @@ begin
     program P;
     type
       TPoint = record
-        X, Y: Integer;
-        Z: Double;
+        X, Y: Int;
+        Z: Float64;
       end;
     var
       A, B: TPoint;
@@ -806,7 +806,7 @@ var
 begin
   Msg := SemanticError('''
     program P;
-    var A, B: Integer;
+    var A, B: Int;
     begin
       Move(A, B);
     end.
@@ -821,7 +821,7 @@ var
 begin
   Msg := SemanticError('''
     program P;
-    var B: Integer;
+    var B: Int;
     begin
       Move(1, B, 4);
     end.
@@ -836,7 +836,7 @@ var
 begin
   Msg := SemanticError('''
     program P;
-    var A, B: Integer;
+    var A, B: Int;
     begin
       Move(A, B, 1.5);
     end.
@@ -917,9 +917,9 @@ var
   Msg: string;
 begin
   AssertEquals('Integer instance is fine', '', SemanticError(Generic + '''
-    var I: TBox<Integer>;
+    var I: TBox<Int32>;
     begin
-      I := TBox<Integer>.Create();
+      I := TBox<Int32>.Create();
     end.
     '''));
   Msg := SemanticError(Generic + '''
@@ -958,11 +958,11 @@ begin
     type
       PByte = ^Byte;
       TRec = record
-        X, Y: Integer;
+        X, Y: Int;
       end;
     var
       Q: PByte;
-      A: array[0..7] of Integer;
+      A: array[0..7] of Int;
       R: TRec;
       V: Byte;
       N: Int64;
@@ -982,7 +982,7 @@ var
 begin
   Msg := SemanticError('''
     program P;
-    var A: Integer;
+    var A: Int;
     begin
       FillByte(A, 4);
     end.
@@ -1012,7 +1012,7 @@ var
 begin
   Msg := SemanticError('''
     program P;
-    var A: Integer;
+    var A: Int;
     begin
       FillByte(A, 1.5, 0);
     end.
@@ -1027,7 +1027,7 @@ var
 begin
   Msg := SemanticError('''
     program P;
-    var A: Integer;
+    var A: Int;
     begin
       FillByte(A, 4, ' ');
     end.
@@ -1043,7 +1043,7 @@ var
 begin
   Msg := SemanticError('''
     program P;
-    var A: Integer;
+    var A: Int;
     begin
       FillByte(A, 4, 256);
     end.
@@ -1060,7 +1060,7 @@ begin
     program P;
     type
       TRec = record
-        Id: Integer;
+        Id: Int;
         Name: string;
       end;
     var R: TRec;
@@ -1101,7 +1101,7 @@ const
   SrcPlain = '''
       program P;
       type
-        TRow = array[0..2] of Integer;
+        TRow = array[0..2] of Int;
         PRow = ^TRow;
       procedure Put(P: PRow; const R: TRow);
       begin

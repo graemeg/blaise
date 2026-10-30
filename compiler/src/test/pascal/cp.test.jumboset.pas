@@ -118,7 +118,7 @@ begin
     type
       TBig = 0..199;
       TJumbo = set of TBig;
-    function Mine(A, B: Integer): TJumbo; begin Result := [A, B] end;
+    function Mine(A, B: Int): TJumbo; begin Result := [A, B] end;
     begin
       WriteLn(7 in Mine(7, 199))
     end.

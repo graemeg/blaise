@@ -250,7 +250,7 @@ const
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int32;
           end;
         begin end.
         ''';
@@ -294,7 +294,7 @@ begin
     AssertEquals('1 field', 1, CD.Fields.Count);
     Fld := TFieldDecl(CD.Fields[0]);
     AssertEquals('Field name', 'X', Fld.Names[0]);
-    AssertEquals('Field type', 'Integer', Fld.TypeName);
+    AssertEquals('Field type', 'Int32', Fld.TypeName);
   finally
     Prog.Free();
   end;
@@ -317,7 +317,7 @@ begin
       TOuter = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
       end;
     begin end.
@@ -349,9 +349,9 @@ begin
       TOuter = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
-        FCount: Integer;
+        FCount: Int;
         procedure Go;
       end;
     begin end.
@@ -384,15 +384,15 @@ begin
       TOuter = class
         type
           TA = record
-            X: Integer;
+            X: Int;
           end;
           TB = record
-            Y: Integer;
+            Y: Int;
           end;
-        FMid: Integer;
+        FMid: Int;
         type
           TC = record
-            Z: Integer;
+            Z: Int;
           end;
       end;
     begin end.
@@ -489,12 +489,12 @@ begin
       strict private
         type
           THidden = record
-            F: Integer;
+            F: Int;
           end;
       public
         type
           TShown = record
-            G: Integer;
+            G: Int;
           end;
       end;
     begin end.
@@ -523,7 +523,7 @@ begin
       TOuter = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
       end;
     begin end.
@@ -548,7 +548,7 @@ begin
         type
           TPerson = class
             Name: string;
-            Age: Integer;
+            Age: Int;
           end;
         begin end.
         ''');
@@ -597,7 +597,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin end.
@@ -622,7 +622,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin
@@ -650,7 +650,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin
@@ -707,7 +707,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin end.
@@ -732,7 +732,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin
@@ -757,7 +757,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin
@@ -774,7 +774,7 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin
@@ -793,9 +793,9 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int32;
           end;
-        var F: TFoo; N: Integer;
+        var F: TFoo; N: Int32;
         begin
           N := F.X
         end.
@@ -824,10 +824,10 @@ begin
     program P;
     type
       TInner = record
-        Global: Integer;
+        Global: Int;
       end;
       TOuter = class
-        F: Integer;
+        F: Int;
       end;
     var v: TOuter.TInner;
     begin end.
@@ -849,7 +849,7 @@ begin
       TOuter = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
       end;
     var v: TOuter.TInner;
@@ -873,7 +873,7 @@ begin
       TOuter = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
         Data: TInner;
       end;
@@ -945,7 +945,7 @@ begin
             PP = PNode;
             PNode = ^TNode;
             TNode = record
-              Val: Integer;
+              Val: Int;
               Next: PP;
             end;
           var
@@ -954,7 +954,7 @@ begin
         TRec = record
           type
             PItem = ^TItem;
-            TItem = record Val: Integer; end;
+            TItem = record Val: Int; end;
           var
             First: PItem;
         end;
@@ -1006,7 +1006,7 @@ begin
             Link: TB;
           end;
           TB = record
-            Back: Integer;
+            Back: Int;
           end;
       end;
     var v: TOuter.TA;
@@ -1031,13 +1031,13 @@ begin
       TA = class
         type
           TInner = record
-            X: Integer;
+            X: Int;
           end;
       end;
       TB = class
         type
           TInner = record
-            Y: Integer;
+            Y: Int;
           end;
       end;
     var a: TA.TInner; b: TB.TInner;
@@ -1062,7 +1062,7 @@ begin
       TOuter = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
         procedure Go;
       end;
@@ -1089,7 +1089,7 @@ begin
       TBase = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
       end;
       TKid = class(TBase)
@@ -1121,7 +1121,7 @@ begin
       TOuter = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
       end;
     var ok: TOuter.TInner;
@@ -1171,7 +1171,7 @@ begin
           TMid = record
             type
               TInner = record
-                F: Integer;
+                F: Int;
               end;
           end;
       end;
@@ -1191,7 +1191,7 @@ begin
       TBox<T> = class
         type
           TInner = record
-            F: Integer;
+            F: Int;
           end;
         Value: T;
       end;
@@ -1206,9 +1206,9 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
-        var F: TFoo; N: Integer;
+        var F: TFoo; N: Int;
         begin
           N := F.Z
         end.
@@ -1225,10 +1225,10 @@ const
         program P;
         type
           TFoo = class
-            X: Integer;
-            procedure SetX(AVal: Integer);
+            X: Int;
+            procedure SetX(AVal: Int);
           end;
-        procedure TFoo.SetX(AVal: Integer);
+        procedure TFoo.SetX(AVal: Int);
         begin
           Self.X := AVal
         end;
@@ -1283,12 +1283,12 @@ begin
   AnalyseSrc(
     '''
         program P;
-        var gValue: Integer;
+        var gValue: Int;
         type
           TFoo = class
-            function GetValue: Integer;
+            function GetValue: Int;
           end;
-        function TFoo.GetValue: Integer;
+        function TFoo.GetValue: Int;
         begin
           Result := gValue
         end;
@@ -1342,7 +1342,7 @@ begin
         program P;
         type
           TWrap = class
-            function Peek: Integer; external 'peek';
+            function Peek: Int32; external 'peek';
           end;
         begin
         end.
@@ -1360,7 +1360,7 @@ const
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
         begin
@@ -1383,7 +1383,7 @@ begin
     '''
     program P;
     type
-      TC = class Tag: Integer; end;
+      TC = class Tag: Int; end;
       THolder = class F: TObject; end;
     var
       O: TObject;
@@ -1427,7 +1427,7 @@ begin
     type
       TBase = class end;
       TChild = class(TBase)
-        Items: array[0..2] of Integer;
+        Items: array[0..2] of Int;
         procedure Bump();
       end;
     procedure TChild.Bump(); begin end;
@@ -1466,16 +1466,16 @@ begin
     '''
     program P;
     type
-      TA = class N: Integer; procedure Show(); end;
+      TA = class N: Int; procedure Show(); end;
       THolder = class
         FA: TA;
         Sub: THolder;
-        Grid: array[0..1] of array[0..1] of Integer;
-        function GetItem(I: Integer): TA;
-        property Items[I: Integer]: TA read GetItem;
+        Grid: array[0..1] of array[0..1] of Int;
+        function GetItem(I: Int): TA;
+        property Items[I: Int]: TA read GetItem;
       end;
     procedure TA.Show(); begin end;
-    function THolder.GetItem(I: Integer): TA; begin Result := FA end;
+    function THolder.GetItem(I: Int): TA; begin Result := FA end;
     var
       H: THolder;
     begin
@@ -1527,12 +1527,12 @@ begin
       EMine = class(TObject) end;
       TagAttribute = class(TCustomAttribute) end;
       TBase = class
-        function GetV(): Integer;
-        property V: Integer read GetV;
+        function GetV(): Int;
+        property V: Int read GetV;
       end;
       [Tag]
       TChild = class(TBase) end;
-    function TBase.GetV(): Integer; begin Result := 1 end;
+    function TBase.GetV(): Int; begin Result := 1 end;
     var C: TChild;
     begin
       try
@@ -1654,7 +1654,7 @@ begin
         type
           TFoo = class;
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         begin
         end.
@@ -1717,7 +1717,7 @@ begin
           TFoo = class;
           TFoo = class;
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         begin
         end.
@@ -1731,13 +1731,13 @@ const
     type
       TC = class
         const KF = 2.5;
-        const KS: Single = 1.25;
+        const KS: Float32 = 1.25;
         const KSum = 2 + 3 * 4;
         const KB: Boolean = True;
         const KBig = 40000000000;
         const KStr = 'ab' + 'cd';
       end;
-    var D: Double; S: Single; I: Integer; B: Boolean; L: Int64; T: string;
+    var D: Float64; S: Float32; I: Int32; B: Boolean; L: Int64; T: string;
     begin
       D := TC.KF;
       S := TC.KS;
@@ -1803,15 +1803,15 @@ const
     program P;
     type
       TFoo = class
-        V: Integer;
-        constructor Init(A: Integer);
+        V: Int32;
+        constructor Init(A: Int32);
         static function CreateDefault(): TFoo;
-        static function CreateCount(): Integer;
+        static function CreateCount(): Int32;
       end;
-    constructor TFoo.Init(A: Integer); begin V := A; end;
+    constructor TFoo.Init(A: Int32); begin V := A; end;
     function TFoo.CreateDefault(): TFoo; begin Result := TFoo.Init(42); end;
-    function TFoo.CreateCount(): Integer; begin Result := 7; end;
-    var F: TFoo; N: Integer;
+    function TFoo.CreateCount(): Int32; begin Result := 7; end;
+    var F: TFoo; N: Int32;
     begin
       F := TFoo.Init(1);
       F := TFoo.CreateDefault();
@@ -1863,8 +1863,8 @@ begin
       program P;
       procedure Outer;
       type
-        TRecM = record A: Integer; function Twice: Integer; end;
-      function TRecM.Twice: Integer; begin Result := A * 2 end;
+        TRecM = record A: Int; function Twice: Int; end;
+      function TRecM.Twice: Int; begin Result := A * 2 end;
       begin
       end;
       begin

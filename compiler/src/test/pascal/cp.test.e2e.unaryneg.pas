@@ -69,17 +69,17 @@ const
     program P;
     type
       TBox = record
-        D: Double;
+        D: Float64;
       end;
     var
-      G, R: Double;
+      G, R: Float64;
       B: TBox;
-    function NegOf(X: Double): Double;
+    function NegOf(X: Float64): Float64;
     begin
       Result := -X
     end;
     procedure Local;
-    var Z, N: Double;
+    var Z, N: Float64;
     begin
       Z := 0.0;
       N := -Z;
@@ -116,7 +116,7 @@ const
   Src = '''
     program P;
     var
-      Z, N: Single;
+      Z, N: Float32;
       B: UInt32;
     begin
       Z := 0.0;
@@ -138,8 +138,8 @@ const
   Src = '''
     program P;
     var
-      D, E: Double;
-      S, T: Single;
+      D, E: Float64;
+      S, T: Float32;
     begin
       D := 0.0;
       E := -(-D);
@@ -167,7 +167,7 @@ const
   Src = '''
     program P;
     var
-      Z, Q, N: Double;
+      Z, Q, N: Float64;
       A, B: Int64;
     begin
       Z := 0.0;
@@ -188,17 +188,17 @@ procedure TE2EUnaryNegTests.TestRun_Neg_Single_PicksSingleOverload;
 const
   Src = '''
     program P;
-    procedure Show(X: Single); overload;
+    procedure Show(X: Float32); overload;
     begin
       WriteLn('Single ', X)
     end;
-    procedure Show(X: Double); overload;
+    procedure Show(X: Float64); overload;
     begin
       WriteLn('Double ', X)
     end;
     var
-      S: Single;
-      D: Double;
+      S: Float32;
+      D: Float64;
     begin
       S := 1.5;
       D := 2.5;
@@ -218,9 +218,9 @@ const
   Src = '''
     program P;
     var
-      I8: Int8; U8: Byte; I16: SmallInt; U16: Word;
-      I32: Integer; U32: UInt32; I64: Int64; U64: UInt64;
-      R: Integer; R64: Int64; RU: UInt64;
+      I8: Int8; U8: Byte; I16: Int16; U16: UInt16;
+      I32: Int32; U32: UInt32; I64: Int64; U64: UInt64;
+      R: Int32; R64: Int64; RU: UInt64;
     procedure Neg8(var V: Int8);
     begin
       V := -V
@@ -229,10 +229,10 @@ const
       I8 := Low(Int8);   R := -I8;  WriteLn('i8 ', R);
       I8 := High(Int8);  R := -I8;  WriteLn('i8 ', R);
       U8 := High(Byte);  R := -U8;  WriteLn('u8 ', R);
-      I16 := Low(SmallInt); R := -I16; WriteLn('i16 ', R);
-      U16 := High(Word); R := -U16; WriteLn('u16 ', R);
-      I32 := High(Integer); R := -I32; WriteLn('i32 ', R);
-      I32 := Low(Integer);  R := -I32; WriteLn('i32 ', R);
+      I16 := Low(Int16); R := -I16; WriteLn('i16 ', R);
+      U16 := High(UInt16); R := -U16; WriteLn('u16 ', R);
+      I32 := High(Int32); R := -I32; WriteLn('i32 ', R);
+      I32 := Low(Int32);  R := -I32; WriteLn('i32 ', R);
       U32 := 1; R := -U32; WriteLn('u32 ', R);
       I64 := High(Int64); R64 := -I64; WriteLn('i64 ', R64);
       I64 := Low(Int64);  R64 := -I64; WriteLn('i64 ', R64);
@@ -267,19 +267,19 @@ const
   Src = '''
     program P;
     type
-      TFn = reference to function: Double;
-    function Five: Integer;
+      TFn = reference to function: Float64;
+    function Five: Int;
     begin
       Result := 5
     end;
-    function NegInl(X: Integer): Integer; inline;
+    function NegInl(X: Int): Int; inline;
     begin
       Result := -X
     end;
     procedure Outer;
     var
-      K: Integer;
-      Z: Double;
+      K: Int;
+      Z: Float64;
       F: TFn;
       procedure Inner;
       begin
@@ -289,7 +289,7 @@ const
       K := 9;
       Z := 0.0;
       Inner();
-      F := function: Double
+      F := function: Float64
         begin
           Result := -Z
         end;
@@ -317,9 +317,9 @@ const
     const
       K = 3;
     var
-      I, N: Integer;
-      A: array[-2..2] of Integer;
-    procedure Show(X: Integer = -1);
+      I, N: Int;
+      A: array[-2..2] of Int;
+    procedure Show(X: Int = -1);
     begin
       Write(X, ' ')
     end;
@@ -358,14 +358,14 @@ const
   UnitSrc = '''
     unit negdefs;
     interface
-    procedure ShowInt(A: Integer = -7);
-    procedure ShowZero(B: Double = -0.0);
+    procedure ShowInt(A: Int = -7);
+    procedure ShowZero(B: Float64 = -0.0);
     implementation
-    procedure ShowInt(A: Integer);
+    procedure ShowInt(A: Int);
     begin
       WriteLn('int ', A)
     end;
-    procedure ShowZero(B: Double);
+    procedure ShowZero(B: Float64);
     begin
       WriteLn('zero ', B, ' ', 1.0 / B)
     end;
@@ -396,7 +396,7 @@ const
     program P;
     type
       TVec = record
-        X, Y: Integer;
+        X, Y: Int;
         class operator Negative(const A: TVec): TVec;
         class operator Add(const A, B: TVec): TVec;
       end;
@@ -433,7 +433,7 @@ const
     type
       TTagged = record
         Name: string;
-        N: Integer;
+        N: Int;
         class operator Negative(const A: TTagged): TTagged;
       end;
     class operator TTagged.Negative(const A: TTagged): TTagged;
@@ -447,7 +447,7 @@ const
     end;
     var
       A, B: TTagged;
-      I: Integer;
+      I: Int;
     begin
       A.Name := 'a';
       A.N := 2;

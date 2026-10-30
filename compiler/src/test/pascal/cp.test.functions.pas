@@ -111,17 +111,17 @@ const
         program P;
         type
           TBox = class
-            Value: Integer;
-            procedure SetValue(AVal: Integer);
+            Value: Int32;
+            procedure SetValue(AVal: Int32);
             begin
               Self.Value := AVal
             end;
-            function GetValue: Integer;
+            function GetValue: Int32;
             begin
               Result := Self.Value
             end;
           end;
-        var B: TBox; N: Integer;
+        var B: TBox; N: Int32;
         begin
           B := TBox.Create();
           B.SetValue(42);
@@ -134,12 +134,12 @@ const
         program P;
         type
           TCalc = class
-            function Add(A: Integer; B: Integer): Integer;
+            function Add(A: Int32; B: Int32): Int32;
             begin
               Result := A + B
             end;
           end;
-        var C: TCalc; N: Integer;
+        var C: TCalc; N: Int32;
         begin
           C := TCalc.Create();
           N := C.Add(3, 4)
@@ -208,7 +208,7 @@ begin
   try
     CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
     MD := TMethodDecl(CD.Methods[1]);
-    AssertEquals('return type name', 'Integer', MD.ReturnTypeName);
+    AssertEquals('return type name', 'Int32', MD.ReturnTypeName);
   finally
     Prog.Free();
   end;
@@ -225,7 +225,7 @@ begin
     CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
     MD := TMethodDecl(CD.Methods[0]);
     AssertEquals('two params', 2, MD.Params.Count);
-    AssertEquals('return type', 'Integer', MD.ReturnTypeName);
+    AssertEquals('return type', 'Int32', MD.ReturnTypeName);
   finally
     Prog.Free();
   end;
@@ -333,7 +333,7 @@ begin
         program P;
         type
           TFoo = class
-            function GetVal: Integer;
+            function GetVal: Int;
             begin
               Result := 1
             end;
@@ -353,12 +353,12 @@ begin
         program P;
         type
           TFoo = class
-            function GetVal: Integer;
+            function GetVal: Int;
             begin
               Result := 0
             end;
           end;
-        var F: TFoo; N: Integer;
+        var F: TFoo; N: Int;
         begin
           F := TFoo.Create();
           N := F.GetVal(1)
@@ -375,12 +375,12 @@ begin
         program P;
         type
           TFoo = class
-            function GetOne: Integer;
+            function GetOne: Int;
             begin
               Result := 1
             end;
           end;
-        var F: TFoo; N: Integer;
+        var F: TFoo; N: Int;
         begin
           F := TFoo.Create();
           N := F.GetOne()
@@ -396,7 +396,7 @@ begin
         program P;
         type
           TFoo = class
-            function GetInt: Integer;
+            function GetInt: Int;
             begin
               Result := 'not an int'
             end;

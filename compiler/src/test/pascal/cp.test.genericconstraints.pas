@@ -77,7 +77,7 @@ begin
         program Prg;
         type
           TBox<T: class> = class
-            FItem: Integer;
+            FItem: Int;
           end;
         begin end.
         ''');
@@ -99,7 +99,7 @@ begin
         program Prg;
         type
           TBox<T: record> = class
-            FItem: Integer;
+            FItem: Int;
           end;
         begin end.
         ''');
@@ -117,9 +117,9 @@ begin
     '''
         program Prg;
         type
-          TAnimal = class(TObject) X: Integer; end;
+          TAnimal = class(TObject) X: Int; end;
           TPen<T: TAnimal> = class
-            FCount: Integer;
+            FCount: Int;
           end;
         begin end.
         ''');
@@ -138,7 +138,7 @@ begin
         program Prg;
         type
           TPair<K, V: class> = class
-            FKey: Integer;
+            FKey: Int;
           end;
         begin end.
         ''');
@@ -174,8 +174,8 @@ begin
   Prog := ParseSrc(
     '''
         program Prg;
-        type TAnimal = class(TObject) X: Integer; end;
-        function Box<T: TAnimal>(A: T): Integer;
+        type TAnimal = class(TObject) X: Int; end;
+        function Box<T: TAnimal>(A: T): Int;
         begin Result := 0 end;
         begin end.
         ''');
@@ -193,9 +193,9 @@ begin
         program Prg;
         function Id<T: class>(A: T): T;
         begin Result := A end;
-        var N: Integer;
+        var N: Int;
         begin
-          N := Id<Integer>(5)
+          N := Id<Int>(5)
         end.
         ''');
 end;
@@ -206,7 +206,7 @@ begin
   Prog := AnalyseSrc(
     '''
         program Prg;
-        type TAnimal = class(TObject) X: Integer; end;
+        type TAnimal = class(TObject) X: Int; end;
         function Id<T: class>(A: T): T;
         begin Result := A end;
         var A: TAnimal;
@@ -226,9 +226,9 @@ begin
         program Prg;
         type
           TBox<T: class> = class
-            FItem: Integer;
+            FItem: Int;
           end;
-        var B: TBox<Integer>;
+        var B: TBox<Int>;
         begin end.
         ''');
 end;
@@ -240,11 +240,11 @@ begin
     '''
         program Prg;
         type
-          TDog = class(TObject) X: Integer; end;
-          TCat = class(TObject) Y: Integer; end;
-        function Use<T: TDog>(A: T): Integer;
+          TDog = class(TObject) X: Int; end;
+          TCat = class(TObject) Y: Int; end;
+        function Use<T: TDog>(A: T): Int;
         begin Result := 0 end;
-        var C: TCat; N: Integer;
+        var C: TCat; N: Int;
         begin
           C := TCat.Create();
           N := Use<TCat>(C);
@@ -261,11 +261,11 @@ begin
     '''
         program Prg;
         type
-          TDog = class(TObject) X: Integer; end;
-          TPuppy = class(TDog) Y: Integer; end;
-        function Use<T: TDog>(A: T): Integer;
+          TDog = class(TObject) X: Int; end;
+          TPuppy = class(TDog) Y: Int; end;
+        function Use<T: TDog>(A: T): Int;
         begin Result := 0 end;
-        var P: TPuppy; N: Integer;
+        var P: TPuppy; N: Int;
         begin
           P := TPuppy.Create();
           N := Use<TPuppy>(P);

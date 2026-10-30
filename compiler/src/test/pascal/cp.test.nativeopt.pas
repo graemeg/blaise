@@ -79,7 +79,7 @@ procedure TNativeOptTests.TestLiteralRhs_ImmediateForm_NoPushPop;
 const
   Src = '''
       program P;
-      function Sub1(N: Integer): Int64;
+      function Sub1(N: Int): Int64;
       begin
         Result := N - 1
       end;
@@ -103,7 +103,7 @@ procedure TNativeOptTests.TestVarRhs_LoadsRcx_NoPushPop;
 const
   Src = '''
       program P;
-      function Add2(A, B: Integer): Int64;
+      function Add2(A, B: Int): Int64;
       begin
         Result := A + B
       end;
@@ -127,7 +127,7 @@ procedure TNativeOptTests.TestCompareBranch_Fused_ImmediateCmp;
 const
   Src = '''
       program P;
-      function Classify(N: Integer): Int64;
+      function Classify(N: Int32): Int64;
       begin
         if N < 2 then
           Result := 1
@@ -178,11 +178,11 @@ procedure TNativeOptTests.TestSingleArgCall_PushPopFused;
 const
   Src = '''
       program P;
-      function Twice(N: Integer): Int64;
+      function Twice(N: Int): Int64;
       begin
         Result := N * 2
       end;
-      var X: Integer;
+      var X: Int;
       begin
         X := 3;
         WriteLn(Twice(X + 1))
@@ -204,13 +204,13 @@ const
       program P;
       type
         ISink = interface
-          function Take(const AName: string; AA, AB, AC, AD, AE: Integer): Integer;
+          function Take(const AName: string; AA, AB, AC, AD, AE: Int): Int;
         end;
         TSink = class(TObject, ISink)
         public
-          function Take(const AName: string; AA, AB, AC, AD, AE: Integer): Integer;
+          function Take(const AName: string; AA, AB, AC, AD, AE: Int): Int;
         end;
-      function TSink.Take(const AName: string; AA, AB, AC, AD, AE: Integer): Integer;
+      function TSink.Take(const AName: string; AA, AB, AC, AD, AE: Int): Int;
       begin
         Result := AA + AB + AC + AD + AE
       end;
@@ -237,14 +237,14 @@ const
       type
         TCalc = class
         public
-          function Mix(AA, AB, AC, AD, AE, AF: Integer): Double;
-          function Run: Double;
+          function Mix(AA, AB, AC, AD, AE, AF: Int): Float64;
+          function Run: Float64;
         end;
-      function TCalc.Mix(AA, AB, AC, AD, AE, AF: Integer): Double;
+      function TCalc.Mix(AA, AB, AC, AD, AE, AF: Int): Float64;
       begin
         Result := AA + AB + AC + AD + AE + AF
       end;
-      function TCalc.Run: Double;
+      function TCalc.Run: Float64;
       begin
         { implicit-Self call in float expression position: lowered by
           EmitExprToXmm0's embedded method-call path }
@@ -267,13 +267,13 @@ const
       program P;
       type
         IM = interface
-          function Mix(A: Integer; X: Double; B: Integer): Integer;
+          function Mix(A: Int; X: Float64; B: Int): Int;
         end;
         TM = class(TObject, IM)
         public
-          function Mix(A: Integer; X: Double; B: Integer): Integer;
+          function Mix(A: Int; X: Float64; B: Int): Int;
         end;
-      function TM.Mix(A: Integer; X: Double; B: Integer): Integer;
+      function TM.Mix(A: Int; X: Float64; B: Int): Int;
       begin
         Result := A + B
       end;

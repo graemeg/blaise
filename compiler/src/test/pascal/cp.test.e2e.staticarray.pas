@@ -198,7 +198,7 @@ const
   SrcAnonReadWrite =
     '''
     program P;
-    var A: array[0..2] of Integer;
+    var A: array[0..2] of Int;
     begin
       A[0] := 10;
       A[1] := 20;
@@ -212,7 +212,7 @@ const
   SrcAnonNonZero =
     '''
     program P;
-    var A: array[5..7] of Integer;
+    var A: array[5..7] of Int;
     begin
       A[5] := 100;
       A[6] := 200;
@@ -225,7 +225,7 @@ const
   SrcAnonLowHighLen =
     '''
     program P;
-    var A: array[0..4] of Integer;
+    var A: array[0..4] of Int;
     begin
       WriteLn(Low(A));
       WriteLn(High(A));
@@ -237,7 +237,7 @@ const
     '''
     program P;
     type
-      TTriple = array[0..2] of Integer;
+      TTriple = array[0..2] of Int;
     var A: TTriple;
     begin
       A[0] := 1;
@@ -253,7 +253,7 @@ const
     '''
     program P;
     type
-      TSlice = array[3..5] of Integer;
+      TSlice = array[3..5] of Int;
     var S: TSlice;
     begin
       S[3] := 33;
@@ -268,8 +268,8 @@ const
     '''
     program P;
     type
-      TFive = array[0..4] of Integer;
-    procedure PrintLen(const A: array of Integer);
+      TFive = array[0..4] of Int;
+    procedure PrintLen(const A: array of Int);
     begin
       WriteLn(Length(A))
     end;
@@ -283,7 +283,7 @@ const
     '''
     program P;
     type
-      TPair = array[0..1] of Integer;
+      TPair = array[0..1] of Int;
     var X, Y: TPair;
     begin
       X[0] := 10; X[1] := 20;
@@ -297,7 +297,7 @@ const
     '''
     program P;
     type
-      TBuf = array[0..2] of Integer;
+      TBuf = array[0..2] of Int;
     var G: TBuf;
     procedure Fill;
     var L: TBuf;
@@ -321,7 +321,7 @@ const
     program P;
     type
       TIdx = 0..2;
-      TBuf = array[TIdx] of Integer;
+      TBuf = array[TIdx] of Int;
     var A: TBuf;
     begin
       A[0] := 11; A[1] := 22; A[2] := 33;
@@ -338,7 +338,7 @@ const
     program P;
     type
       TIdx = 2..4;
-      TBuf = array[TIdx] of Integer;
+      TBuf = array[TIdx] of Int;
     var A: TBuf;
     begin
       A[2] := 100; A[3] := 200; A[4] := 300;
@@ -415,8 +415,8 @@ const
   Src = '''
     program P;
     var
-      A: array[5..9] of Integer;
-      I: Integer;
+      A: array[5..9] of Int;
+      I: Int;
     begin
       for I := 5 to 9 do
         A[I] := I * 10;
@@ -543,7 +543,7 @@ const
     '''
     program P;
     const Days: array[0..6] of string = ('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat');
-    var I: Integer;
+    var I: Int;
     begin
       WriteLn(Days[0]);
       WriteLn(Days[3]);
@@ -573,7 +573,7 @@ const
   Src =
     '''
     program P;
-    const Primes: array[0..4] of Integer = (2, 3, 5, 7, 11);
+    const Primes: array[0..4] of Int32 = (2, 3, 5, 7, 11);
     begin
       WriteLn(Primes[0]);
       WriteLn(Primes[2]);
@@ -606,7 +606,7 @@ const
         const Days: array[0..6] of string =
           ('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat');
       end;
-    var T: TMyDays; I: Integer;
+    var T: TMyDays; I: Int;
     begin
       T := TMyDays.Create();
       WriteLn(T.Days[0]);
@@ -681,7 +681,7 @@ procedure TE2EStaticArrayTests.TestRun_DynArray_High_ReturnsLengthMinusOne;
 const Src =
   '''
   program P;
-  type Tar = array of Integer;
+  type Tar = array of Int;
   var ar: Tar;
   begin
     SetLength(ar, 15);
@@ -700,7 +700,7 @@ procedure TE2EStaticArrayTests.TestRun_DynArray_Low_ReturnsZero;
 const Src =
   '''
   program P;
-  type Tar = array of Integer;
+  type Tar = array of Int;
   var ar: Tar;
   begin
     SetLength(ar, 15);
@@ -720,8 +720,8 @@ const Src =
   '''
   program P;
   var
-    da: array of Integer;
-    x, i: Integer;
+    da: array of Int;
+    x, i: Int;
   begin
     SetLength(da, 4);
     da[0] := 10;
@@ -745,7 +745,7 @@ const Src =
   program P;
   type
     TPt = record
-      X: Integer;
+      X: Int;
       Name: string;
     end;
   const
@@ -766,9 +766,9 @@ const Src =
       Write(S, ';');
     WriteLn()
   end;
-  function Count(const A: array of Integer): Integer;
+  function Count(const A: array of Int): Int;
   var
-    X: Integer;
+    X: Int;
   begin
     Result := 0;
     for X in A do
@@ -782,9 +782,9 @@ const Src =
       Write(Pt.Name, '=', Pt.X, ' ');
     WriteLn()
   end;
-  procedure SumVar(var A: array of Integer);
+  procedure SumVar(var A: array of Int);
   var
-    X, T: Integer;
+    X, T: Int;
   begin
     T := 0;
     for X in A do
@@ -798,10 +798,10 @@ const Src =
   var
     ba: array[0..3] of Byte;
     bb: array[0..1] of Byte;
-    da: array of Integer;
+    da: array of Int;
     pts: array[0..1] of TPt;
-    sa: array[0..5] of Integer;
-    i: Integer;
+    sa: array[0..5] of Int;
+    i: Int;
   begin
     for i := 0 to 3 do
       ba[i] := 3 - i;
@@ -837,9 +837,9 @@ const Src =
   '''
   program P;
   var
-    da: array of Integer;
-    x: Integer;
-    count: Integer;
+    da: array of Int;
+    x: Int;
+    count: Int;
   begin
     count := 0;
     for x in da do
@@ -860,8 +860,8 @@ procedure TE2EStaticArrayTests.TestRun_MultiDim_CommaForm_ReadWrite;
 const Src =
   '''
   program P;
-  var A: array[0..1, 0..2] of Integer;
-      i, j: Integer;
+  var A: array[0..1, 0..2] of Int;
+      i, j: Int;
   begin
     for i := 0 to 1 do
       for j := 0 to 2 do
@@ -883,7 +883,7 @@ procedure TE2EStaticArrayTests.TestRun_MultiDim_ChainedForm_ReadWrite;
 const Src =
   '''
   program P;
-  var A: array[0..1] of array[0..2] of Integer;
+  var A: array[0..1] of array[0..2] of Int;
   begin
     A[0][0] := 5;
     A[1][2] := 42;
@@ -902,8 +902,8 @@ procedure TE2EStaticArrayTests.TestRun_MultiDim_NonZeroBounds;
 const Src =
   '''
   program P;
-  var A: array[1..2, 5..7] of Integer;
-      i, j: Integer;
+  var A: array[1..2, 5..7] of Int;
+      i, j: Int;
   begin
     for i := 1 to 2 do
       for j := 5 to 7 do
@@ -923,7 +923,7 @@ procedure TE2EStaticArrayTests.TestRun_MultiDim_ThreeDimensions;
 const Src =
   '''
   program P;
-  var A: array[0..1, 0..1, 0..1] of Integer;
+  var A: array[0..1, 0..1, 0..1] of Int;
   begin
     A[0, 0, 0] := 1;
     A[1, 1, 1] := 8;
@@ -963,7 +963,7 @@ procedure TE2EStaticArrayTests.TestRun_MultiDim_MixedNotation;
 const Src =
   '''
   program P;
-  var A: array[0..1, 0..2] of Integer;
+  var A: array[0..1, 0..2] of Int;
   begin
     A[1, 2] := 77;       { comma write }
     WriteLn(A[1][2]);    { chained read }
@@ -982,7 +982,7 @@ procedure TE2EStaticArrayTests.TestRun_DynArray_DoubleElement_ReadWrite;
 const Src =
   '''
   program P;
-  type TArr = array of Double;
+  type TArr = array of Float64;
   var A: TArr;
   begin
     SetLength(A, 3);
@@ -1005,7 +1005,7 @@ procedure TE2EStaticArrayTests.TestRun_DynArray_SingleElement_ReadWrite;
 const Src =
   '''
   program P;
-  type TArr = array of Single;
+  type TArr = array of Float32;
   var A: TArr;
   begin
     SetLength(A, 2);
@@ -1026,7 +1026,7 @@ procedure TE2EStaticArrayTests.TestRun_StaticArray_DoubleElement_ReadWrite;
 const Src =
   '''
   program P;
-  var A: array[0..2] of Double;
+  var A: array[0..2] of Float64;
   begin
     A[0] := 12.5;
     A[1] := -3.25;
@@ -1047,7 +1047,7 @@ procedure TE2EStaticArrayTests.TestRun_MultiDimConst_CommaForm_ReadsValues;
 const Src =
   '''
   program P;
-  const M: array[0..1, 0..2] of Integer = ((1, 2, 3), (4, 5, 6));
+  const M: array[0..1, 0..2] of Int32 = ((1, 2, 3), (4, 5, 6));
   begin
     WriteLn(M[0, 0]);
     WriteLn(M[0, 2]);
@@ -1066,7 +1066,7 @@ procedure TE2EStaticArrayTests.TestRun_MultiDimConst_NestedForm_ReadsValues;
 const Src =
   '''
   program P;
-  const M: array[0..1] of array[0..1] of Integer = ((10, 20), (30, 40));
+  const M: array[0..1] of array[0..1] of Int32 = ((10, 20), (30, 40));
   begin
     WriteLn(M[0][0]);
     WriteLn(M[0][1]);
@@ -1085,7 +1085,7 @@ procedure TE2EStaticArrayTests.TestRun_MultiDimConst_ThreeDimensions;
 const Src =
   '''
   program P;
-  const M: array[0..1, 0..1, 0..1] of Integer =
+  const M: array[0..1, 0..1, 0..1] of Int32 =
     (((1, 2), (3, 4)), ((5, 6), (7, 8)));
   begin
     WriteLn(M[0, 0, 0]);
@@ -1108,7 +1108,7 @@ begin
   AssertRunsOnAll('''
     program P;
     const N = 3;
-    var A: array[0..N] of Integer;
+    var A: array[0..N] of Int;
     begin
       A[0] := 10; A[1] := 20; A[2] := 30; A[3] := 40;
       WriteLn(A[0]); WriteLn(A[3])
@@ -1124,7 +1124,7 @@ begin
   AssertRunsOnAll('''
     program P;
     const N = 10;
-    var A: array[0..N-1] of Integer;
+    var A: array[0..N-1] of Int;
     begin
       A[0] := 1; A[9] := 99;
       WriteLn(A[0]); WriteLn(A[9])
@@ -1140,7 +1140,7 @@ begin
   AssertRunsOnAll('''
     program P;
     const MaxItems = 5;
-    type TBuf = array[0..MaxItems-1] of Integer;
+    type TBuf = array[0..MaxItems-1] of Int;
     var B: TBuf;
     begin
       B[0] := 100; B[4] := 500;
@@ -1173,7 +1173,7 @@ begin
   AssertRunsOnAll('''
     program P;
     type TDir = (North, South, East, West);
-    type TDirCost = array[TDir] of Integer;
+    type TDirCost = array[TDir] of Int;
     var C: TDirCost;
     begin
       C[North] := 1; C[South] := 2; C[East] := 3; C[West] := 4;
@@ -1189,10 +1189,10 @@ begin
     program P;
     type
       TIdx = 3..5;
-      TFlags = array[Boolean, 0..1] of Integer;
+      TFlags = array[Boolean, 0..1] of Int32;
     var
       F: TFlags;
-      G: array[0..1, Boolean] of Integer;
+      G: array[0..1, Boolean] of Int32;
       H: array[Byte, Boolean] of Byte;
       K: array[TIdx, Int8] of Byte;
     begin
@@ -1233,10 +1233,10 @@ begin
     included because the element resolver treats managed elements separately. }
   AssertRunsOnAll('''
     program P;
-    type TF = array[Boolean] of Integer;
+    type TF = array[Boolean] of Int;
     const
       C1: TF = (10, 20);
-      C2: array[Boolean] of Integer = (30, 40);
+      C2: array[Boolean] of Int32 = (30, 40);
       C3: array[Boolean] of string = ('no', 'yes');
     begin
       WriteLn(C1[False]); WriteLn(C1[True]);
@@ -1254,8 +1254,8 @@ begin
   { Anonymous decl + subscript by a Boolean expression, not just literals. }
   AssertRunsOnAll('''
     program P;
-    var A: array[Boolean] of Integer;
-    var I: Integer;
+    var A: array[Boolean] of Int;
+    var I: Int;
     begin
       A[False] := 10; A[True] := 20;
       for I := 0 to 3 do
@@ -1275,7 +1275,7 @@ begin
       TThing = class
         FTab: array[0..3] of string;
         procedure Fill;
-        function Get(I: Integer): string;
+        function Get(I: Int): string;
       end;
     procedure TThing.Fill;
     begin
@@ -1283,7 +1283,7 @@ begin
       FTab[1] := 'bb';
       FTab[3] := 'dd'
     end;
-    function TThing.Get(I: Integer): string;
+    function TThing.Get(I: Int): string;
     begin
       Result := FTab[I]
     end;
@@ -1304,7 +1304,7 @@ const
   Src =
     '''
     program P;
-    type TR = record A, B: Integer; S: string; end;
+    type TR = record A, B: Int; S: string; end;
     var arr: array[0..3] of TR; d: array of TR; r: TR;
     begin
       arr[1].A := 5; arr[1].B := 7; arr[1].S := 'hi';
@@ -1332,15 +1332,15 @@ const Src =
     TBig = set of Byte;
     THold = class
     public
-      FGrid: array[0..1] of array[0..1] of Integer;
-      FDeep: array[0..1] of array[0..1] of array[0..1] of Integer;
+      FGrid: array[0..1] of array[0..1] of Int;
+      FDeep: array[0..1] of array[0..1] of array[0..1] of Int;
       FSets: array[0..1] of array[0..1] of TBig;
     end;
     TOuter = class
     public
       FH: THold;
     end;
-  procedure Bump(var I: Integer); begin I := I + 100 end;
+  procedure Bump(var I: Int); begin I := I + 100 end;
   var H: THold; O: TOuter;
   begin
     H := THold.Create();
@@ -1380,8 +1380,8 @@ const
   '''
   program P;
   var
-    a: array[0..4] of Integer;
-    guard: Integer;
+    a: array[0..4] of Int;
+    guard: Int;
   begin
     guard := 111;
     a[99] := 7;
@@ -1405,7 +1405,7 @@ const
   '''
   program P;
   var
-    a: array[0..4] of Integer;
+    a: array[0..4] of Int;
   begin
     a[-3] := 5;
     WriteLn('done')
@@ -1427,8 +1427,8 @@ const
   '''
   program P;
   var
-    a: array[0..4] of Integer;
-    b: array[1..5] of Integer;
+    a: array[0..4] of Int;
+    b: array[1..5] of Int;
   begin
     a[0] := 10; a[4] := 20;
     b[1] := 30; b[5] := 40;
@@ -1534,7 +1534,7 @@ const
   '''
   program P;
   type TColor = (Red = 5, Green = 10);
-  var A: array[TColor] of Integer;
+  var A: array[TColor] of Int;
   begin
     A[Red] := 1;
     A[Green] := 2;
@@ -1556,7 +1556,7 @@ const
   '''
   program P;
   type TColor = (Red = 5, Green = 10);
-  var A: array[TColor] of Integer;
+  var A: array[TColor] of Int32;
   begin
     WriteLn(Low(A), ' ', High(A), ' ', SizeOf(A), ' ', Length(A))
   end.
@@ -1577,9 +1577,9 @@ const
   program P;
   type TColor = (Red = 5, Green = 10);
   var
-    GuardLo: Integer;
-    A: array[TColor] of Integer;
-    GuardHi: Integer;
+    GuardLo: Int;
+    A: array[TColor] of Int;
+    GuardHi: Int;
     c: TColor;
   begin
     GuardLo := 111;
@@ -1605,7 +1605,7 @@ const
   '''
   program P;
   type TColor = (Red = 5, Green = 10);
-  const A: array[TColor] of Integer = (1, 0, 0, 0, 0, 2);
+  const A: array[TColor] of Int32 = (1, 0, 0, 0, 0, 2);
   begin
     WriteLn(A[Red], ' ', A[Green])
   end.
@@ -1624,7 +1624,7 @@ const
   '''
   program P;
   type TDir = (North, South, East, West);
-  var A: array[TDir] of Integer;
+  var A: array[TDir] of Int32;
   begin
     A[North] := 1;
     A[West] := 4;
@@ -1652,7 +1652,7 @@ const
     TE = (eA, eB);
     TC = class
     public
-      const Names: array[TE] of Integer = (1, 2);
+      const Names: array[TE] of Int32 = (1, 2);
     end;
   begin
     WriteLn(TC.Names[7])
@@ -1678,7 +1678,7 @@ const
     TE = (eA, eB);
     TC = class
     public
-      const Names: array[TE] of Integer = (11, 22);
+      const Names: array[TE] of Int32 = (11, 22);
     end;
   begin
     WriteLn(TC.Names[0], ' ', TC.Names[1])
@@ -1703,7 +1703,7 @@ const
   type
     TR = record
     public
-      const Vals: array[0..2] of Integer = (11, 22, 33);
+      const Vals: array[0..2] of Int32 = (11, 22, 33);
     end;
   begin
     WriteLn(TR.Vals[0], ' ', TR.Vals[1], ' ', TR.Vals[2])
@@ -1728,7 +1728,7 @@ const
     TE = (eA, eB);
     TR = record
     public
-      const Vals: array[TE] of Integer = (1, 2);
+      const Vals: array[TE] of Int32 = (1, 2);
     end;
   begin
     WriteLn(TR.Vals[0], ' ', TR.Vals[1])
@@ -1780,39 +1780,39 @@ const
     type
       TColor = (Red = 5, Green = 10);
       TBuf = array[0..7] of Byte;
-      TTriple = array[0..2] of Integer;
+      TTriple = array[0..2] of Int32;
       TBox = class
-        V: Integer;
+        V: Int32;
         destructor Destroy; override;
       end;
       TR = record
       public
-        const Vals: array[0..1] of Integer = (11, 22);
+        const Vals: array[0..1] of Int32 = (11, 22);
       end;
       TC = class
       public
-        const Vals: array[0..1] of Integer = (33, 44);
+        const Vals: array[0..1] of Int32 = (33, 44);
       end;
     destructor TBox.Destroy;
     begin
       WriteLn('box ', V, ' gone');
       inherited Destroy()
     end;
-    function MakeTriple(A: Integer): TTriple;
+    function MakeTriple(A: Int32): TTriple;
     begin
       Result[0] := A; Result[1] := A * 2; Result[2] := A * 3
     end;
     procedure Locals;
-    var A: array[0..1] of Integer; Z: array[0..3] of Integer; I: Integer;
+    var A: array[0..1] of Int32; Z: array[0..3] of Int32; I: Int32;
     begin
       A[0] := 5;
       for I := 0 to 3 do Write(Z[I]);
       WriteLn(' ', A[0], ' ', A[1])
     end;
     var
-      NZ: array[3..7] of Integer; Buf: TBuf; P: ^Byte; I: Integer;
-      M: array[0..1, 0..2] of Integer; Mc: array[0..1] of array[0..2] of Integer;
-      T: TTriple; NB: array[0..N] of Integer; EA: array[TColor] of Integer;
+      NZ: array[3..7] of Int32; Buf: TBuf; P: ^Byte; I: Int32;
+      M: array[0..1, 0..2] of Int32; Mc: array[0..1] of array[0..2] of Int32;
+      T: TTriple; NB: array[0..N] of Int32; EA: array[TColor] of Int32;
       SA: array[0..1] of string; CA: array[0..1] of TBox;
     begin
       Locals();
@@ -1873,7 +1873,7 @@ const
     program DynElems;
     type
       TBox = class
-        V: Integer;
+        V: Int;
         destructor Destroy; override;
       end;
     destructor TBox.Destroy;
@@ -1914,9 +1914,9 @@ const
     expression TStringSubscriptExpr"). }
   Src = '''
     program FL;
-    type TD = array of Double; TS = array of Single;
-    function Sum(const A: array of Double): Double;
-    var I: Integer;
+    type TD = array of Float64; TS = array of Float32;
+    function Sum(const A: array of Float64): Float64;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do Result := Result + A[I]
@@ -1947,12 +1947,12 @@ const
   Src = '''
     program ByValAggs;
     type
-      PInt = ^Integer;
-      TArr = array[0..2] of Integer;
-      TRec = record N: Integer; A: TArr; end;
+      PInt = ^Int;
+      TArr = array[0..2] of Int;
+      TRec = record N: Int; A: TArr; end;
       TObj = class A: TArr; end;
-    procedure SetVia(Q: PInt; V: Integer); begin Q^ := V end;
-    procedure BumpI(var X: Integer); begin X := X + 100 end;
+    procedure SetVia(Q: PInt; V: Int); begin Q^ := V end;
+    procedure BumpI(var X: Int); begin X := X + 100 end;
     procedure ShowA(const X: TArr); begin WriteLn(X[0], ' ', X[1], ' ', X[2]) end;
     procedure Arr(A: TArr; B: TArr);
     begin
@@ -1988,16 +1988,16 @@ const
     program ManagedArrs;
     uses SysUtils;
     type TSA = array[0..1] of String;
-      TRec = record N: Integer; A: TSA; end;
+      TRec = record N: Int; A: TSA; end;
       TObj = class A: TSA; end;
-    function Mk(I: Integer): String; begin Result := 'v' + IntToStr(I) end;
+    function Mk(I: Int): String; begin Result := 'v' + IntToStr(I) end;
     procedure ByVal(A: TSA; B: TSA);
     begin
       A := B; A[0] := A[0] + '!';
       WriteLn(A[0], A[1], B[0]);
     end;
     procedure Run;
-    var G, L: TSA; R: TRec; O: TObj; I: Integer;
+    var G, L: TSA; R: TRec; O: TObj; I: Int;
     begin
       G[0] := Mk(1); G[1] := Mk(2);
       for I := 1 to 3 do
@@ -2025,28 +2025,28 @@ const
     program ManagedStrArr;
     uses SysUtils;
     type
-      IFoo = interface function Get: Integer; end;
-      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
-      TDA = array of Integer;
-      TR = record N: Integer; S: String; end;
-      TF = reference to function: Integer;
+      IFoo = interface function Get: Int; end;
+      THold = class(TObject, IFoo) N: Int; function Get: Int; end;
+      TDA = array of Int;
+      TR = record N: Int; S: String; end;
+      TF = reference to function: Int;
       TE = String;
       TSA = array[0..1] of TE;
-      TRA = record N: Integer; A: TSA; end;
+      TRA = record N: Int; A: TSA; end;
       TOA = class A: TSA; end;
     var GG: TSA;
-    function THold.Get: Integer; begin Result := N end;
-    function MkH(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
-    function V(N: Integer): TE; begin Result := 'v' + IntToStr(N) end;
+    function THold.Get: Int; begin Result := N end;
+    function MkH(N: Int): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    function V(N: Int): TE; begin Result := 'v' + IntToStr(N) end;
     function Pr(E: TE): String; begin Result := E end;
     procedure Sh(const A: TSA); begin WriteLn(Pr(A[0]), ' ', Pr(A[1])) end;
     procedure ByVal(A: TSA); begin A[0] := V(9); Sh(A) end;
     procedure ByConst(const A: TSA); begin Sh(A) end;
     procedure ByVar(var A: TSA); begin A[0] := V(9) end;
-    function MkA(N: Integer): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
+    function MkA(N: Int): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
     function Pass(A: TSA): TSA; begin Result := A end;
     procedure Run;
-    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Integer;
+    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Int;
       procedure Inner; begin L2 := L; L[1] := V(9) end;
     begin
       O := TOA.Create();
@@ -2168,28 +2168,28 @@ const
     program ManagedIntfArr;
     uses SysUtils;
     type
-      IFoo = interface function Get: Integer; end;
-      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
-      TDA = array of Integer;
-      TR = record N: Integer; S: String; end;
-      TF = reference to function: Integer;
+      IFoo = interface function Get: Int; end;
+      THold = class(TObject, IFoo) N: Int; function Get: Int; end;
+      TDA = array of Int;
+      TR = record N: Int; S: String; end;
+      TF = reference to function: Int;
       TE = IFoo;
       TSA = array[0..1] of TE;
-      TRA = record N: Integer; A: TSA; end;
+      TRA = record N: Int; A: TSA; end;
       TOA = class A: TSA; end;
     var GG: TSA;
-    function THold.Get: Integer; begin Result := N end;
-    function MkH(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
-    function V(N: Integer): TE; begin Result := MkH(N) end;
+    function THold.Get: Int; begin Result := N end;
+    function MkH(N: Int): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    function V(N: Int): TE; begin Result := MkH(N) end;
     function Pr(E: TE): String; begin Result := 'v' + IntToStr(E.Get()) end;
     procedure Sh(const A: TSA); begin WriteLn(Pr(A[0]), ' ', Pr(A[1])) end;
     procedure ByVal(A: TSA); begin A[0] := V(9); Sh(A) end;
     procedure ByConst(const A: TSA); begin Sh(A) end;
     procedure ByVar(var A: TSA); begin A[0] := V(9) end;
-    function MkA(N: Integer): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
+    function MkA(N: Int): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
     function Pass(A: TSA): TSA; begin Result := A end;
     procedure Run;
-    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Integer;
+    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Int;
       procedure Inner; begin L2 := L; L[1] := V(9) end;
     begin
       O := TOA.Create();
@@ -2311,28 +2311,28 @@ const
     program ManagedClosArr;
     uses SysUtils;
     type
-      IFoo = interface function Get: Integer; end;
-      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
-      TDA = array of Integer;
-      TR = record N: Integer; S: String; end;
-      TF = reference to function: Integer;
+      IFoo = interface function Get: Int; end;
+      THold = class(TObject, IFoo) N: Int; function Get: Int; end;
+      TDA = array of Int;
+      TR = record N: Int; S: String; end;
+      TF = reference to function: Int;
       TE = TF;
       TSA = array[0..1] of TE;
-      TRA = record N: Integer; A: TSA; end;
+      TRA = record N: Int; A: TSA; end;
       TOA = class A: TSA; end;
     var GG: TSA;
-    function THold.Get: Integer; begin Result := N end;
-    function MkH(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
-    function V(N: Integer): TE; begin Result := function: Integer begin Result := N end end;
+    function THold.Get: Int; begin Result := N end;
+    function MkH(N: Int): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    function V(N: Int): TE; begin Result := function: Int begin Result := N end end;
     function Pr(E: TE): String; begin Result := 'v' + IntToStr(E()) end;
     procedure Sh(const A: TSA); begin WriteLn(Pr(A[0]), ' ', Pr(A[1])) end;
     procedure ByVal(A: TSA); begin A[0] := V(9); Sh(A) end;
     procedure ByConst(const A: TSA); begin Sh(A) end;
     procedure ByVar(var A: TSA); begin A[0] := V(9) end;
-    function MkA(N: Integer): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
+    function MkA(N: Int): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
     function Pass(A: TSA): TSA; begin Result := A end;
     procedure Run;
-    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Integer;
+    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Int;
       procedure Inner; begin L2 := L; L[1] := V(9) end;
     begin
       O := TOA.Create();
@@ -2479,7 +2479,7 @@ const
     program j2;
     type TBig = set of 0..127;
       TObj = class S: TBig; end;
-    var GA: array[0..1] of TBig; DA: array of TBig; O: TObj; I: Integer; L: TBig;
+    var GA: array[0..1] of TBig; DA: array of TBig; O: TObj; I: Int; L: TBig;
     begin
       O := TObj.Create(); O.S := [7, 99]; SetLength(DA, 2);
       for I := 0 to 99999 do
@@ -2521,10 +2521,10 @@ const
   Src = '''
     program CA;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class public FArr: TArr; end;
-    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
-    var O: TObj; B: TArr; Raw: array[0..3] of Integer; X: Integer;
+    procedure ShowOpen(const A: array of Int); var X: Int; begin for X in A do Write(X, ' '); WriteLn(); end;
+    var O: TObj; B: TArr; Raw: array[0..3] of Int; X: Int;
     begin
       O := TObj.Create(); O.FArr[1] := 4; Raw[2] := 9;
       B := TArr(O.FArr); ShowOpen(B);
@@ -2555,8 +2555,8 @@ const
         destructor Destroy(); override;
       end;
       TKC = class of TK;
-      TProc = procedure(A: Integer);
-      TRow = array[0..2] of Integer;
+      TProc = procedure(A: Int);
+      TRow = array[0..2] of Int;
       TSRow = array[0..1] of string;
       TKRow = array[0..1] of TK;
       TObj = class
@@ -2575,7 +2575,7 @@ const
       WriteLn('gone ', Tag);
       inherited Destroy()
     end;
-    procedure Hello(A: Integer);
+    procedure Hello(A: Int);
     begin
       WriteLn('hello ', A)
     end;
@@ -2595,7 +2595,7 @@ const
       Row: TRow;
       SR: TSRow;
       KR: TKRow;
-      I: Integer;
+      I: Int;
       C: TKC;
       Pr: TProc;
     begin
@@ -2659,13 +2659,13 @@ const
   Src = '''
     program P;
     type
-      TR = record G: array[0..1, 0..1] of Integer; end;
+      TR = record G: array[0..1, 0..1] of Int; end;
       TOb = class
-        G: array[0..1, 0..1] of Integer;
+        G: array[0..1, 0..1] of Int;
         R: TR;
         Objs: array[0..1, 0..1] of TOb;
         Sub: TOb;
-        N: Integer;
+        N: Int;
         procedure Fill();
         procedure Show();
       end;

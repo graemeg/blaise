@@ -108,7 +108,7 @@ const
 
   SrcPreservesLocals = '''
     program P;
-    var A, B, C: Integer;
+    var A, B, C: Int;
     begin
       A := 11;
       B := 22;
@@ -163,7 +163,7 @@ const
     that sits inside try/finally. }
   SrcExitValueThroughFinally = '''
     program P;
-    function Pick(b: Boolean): Integer;
+    function Pick(b: Boolean): Int;
     begin
       Result := -1;
       try
@@ -204,7 +204,7 @@ const
   { Break out of a loop from inside a try/finally must run the finally body. }
   SrcBreakThroughFinally = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 3 do
       begin
@@ -228,7 +228,7 @@ const
     program P;
     type Exception = class FMessage: string; end;
     procedure DoIt(Boom: Boolean);
-    var Acc, I: Integer;
+    var Acc, I: Int;
     begin
       Acc := 0;
       try
@@ -253,16 +253,16 @@ const
     program P;
     type
       TNode = class
-        function GetTag: Integer; virtual;
+        function GetTag: Int; virtual;
       end;
       TMarkedNode = class(TNode)
-        function GetTag: Integer; override;
+        function GetTag: Int; override;
       end;
-    function TNode.GetTag: Integer;
+    function TNode.GetTag: Int;
     begin Result := 0 end;
-    function TMarkedNode.GetTag: Integer;
+    function TMarkedNode.GetTag: Int;
     begin Result := 1 end;
-    var N: TNode; T: Integer;
+    var N: TNode; T: Int;
     begin
       N := TMarkedNode.Create();
       try
@@ -279,7 +279,7 @@ const
   SrcDivNonZeroStillWorks = '''
     program P;
     uses SysUtils;
-    var a, b: Integer;
+    var a, b: Int;
     begin
       a := 20; b := 4;
       WriteLn(a div b);
@@ -328,7 +328,7 @@ const
   SrcTypedExceptCorrect =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           X := 0;
           try
@@ -344,7 +344,7 @@ const
   SrcTypedExceptSubclass =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           X := 0;
           try
@@ -359,7 +359,7 @@ const
   SrcTypedExceptElseRun =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           X := 0;
           try
@@ -375,7 +375,7 @@ const
   SrcTypedExceptBareRaise =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           X := 0;
           try
@@ -398,7 +398,7 @@ const
   SrcTypedExceptUnmatched =
     SrcExcBase +
     '''
-        var X: Integer;
+        var X: Int;
         begin
           X := 0;
           try
@@ -579,7 +579,7 @@ const
     program P;
     type EBoom = class end;
 
-    function F(n: Integer): Integer;
+    function F(n: Int): Int;
     begin
       Result := 0;
       try
@@ -601,7 +601,7 @@ const
       end;
     end;
 
-    var x: Integer;
+    var x: Int;
     begin
       x := F(0);
       writeln(x);
@@ -707,7 +707,7 @@ const
       D: TDog;
       G: IGreet;
       O: TObject;
-      N, Z: Integer;
+      N, Z: Int;
     begin
       A := TCat.Create();
       try
@@ -789,7 +789,7 @@ const
         Trace := Trace + 'X'
       end
     end;
-    function TwoTries(N: Integer): Integer;
+    function TwoTries(N: Int): Int;
     begin
       Result := 0;
       try
@@ -804,7 +804,7 @@ const
       except
       end
     end;
-    function Classify(K: Integer): string;
+    function Classify(K: Int): string;
     begin
       try
         case K of
@@ -899,7 +899,7 @@ const
     uses SysUtils;
     type
       EMy = class(Exception)
-        Tag: Integer;
+        Tag: Int;
         destructor Destroy; override;
       end;
     destructor EMy.Destroy;

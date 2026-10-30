@@ -168,7 +168,7 @@ const
   Src = '''
     program P;
     var
-      I: Integer; L: Int64;
+      I: Int; L: Int64;
     begin
       I := 7;
       WriteLn(Float64(I) / 2:0:1);
@@ -218,7 +218,7 @@ const
       C: array[0..2] of Int32 = (10, -20, 30);
       D: array[0..2] of Float64 = (0.5, 1.5, 2.5);
       E: array[0..2] of Float32 = (0.25, 0.75, 1.25);
-    var I: Integer;
+    var I: Int;
     begin
       for I := 1 to 2 do
         WriteLn(A[I], ' ', B[I], ' ', C[I], ' ', D[I]:0:1, ' ', E[I]:0:2)
@@ -252,7 +252,7 @@ const
       SA: array[0..3] of Int8;
       DA: array of Int8;
       L: Int8;
-      I: Integer;
+      I: Int;
 
     procedure Neg(var X: Int8);
     begin
@@ -373,22 +373,22 @@ procedure TE2ETypeStdTests.TestRun_NarrowArg_ReachesClosestOverload;
 const
   Src = '''
     program P;
-    procedure A(X: Integer); overload; begin WriteLn('Integer') end;
+    procedure A(X: Int32); overload; begin WriteLn('Integer') end;
     procedure A(X: Int64); overload; begin WriteLn('Int64') end;
-    procedure A(X: Double); overload; begin WriteLn('Double') end;
-    procedure W(X: Word); overload; begin WriteLn('Word') end;
-    procedure W(X: SmallInt); overload; begin WriteLn('SmallInt') end;
+    procedure A(X: Float64); overload; begin WriteLn('Double') end;
+    procedure W(X: UInt16); overload; begin WriteLn('Word') end;
+    procedure W(X: Int16); overload; begin WriteLn('SmallInt') end;
     procedure L(X: Int64); overload; begin WriteLn('Int64') end;
-    procedure L(X: Double); overload; begin WriteLn('Double') end;
+    procedure L(X: Float64); overload; begin WriteLn('Double') end;
     type
       TC = class
         procedure B(X: Int64); overload;
-        procedure B(X: Integer); overload;
+        procedure B(X: Int32); overload;
       end;
     procedure TC.B(X: Int64); begin WriteLn('m Int64') end;
-    procedure TC.B(X: Integer); begin WriteLn('m Integer ', X) end;
+    procedure TC.B(X: Int32); begin WriteLn('m Integer ', X) end;
     var
-      V8: Int8; VB: Byte; VS: SmallInt; VI: Integer; O: TC;
+      V8: Int8; VB: Byte; VS: Int16; VI: Int32; O: TC;
     begin
       V8 := -1; VB := 2; VS := 3; VI := 4;
       A(V8); A(VB); A(VS);
@@ -411,7 +411,7 @@ const
   Src = '''
     program P;
     uses SysUtils;
-    var Q: UInt64; U: UInt32; I: Integer;
+    var Q: UInt64; U: UInt32; I: Int;
     begin
       Q := High(UInt64);
       U := High(UInt32);
@@ -437,11 +437,11 @@ const
     program P;
     const
       N = 42;
-    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
     procedure F(X: Int64); overload; begin WriteLn('Int64 ', X) end;
     procedure G(X: Byte); begin WriteLn('Byte ', X) end;
     var
-      I: Integer; B: Byte;
+      I: Int32; B: Byte;
     begin
       F(42);
       F(N);
@@ -453,7 +453,7 @@ const
       G(200);
       B := 255;
       WriteLn(B + 1);
-      F(High(Integer));
+      F(High(Int32));
       WriteLn(I + 1 = 8)
     end.
     ''';
@@ -480,23 +480,23 @@ const
       Buckets = 4096;
     procedure Q(X: UInt64); begin WriteLn('Q ', X) end;
     procedure F(X: Byte); overload; begin WriteLn('Byte ', X) end;
-    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
-    procedure Pair(const S: string; A, B: Integer); overload;
+    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
+    procedure Pair(const S: string; A, B: Int32); overload;
     begin WriteLn(S, ' Integer ', A + B) end;
     procedure Pair(const S: string; A, B: Int64); overload;
     begin WriteLn(S, ' Int64 ', A + B) end;
     procedure Tags(const Args: array of const);
-    var I: Integer;
+    var I: Int32;
     begin
       for I := 0 to High(Args) do
         if Args[I].VType = vtInteger then
-          Write(Integer(Args[I].VValue), ' ')
+          Write(Int32(Args[I].VValue), ' ')
         else
           Write('tag', Args[I].VType, ' ');
       WriteLn()
     end;
     var
-      U: UInt64; V: UInt64; I, K: Integer;
+      U: UInt64; V: UInt64; I, K: Int32;
     begin
       U := 1;
       V := UInt64(1) shl 40 + 4097;
@@ -529,33 +529,33 @@ procedure TE2ETypeStdTests.TestRun_OpenArrayLiteral_EveryCallShape;
 const
   Src = '''
     program P;
-    function Total(const A: array of Integer): Integer;
-    var I: Integer;
+    function Total(const A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do Result := Result * 10 + A[I]
     end;
     type
       TC = class
-        S: Integer;
-        constructor Create(const A: array of Integer);
-        function Sum(const A: array of Integer): Integer;
+        S: Int;
+        constructor Create(const A: array of Int);
+        function Sum(const A: array of Int): Int;
         procedure Run;
       end;
-    constructor TC.Create(const A: array of Integer);
+    constructor TC.Create(const A: array of Int);
     begin S := Total(A) end;
-    function TC.Sum(const A: array of Integer): Integer;
+    function TC.Sum(const A: array of Int): Int;
     begin Result := Total(A) end;
     procedure TC.Run;
-      procedure Show(const AName: string; const A: array of Integer);
+      procedure Show(const AName: string; const A: array of Int);
       begin WriteLn(AName, ' ', Total(A)) end;
     begin
       Show('nested-in-method', [1, 2, 3])
     end;
     procedure Outer;
-      procedure Show(const A: array of Integer);
+      procedure Show(const A: array of Int);
       begin WriteLn('nested-proc ', Total(A)) end;
-      function Calc(const A: array of Integer): Integer;
+      function Calc(const A: array of Int): Int;
       begin Result := Total(A) end;
     begin
       Show([4, 5, 6]);
@@ -588,16 +588,16 @@ const
     type
       TE = (eA, eB, eC);
       TN = (nNeg = -3, nZero = 0);
-    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
     procedure F(X: Int64); overload; begin WriteLn('Int64 ', X) end;
-    procedure OA(const X: array of Integer);
+    procedure OA(const X: array of Int32);
     begin
       F(Length(X));
       F(High(X))
     end;
     var
-      S, Empty: string; A: array of Integer; SA: array[1..5] of Byte;
-      I: Integer; B: Byte; E: TE; EN: TN; L, N: Int64;
+      S, Empty: string; A: array of Int32; SA: array[1..5] of Byte;
+      I: Int32; B: Byte; E: TE; EN: TN; L, N: Int64;
     begin
       S := 'hello';
       Empty := '';
@@ -624,7 +624,7 @@ const
       F(Ord(EN));
       F(Ord(True));
       OA([1, 2, 3]);
-      F(High(Integer));
+      F(High(Int32));
       L := Ord(I) * 1000000000;
       WriteLn(L);
       N := (Int64(1) shl 32) + 2;
@@ -699,7 +699,7 @@ const
       TE = (eA, eB, eC);
     procedure Q(X: UInt64); begin WriteLn('Q ', X) end;
     var
-      H: UInt64; S: string; I: Integer; B: Byte; E: TE; A: array of Word;
+      H: UInt64; S: string; I: Int32; B: Byte; E: TE; A: array of UInt16;
     begin
       S := 'hello';
       H := 14695981039346656037;
@@ -755,15 +755,15 @@ const
   Src = '''
     program P;
     uses Generics.Collections, Classes, contnrs;
-    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
     procedure F(X: Int64); overload; begin WriteLn('Int ', X) end;
     var
-      L: TList<Integer>; St: TStack<Integer>; Q: TQueue<Integer>;
-      S: TSet<Integer>; D: TDictionary<string, Integer>;
-      OD: TOrderedDictionary<string, Integer>; M: IMap<string, Integer>;
+      L: TList<Int>; St: TStack<Int>; Q: TQueue<Int>;
+      S: TSet<Int>; D: TDictionary<string, Int>;
+      OD: TOrderedDictionary<string, Int>; M: IMap<string, Int>;
       SL: TStringList; OL: TObjectList; C: TComponent; Idx: Int;
     begin
-      L := TList<Integer>.Create;
+      L := TList<Int>.Create;
       L.Add(3); L.Add(5);
       F(L.Count);
       F(L.IndexOf(5));
@@ -771,17 +771,17 @@ const
       L.FCount := 5000000000;
       WriteLn(L.Count);
       L.FCount := 2;
-      St := TStack<Integer>.Create; St.Push(1);
+      St := TStack<Int>.Create; St.Push(1);
       F(St.Count);
-      Q := TQueue<Integer>.Create; Q.Enqueue(1);
+      Q := TQueue<Int>.Create; Q.Enqueue(1);
       F(Q.Count);
-      S := TSet<Integer>.Create; S.Include(1);
+      S := TSet<Int>.Create; S.Include(1);
       F(S.Count);
-      D := TDictionary<string, Integer>.Create; D.Add('a', 1);
+      D := TDictionary<string, Int>.Create; D.Add('a', 1);
       F(D.Count);
       M := D;
       F(M.GetCount);
-      OD := TOrderedDictionary<string, Integer>.Create; OD.Add('a', 1);
+      OD := TOrderedDictionary<string, Int>.Create; OD.Add('a', 1);
       F(OD.Count);
       SL := TStringList.Create;
       F(SL.Add('b'));
@@ -810,7 +810,7 @@ procedure TE2ETypeStdTests.TestRun_MaxInt_IsHighInt;
 const
   Src = '''
     program P;
-    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Integer ', X) end;
     procedure F(X: Int64); overload; begin WriteLn('Int ', X) end;
     var S: string;
     begin
@@ -855,8 +855,8 @@ const
       Result := A = B
     end;
     var
-      EI: IEq<Integer>;
-      EF: IEq<Double>;
+      EI: IEq<Int32>;
+      EF: IEq<Float64>;
     begin
       EI := TIntEq.Create();
       EF := TFloatEq.Create();

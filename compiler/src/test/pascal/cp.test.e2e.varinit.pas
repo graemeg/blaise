@@ -54,7 +54,7 @@ procedure TE2EVarInitTests.TestRun_IntegerInit;
 const Src =
   '''
   program P;
-  var G: Integer = 42;
+  var G: Int32 = 42;
   begin
     WriteLn(G)
   end.
@@ -96,7 +96,7 @@ procedure TE2EVarInitTests.TestRun_RealInit;
 const Src =
   '''
   program P;
-  var D: Double = 3.5;
+  var D: Float64 = 3.5;
   begin
     WriteLn(D)
   end.
@@ -124,7 +124,7 @@ procedure TE2EVarInitTests.TestRun_ArrayInit_ZeroBased;
 const Src =
   '''
   program P;
-  var A: array[0..2] of Integer = (10, 20, 30);
+  var A: array[0..2] of Int32 = (10, 20, 30);
   begin
     WriteLn(A[0]); WriteLn(A[1]); WriteLn(A[2])
   end.
@@ -140,7 +140,7 @@ procedure TE2EVarInitTests.TestRun_ArrayInit_NonZeroBased;
 const Src =
   '''
   program P;
-  var R: array[1..3] of Integer = (7, 8, 9);
+  var R: array[1..3] of Int32 = (7, 8, 9);
   begin
     WriteLn(R[1]); WriteLn(R[3])
   end.
@@ -157,8 +157,8 @@ const Src =
   '''
   program P;
   var
-    A: Integer = 1;
-    B: Integer = 2;
+    A: Int32 = 1;
+    B: Int32 = 2;
     C: string = 'three';
   begin
     WriteLn(A); WriteLn(B); WriteLn(C)
@@ -175,7 +175,7 @@ procedure TE2EVarInitTests.TestRun_InitThenReassign;
 const Src =
   '''
   program P;
-  var G: Integer = 10;
+  var G: Int32 = 10;
   begin
     WriteLn(G);
     G := G + 5;
@@ -252,7 +252,7 @@ const
       S: TS = [eA, eC..eD];
       E: TS = [];
       J: TJumbo = [2, 100];
-    var I: Integer;
+    var I: Int;
     begin
       WriteLn(eA in S, ' ', eB in S, ' ', eC in S, ' ', eD in S, ' ', E = []);
       WriteLn(2 in J, ' ', 3 in J, ' ', 100 in J);
@@ -290,8 +290,8 @@ const
       UO: TObject = nil;
     implementation
     var
-      HiddenA: array of Integer = nil;
-    function HiddenLen: Integer;
+      HiddenA: array of Int32 = nil;
+    function HiddenLen: Int;
     begin
       Result := Length(HiddenA)
     end;
@@ -311,7 +311,7 @@ const
       C: TClassRef = nil;
       F: TProc = nil;
       I: IThing = nil;
-      A: array of Integer = nil;
+      A: array of Int32 = nil;
     begin
       WriteLn(Ptr = nil, ' ', O = nil, ' ', C = nil, ' ', Assigned(F), ' ',
         I = nil, ' ', Length(A));

@@ -96,7 +96,7 @@ const
   SrcCaseSimple =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 2;
           case N of
@@ -110,7 +110,7 @@ const
   SrcCaseWithElse =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 5;
           case N of
@@ -125,7 +125,7 @@ const
   SrcCaseMultiValue =
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := 3;
           case N of
@@ -176,7 +176,7 @@ const
           TState = (sIdle, sRunning, sDone);
         var
           S: TState;
-          N: Integer;
+          N: Int;
         begin
           S := sRunning;
           case S of
@@ -426,7 +426,7 @@ const
   Src =
     '''
         program P;
-        var S: string; R: Integer;
+        var S: string; R: Int;
         begin
           S := 'foo';
           case S of
@@ -472,7 +472,7 @@ const
     '''
         program P;
         type TDir = (dN, dE, dS, dW);
-        var x: Integer;
+        var x: Int;
         begin
           x := Ord(TDir.dNope)
         end.

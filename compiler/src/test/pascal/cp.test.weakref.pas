@@ -169,7 +169,7 @@ const
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var
           [Weak] F: TFoo;
@@ -327,7 +327,7 @@ const
     '''
         program P;
         var
-          [Weak] N: Integer;
+          [Weak] N: Int;
         begin
         end.
         ''';
@@ -414,7 +414,7 @@ const
         program P;
         type
           TFoo = class
-            [Unretained] N: Integer;
+            [Unretained] N: Int;
           end;
         begin
         end.

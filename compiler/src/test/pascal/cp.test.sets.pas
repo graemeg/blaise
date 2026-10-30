@@ -329,7 +329,7 @@ const
   SrcEmptyLiteralNonSetAssign =
     '''
     program P;
-    var x: Integer;
+    var x: Int;
     begin
       x := []
     end.
@@ -517,7 +517,7 @@ const
   SrcSetBadBaseType =
     '''
         program P;
-        type TBad = set of Integer;
+        type TBad = set of Int;
         begin
         end.
         ''';
@@ -1259,14 +1259,14 @@ const
         TDs = set of TD;
         TBox = class
           procedure Chk(S: TCs; C: TC);
-          static function SCard(S: TCs): Integer;
+          static function SCard(S: TCs): Int;
         end;
       procedure TBox.Chk(S: TCs; C: TC); begin end;
-      static function TBox.SCard(S: TCs): Integer; begin Result := 0 end;
+      static function TBox.SCard(S: TCs): Int; begin Result := 0 end;
       procedure Chk(S: TCs; C: TC); begin end;
-      function Card(S: TCs): Integer; overload; begin Result := 1 end;
-      function Card(S: TDs): Integer; overload; begin Result := 2 end;
-      var B: TBox; N: Integer;
+      function Card(S: TCs): Int; overload; begin Result := 1 end;
+      function Card(S: TDs): Int; overload; begin Result := 2 end;
+      var B: TBox; N: Int;
       begin
       ''';
 var
@@ -1575,7 +1575,7 @@ begin
       program P;
       type TNum = 0..15; TNumSet = set of TNum;
         TDir = (dN, dS, dE, dW); TDirSet = set of TDir;
-      function M(S: TNumSet): Integer; begin Result := 0 end;
+      function M(S: TNumSet): Int; begin Result := 0 end;
       var N: TNumSet; D: TDirSet; B: Boolean;
       begin
         B := M([1..3]) = 0;
@@ -1593,7 +1593,7 @@ begin
   AssertTrue('a range is not an open-array element',
     Pos('only allowed in a set literal', SemanticError('''
       program P;
-      procedure OA(const A: array of Integer); begin end;
+      procedure OA(const A: array of Int); begin end;
       begin
         OA([1..3])
       end.
@@ -1650,7 +1650,7 @@ var
 begin
   Prog := AnalyseSrc('''
     program P;
-    var I: Integer; N: Int64; W: Word; B: Boolean;
+    var I: Int; N: Int64; W: UInt16; B: Boolean;
     begin
       I := 2; N := 3; W := 4;
       B := (I in [1, 2]) or (N in [3..5, 200]) or (W in [I, 9]) or
@@ -1660,7 +1660,7 @@ begin
   Prog.Free();
   Msg := SemanticError('''
     program P;
-    var I: Integer; B: Boolean;
+    var I: Int; B: Boolean;
     begin
       B := I in [1, 300]
     end.
@@ -1669,7 +1669,7 @@ begin
     Pos('300', Msg) >= 0);
   Msg := SemanticError('''
     program P;
-    var I: Integer; B: Boolean;
+    var I: Int; B: Boolean;
     begin
       B := I in [-1, 2]
     end.

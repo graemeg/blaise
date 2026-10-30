@@ -528,7 +528,7 @@ const
     '''
     program P;
     var
-      A, B, C: Integer;
+      A, B, C: Int;
     begin
       A := 6;
       B := 7;
@@ -541,7 +541,7 @@ const
     '''
     program P;
     var
-      N, Sum: Integer;
+      N, Sum: Int;
     begin
       N := 5;
       Sum := 0;
@@ -561,7 +561,7 @@ const
   SrcFuncs =
     '''
     program P;
-    function Add2(A, B: Integer): Integer;
+    function Add2(A, B: Int): Int;
     begin
       Result := A + B
     end;
@@ -573,7 +573,7 @@ const
   SrcFib =
     '''
     program P;
-    function Fib(N: Integer): Integer;
+    function Fib(N: Int): Int;
     begin
       if N < 2 then
       begin
@@ -591,7 +591,7 @@ const
     '''
     program P;
     var
-      I, Sum: Integer;
+      I, Sum: Int32;
     begin
       Sum := 0;
       for I := 1 to 10 do
@@ -848,7 +848,7 @@ begin
     procedure Run;
     var
       B: Byte;
-      C: Integer;
+      C: Int;
     begin
       for B := 250 to 255 do
         C := C + 1;
@@ -891,7 +891,7 @@ begin
     '''
     program P;
     var
-      D, E: Double;
+      D, E: Float64;
     begin
       D := 1.5;
       E := D * 2.0 + 0.25;
@@ -921,13 +921,13 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var D: Double; F: Single; I: Integer;
+    var D: Float64; F: Float32; I: Int32;
     begin
       D := 3.5;
-      F := Single(D);         { double -> single: narrow }
-      D := Double(F);         { single -> double: widen  }
+      F := Float32(D);         { double -> single: narrow }
+      D := Float64(F);         { single -> double: widen  }
       I := 7;
-      D := Double(I);         { int -> double: scvtf     }
+      D := Float64(I);         { int -> double: scvtf     }
       if D > 0.0 then WriteLn(1)
     end.
     ''', TargetArm64);
@@ -948,7 +948,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function Mix(A: Integer; X: Double; B: Integer): Integer;
+    function Mix(A: Int; X: Float64; B: Int): Int;
     begin
       Result := A + B
     end;
@@ -1020,7 +1020,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function Tag(N: Integer): Integer;
+    function Tag(N: Int): Int;
     var
       S: string;
     begin
@@ -1098,13 +1098,13 @@ begin
     program P;
     type
       TPoint = record
-        X: Integer;
+        X: Int;
         Y: Int64;
-        D: Double;
+        D: Float64;
       end;
     var
       G: TPoint;
-    function Sum(N: Integer): Integer;
+    function Sum(N: Int): Int;
     var
       L, M: TPoint;
     begin
@@ -1156,10 +1156,10 @@ begin
     type
       TBig = class
         Pad: array[0..299] of Byte;
-        N: Integer;
-        function GetN: Integer;
+        N: Int32;
+        function GetN: Int32;
       end;
-    function TBig.GetN: Integer; begin Result := N end;
+    function TBig.GetN: Int32; begin Result := N end;
     var t: TBig;
     begin
       t := TBig.Create();
@@ -1197,7 +1197,7 @@ begin
       end;
     var
       G: TBig;
-    function MakeBig(N: Integer): TBig;
+    function MakeBig(N: Int): TBig;
     begin
       Result.A := N
     end;
@@ -1228,8 +1228,8 @@ begin
         B: Int64;
       end;
       TVec = record
-        X: Double;
-        Y: Double;
+        X: Float64;
+        Y: Float64;
       end;
     var
       GP: TPair;
@@ -1270,8 +1270,8 @@ begin
         B: Int64;
       end;
       TVec = record
-        X: Double;
-        Y: Double;
+        X: Float64;
+        Y: Float64;
       end;
     var
       GP: TPair;
@@ -1280,7 +1280,7 @@ begin
     begin
       Result := P.A + P.B
     end;
-    function VecX(V: TVec): Double;
+    function VecX(V: TVec): Float64;
     begin
       Result := V.X
     end;
@@ -1357,10 +1357,10 @@ begin
     program P;
     type
       TR = record
-        X: Integer;
-        function G(): Integer;
+        X: Int;
+        function G(): Int;
       end;
-    function TR.G(): Integer;
+    function TR.G(): Int;
     begin
       Result := Self.X
     end;
@@ -1385,10 +1385,10 @@ begin
     program P;
     type
       TR = record
-        X: Integer;
-        function G(): Integer;
+        X: Int32;
+        function G(): Int32;
       end;
-    function TR.G(): Integer;
+    function TR.G(): Int32;
     begin
       Result := Self.X
     end;
@@ -1420,10 +1420,10 @@ begin
     program P;
     type
       TR = record
-        X: Integer;
-        procedure S(V: Integer);
+        X: Int32;
+        procedure S(V: Int32);
       end;
-    procedure TR.S(V: Integer);
+    procedure TR.S(V: Int32);
     begin
       Self.X := V
     end;
@@ -1449,10 +1449,10 @@ begin
     program P;
     type
       TR = record
-        X: Integer;
-        function G(): Integer;
+        X: Int;
+        function G(): Int;
       end;
-    function TR.G(): Integer;
+    function TR.G(): Int;
     begin
       Result := Self.X
     end;
@@ -1488,23 +1488,23 @@ begin
     program P;
     type
       TInner = record
-        A, B: Integer;
-        function Sum(): Integer;
+        A, B: Int32;
+        function Sum(): Int32;
       end;
       TOuter = record
-        Tag: Integer;
+        Tag: Int32;
         X: TInner;
-        function Total(): Integer;
+        function Total(): Int32;
       end;
       TBox = class
-        N: Integer;
+        N: Int32;
         R: TInner;
       end;
-    function TInner.Sum(): Integer;
+    function TInner.Sum(): Int32;
     begin
       Result := A + B
     end;
-    function TOuter.Total(): Integer;
+    function TOuter.Total(): Int32;
     begin
       Result := Self.X.Sum() + Tag
     end;
@@ -1541,7 +1541,7 @@ begin
     type
       TM = record
         Code: string;
-        Amt: Integer;
+        Amt: Int;
         function Show(): string;
       end;
     function TM.Show(): string;
@@ -1579,7 +1579,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function printf(AFormat: PChar): Integer; cdecl; varargs; external 'c' name 'printf';
+    function printf(AFormat: PChar): Int32; cdecl; varargs; external 'c' name 'printf';
     begin
       printf(PChar('%d %d %d'), 1, 2, 3)
     end.
@@ -1612,19 +1612,19 @@ begin
     program P;
     type
       TTok = record
-        Kind: Integer;
+        Kind: Int;
         Value: string;
-        Line: Integer;
+        Line: Int;
       end;
       TToks = class
-        function Get(I: Integer): TTok;
-        property Items[I: Integer]: TTok read Get; default;
+        function Get(I: Int): TTok;
+        property Items[I: Int]: TTok read Get; default;
       end;
       THolder = class
-        N: Integer;
+        N: Int;
         Toks: TToks;
       end;
-    function TToks.Get(I: Integer): TTok;
+    function TToks.Get(I: Int): TTok;
     begin
       Result.Line := I
     end;
@@ -1652,7 +1652,7 @@ begin
     type
       TTool = record
         Path: string;
-        Kind: Integer;
+        Kind: Int;
       end;
       TChain = record
         Tool: TTool;
@@ -1704,13 +1704,13 @@ const
     program P;
     type
       TBase = class
-        function T(N: Integer): Single;
+        function T(N: Int32): Float32;
       end;
-    function TBase.T(N: Integer): Single;
+    function TBase.T(N: Int32): Float32;
     begin
       Result := N + 0.5
     end;
-    var B: TBase; X: Double;
+    var B: TBase; X: Float64;
     begin
       B := TBase.Create();
       X := B.T(2);
@@ -1779,8 +1779,8 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TF2 = record A, B: Single; end;
-    function M(A, B: Single): TF2;
+    type TF2 = record A, B: Float32; end;
+    function M(A, B: Float32): TF2;
     begin
       Result.A := A;
       Result.B := B
@@ -1808,8 +1808,8 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type T12 = record A, B, C: Integer; end;
-    function M(V: Integer): T12;
+    type T12 = record A, B, C: Int32; end;
+    function M(V: Int32): T12;
     begin
       Result.A := V;
       Result.B := V;
@@ -1840,7 +1840,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function F(A: Single; N: Integer; B: Double): Integer;
+    function F(A: Float32; N: Int; B: Float64): Int;
     begin
       Result := Trunc(A + B) + N
     end;
@@ -1876,7 +1876,7 @@ begin
         function Name(): string;
       end;
       TGreet = class(TObject, IGreet)
-        N: Integer;
+        N: Int;
         function Name(): string;
       end;
     function TGreet.Name(): string;
@@ -1912,7 +1912,7 @@ begin
     program P;
     type
       TCounter = record
-        Value: Integer;
+        Value: Int;
         procedure Inc;
       end;
       TApp = class
@@ -1951,7 +1951,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var X: Double; S: Single;
+    var X: Float64; S: Float32;
     begin
       WriteLn(IsNaN(X));
       WriteLn(IsInfinite(S))
@@ -1980,10 +1980,10 @@ begin
     program P;
     type
       IVal = interface
-        function Get(): Integer;
+        function Get(): Int;
       end;
       THolder = class
-        N: Integer;
+        N: Int;
         F: IVal;
       end;
     var H: THolder;
@@ -2023,7 +2023,7 @@ begin
     begin
       Result := Self.V
     end;
-    var b: TB<Integer>;
+    var b: TB<Int32>;
     begin
       b.V := 3;
       WriteLn(b.G())
@@ -2054,7 +2054,7 @@ begin
       Result := Self.V
     end;
     var
-      bi: TB<Integer>;
+      bi: TB<Int32>;
       bs: TB<string>;
     begin
       bi.V := 3;
@@ -2085,7 +2085,7 @@ begin
     begin
       Result := Self.V
     end;
-    var b: TB<Integer>;
+    var b: TB<Int32>;
     begin
       b.V := 3;
       WriteLn(b.G())
@@ -2315,11 +2315,11 @@ begin
     interface
     type
       TBox = class
-        function Get: Integer;
+        function Get: Int;
       end;
     implementation
-    var GCount: Integer;
-    function TBox.Get: Integer;
+    var GCount: Int;
+    function TBox.Get: Int;
     begin
       GCount := GCount + 1;
       Result := GCount
@@ -2400,7 +2400,7 @@ begin
     program P;
     var
       Answer: Int64 = 42;
-      Ratio: Double = 2.5;
+      Ratio: Float64 = 2.5;
       Plain: Int64;
     begin
       WriteLn(Answer);
@@ -2435,7 +2435,7 @@ begin
     program P;
     var
       N: Int64;
-      D: Double;
+      D: Float64;
       S: string;
     procedure Bump(var X: Int64);
     begin
@@ -2446,7 +2446,7 @@ begin
       Bump(X);
       Bump(X)
     end;
-    procedure SetD(out V: Double);
+    procedure SetD(out V: Float64);
     begin
       V := 2.5
     end;
@@ -2493,8 +2493,8 @@ begin
     '''
     program P;
     var
-      A, B: Single;
-    function Half(V: Single): Single;
+      A, B: Float32;
+    function Half(V: Float32): Float32;
     begin
       Result := V / 2.0
     end;
@@ -2907,7 +2907,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function printf(Fmt: PChar): Integer; cdecl; varargs;
+    function printf(Fmt: PChar): Int32; cdecl; varargs;
       external 'c' name 'printf';
     function Sum10(A, B, C, D, E, F, G, H, I, J: Int64): Int64;
     begin
@@ -3115,13 +3115,13 @@ begin
     type
       TColour  = (cRed, cGreen, cBlue);
       TColours = set of TColour;
-    function Count(ASet: TColours): Integer;
+    function Count(ASet: TColours): Int;
     begin
       Result := 0;
       if cRed in ASet then Result := Result + 1;
       if cBlue in ASet then Result := Result + 1
     end;
-    var N: Integer;
+    var N: Int;
     begin
       N := Count([cRed, cBlue]);
       WriteLn(N)
@@ -3139,15 +3139,15 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function HashIt(const AValue: string): Integer;
+    function HashIt(const AValue: string): Int32;
     begin
       Result := Length(AValue)
     end;
-    function CopyIt(AValue: string): Integer;
+    function CopyIt(AValue: string): Int;
     begin
       Result := Length(AValue)
     end;
-    var N: Integer;
+    var N: Int;
     begin
       N := HashIt('a' + 'b');
       N := N + CopyIt('c' + 'd');
@@ -3186,7 +3186,7 @@ begin
         procedure Put(A: T);
       end;
       TBag = class(TObject)
-        B: TBox<Integer>;
+        B: TBox<Int32>;
         procedure Fill;
       end;
     implementation
@@ -3196,7 +3196,7 @@ begin
     end;
     procedure TBag.Fill;
     begin
-      Self.B := TBox<Integer>.Create();
+      Self.B := TBox<Int32>.Create();
       Self.B.Put(1)
     end;
     end.
@@ -3297,7 +3297,7 @@ begin
         function Get: T;
       end;
       TThing = class
-        FBox: TBox<Integer>;
+        FBox: TBox<Int32>;
         procedure Setup;
       end;
     implementation
@@ -3305,7 +3305,7 @@ begin
     function TBox<T>.Get: T; begin Result := FVal end;
     procedure TThing.Setup;
     begin
-      FBox := TBox<Integer>.Create();
+      FBox := TBox<Int32>.Create();
       FBox.Put(7);
     end;
     end.
@@ -3577,7 +3577,7 @@ begin
     program P;
     var
       A: array[0..599] of string;
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 599 do
         A[I] := 'x';
@@ -3629,7 +3629,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var S: string; N: Integer;
+    var S: string; N: Int;
     begin
       N := 71;
       S := 'x';
@@ -3678,15 +3678,15 @@ begin
     program P;
     type
       TInner = record
-        Kind: Integer;
-        Line: Integer;
+        Kind: Int32;
+        Line: Int32;
       end;
       TOuter = class
         FSource: string;
-        FPos: Integer;
+        FPos: Int32;
         FTok: TInner;
         procedure Init;
-        function GetKind: Integer;
+        function GetKind: Int32;
       end;
     procedure TOuter.Init;
     begin
@@ -3695,7 +3695,7 @@ begin
       FTok.Kind := 5;
       FTok.Line := 9;
     end;
-    function TOuter.GetKind: Integer;
+    function TOuter.GetKind: Int32;
     begin
       Result := FTok.Kind
     end;
@@ -3760,15 +3760,15 @@ begin
     program P;
     type
       TInner = class
-        FCount: Integer;
+        FCount: Int;
       end;
       TOuter = class
         FSource: string;
         FInner: TInner;
-        function ReadCount: Integer;
+        function ReadCount: Int;
         procedure SetCount;
       end;
-    function TOuter.ReadCount: Integer;
+    function TOuter.ReadCount: Int;
     begin
       Result := FInner.FCount
     end;
@@ -3820,20 +3820,20 @@ begin
     program P;
     type
       TInner = class
-        FData: array[0..3] of Integer;
-        function GetItem(I: Integer): Integer;
-        property Items[I: Integer]: Integer read GetItem;
+        FData: array[0..3] of Int;
+        function GetItem(I: Int): Int;
+        property Items[I: Int]: Int read GetItem;
       end;
       TOuter = class
         FDecoy: Pointer;
         FList: TInner;
-        function First: Integer;
+        function First: Int;
       end;
-    function TInner.GetItem(I: Integer): Integer;
+    function TInner.GetItem(I: Int): Int;
     begin
       Result := FData[I]
     end;
-    function TOuter.First: Integer;
+    function TOuter.First: Int;
     begin
       Result := FList.Items[0]
     end;
@@ -3882,7 +3882,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var S: string; T: string; I: Integer;
+    var S: string; T: string; I: Int;
     begin
       S := '';
       for I := 72 to 74 do
@@ -3984,12 +3984,12 @@ begin
     program P;
     type
       IThing = interface
-        function Val: Integer;
+        function Val: Int;
       end;
       TThing = class(TObject, IThing)
-        function Val: Integer;
+        function Val: Int;
       end;
-    function TThing.Val: Integer; begin Result := 7 end;
+    function TThing.Val: Int; begin Result := 7 end;
     function MakeThing: IThing;
     begin
       Result := TThing.Create()
@@ -4051,17 +4051,17 @@ begin
     program P;
     type
       TItem = record
-        A: Integer;
-        B: Integer;
+        A: Int32;
+        B: Int32;
         C: Int64;
       end;
       TBag = class
-        Pad1: Integer;
-        Pad2: Integer;
+        Pad1: Int32;
+        Pad2: Int32;
         Items: array of TItem;
-        Count: Integer;
+        Count: Int32;
         procedure Fill;
-        function Read0: Integer;
+        function Read0: Int32;
       end;
     procedure TBag.Fill;
     var R: TItem; L: TBag;
@@ -4070,7 +4070,7 @@ begin
       R.A := 111; R.B := 222; R.C := 333;
       L.Items[0] := R
     end;
-    function TBag.Read0: Integer;
+    function TBag.Read0: Int32;
     var R: TItem; L: TBag;
     begin
       L := Self;
@@ -4121,7 +4121,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var S: string; Pp: PChar; N: Integer;
+    var S: string; Pp: PChar; N: Int;
     begin
       S := 'a/b';
       Pp := PChar(S);
@@ -4169,7 +4169,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var S: string; N: Integer;
+    var S: string; N: Int;
     begin
       S := '';
       N := Length(S);
@@ -4255,21 +4255,21 @@ begin
     type
       TBox = class
       private
-        function GetItem(I: Integer): Integer;
+        function GetItem(I: Int): Int;
       public
-        property Items[I: Integer]: Integer read GetItem; default;
+        property Items[I: Int]: Int read GetItem; default;
       end;
       TOuter = class
         Box: TBox;
       end;
     implementation
-    function TBox.GetItem(I: Integer): Integer; begin Result := I end;
+    function TBox.GetItem(I: Int): Int; begin Result := I end;
     end.
     ''',
     '''
     program P;
     uses DPU;
-    var O: TOuter; N: Integer;
+    var O: TOuter; N: Int;
     begin
       O := TOuter.Create();
       O.Box := TBox.Create();
@@ -4317,8 +4317,8 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    const K = Integer($FEEDFACF);
-    var B: Integer;
+    const K = Int32($FEEDFACF);
+    var B: Int32;
     begin
       B := $CF or ($FA shl 8) or ($ED shl 16) or ($FE shl 24);
       if B = K then WriteLn('eq') else WriteLn('ne')
@@ -4439,18 +4439,18 @@ begin
     type
       TBag = class
       private
-        function GetItem(I: Integer): Integer;
+        function GetItem(I: Int): Int;
       public
-        property Items[I: Integer]: Integer read GetItem; default;
+        property Items[I: Int]: Int read GetItem; default;
       end;
     implementation
-    function TBag.GetItem(I: Integer): Integer; begin Result := I end;
+    function TBag.GetItem(I: Int): Int; begin Result := I end;
     end.
     ''',
     '''
     program P;
     uses DPV;
-    var B: TBag; N: Integer;
+    var B: TBag; N: Int;
     begin
       B := TBag.Create();
       N := B[3];
@@ -4481,7 +4481,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var I: Integer;
+    var I: Int32;
     begin
       I := -1;
       WriteLn(I)
@@ -4538,7 +4538,7 @@ begin
     '''
     program P;
     uses SysUtils, STU;
-    var N: TNode; J: Integer;
+    var N: TNode; J: Int;
     begin
       N := TNode.Create();
       N.Name := 'items';
@@ -4601,10 +4601,10 @@ begin
     '''
     program P;
     uses SysUtils;
-    function A(I: Integer): string; begin Result := 'a' + IntToStr(I) end;
+    function A(I: Int): string; begin Result := 'a' + IntToStr(I) end;
     function G(const S: string): string; begin Result := S + '!' end;
     procedure F(const X, Y: string); begin WriteLn(X, ' ', Y) end;
-    var K: Integer;
+    var K: Int;
     begin
       K := 1;
       F(A(K), G(A(K + 10)))
@@ -4952,16 +4952,16 @@ begin
       TRec = record A, B: Int64; end;
       TC = class
         FA: Int64;
-        procedure Put(K: Integer; V: Int64);
-        procedure PutRec(K: Integer; const R: TRec);
-        property Items[K: Integer]: Int64 write Put; default;
-        property Recs[K: Integer]: TRec write PutRec;
+        procedure Put(K: Int; V: Int64);
+        procedure PutRec(K: Int; const R: TRec);
+        property Items[K: Int]: Int64 write Put; default;
+        property Recs[K: Int]: TRec write PutRec;
       end;
-    procedure TC.Put(K: Integer; V: Int64);
+    procedure TC.Put(K: Int; V: Int64);
     begin
       FA := K + V;
     end;
-    procedure TC.PutRec(K: Integer; const R: TRec);
+    procedure TC.PutRec(K: Int; const R: TRec);
     begin
       FA := K + R.A + R.B;
     end;
@@ -4997,8 +4997,8 @@ begin
     '''
     program P;
     var
-      G: array[0..2, 1..3] of Integer;
-      I: Integer;
+      G: array[0..2, 1..3] of Int32;
+      I: Int32;
     begin
       I := 2;
       G[I, 3] := 7;
@@ -5156,7 +5156,7 @@ begin
     '''
     program P;
     type
-      TTick = reference to procedure(N: Integer);
+      TTick = reference to procedure(N: Int);
       TC = class
       public
         Tag: Int64;
@@ -5334,11 +5334,11 @@ begin
     '''
     program P;
     type
-      TF = reference to function(D: Double): Int64;
+      TF = reference to function(D: Float64): Int64;
     var
       F: TF;
     begin
-      F := function(D: Double): Int64 begin Result := Trunc(D); end;
+      F := function(D: Float64): Int64 begin Result := Trunc(D); end;
       WriteLn(F(2.5));
     end.
     ''', TargetArm64);
@@ -5435,8 +5435,8 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TObj = class F: Single; procedure Run; end;
-    procedure TObj.Run; var L: Single; begin L := F end;
+    type TObj = class F: Float32; procedure Run; end;
+    procedure TObj.Run; var L: Float32; begin L := F end;
     begin
     end.
     ''', TargetArm64);
@@ -5476,8 +5476,8 @@ begin
     '''
     program P;
     type
-      TObj = class N: Integer; end;
-      PInt = ^Integer;
+      TObj = class N: Int; end;
+      PInt = ^Int;
     procedure Take(var O: TObj; var P: PInt);
     begin
       P := @O.N;
@@ -5507,10 +5507,10 @@ begin
         A, B, C: Int64;
       end;
       TC = class
-        function GetRec(I: Integer): TRec;
-        property Recs[I: Integer]: TRec read GetRec; default;
+        function GetRec(I: Int): TRec;
+        property Recs[I: Int]: TRec read GetRec; default;
       end;
-    function TC.GetRec(I: Integer): TRec;
+    function TC.GetRec(I: Int): TRec;
     begin
       Result.A := I;
     end;
@@ -5870,7 +5870,7 @@ begin
     program P;
     type
       IM = interface
-        function Scale(D: Double; N: Int64): Double;
+        function Scale(D: Float64; N: Int64): Float64;
       end;
     var
       M: IM;
@@ -5963,12 +5963,12 @@ begin
     type
       TTank = class
       private
-        FVol: Double;
-        function GetVol: Double;
+        FVol: Float64;
+        function GetVol: Float64;
       public
-        property Vol: Double read GetVol;
+        property Vol: Float64 read GetVol;
       end;
-    function TTank.GetVol: Double;
+    function TTank.GetVol: Float64;
     begin
       Result := FVol
     end;
@@ -6042,11 +6042,11 @@ begin
         procedure Go;
       end;
       TVec = record
-        X: Single;
-        Y: Single;
+        X: Float32;
+        Y: Float32;
       end;
       TThing = class(TObject, IThing)
-        FRatio: Single;
+        FRatio: Float32;
         procedure Go;
       end;
     procedure TThing.Go;
@@ -6245,7 +6245,7 @@ begin
     '''
     program P;
     var
-      Nums: array[0..3] of Integer;
+      Nums: array[0..3] of Int32;
       Names: array[0..1] of string;
       I: Int64;
     begin
@@ -6427,7 +6427,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var A: array[5..9] of Integer;
+    var A: array[5..9] of Int;
     begin
       A[5] := 50;
       A[9] := 90;
@@ -6543,21 +6543,21 @@ begin
     program P;
     type
       IHolder = interface
-        function Get: Integer;
+        function Get: Int32;
       end;
       TBox<T> = class(TObject, IHolder)
-        FVal: Integer;
-        function Get: Integer;
+        FVal: Int32;
+        function Get: Int32;
       end;
-    function TBox<T>.Get: Integer;
+    function TBox<T>.Get: Int32;
     begin
       Result := FVal
     end;
     var
-      B: TBox<Integer>;
+      B: TBox<Int32>;
       H: IHolder;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int32>.Create();
       B.FVal := 42;
       H := B;
       WriteLn(H.Get())
@@ -6597,11 +6597,11 @@ begin
       ITransform<T> = interface
         function Apply(x: T): T;
       end;
-      TDoubler = class(TObject, ITransform<Integer>)
-        function Apply(x: Integer): Integer;
+      TDoubler = class(TObject, ITransform<Int32>)
+        function Apply(x: Int32): Int32;
       end;
-    function TDoubler.Apply(x: Integer): Integer; begin Result := x * 2 end;
-    var d: TDoubler; t: ITransform<Integer>;
+    function TDoubler.Apply(x: Int32): Int32; begin Result := x * 2 end;
+    var d: TDoubler; t: ITransform<Int32>;
     begin
       d := TDoubler.Create();
       t := d;
@@ -6634,16 +6634,16 @@ begin
     program P;
     type
       IShape = interface
-        function Area: Integer;
+        function Area: Int;
       end;
       TBase = class(TObject, IShape)
-        function Area: Integer; virtual; abstract;
+        function Area: Int; virtual; abstract;
       end;
       TSquare = class(TBase)
-        Side: Integer;
-        function Area: Integer; override;
+        Side: Int;
+        function Area: Int; override;
       end;
-    function TSquare.Area: Integer;
+    function TSquare.Area: Int;
     begin Result := Side * Side end;
     var S: TSquare; Sh: IShape;
     begin
@@ -6682,18 +6682,18 @@ begin
     program P;
     type
       IBase = interface
-        function BaseVal: Integer;
+        function BaseVal: Int;
       end;
       IDerived = interface(IBase)
-        function DerivedVal: Integer;
+        function DerivedVal: Int;
       end;
       TImpl = class(TObject, IDerived)
-        function BaseVal: Integer;
-        function DerivedVal: Integer;
+        function BaseVal: Int;
+        function DerivedVal: Int;
       end;
-    function TImpl.BaseVal: Integer;
+    function TImpl.BaseVal: Int;
     begin Result := 10 end;
-    function TImpl.DerivedVal: Integer;
+    function TImpl.DerivedVal: Int;
     begin Result := 20 end;
     var T: TImpl; D: IDerived; B: IBase;
     begin
@@ -6831,10 +6831,10 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TIntFn = reference to function(A: Integer): Integer;
+    type TIntFn = reference to function(A: Int): Int;
     var F: TIntFn;
     begin
-      F := function(A: Integer): Integer begin Result := A + 1; end;
+      F := function(A: Int): Int begin Result := A + 1; end;
       WriteLn(F(5))
     end.
     ''', TargetArm64);
@@ -6864,7 +6864,7 @@ begin
       TS = set of TE;
     var
       A, B, C: TS;
-      I: Integer;
+      I: Int;
     begin
       A := [M00];
       B := [M65];
@@ -7090,10 +7090,10 @@ begin
     '''
     program P;
     var
-      Nums: array[0..3] of Integer = (10, 20, 30, 40);
+      Nums: array[0..3] of Int32 = (10, 20, 30, 40);
       Names: array[0..1] of string = ('alpha', 'beta');
       Longs: array[0..1] of Int64 = (3, 4);
-      Ds: array[0..1] of Double = (1.5, 2.5);
+      Ds: array[0..1] of Float64 = (1.5, 2.5);
     begin
       WriteLn(Nums[2]);
       WriteLn(Names[1])
@@ -7259,18 +7259,18 @@ begin
     program P;
     type
       TBox = class
-        FBase: Integer;
+        FBase: Int32;
         function Wrap<U>(x: U): U;
-        function AddBase<U>(x: Integer): Integer;
+        function AddBase<U>(x: Int32): Int32;
       end;
     function TBox.Wrap<U>(x: U): U; begin Result := x end;
-    function TBox.AddBase<U>(x: Integer): Integer; begin Result := x + FBase end;
+    function TBox.AddBase<U>(x: Int32): Int32; begin Result := x + FBase end;
     var b: TBox;
     begin
       b := TBox.Create();
       b.FBase := 10;
-      WriteLn(b.Wrap<Integer>(5));
-      WriteLn(b.AddBase<Integer>(7))
+      WriteLn(b.Wrap<Int32>(5));
+      WriteLn(b.AddBase<Int32>(7))
     end.
     ''', TargetArm64);
   { the monomorphised instance bodies are emitted with weak binding }
@@ -7297,13 +7297,13 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TIntFn = reference to function(x: Integer): Integer;
-    function Apply(P: TIntFn; v: Integer): Integer;
+    type TIntFn = reference to function(x: Int): Int;
+    function Apply(P: TIntFn; v: Int): Int;
     begin
       Result := P(v)
     end;
     begin
-      WriteLn(Apply(function(x: Integer): Integer begin Result := x * 2 end, 5))
+      WriteLn(Apply(function(x: Int): Int begin Result := x * 2 end, 5))
     end.
     ''', TargetArm64);
   { the anon thunk body is emitted }
@@ -7339,14 +7339,14 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TStrFn = reference to function(s: string): Integer;
+    type TStrFn = reference to function(s: string): Int;
     function MakeStr: string; begin Result := 'hello' end;
-    function Apply(P: TStrFn): Integer;
+    function Apply(P: TStrFn): Int;
     begin
       Result := P(MakeStr())
     end;
     begin
-      WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end))
+      WriteLn(Apply(function(s: string): Int begin Result := Length(s) end))
     end.
     ''', TargetArm64);
   { the closure is invoked (blr) and the transient released afterwards }
@@ -7369,7 +7369,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function Sink(const S: string): Integer;
+    function Sink(const S: string): Int;
     var B: string;
     begin
       B := S;
@@ -7446,23 +7446,23 @@ begin
     program P;
     type
       TBag = class
-        function GetIt(I: Integer): Integer;
-        property Items[I: Integer]: Integer read GetIt; default;
+        function GetIt(I: Int): Int;
+        property Items[I: Int]: Int read GetIt; default;
       end;
       TMid = class
-        M1: Integer;
+        M1: Int;
         Bag: TBag;
       end;
       TTop = class
-        T1: Integer;
+        T1: Int;
         Mid: TMid;
       end;
-    function TBag.GetIt(I: Integer): Integer;
+    function TBag.GetIt(I: Int): Int;
     begin
       Result := I
     end;
     procedure Use(T: TTop);
-    var N: Integer;
+    var N: Int;
     begin
       N := T.Mid.Bag[3];
       WriteLn(N)
@@ -7506,14 +7506,14 @@ begin
     program P;
     type
       TOp = record
-        K: Integer;
+        K: Int;
         S: string;
       end;
       TLine = record
-        Kind: Integer;
+        Kind: Int;
         Mnem: string;
         O1, O2, O3: TOp;
-        N: Integer;
+        N: Int;
         Raw: string;
       end;
     function Enc(const L: TLine): string;
@@ -7560,12 +7560,12 @@ begin
     program P;
     type
       TBox = class
-        Tag: Integer;
+        Tag: Int;
         Data: string;
       end;
     var
       M: TBox;
-      N: Integer;
+      N: Int;
     begin
       M := TBox.Create();
       M.Data := 'ABC';
@@ -7596,7 +7596,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    procedure SetI(var X: Integer);
+    procedure SetI(var X: Int32);
     begin
       X := 5
     end;
@@ -7609,7 +7609,7 @@ begin
       L := 7
     end;
     var
-      I: Integer;
+      I: Int32;
       Y: Byte;
       Q: Int64;
     begin
@@ -7649,12 +7649,12 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    procedure SetI(var X: Integer);
+    procedure SetI(var X: Int32);
     begin
       X := -8
     end;
     var
-      V: Integer;
+      V: Int32;
     begin
       SetI(V);
       WriteLn(V)
@@ -7689,12 +7689,12 @@ begin
     program P;
     type
       TS = class
-        Pad: Integer;
+        Pad: Int;
         BB: array of Byte;
       end;
     var
       S: TS;
-      N: Integer;
+      N: Int;
     begin
       S := TS.Create();
       SetLength(S.BB, 4);
@@ -7726,13 +7726,13 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TStrFn = reference to function(s: string): Integer;
-    function Apply(P: TStrFn; a: string): Integer;
+    type TStrFn = reference to function(s: string): Int;
+    function Apply(P: TStrFn; a: string): Int;
     begin
       Result := P(a + '!')
     end;
     begin
-      WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end, 'hi'))
+      WriteLn(Apply(function(s: string): Int begin Result := Length(s) end, 'hi'))
     end.
     ''', TargetArm64);
   PosCat := Pos(#9'bl __StringConcat', AsmT);
@@ -7759,13 +7759,13 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TProc = reference to procedure(x: Integer);
-    procedure Run(P: TProc; v: Integer);
+    type TProc = reference to procedure(x: Int);
+    procedure Run(P: TProc; v: Int);
     begin
       P(v)
     end;
     begin
-      Run(procedure(x: Integer) begin WriteLn(x) end, 42)
+      Run(procedure(x: Int) begin WriteLn(x) end, 42)
     end.
     ''', TargetArm64);
   { the fat call loads Env (x0) and Code (x9) and blr's }
@@ -7819,10 +7819,10 @@ begin
     '''
     program P;
     type
-      PInt = ^Integer;
-      PW = ^Word;
+      PInt = ^Int32;
+      PW = ^UInt16;
     var
-      N: Integer;
+      N: Int32;
       Q: PInt;
       H: PW;
       B: Int64;
@@ -7831,7 +7831,7 @@ begin
       Q := @N;
       Q^ := Q^ + 1;
       H := PW(Pointer(Q));
-      B := Integer(H^);
+      B := Int32(H^);
       WriteLn(N);
       WriteLn(B)
     end.
@@ -7899,7 +7899,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function c_open(Path: PChar; Flags: Integer): Integer;
+    function c_open(Path: PChar; Flags: Int32): Int32;
       external name 'open';
     var
       Fd: Int64;
@@ -7936,9 +7936,9 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function Sum(const A: array of Integer): Int64;
+    function Sum(const A: array of Int): Int64;
     var
-      I: Integer;
+      I: Int;
       T: Int64;
     begin
       T := 0;
@@ -7946,13 +7946,13 @@ begin
         T := T + A[I];
       Result := T + Low(A) + Length(A)
     end;
-    function Fwd(const A: array of Integer): Int64;
+    function Fwd(const A: array of Int): Int64;
     begin
       Result := Sum(A)
     end;
     var
-      S: array[0..2] of Integer;
-      D: array of Integer;
+      S: array[0..2] of Int;
+      D: array of Int;
     begin
       S[0] := 1; S[1] := 2; S[2] := 3;
       SetLength(D, 2);
@@ -7988,9 +7988,9 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function IndexOf(const S: string; const Arr: array of string): Integer;
+    function IndexOf(const S: string; const Arr: array of string): Int;
     var
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to High(Arr) do
         if Arr[I] = S then
@@ -8069,7 +8069,7 @@ begin
     type
       TAnimal = class
       public
-        Legs: Integer;
+        Legs: Int;
       end;
       TDog = class(TAnimal)
       end;
@@ -8149,7 +8149,7 @@ begin
     type
       TCounter = class
       private
-        FN: Integer;
+        FN: Int32;
       public
         procedure Step;
       end;
@@ -8193,7 +8193,7 @@ begin
     type
       TThing = class
       public
-        V: Integer;
+        V: Int;
       end;
     procedure Grab(var T: TThing);
     begin
@@ -8235,14 +8235,14 @@ begin
     type
       TBox = class
       public
-        N: Integer;
+        N: Int;
       end;
     function MakeBox: TBox;
     begin
       Result := TBox.Create()
     end;
     var
-      K: Integer;
+      K: Int;
     begin
       K := MakeBox().N;
       WriteLn(K)
@@ -8274,15 +8274,15 @@ begin
     program P;
     type
       TPair = record
-        A: Integer;
-        B: Integer;
+        A: Int;
+        B: Int;
       end;
-    function MakePair(X: Integer): TPair;
+    function MakePair(X: Int): TPair;
     begin
       Result.A := X;
       Result.B := X * 2
     end;
-    function SumPair(const P: TPair): Integer;
+    function SumPair(const P: TPair): Int;
     begin
       Result := P.A + P.B
     end;
@@ -8317,10 +8317,10 @@ begin
     program P;
     type
       TPair = record
-        A: Integer;
-        B: Integer;
+        A: Int32;
+        B: Int32;
       end;
-    function MakePair(X: Integer): TPair;
+    function MakePair(X: Int32): TPair;
     begin
       Result.A := X;
       Result.B := X * 2
@@ -8361,7 +8361,7 @@ begin
     var
       H: Pointer;
       R: Boolean;
-      E: Integer;
+      E: Int;
     begin
       H := ProcessCreate();
       ProcessSetExe(H, '/bin/echo');
@@ -8408,7 +8408,7 @@ begin
     type
       TThing = class
       public
-        V: Integer;
+        V: Int;
       end;
       TBox = class
       public
@@ -8493,7 +8493,7 @@ begin
     type
       TInner = class
       public
-        N: Integer;
+        N: Int;
       end;
       TThing = class
       public
@@ -8556,7 +8556,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TArr = array of Integer;
+    type TArr = array of Int;
     function MakeArr: TArr;
     begin
       SetLength(Result, 2);
@@ -8603,10 +8603,10 @@ begin
     type
       TSpec = record
         Name: string;
-        Kind: Integer;
+        Kind: Int;
       end;
       TArr = array of TSpec;
-    function MakeSpec(N: Integer): TSpec;
+    function MakeSpec(N: Int): TSpec;
     begin
       Result.Name := 'tool';
       Result.Kind := N
@@ -8646,11 +8646,11 @@ begin
     program P;
     type
       TPair = record
-        A: Integer;
-        B: Integer;
+        A: Int;
+        B: Int;
       end;
       TArr = array of TPair;
-    function SumPair(const P: TPair): Integer;
+    function SumPair(const P: TPair): Int;
     begin
       Result := P.A + P.B
     end;
@@ -8691,13 +8691,13 @@ begin
       TThing = class
         FTab: array[0..3] of string;
         procedure Fill;
-        function Get(I: Integer): string;
+        function Get(I: Int): string;
       end;
     procedure TThing.Fill;
     begin
       FTab[0] := 'a'
     end;
-    function TThing.Get(I: Integer): string;
+    function TThing.Get(I: Int): string;
     begin
       Result := FTab[I]
     end;
@@ -8783,7 +8783,7 @@ begin
     program P;
     procedure Outer;
     var
-      n: Integer;
+      n: Int32;
       procedure Inner;
       begin
         n := n + 1
@@ -8832,7 +8832,7 @@ begin
     program P;
     procedure Outer;
     var
-      I, J: Integer;
+      I, J: Int32;
       Cl: reference to procedure;
       procedure Init;
       begin
@@ -8950,8 +8950,8 @@ begin
     program P;
     procedure Outer;
     var
-      a, b: Integer;
-      procedure Inner(p1, p2, p3, p4, p5, p6, p7, p8: Integer);
+      a, b: Int32;
+      procedure Inner(p1, p2, p3, p4, p5, p6, p7, p8: Int32);
       begin
         WriteLn(a + b + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8)
       end;
@@ -9067,14 +9067,14 @@ begin
     program P;
     type
       TBox = class
-        FVal: Integer;
-        function GetItem(const Key: string): Integer;
-        procedure SetItem(const Key: string; V: Integer);
-        property Items[Key: string]: Integer read GetItem write SetItem;
+        FVal: Int;
+        function GetItem(const Key: string): Int;
+        procedure SetItem(const Key: string; V: Int);
+        property Items[Key: string]: Int read GetItem write SetItem;
       end;
-    function TBox.GetItem(const Key: string): Integer;
+    function TBox.GetItem(const Key: string): Int;
     begin Result := FVal end;
-    procedure TBox.SetItem(const Key: string; V: Integer);
+    procedure TBox.SetItem(const Key: string; V: Int);
     begin FVal := V end;
     var B: TBox;
     begin
@@ -9119,12 +9119,12 @@ begin
       TFoo = class
         FItems: array[0..3] of string;
         FCur: string;
-        procedure SetItem(I: Integer; const V: string);
+        procedure SetItem(I: Int; const V: string);
         procedure SetCur(const V: string);
-        property Items[I: Integer]: string write SetItem;
+        property Items[I: Int]: string write SetItem;
         property Cur: string write SetCur;
       end;
-    procedure TFoo.SetItem(I: Integer; const V: string); begin FItems[I] := V end;
+    procedure TFoo.SetItem(I: Int; const V: string); begin FItems[I] := V end;
     procedure TFoo.SetCur(const V: string); begin FCur := V end;
     var f: TFoo; a, b: string;
     begin
@@ -9241,7 +9241,7 @@ begin
     '''
     program P;
     type
-      TThing = class FN: Integer; end;
+      TThing = class FN: Int; end;
       TProc = class procedure Run(AThing: TThing); end;
     procedure TProc.Run(AThing: TThing);
       procedure Inner;
@@ -9277,7 +9277,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TThing = class FN: Integer; end;
+    type TThing = class FN: Int; end;
     procedure Run(var T: TThing);
       procedure Inner;
       begin T.FN := 5 end;
@@ -9351,7 +9351,7 @@ begin
     '''
     program P;
     type TBox = class
-      FMtx: array[0..3] of Integer;
+      FMtx: array[0..3] of Int;
       procedure Fill;
     end;
     procedure Take(P: Pointer); begin end;
@@ -9422,7 +9422,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    var A: array[0..7] of Integer;
+    var A: array[0..7] of Int;
     begin
       WriteLn(Length(A));
       WriteLn(High(A))
@@ -9456,7 +9456,7 @@ begin
     '''
     program P;
     type
-      TRec = record A: Integer; B: Integer; C: Int64; end;
+      TRec = record A: Int32; B: Int32; C: Int64; end;
       TBox = class Recs: array of TRec; end;
     var Box: TBox; R: TRec;
     begin
@@ -9499,7 +9499,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TRec = record A: Integer; B: Integer; C: Int64; end;
+    type TRec = record A: Int32; B: Int32; C: Int64; end;
     procedure Get(var Outp: TRec; Src: TRec);
     begin Outp := Src end;
     var R, S: TRec;
@@ -9543,8 +9543,8 @@ begin
     '''
     program P;
     type
-      TInner = record K: Integer; end;
-      TOuter = record Pad: Integer; I: TInner; end;
+      TInner = record K: Int32; end;
+      TOuter = record Pad: Int32; I: TInner; end;
     var O: TOuter;
     begin
       O.I.K := 7;
@@ -9582,7 +9582,7 @@ begin
     '''
     program P;
     type
-      TOp = record S: string; N: Integer; end;
+      TOp = record S: string; N: Int; end;
       TLine = record Op: TOp; end;
     var L: TLine; O: TOp;
     begin
@@ -9624,8 +9624,8 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TCtx = record Arr: array of Integer; end;
-    procedure Grow(var C: TCtx; N: Integer);
+    type TCtx = record Arr: array of Int; end;
+    procedure Grow(var C: TCtx; N: Int);
     begin SetLength(C.Arr, N) end;
     var Ctx: TCtx;
     begin Grow(Ctx, 3); WriteLn(Length(Ctx.Arr)) end.
@@ -9657,7 +9657,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    procedure Grow(var S: string; N: Integer); begin SetLength(S, N) end;
+    procedure Grow(var S: string; N: Int); begin SetLength(S, N) end;
     var t: string;
     begin
       t := 'xy'; SetLength(t, 4);
@@ -9690,12 +9690,12 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TA = array of Integer;
-    function SumC(const A: TA): Integer;
-    var i: Integer;
+    type TA = array of Int;
+    function SumC(const A: TA): Int;
+    var i: Int;
     begin Result := 0; for i := 0 to Length(A) - 1 do Result := Result + A[i] end;
-    function SumV(A: TA): Integer;
-    var i: Integer;
+    function SumV(A: TA): Int;
+    var i: Int;
     begin Result := 0; for i := 0 to Length(A) - 1 do Result := Result + A[i] end;
     var d: TA;
     begin
@@ -9731,8 +9731,8 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TCtx = record Arr: array of Integer; end;
-    procedure SetAt(var C: TCtx; I, V: Integer);
+    type TCtx = record Arr: array of Int; end;
+    procedure SetAt(var C: TCtx; I, V: Int);
     begin C.Arr[I] := V end;
     var Ctx: TCtx;
     begin SetLength(Ctx.Arr, 3); SetAt(Ctx, 1, 42); WriteLn(Ctx.Arr[1]) end.
@@ -9769,7 +9769,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TR = record A, B: Integer; S: string; end;
+    type TR = record A, B: Int; S: string; end;
     var arr: array[0..3] of TR; d: array of TR; r: TR;
     begin
       arr[1].A := 5; arr[1].S := 'hi';
@@ -9799,7 +9799,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    type TFoo = class Arr: array of Integer; end;
+    type TFoo = class Arr: array of Int; end;
     procedure Poke(var F: TFoo);
     begin F.Arr[0] := 5 end;
     var F: TFoo;
@@ -9825,7 +9825,7 @@ begin
     program P;
     var
       G: string;
-    function Look(Key: string): Integer;
+    function Look(Key: string): Int;
     begin
       Result := Length(Key)
     end;
@@ -9863,7 +9863,7 @@ begin
   AsmT := GenAsm(
     '''
     program P;
-    function Look(Key: string): Integer;
+    function Look(Key: string): Int;
     begin
       Result := Length(Key)
     end;
@@ -9897,9 +9897,9 @@ procedure TArm64BackendTests.TestStaticArrayValueCast_IsTheOperandStorage;
 const
   Src = '''
     program P;
-    type TArr = array[0..3] of Integer;
-    procedure ShowOpen(const A: array of Integer); begin end;
-    var Raw: array[0..3] of Integer;
+    type TArr = array[0..3] of Int;
+    procedure ShowOpen(const A: array of Int); begin end;
+    var Raw: array[0..3] of Int;
     begin
       ShowOpen(TArr(Raw))
     end.
@@ -9920,13 +9920,13 @@ const
   Src = '''
     program T;
     type
-      TMixed8 = record X: Single; N: Integer; end;
-      TBig32 = record A, B, C: Int64; D: Double; end;
-      TV4 = record X, Y, Z, W: Single; end;
-    function abi_mixed8(M: TMixed8): Double; cdecl; external 'abi';
+      TMixed8 = record X: Float32; N: Int32; end;
+      TBig32 = record A, B, C: Int64; D: Float64; end;
+      TV4 = record X, Y, Z, W: Float32; end;
+    function abi_mixed8(M: TMixed8): Float64; cdecl; external 'abi';
     function abi_big(B: TBig32): Int64; cdecl; external 'abi';
-    function abi_v4(A, B, C, D, E, F, G: Double; V: TV4): Double; cdecl; external 'abi';
-    var M8: TMixed8; B: TBig32; V: TV4; R: Double; N: Int64;
+    function abi_v4(A, B, C, D, E, F, G: Float64; V: TV4): Float64; cdecl; external 'abi';
+    var M8: TMixed8; B: TBig32; V: TV4; R: Float64; N: Int64;
     begin
       R := abi_mixed8(M8);
       N := abi_big(B);

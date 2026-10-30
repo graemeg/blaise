@@ -273,7 +273,7 @@ begin
       C: TClassRef = nil;
       F: TProc = nil;
       I: IThing = nil;
-      A: array of Integer = nil;
+      A: array of Int32 = nil;
     begin
     end.
     ''');

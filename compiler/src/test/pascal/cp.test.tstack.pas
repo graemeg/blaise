@@ -36,15 +36,15 @@ const
         type
           TStack<T> = class
             FData:     ^T;
-            FCount:    Integer;
-            FCapacity: Integer;
+            FCount:    Int;
+            FCapacity: Int;
             procedure Grow;
             procedure Push(Value: T);
             function  Pop: T;
             function  Peek: T;
             procedure Clear;
             procedure Destroy;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         ''';
 
@@ -52,8 +52,8 @@ const
     '''
         procedure TStack<T>.Grow;
         var
-          NewCap: Integer;
-          OldCap: Integer;
+          NewCap: Int;
+          OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then
@@ -107,9 +107,9 @@ const
     StackDecl +
     StackImpls +
     '''
-        var S: TStack<Integer>;
+        var S: TStack<Int>;
         begin
-          S := TStack<Integer>.Create()
+          S := TStack<Int>.Create()
         end.
         ''';
 
@@ -118,9 +118,9 @@ const
     StackDecl +
     StackImpls +
     '''
-        var S: TStack<Integer>;
+        var S: TStack<Int>;
         begin
-          S := TStack<Integer>.Create();
+          S := TStack<Int>.Create();
           S.Push(10);
           S.Push(20)
         end.
@@ -132,10 +132,10 @@ const
     StackImpls +
     '''
         var
-          S: TStack<Integer>;
-          V: Integer;
+          S: TStack<Int>;
+          V: Int;
         begin
-          S := TStack<Integer>.Create();
+          S := TStack<Int>.Create();
           S.Push(42);
           V := S.Pop()
         end.
@@ -147,10 +147,10 @@ const
     StackImpls +
     '''
         var
-          S: TStack<Integer>;
-          V: Integer;
+          S: TStack<Int>;
+          V: Int;
         begin
-          S := TStack<Integer>.Create();
+          S := TStack<Int>.Create();
           S.Push(7);
           V := S.Peek()
         end.

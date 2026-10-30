@@ -170,9 +170,9 @@ const
     type
       TColor = (cR, cG, cB);
       TProc0 = reference to procedure;
-      TIntArr = array of Integer;
+      TIntArr = array of Int;
       TPlain = procedure;
-      TPt = record X, Y: Integer; end;
+      TPt = record X, Y: Int; end;
       TInner = record
         F: TProc0; D: TIntArr; Cs: set of TColor; P: TPlain; Pt: TPt;
       end;
@@ -212,7 +212,7 @@ const
 
   SrcRecordFieldRW = '''
     program Prg;
-    type TPoint = record X, Y: Integer; end;
+    type TPoint = record X, Y: Int; end;
     var P1: TPoint;
     begin
       P1.X := 3;
@@ -223,7 +223,7 @@ const
 
   SrcRecordPassByValue = '''
     program Prg;
-    type TPoint = record X, Y: Integer; end;
+    type TPoint = record X, Y: Int; end;
     procedure Print(Pt: TPoint);
     begin
       WriteLn(Pt.X);
@@ -239,7 +239,7 @@ const
 
   SrcRecordPassByVar = '''
     program Prg;
-    type TPoint = record X, Y: Integer; end;
+    type TPoint = record X, Y: Int; end;
     procedure Scale(var Pt: TPoint);
     begin
       Pt.X := Pt.X * 2;
@@ -262,8 +262,8 @@ const
     function RHS (out). }
   SrcRecordAssignToVarParam = '''
     program Prg;
-    type TPoint = record X, Y: Integer; end;
-    function Make(AX, AY: Integer): TPoint;
+    type TPoint = record X, Y: Int; end;
+    function Make(AX, AY: Int): TPoint;
     begin
       Result.X := AX;
       Result.Y := AY
@@ -304,7 +304,7 @@ const
   SrcRecordNested = '''
     program Prg;
     type
-      TInner = record V: Integer; end;
+      TInner = record V: Int; end;
       TOuter = record A, B: TInner; end;
     var O: TOuter;
     begin
@@ -342,7 +342,7 @@ const
     type
       TMixed = record
         Tag: Byte;
-        Value: Integer;
+        Value: Int32;
       end;
     var R: TMixed;
     begin
@@ -358,15 +358,15 @@ const
     program Prg;
     type
       TCounter = record
-        Value: Integer;
+        Value: Int;
         procedure Inc;
-        function GetValue: Integer;
+        function GetValue: Int;
       end;
     procedure TCounter.Inc;
     begin
       Value := Value + 1
     end;
-    function TCounter.GetValue: Integer;
+    function TCounter.GetValue: Int;
     begin
       Result := Value
     end;
@@ -385,7 +385,7 @@ const
     program Prg;
     type
       TCounter = record
-        Value: Integer;
+        Value: Int;
         procedure Inc;
       end;
       TApp = class
@@ -415,15 +415,15 @@ const
     program Prg;
     type
       TPoint = record
-        X, Y: Integer;
-        procedure SetXY(AX, AY: Integer);
+        X, Y: Int;
+        procedure SetXY(AX, AY: Int);
       end;
-    procedure TPoint.SetXY(AX, AY: Integer);
+    procedure TPoint.SetXY(AX, AY: Int);
     begin
       X := AX;
       Y := AY
     end;
-    function MakePoint(AX, AY: Integer): TPoint;
+    function MakePoint(AX, AY: Int): TPoint;
     begin
       Result.SetXY(AX, AY)
     end;
@@ -440,7 +440,7 @@ const
     program Prg;
     type
       TPoint = record
-        X, Y: Integer;
+        X, Y: Int;
       end;
       TApp = class
         Pt: TPoint;
@@ -466,7 +466,7 @@ const
   SrcRecordPointerDerefFieldAccess = '''
     program Prg;
     type
-      TPoint = record X, Y: Integer; end;
+      TPoint = record X, Y: Int; end;
     var
       Pt: TPoint;
       PP: ^TPoint;
@@ -499,13 +499,13 @@ const
     program Prg;
     type
       TLeaf = class
-        Tag: Integer;
+        Tag: Int;
         constructor Create();
         destructor Destroy(); override;
       end;
       TMidRec = record
         Leaf:  TLeaf;
-        Extra: Integer;
+        Extra: Int;
       end;
       TMid = class
         Inner: TMidRec;
@@ -514,7 +514,7 @@ const
       end;
       TOuterRec = record
         Mid:  TMid;
-        Note: Integer;
+        Note: Int;
       end;
       TOuter = class
         Wrap: TOuterRec;
@@ -522,7 +522,7 @@ const
         destructor Destroy(); override;
       end;
     var
-      AliveCount: Integer;
+      AliveCount: Int;
     constructor TLeaf.Create();
     begin
       AliveCount := AliveCount + 1;
@@ -561,7 +561,7 @@ const
         WriteLn('chain broken')
     end;
     var
-      i: Integer;
+      i: Int;
     begin
       AliveCount := 0;
       for i := 0 to 99 do
@@ -617,7 +617,7 @@ const
     begin
       Consume(MakeOuter())
     end;
-    var i: Integer;
+    var i: Int;
     begin
       for i := 1 to 1000 do Driver()
     end.
@@ -627,12 +627,12 @@ const
     program Prg;
     type
       TBuf = record
-        Arr: array of Integer;
+        Arr: array of Int;
       end;
     function MakeBuf: TBuf;
     var
       tmp: TBuf;
-      a:   array of Integer;
+      a:   array of Int;
     begin
       SetLength(a, 8);
       a[0] := 1;
@@ -641,7 +641,7 @@ const
       Result := tmp
     end;
     var
-      i:   Integer;
+      i:   Int;
       r:   TBuf;
     begin
       for i := 0 to 4999 do
@@ -663,21 +663,21 @@ const
     program Prg;
     type
       IFoo = interface
-        function GetVal: Integer;
+        function GetVal: Int;
       end;
       TFoo = class(TObject, IFoo)
-        V: Integer;
-        function GetVal: Integer;
+        V: Int;
+        function GetVal: Int;
       end;
       TRec = record
         Foo: IFoo;
-        Tag: Integer;
+        Tag: Int;
       end;
-    function TFoo.GetVal: Integer;
+    function TFoo.GetVal: Int;
     begin
       Result := Self.V
     end;
-    function MakeRec(n: Integer): TRec;
+    function MakeRec(n: Int): TRec;
     var
       r: TRec;
       f: TFoo;
@@ -703,14 +703,14 @@ const
     program Prg;
     type
       TDate = record
-        Year: Integer;
-        Month: Integer;
-        Day: Integer;
+        Year: Int;
+        Month: Int;
+        Day: Int;
         function ToString: string;
       end;
       TDateTime = record
         Date: TDate;
-        Hour: Integer;
+        Hour: Int;
       end;
     function TDate.ToString: string;
     begin
@@ -788,10 +788,10 @@ const
   SrcRecordVarToVarCopy = '''
     program Prg;
     type
-      TPerson = record Name: string; Age: Integer; end;
+      TPerson = record Name: string; Age: Int; end;
     var
       A, B: TPerson;
-      I: Integer;
+      I: Int;
     begin
       A.Name := 'Alice-' + IntToStr(42);
       A.Age := 30;
@@ -940,10 +940,10 @@ const
   SrcDynRecElemFieldAssign = '''
     program Prg;
     type
-      TInner = record N: Integer; end;
+      TInner = record N: Int; end;
       TRec = record
         Name: String;
-        Number: Integer;
+        Number: Int;
         Inner: TInner;
       end;
     var
@@ -970,7 +970,7 @@ const
 
   SrcDynRecElemCopyNoAlias = '''
     program Prg;
-    type TRec = record Name: String; Number: Integer; end;
+    type TRec = record Name: String; Number: Int; end;
     var
       r: TRec;
       a: array of TRec;
@@ -993,7 +993,7 @@ const
 
   SrcStaticRecElemFieldAssign = '''
     program Prg;
-    type TRec = record Name: String; Number: Integer; end;
+    type TRec = record Name: String; Number: Int; end;
     var
       r1, r2: TRec;
       sa: array[0..1] of TRec;
@@ -1016,7 +1016,7 @@ const
     program Prg;
     type
       TC = class
-        V: Integer;
+        V: Int;
         procedure Bump;
       end;
     procedure TC.Bump;
@@ -1066,7 +1066,7 @@ const
   SrcRecFieldDynElemWrite = '''
     program Prg;
     type
-      TIA = array of Integer;
+      TIA = array of Int;
       TR  = record A: TIA; end;
     var r: TR;
     begin
@@ -1083,7 +1083,7 @@ const
   SrcClassFieldDynElemWrite = '''
     program Prg;
     type
-      TIA = array of Integer;
+      TIA = array of Int;
       TC = class
         A: TIA;
         procedure Fill;
@@ -1110,7 +1110,7 @@ const
   SrcNestedChainDynElemWrite = '''
     program Prg;
     type
-      TIA    = array of Integer;
+      TIA    = array of Int;
       TInner = record A: TIA; end;
       TC     = class N: TInner; end;
     var c: TC;
@@ -1127,7 +1127,7 @@ const
   SrcSubscriptChainFieldElemWrite = '''
     program Prg;
     type
-      TIA = array of Integer;
+      TIA = array of Int;
       TR  = record A: TIA; end;
     var
       rs: array of TR;
@@ -1142,7 +1142,7 @@ const
   SrcRecFieldStaticElemWrite = '''
     program Prg;
     type
-      TR = record S: array[0..2] of Integer; end;
+      TR = record S: array[0..2] of Int; end;
     var r: TR;
     begin
       r.S[0] := 5;
@@ -1218,11 +1218,11 @@ const
     program Prg;
     type
       TTok = record
-        Kind: Integer;
+        Kind: Int;
         Text: String;
       end;
       TLex = class
-        FN: Integer;
+        FN: Int;
         function Next(): TTok;
       end;
     function TLex.Next(): TTok;
@@ -1235,7 +1235,7 @@ const
       L: TLex;
       A: array[0..2] of TTok;
       D: array of TTok;
-      I: Integer;
+      I: Int;
     begin
       L := TLex.Create();
       for I := 0 to 2 do
@@ -1258,22 +1258,22 @@ end;
 const
   SrcRecMutatesSelf = '''
     program Prg;
-    type TP = record X: Integer; procedure Inc; begin X := X + 1 end; end;
+    type TP = record X: Int; procedure Inc; begin X := X + 1 end; end;
     var a: TP;
     begin a.X := 5; a.Inc(); a.Inc(); WriteLn(a.X) end.
     ''';
 
   SrcRecReturnFieldInline = '''
     program Prg;
-    type TP = record X, Y: Integer; end;
-    function Make(V: Integer): TP; begin Result.X := V; Result.Y := V * 2 end;
+    type TP = record X, Y: Int; end;
+    function Make(V: Int): TP; begin Result.X := V; Result.Y := V * 2 end;
     begin WriteLn(Make(10).X + Make(10).Y) end.
     ''';
 
   SrcRecStaticArrDeepCopy = '''
     program Prg;
-    type TP = record A: array[0..2] of Integer; end;
-    var x, y: TP; i: Integer;
+    type TP = record A: array[0..2] of Int; end;
+    var x, y: TP; i: Int;
     begin
       for i := 0 to 2 do x.A[i] := i + 1;
       y := x;
@@ -1284,7 +1284,7 @@ const
 
   SrcNestedRecMethod = '''
     program Prg;
-    type TInner = record V: Integer; function Get: Integer; begin Result := V end; end;
+    type TInner = record V: Int; function Get: Int; begin Result := V end; end;
       TOuter = record I: TInner; end;
     var o: TOuter;
     begin o.I.V := 88; WriteLn(o.I.Get()) end.
@@ -1323,7 +1323,7 @@ const
   Src = '''
     program P;
     type
-      TDec = record FC: Int64; FM: array of UInt32; FS: Integer; FN: Boolean; FI: Boolean; end;
+      TDec = record FC: Int64; FM: array of UInt32; FS: Int; FN: Boolean; FI: Boolean; end;
       TM   = record A: TDec; C: string; end;
     function MkDec: TDec;
     begin SetLength(Result.FM, 2); Result.FM[0] := 5; Result.FC := 99; Result.FI := True end;
@@ -1357,14 +1357,14 @@ const
     type
       TRec = record
         Name: string;
-        Number: Integer;
+        Number: Int;
         Initialized: Boolean;
       end;
       TArr = array[0..2] of TRec;
     var
       A: TArr;
       R: TRec;
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 2 do
       begin
@@ -1388,17 +1388,17 @@ const
     program prg;
     type
       TVal = record
-        X: Integer;
+        X: Int;
         Y: Int64;
-        static function Make(A: Integer): TVal;
-        function GetX: Integer;
+        static function Make(A: Int): TVal;
+        function GetX: Int;
       end;
-    static function TVal.Make(A: Integer): TVal;
+    static function TVal.Make(A: Int): TVal;
     begin
       Result.X := A;
       Result.Y := 7
     end;
-    function TVal.GetX: Integer;
+    function TVal.GetX: Int;
     begin
       Result := X
     end;
@@ -1448,7 +1448,7 @@ const
     program P;
     type
       TStrArr = array of string;
-      TIntArr = array of Integer;
+      TIntArr = array of Int;
       TSpec = record
         Cands: TStrArr;
         Nums: TIntArr;
@@ -1482,7 +1482,7 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TRec = record A: Integer; B: Integer; C: Int64; end;
+      TRec = record A: Int; B: Int; C: Int64; end;
       TBox = class Recs: array of TRec; end;
     var Box: TBox; R: TRec;
     begin
@@ -1505,7 +1505,7 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TRec = record A: Integer; B: Int64; end;
+      TRec = record A: Int; B: Int64; end;
       TBox = class Recs: array[0..3] of TRec; end;
     var Box: TBox; R: TRec;
     begin
@@ -1527,7 +1527,7 @@ begin
   AssertLeakFreeOnAll('''
     program Prg;
     type
-      TRec = record Name: string; N: Integer; end;
+      TRec = record Name: string; N: Int; end;
       TBox = class Recs: array of TRec; end;
     var Box: TBox; R: TRec;
     begin
@@ -1552,7 +1552,7 @@ begin
   AssertRunsOnAll('''
     program Prg;
     type
-      TRec = record A: Integer; B: Int64; end;
+      TRec = record A: Int; B: Int64; end;
       TBox = class Recs: array of TRec; end;
     var Box: TBox;
     function MakeAndGrow: TRec;
@@ -1579,7 +1579,7 @@ begin
     stored values.  Expect 10 / 20 / 30. }
   AssertRunsOnAll('''
     program Prg;
-    type TRec = record A: Integer; B: Integer; C: Int64; end;
+    type TRec = record A: Int; B: Int; C: Int64; end;
     procedure Get(var Outp: TRec; Src: TRec);
     begin Outp := Src end;
     var R, S: TRec;
@@ -1600,8 +1600,8 @@ begin
   AssertRunsOnAll('''
     program N;
     type
-      TInner = record K: Integer; end;
-      TOuter = record Pad: Integer; I: TInner; end;
+      TInner = record K: Int; end;
+      TOuter = record Pad: Int; I: TInner; end;
     function Make: TOuter;
     begin
       Result.I.K := 5;
@@ -1628,7 +1628,7 @@ begin
   AssertLeakFreeOnAll('''
     program Prg;
     type
-      TOp = record S: string; N: Integer; end;
+      TOp = record S: string; N: Int; end;
       TLine = record Op: TOp; end;
     var L: TLine; O: TOp;
     begin
@@ -1651,10 +1651,10 @@ begin
     tried to copy it via a never-registered __pptr slot.  Leak-free. }
   AssertLeakFreeOnAll('''
     program Prg;
-    type TBuf = record Data: string; Len: Integer; end;
+    type TBuf = record Data: string; Len: Int; end;
     procedure Init(var B: TBuf);
     begin B.Data := ''; B.Len := 0 end;
-    procedure Emit(var B: TBuf; C: Integer);
+    procedure Emit(var B: TBuf; C: Int);
     begin B.Data := B.Data + Chr(C); B.Len := B.Len + 1 end;
     procedure Show(B: TBuf);
     begin WriteLn(B.Data); WriteLn(B.Len) end;
@@ -1678,7 +1678,7 @@ begin
     prove the caller's record is unchanged. }
   AssertRunsOnAll('''
     program Prg;
-    type TCtx = record Tag: Integer; Sum: Integer; end;
+    type TCtx = record Tag: Int; Sum: Int; end;
     procedure Use(C: TCtx);
     begin
       WriteLn(C.Tag);          { read inline copy }
@@ -1732,7 +1732,7 @@ begin
         A, B: string;
         Inner: TInner;                     { nested-managed record field }
         ArrRec: array[0..1] of TInner;     { static-array-OF-record field }
-        N: Integer;
+        N: Int;
       end;
       TBox = record Arr: array[0..1] of TRec; end;
     var R: TRec; B: TBox;
@@ -1758,22 +1758,22 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TBig = record A, B, C, D, E: Integer; end;
-      TWrap = record Tag: Integer; Payload: TBig; end;
+      TBig = record A, B, C, D, E: Int; end;
+      TWrap = record Tag: Int; Payload: TBig; end;
       TBox = class
       public
         FBig: TBig;
         FArr: array[0..1] of TBig;
         function Cur(): TBig;
-        function Item(I: Integer): TBig;
+        function Item(I: Int): TBig;
         property Cur2: TBig read Cur;
-        property Items[I: Integer]: TBig read Item;
+        property Items[I: Int]: TBig read Item;
       end;
     function TBox.Cur(): TBig;
     begin
       Result := FBig
     end;
-    function TBox.Item(I: Integer): TBig;
+    function TBox.Item(I: Int): TBig;
     begin
       Result := FArr[I]
     end;
@@ -1797,9 +1797,9 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TBig = record A, B, C, D, E: Integer; end;
-      TWrap = record Tag: Integer; Payload: TBig; end;
-    function MakeBig(V: Integer): TBig;
+      TBig = record A, B, C, D, E: Int; end;
+      TWrap = record Tag: Int; Payload: TBig; end;
+    function MakeBig(V: Int): TBig;
     begin
       Result.C := V
     end;
@@ -1821,15 +1821,15 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TStrRec = record S: String; N: Integer; end;
-      TWrap = record Tag: Integer; Payload: TStrRec; end;
+      TStrRec = record S: String; N: Int; end;
+      TWrap = record Tag: Int; Payload: TStrRec; end;
       TBox = class
       public
         FRec: TStrRec;
-        function Item(I: Integer): TStrRec;
-        property Items[I: Integer]: TStrRec read Item;
+        function Item(I: Int): TStrRec;
+        property Items[I: Int]: TStrRec read Item;
       end;
-    function TBox.Item(I: Integer): TStrRec;
+    function TBox.Item(I: Int): TStrRec;
     begin
       Result := FRec;
       Result.S := Result.S + '-' + IntToStr(I);
@@ -1858,7 +1858,7 @@ begin
     type
       TRec = record
         S: string;
-        N: Integer;
+        N: Int;
         function Grow(const A: string): TRec;
       end;
     function TRec.Grow(const A: string): TRec;
@@ -1899,17 +1899,17 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TR = record N: Integer; end;
+      TR = record N: Int; end;
       THold = class
       public
-        FInts: array[0..2] of Integer;
-        FLow: array[2..4] of Integer;
-        FDyn: array of Integer;
+        FInts: array[0..2] of Int;
+        FLow: array[2..4] of Int;
+        FDyn: array of Int;
         FStr: array[0..2] of string;
         FRec: array[0..1] of TR;
         procedure Go();
       end;
-    procedure Bump(var I: Integer); begin I := I + 100 end;
+    procedure Bump(var I: Int); begin I := I + 100 end;
     procedure AppendX(var S: string); begin S := S + 'X' end;
     procedure SetN(out R: TR); begin R.N := 99 end;
     procedure THold.Go();
@@ -1952,9 +1952,9 @@ const
   Src = '''
     program P;
     type
-      TS = record V: Single; N: Integer; end;
-      TD = record V: Double; N: Integer; end;
-    var R: TS; D: TD; S: Single;
+      TS = record V: Float32; N: Int; end;
+      TD = record V: Float64; N: Int; end;
+    var R: TS; D: TD; S: Float32;
     begin
       R.N := 7;
       R.V := 1.5;
@@ -1980,7 +1980,7 @@ const
   Src = '''
     program P;
     type
-      TRect = record L: Integer; T: Integer; end;
+      TRect = record L: Int32; T: Int32; end;
       TPerson = record Name: string; end;
       TFourBytes = record A, B, C, D: Byte; end;
     begin
@@ -2006,7 +2006,7 @@ const
   Src = '''
     program P;
     type
-      TIA = array of Integer;
+      TIA = array of Int;
       TR = record S: string; A: TIA; end;
       TInner = record N: string; end;
       TOuter = record S: string; Inner: TInner; end;
@@ -2075,7 +2075,7 @@ const
     program P;
     type
       TBig = record A, B, C: string; end;
-      TMix = record D: Double; S: string; end;
+      TMix = record D: Float64; S: string; end;
       TTwo = record S: string; N: Int64; end;
       TObj = class
         function Make(const X: string): TBig;
@@ -2101,15 +2101,15 @@ const
     begin
       WriteLn(V.A, V.B, V.C, ' ', M.D:0:1, ' ', M.S)
     end;
-    procedure Show(const B: TBig; const T: TTwo; N: Integer);
+    procedure Show(const B: TBig; const T: TTwo; N: Int);
     begin
       WriteLn(B.C, ' ', T.S, ' ', T.N, ' ', N)
     end;
-    function Len(V: TBig): Integer;
+    function Len(V: TBig): Int;
     begin
       Result := Length(V.A) + Length(V.B)
     end;
-    var O: TObj; I, Sum: Integer;
+    var O: TObj; I, Sum: Int;
     begin
       O := TObj.Create();
       O.Take(O.Make('x'), MakeMix());

@@ -84,7 +84,7 @@ const
               Result := Self.Value
             end;
           end;
-        var V: TMyVal<Integer>;
+        var V: TMyVal<Int>;
         begin
         end.
         ''';
@@ -96,7 +96,7 @@ const
           TMyVal<T> = record
             Value: T;
           end;
-        var V: TMyVal<Integer>;
+        var V: TMyVal<Int32>;
         begin
           V.Value := 9
         end.
@@ -122,7 +122,7 @@ const
             Key: K;
             Val: V;
           end;
-        var P: TPair<string, Integer>;
+        var P: TPair<string, Int32>;
         begin
         end.
         ''';
@@ -147,7 +147,7 @@ const
           Self.FValue := AValue
         end;
 
-        var V: TMyVal<Integer>;
+        var V: TMyVal<Int>;
         begin
           V.SetValue(42);
           WriteLn(V.GetValue())

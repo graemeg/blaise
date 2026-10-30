@@ -51,11 +51,11 @@ const
     uses SysUtils, async.io, async.fibers, net.sockets;
     const PORT = 29377;
     var
-      ListenFd: Integer;
+      ListenFd: Int;
 
     procedure ServerFiber(AArg: Pointer);
     var
-      Conn: Integer;
+      Conn: Int;
       Buf: array[0..63] of Byte;
       N: Int64;
     begin
@@ -69,7 +69,7 @@ const
 
     procedure ClientFiber(AArg: Pointer);
     var
-      Fd, Rc, I: Integer;
+      Fd, Rc, I: Int;
       SA: TSockAddrIn;
       Buf: array[0..63] of Byte;
       N: Int64;
@@ -83,7 +83,7 @@ const
       FiberSend(Fd, PChar('hello'), 5);
       N := FiberRecv(Fd, @Buf[0], 64);
       S := '';
-      for I := 0 to Integer(N) - 1 do S := S + Chr(Buf[I]);
+      for I := 0 to Int32(N) - 1 do S := S + Chr(Buf[I]);
       WriteLn('ECHO:', S);
       Close(Fd);
     end;
@@ -122,13 +122,13 @@ const
     procedure Driver(AArg: Pointer);
     var
       G: TTaskGroup;
-      I: Integer;
+      I: Int;
     begin
       G := TTaskGroup.Create();
       try
         for I := 0 to 2 do
         begin
-          var Snap: Integer := I;
+          var Snap: Int := I;
           G.Spawn(procedure
             begin
               WriteLn(Snap)
@@ -158,7 +158,7 @@ const
     procedure Driver(AArg: Pointer);
     var
       G: TTaskGroup;
-      I: Integer;
+      I: Int;
     begin
       G := TTaskGroup.Create();
       try

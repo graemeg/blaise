@@ -714,7 +714,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var A, B, R: Integer;
+    var A, B, R: Int;
     begin R := Min(A, B) end.
     ''');
 end;
@@ -724,7 +724,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var A, B, R: Integer;
+    var A, B, R: Int;
     begin R := Max(A, B) end.
     ''');
 end;
@@ -734,7 +734,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var A, B, R: Double;
+    var A, B, R: Float64;
     begin R := Min(A, B) end.
     ''');
 end;
@@ -744,7 +744,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var A, B, R: Double;
+    var A, B, R: Float64;
     begin R := Max(A, B) end.
     ''');
 end;
@@ -834,7 +834,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var X, R: Integer;
+    var X, R: Int;
     begin R := Sign(X) end.
     ''');
 end;
@@ -844,7 +844,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var X: Double; R: Integer;
+    var X: Float64; R: Int;
     begin R := Sign(X) end.
     ''');
 end;
@@ -910,7 +910,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Integer; B: Boolean;
+    var V, Lo, Hi: Int; B: Boolean;
     begin B := InRange(V, Lo, Hi) end.
     ''');
 end;
@@ -920,7 +920,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var V, Lo, Hi: Double; B: Boolean;
+    var V, Lo, Hi: Float64; B: Boolean;
     begin B := InRange(V, Lo, Hi) end.
     ''');
 end;
@@ -972,7 +972,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var V, Lo, Hi, R: Integer;
+    var V, Lo, Hi, R: Int;
     begin R := EnsureRange(V, Lo, Hi) end.
     ''');
 end;
@@ -982,7 +982,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var V, Lo, Hi, R: Double;
+    var V, Lo, Hi, R: Float64;
     begin R := EnsureRange(V, Lo, Hi) end.
     ''');
 end;
@@ -1034,7 +1034,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var R: Double;
+    var R: Float64;
     begin R := Pi * 2.0 end.
     ''');
 end;
@@ -1048,7 +1048,7 @@ begin
   SemanticError(
     '''
     program P;
-    var E: Integer; D: Double;
+    var E: Int; D: Float64;
     begin E := D end.
     ''');
 end;
@@ -1058,7 +1058,7 @@ begin
   SemanticError(
     '''
     program P;
-    var E: Integer; S: Single;
+    var E: Int; S: Float32;
     begin E := S end.
     ''');
 end;
@@ -1068,7 +1068,7 @@ begin
   SemanticOKBuiltin(
     '''
     program P;
-    var D: Double; I: Integer;
+    var D: Float64; I: Int;
     begin D := I end.
     ''');
 end;
@@ -1078,7 +1078,7 @@ begin
   SemanticOKBuiltin(
     '''
     program P;
-    var S: Single; I: Integer;
+    var S: Float32; I: Int;
     begin S := I end.
     ''');
 end;
@@ -1088,7 +1088,7 @@ begin
   SemanticOKBuiltin(
     '''
     program P;
-    var A, B: Double;
+    var A, B: Float64;
     begin B := A end.
     ''');
 end;
@@ -1098,7 +1098,7 @@ begin
   SemanticOKBuiltin(
     '''
     program P;
-    var A, B: Single;
+    var A, B: Float32;
     begin B := A end.
     ''');
 end;
@@ -1108,7 +1108,7 @@ begin
   SemanticOKBuiltin(
     '''
     program P;
-    var S: Single; D: Double;
+    var S: Float32; D: Float64;
     begin D := S end.
     ''');
 end;
@@ -1171,7 +1171,7 @@ procedure TMathTests.TestCodegen_Round_TiesToEvenConversion;
 const
   Src = '''
     program P;
-    var D: Double; S: Single; R: Int64;
+    var D: Float64; S: Float32; R: Int64;
     begin
       R := Round(D);
       R := Round(S)

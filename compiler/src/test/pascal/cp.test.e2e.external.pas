@@ -91,7 +91,7 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalName_Strlen;
 const Src = '''
     program T;
-    function c_strlen(S: PChar): Integer; external name 'strlen';
+    function c_strlen(S: PChar): Int32; external name 'strlen';
     begin
       WriteLn(c_strlen(PChar('hello')))
     end.
@@ -103,7 +103,7 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalLibName_Strlen;
 const Src = '''
     program T;
-    function c_strlen(S: PChar): Integer; external 'c' name 'strlen';
+    function c_strlen(S: PChar): Int32; external 'c' name 'strlen';
     begin
       WriteLn(c_strlen(PChar('hello')))
     end.
@@ -129,8 +129,8 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalWordReturn_MaskedCorrectly;
 const Src = '''
     program T;
-    function c_strlen(S: PChar): Word; external name 'strlen';
-    var W: Word;
+    function c_strlen(S: PChar): UInt16; external name 'strlen';
+    var W: UInt16;
     begin
       W := c_strlen(PChar('abcdef'));
       WriteLn(W)
@@ -143,8 +143,8 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalSmallIntReturn_SignExtended;
 const Src = '''
     program T;
-    function c_atoi(S: PChar): SmallInt; external name 'atoi';
-    var V: SmallInt;
+    function c_atoi(S: PChar): Int16; external name 'atoi';
+    var V: Int16;
     begin
       V := c_atoi(PChar('-7'));
       WriteLn(V)
@@ -157,8 +157,8 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalIntegerReturn_NoTruncation;
 const Src = '''
     program T;
-    function c_atoi(S: PChar): Integer; external name 'atoi';
-    var I: Integer;
+    function c_atoi(S: PChar): Int32; external name 'atoi';
+    var I: Int;
     begin
       I := c_atoi(PChar('1000000'));
       WriteLn(I)
@@ -190,8 +190,8 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalSingleParam_SinfReturnsCorrectValue;
 const Src = '''
     program T;
-    function c_sinf(X: Single): Single; cdecl; external 'm' name 'sinf';
-    var R: Single;
+    function c_sinf(X: Float32): Float32; cdecl; external 'm' name 'sinf';
+    var R: Float32;
     begin
       R := c_sinf(0.0);
       if R = 0.0 then
@@ -215,8 +215,8 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalSingleReturn_RoundTrip;
 const Src = '''
     program T;
-    function c_sqrtf(X: Single): Single; cdecl; external 'm' name 'sqrtf';
-    var R: Single;
+    function c_sqrtf(X: Float32): Float32; cdecl; external 'm' name 'sqrtf';
+    var R: Float32;
     begin
       R := c_sqrtf(4.0);
       if R = 2.0 then
@@ -234,7 +234,7 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalNameAlias_CallsCorrectSymbol;
 const Src = '''
     program T;
-    function MyAbsFunc(N: Integer): Integer; external name 'abs';
+    function MyAbsFunc(N: Int32): Int32; external name 'abs';
     begin
       WriteLn(MyAbsFunc(-42))
     end.
@@ -248,18 +248,18 @@ const Src = '''
     program T;
     type
       TInAddr = record
-        S_addr: Cardinal;
+        S_addr: UInt32;
       end;
     function inet_ntoa(AIn: TInAddr): PChar; cdecl; external name 'inet_ntoa';
-    function MakeAddr(A, B, C, D: Integer): TInAddr;
+    function MakeAddr(A, B, C, D: Int): TInAddr;
     begin
       { network byte order: the first octet is the lowest-addressed byte }
-      Result.S_addr := Cardinal(A or (B shl 8) or (C shl 16) or (D shl 24))
+      Result.S_addr := UInt32(A or (B shl 8) or (C shl 16) or (D shl 24))
     end;
     var
       Addr: TInAddr;
     begin
-      Addr.S_addr := Cardinal($0403020A);
+      Addr.S_addr := UInt32($0403020A);
       WriteLn(string(inet_ntoa(Addr)));
       WriteLn(string(inet_ntoa(MakeAddr(192, 168, 1, 254))))
     end.
@@ -273,9 +273,9 @@ const
   Src = '''
     program P;
     type
-      TDiv = record Quot, Rem: Integer; end;
+      TDiv = record Quot, Rem: Int32; end;
       TLDiv = record Quot, Rem: Int64; end;
-    function c_div(N, D: Integer): TDiv; external name 'div';
+    function c_div(N, D: Int32): TDiv; external name 'div';
     function c_ldiv(N, D: Int64): TLDiv; external name 'ldiv';
     procedure Show(const D: TDiv); begin WriteLn('show ', D.Quot, ' ', D.Rem) end;
     var A: TDiv; B: TLDiv;
@@ -299,10 +299,10 @@ const
   Src = '''
     program P;
     type
-      TSinCos = record S, C: Double; end;
-      TSinCosF = record S, C: Single; end;
-    function c_sincos(X: Double): TSinCos; external name '__sincos_stret';
-    function c_sincosf(X: Single): TSinCosF; external name '__sincosf_stret';
+      TSinCos = record S, C: Float64; end;
+      TSinCosF = record S, C: Float32; end;
+    function c_sincos(X: Float64): TSinCos; external name '__sincos_stret';
+    function c_sincosf(X: Float32): TSinCosF; external name '__sincosf_stret';
     var D: TSinCos; F: TSinCosF;
     begin
       D := c_sincos(0.0); WriteLn(D.S:0:2, ' ', D.C:0:2);
@@ -358,28 +358,28 @@ const
   Src = '''
     program T;
     type
-      TMixed16 = record A: Integer; F: Single; D: Double; end;
-      TMixed8 = record X: Single; N: Integer; end;
-      TBig32 = record A, B, C: Int64; D: Double; end;
-      TV4 = record X, Y, Z, W: Single; end;
-      TV2 = record X, Y: Single; end;
-      TD2 = record X, Y: Double; end;
-      TDL = record X: Double; N: Int64; end;
-    function abi_d2(A, B: TD2): Double; cdecl; external 'abi';
-    function abi_dl(A: TDL; K: Integer): Double; cdecl; external 'abi';
+      TMixed16 = record A: Int32; F: Float32; D: Float64; end;
+      TMixed8 = record X: Float32; N: Int32; end;
+      TBig32 = record A, B, C: Int64; D: Float64; end;
+      TV4 = record X, Y, Z, W: Float32; end;
+      TV2 = record X, Y: Float32; end;
+      TD2 = record X, Y: Float64; end;
+      TDL = record X: Float64; N: Int64; end;
+    function abi_d2(A, B: TD2): Float64; cdecl; external 'abi';
+    function abi_dl(A: TDL; K: Int32): Float64; cdecl; external 'abi';
     function abi_ispill(A, B, C, D, E: Int64; M: TMixed16; G: Int64): Int64; cdecl; external 'abi';
-    function abi_mkv2(X, Y: Single): TV2; cdecl; external 'abi';
-    function abi_mkv4(X, Y, Z, W: Single): TV4; cdecl; external 'abi';
-    function abi_mkd2(X, Y: Double): TD2; cdecl; external 'abi';
-    function abi_mkdl(X: Double; N: Int64): TDL; cdecl; external 'abi';
-    function abi_mkbig(A: Int64; D: Double): TBig32; cdecl; external 'abi';
-    function abi_mixed16(M: TMixed16): Double; cdecl; external 'abi';
-    function abi_mixed8(K: Integer; M: TMixed8): Double; cdecl; external 'abi';
-    function abi_big(B: TBig32; K: Integer): Int64; cdecl; external 'abi';
-    function abi_v4spill(A, B, C, D, E, F, G: Double; V: TV4; H: Double): Double; cdecl; external 'abi';
-    function abi_v2spill(A, B, C, D, E, F, G: Double; V: TV2; H: Single; U: TV2): Double; cdecl; external 'abi';
-    function abi_mk8(X: Single; N: Integer): TMixed8; cdecl; external 'abi';
-    function abi_mk16(A: Integer; F: Single; D: Double): TMixed16; cdecl; external 'abi';
+    function abi_mkv2(X, Y: Float32): TV2; cdecl; external 'abi';
+    function abi_mkv4(X, Y, Z, W: Float32): TV4; cdecl; external 'abi';
+    function abi_mkd2(X, Y: Float64): TD2; cdecl; external 'abi';
+    function abi_mkdl(X: Float64; N: Int64): TDL; cdecl; external 'abi';
+    function abi_mkbig(A: Int64; D: Float64): TBig32; cdecl; external 'abi';
+    function abi_mixed16(M: TMixed16): Float64; cdecl; external 'abi';
+    function abi_mixed8(K: Int32; M: TMixed8): Float64; cdecl; external 'abi';
+    function abi_big(B: TBig32; K: Int32): Int64; cdecl; external 'abi';
+    function abi_v4spill(A, B, C, D, E, F, G: Float64; V: TV4; H: Float64): Float64; cdecl; external 'abi';
+    function abi_v2spill(A, B, C, D, E, F, G: Float64; V: TV2; H: Float32; U: TV2): Float64; cdecl; external 'abi';
+    function abi_mk8(X: Float32; N: Int32): TMixed8; cdecl; external 'abi';
+    function abi_mk16(A: Int32; F: Float32; D: Float64): TMixed16; cdecl; external 'abi';
     var M: TMixed16; M8: TMixed8; B: TBig32; V: TV4; V2, U2: TV2; D2a, D2b: TD2; DL: TDL;
     begin
       M.A := 1; M.F := 2.5; M.D := 4.25;
@@ -465,7 +465,7 @@ const
     type
       TBig = 0..199;
       TJumbo = set of TBig;
-    function abi_bits(A, B: Integer): TJumbo; external 'abi';
+    function abi_bits(A, B: Int32): TJumbo; external 'abi';
     var
       J: TJumbo;
     begin

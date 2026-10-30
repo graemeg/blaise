@@ -36,16 +36,16 @@ const
         type
           TSet<T> = class
             FData:     ^T;
-            FCount:    Integer;
-            FCapacity: Integer;
+            FCount:    Int;
+            FCapacity: Int;
             procedure Grow;
-            function  IndexOf(Value: T): Integer;
+            function  IndexOf(Value: T): Int;
             procedure Include(Value: T);
             procedure Exclude(Value: T);
             function  Contains(Value: T): Boolean;
             procedure Clear;
             procedure Destroy;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         ''';
 
@@ -53,8 +53,8 @@ const
     '''
         procedure TSet<T>.Grow;
         var
-          NewCap: Integer;
-          OldCap: Integer;
+          NewCap: Int;
+          OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then
@@ -65,9 +65,9 @@ const
           ZeroMem(Self.FData + OldCap * SizeOf(T), (NewCap - OldCap) * SizeOf(T));
           Self.FCapacity := NewCap
         end;
-        function TSet<T>.IndexOf(Value: T): Integer;
+        function TSet<T>.IndexOf(Value: T): Int;
         var
-          I:   Integer;
+          I:   Int;
           Ptr: ^T;
         begin
           Result := -1;
@@ -97,8 +97,8 @@ const
         end;
         procedure TSet<T>.Exclude(Value: T);
         var
-          Idx: Integer;
-          I:   Integer;
+          Idx: Int;
+          I:   Int;
           Dst: ^T;
           Src: ^T;
         begin
@@ -137,9 +137,9 @@ const
     SetDecl +
     SetImpls +
     '''
-        var S: TSet<Integer>;
+        var S: TSet<Int>;
         begin
-          S := TSet<Integer>.Create()
+          S := TSet<Int>.Create()
         end.
         ''';
 
@@ -148,9 +148,9 @@ const
     SetDecl +
     SetImpls +
     '''
-        var S: TSet<Integer>;
+        var S: TSet<Int>;
         begin
-          S := TSet<Integer>.Create();
+          S := TSet<Int>.Create();
           S.Include(1);
           S.Include(2);
           S.Include(1)
@@ -162,9 +162,9 @@ const
     SetDecl +
     SetImpls +
     '''
-        var S: TSet<Integer>;
+        var S: TSet<Int>;
         begin
-          S := TSet<Integer>.Create();
+          S := TSet<Int>.Create();
           S.Include(5);
           S.Exclude(5)
         end.
@@ -176,10 +176,10 @@ const
     SetImpls +
     '''
         var
-          S: TSet<Integer>;
+          S: TSet<Int>;
           B: Boolean;
         begin
-          S := TSet<Integer>.Create();
+          S := TSet<Int>.Create();
           S.Include(42);
           B := S.Contains(42)
         end.

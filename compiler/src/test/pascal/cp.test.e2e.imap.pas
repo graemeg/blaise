@@ -49,11 +49,11 @@ const
     program P;
     type
       IMap = interface
-        procedure Add(Key, Value: Integer);
-        function  TryGetValue(Key: Integer; var Value: Integer): Boolean;
-        function  ContainsKey(Key: Integer): Boolean;
-        procedure Remove(Key: Integer);
-        function  GetCount: Integer;
+        procedure Add(Key, Value: Int);
+        function  TryGetValue(Key: Int; var Value: Int): Boolean;
+        function  ContainsKey(Key: Int): Boolean;
+        procedure Remove(Key: Int);
+        function  GetCount: Int;
       end;
     ''';
 
@@ -61,75 +61,75 @@ const
   TDictSrc =
     '''
       TDict = class(IMap)
-        FKeys:     ^Integer;
-        FValues:   ^Integer;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FKeys:     ^Int;
+        FValues:   ^Int;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        var NewCap, OldCap: Integer;
+        var NewCap, OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 8 else NewCap := OldCap * 2;
-          Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(Integer));
-          ZeroMem(Self.FKeys + OldCap * SizeOf(Integer), (NewCap-OldCap) * SizeOf(Integer));
-          Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(Integer));
-          ZeroMem(Self.FValues + OldCap * SizeOf(Integer), (NewCap-OldCap) * SizeOf(Integer));
+          Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(Int));
+          ZeroMem(Self.FKeys + OldCap * SizeOf(Int), (NewCap-OldCap) * SizeOf(Int));
+          Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(Int));
+          ZeroMem(Self.FValues + OldCap * SizeOf(Int), (NewCap-OldCap) * SizeOf(Int));
           Self.FCapacity := NewCap
         end;
-        function FindKey(Key: Integer): Integer;
-        var I: Integer; Ptr: ^Integer;
+        function FindKey(Key: Int): Int;
+        var I: Int; Ptr: ^Int;
         begin
           Result := -1; I := 0;
           while I < Self.FCount do begin
-            Ptr := Self.FKeys + I * SizeOf(Integer);
+            Ptr := Self.FKeys + I * SizeOf(Int);
             if Ptr^ = Key then begin Result := I; break end;
             I := I + 1
           end
         end;
-        procedure Add(Key, Value: Integer);
-        var Idx: Integer; KPtr, VPtr: ^Integer;
+        procedure Add(Key, Value: Int);
+        var Idx: Int; KPtr, VPtr: ^Int;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
-            VPtr := Self.FValues + Idx * SizeOf(Integer); VPtr^ := Value
+            VPtr := Self.FValues + Idx * SizeOf(Int); VPtr^ := Value
           end else begin
             if Self.FCount = Self.FCapacity then Self.Grow();
-            KPtr := Self.FKeys   + Self.FCount * SizeOf(Integer);
-            VPtr := Self.FValues + Self.FCount * SizeOf(Integer);
+            KPtr := Self.FKeys   + Self.FCount * SizeOf(Int);
+            VPtr := Self.FValues + Self.FCount * SizeOf(Int);
             KPtr^ := Key; VPtr^ := Value;
             Self.FCount := Self.FCount + 1
           end
         end;
-        function TryGetValue(Key: Integer; var Value: Integer): Boolean;
-        var Idx: Integer; VPtr: ^Integer;
+        function TryGetValue(Key: Int; var Value: Int): Boolean;
+        var Idx: Int; VPtr: ^Int;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
-            VPtr := Self.FValues + Idx * SizeOf(Integer);
+            VPtr := Self.FValues + Idx * SizeOf(Int);
             Value := VPtr^; Result := True
           end else Result := False
         end;
-        function ContainsKey(Key: Integer): Boolean;
+        function ContainsKey(Key: Int): Boolean;
         begin Result := Self.FindKey(Key) >= 0 end;
-        procedure Remove(Key: Integer);
-        var Idx, I: Integer; KDst, KSrc, VDst, VSrc: ^Integer;
+        procedure Remove(Key: Int);
+        var Idx, I: Int; KDst, KSrc, VDst, VSrc: ^Int;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
             I := Idx;
             while I < Self.FCount - 1 do begin
-              KDst := Self.FKeys   + I * SizeOf(Integer);
-              KSrc := Self.FKeys   + (I+1) * SizeOf(Integer);
-              VDst := Self.FValues + I * SizeOf(Integer);
-              VSrc := Self.FValues + (I+1) * SizeOf(Integer);
+              KDst := Self.FKeys   + I * SizeOf(Int);
+              KSrc := Self.FKeys   + (I+1) * SizeOf(Int);
+              VDst := Self.FValues + I * SizeOf(Int);
+              VSrc := Self.FValues + (I+1) * SizeOf(Int);
               KDst^ := KSrc^; VDst^ := VSrc^; I := I + 1
             end;
             Self.FCount := Self.FCount - 1
           end
         end;
-        function GetCount: Integer;
+        function GetCount: Int;
         begin Result := Self.FCount end;
-        property Count: Integer read GetCount;
+        property Count: Int read GetCount;
       end;
     ''';
 
@@ -137,75 +137,75 @@ const
   TOrdDictSrc =
     '''
       TOrdDict = class(IMap)
-        FKeys:     ^Integer;
-        FValues:   ^Integer;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FKeys:     ^Int;
+        FValues:   ^Int;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        var NewCap, OldCap: Integer;
+        var NewCap, OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 8 else NewCap := OldCap * 2;
-          Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(Integer));
-          ZeroMem(Self.FKeys + OldCap * SizeOf(Integer), (NewCap-OldCap) * SizeOf(Integer));
-          Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(Integer));
-          ZeroMem(Self.FValues + OldCap * SizeOf(Integer), (NewCap-OldCap) * SizeOf(Integer));
+          Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(Int));
+          ZeroMem(Self.FKeys + OldCap * SizeOf(Int), (NewCap-OldCap) * SizeOf(Int));
+          Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(Int));
+          ZeroMem(Self.FValues + OldCap * SizeOf(Int), (NewCap-OldCap) * SizeOf(Int));
           Self.FCapacity := NewCap
         end;
-        function FindKey(Key: Integer): Integer;
-        var I: Integer; Ptr: ^Integer;
+        function FindKey(Key: Int): Int;
+        var I: Int; Ptr: ^Int;
         begin
           Result := -1; I := 0;
           while I < Self.FCount do begin
-            Ptr := Self.FKeys + I * SizeOf(Integer);
+            Ptr := Self.FKeys + I * SizeOf(Int);
             if Ptr^ = Key then begin Result := I; break end;
             I := I + 1
           end
         end;
-        procedure Add(Key, Value: Integer);
-        var Idx: Integer; KPtr, VPtr: ^Integer;
+        procedure Add(Key, Value: Int);
+        var Idx: Int; KPtr, VPtr: ^Int;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
-            VPtr := Self.FValues + Idx * SizeOf(Integer); VPtr^ := Value
+            VPtr := Self.FValues + Idx * SizeOf(Int); VPtr^ := Value
           end else begin
             if Self.FCount = Self.FCapacity then Self.Grow();
-            KPtr := Self.FKeys   + Self.FCount * SizeOf(Integer);
-            VPtr := Self.FValues + Self.FCount * SizeOf(Integer);
+            KPtr := Self.FKeys   + Self.FCount * SizeOf(Int);
+            VPtr := Self.FValues + Self.FCount * SizeOf(Int);
             KPtr^ := Key; VPtr^ := Value;
             Self.FCount := Self.FCount + 1
           end
         end;
-        function TryGetValue(Key: Integer; var Value: Integer): Boolean;
-        var Idx: Integer; VPtr: ^Integer;
+        function TryGetValue(Key: Int; var Value: Int): Boolean;
+        var Idx: Int; VPtr: ^Int;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
-            VPtr := Self.FValues + Idx * SizeOf(Integer);
+            VPtr := Self.FValues + Idx * SizeOf(Int);
             Value := VPtr^; Result := True
           end else Result := False
         end;
-        function ContainsKey(Key: Integer): Boolean;
+        function ContainsKey(Key: Int): Boolean;
         begin Result := Self.FindKey(Key) >= 0 end;
-        procedure Remove(Key: Integer);
-        var Idx, I: Integer; KDst, KSrc, VDst, VSrc: ^Integer;
+        procedure Remove(Key: Int);
+        var Idx, I: Int; KDst, KSrc, VDst, VSrc: ^Int;
         begin
           Idx := Self.FindKey(Key);
           if Idx >= 0 then begin
             I := Idx;
             while I < Self.FCount - 1 do begin
-              KDst := Self.FKeys   + I * SizeOf(Integer);
-              KSrc := Self.FKeys   + (I+1) * SizeOf(Integer);
-              VDst := Self.FValues + I * SizeOf(Integer);
-              VSrc := Self.FValues + (I+1) * SizeOf(Integer);
+              KDst := Self.FKeys   + I * SizeOf(Int);
+              KSrc := Self.FKeys   + (I+1) * SizeOf(Int);
+              VDst := Self.FValues + I * SizeOf(Int);
+              VSrc := Self.FValues + (I+1) * SizeOf(Int);
               KDst^ := KSrc^; VDst^ := VSrc^; I := I + 1
             end;
             Self.FCount := Self.FCount - 1
           end
         end;
-        function GetCount: Integer;
+        function GetCount: Int;
         begin Result := Self.FCount end;
-        property Count: Integer read GetCount;
+        property Count: Int read GetCount;
       end;
     ''';
 
@@ -236,7 +236,7 @@ const
     ''' +
     TDictSrc +
     '''
-    var M: IMap; V: Integer; OK: Boolean;
+    var M: IMap; V: Int; OK: Boolean;
     begin
       M := TDict.Create();
       M.Add(42, 99);
@@ -294,7 +294,7 @@ const
     ''' +
     TOrdDictSrc +
     '''
-    var M: IMap; V: Integer; OK: Boolean;
+    var M: IMap; V: Int; OK: Boolean;
     begin
       M := TOrdDict.Create();
       M.Add(42, 99);
@@ -434,17 +434,17 @@ const
     uses Generics.Collections;
     type
       TStore = class
-        FMap: TDictionary<string, Integer>;
+        FMap: TDictionary<string, Int>;
         constructor Create;
-        function Get(const AKey: string): Integer;
+        function Get(const AKey: string): Int;
       end;
     implementation
     constructor TStore.Create;
     begin
-      FMap := TDictionary<string, Integer>.Create();
+      FMap := TDictionary<string, Int>.Create();
       FMap.Add('answer', 42);
     end;
-    function TStore.Get(const AKey: string): Integer;
+    function TStore.Get(const AKey: string): Int;
     begin
       if not FMap.TryGetValue(AKey, Result) then Result := -1;
     end;
@@ -483,16 +483,16 @@ const
     program P;
     type
       IGreet = interface
-        function Greet: Integer;
+        function Greet: Int;
       end;
       TA = class(IGreet)
-        function Greet: Integer;
+        function Greet: Int;
         begin
           Result := 11
         end;
       end;
       TB = class(IGreet)
-        function Greet: Integer;
+        function Greet: Int;
         begin
           Result := 22
         end;
@@ -533,10 +533,10 @@ const
     program P;
     type
       IDriver = interface
-        function GetVal: Integer;
+        function GetVal: Int;
       end;
       TDrv = class(IDriver)
-        function GetVal: Integer;
+        function GetVal: Int;
         begin
           Result := 7
         end;
@@ -571,20 +571,20 @@ const
     program P;
     type
       IWidget = interface
-        function Tag: Integer;
+        function Tag: Int;
       end;
       IDriver = interface
-        function MakeWidget(N: Integer): IWidget;
+        function MakeWidget(N: Int): IWidget;
       end;
       TWidget = class(IWidget)
-        FTag: Integer;
-        function Tag: Integer;
+        FTag: Int;
+        function Tag: Int;
         begin
           Result := Self.FTag
         end;
       end;
       TDrv = class(IDriver)
-        function MakeWidget(N: Integer): IWidget;
+        function MakeWidget(N: Int): IWidget;
         var W: TWidget;
         begin
           W := TWidget.Create();
@@ -594,7 +594,7 @@ const
       end;
       TWorker = class
         FDriver: IDriver;
-        function Run: Integer;
+        function Run: Int;
         var W: IWidget;
         begin
           W := FDriver.MakeWidget(21);
@@ -642,15 +642,15 @@ const
     program P;
     type
       TOpts = record
-        A: Integer;
-        B: Integer;
-        C: Integer;
+        A: Int;
+        B: Int;
+        C: Int;
       end;
       ICfg = interface
-        procedure Configure(const Opts: TOpts; X: Integer);
+        procedure Configure(const Opts: TOpts; X: Int);
       end;
       TCfg = class(ICfg)
-        procedure Configure(const Opts: TOpts; X: Integer);
+        procedure Configure(const Opts: TOpts; X: Int);
         begin
           WriteLn(Opts.A);
           WriteLn(Opts.B);
@@ -700,7 +700,7 @@ const
     '''
     program P;
     type
-      TIntArr = array of Integer;
+      TIntArr = array of Int;
       ISink = interface
         procedure Fill(var A: TIntArr);
       end;
@@ -732,11 +732,11 @@ const
     program P;
     type
       IInfo = interface
-        function Val(): Integer;
+        function Val(): Int;
         procedure Note();
       end;
       TInfo = class(IInfo)
-        function Val(): Integer;
+        function Val(): Int;
         begin
           Result := 5
         end;
@@ -763,20 +763,20 @@ const
     program P;
     type
       IWidget = interface
-        function Tag(): Integer;
+        function Tag(): Int;
       end;
       IDriver = interface
-        function MakeWidget(N: Integer): IWidget;
+        function MakeWidget(N: Int): IWidget;
       end;
       TWidget = class(IWidget)
-        FTag: Integer;
-        function Tag(): Integer;
+        FTag: Int;
+        function Tag(): Int;
         begin
           Result := Self.FTag
         end;
       end;
       TDrv = class(IDriver)
-        function MakeWidget(N: Integer): IWidget;
+        function MakeWidget(N: Int): IWidget;
         var W: TWidget;
         begin
           W := TWidget.Create();

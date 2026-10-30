@@ -182,7 +182,7 @@ const
           TBox<T> = class
             FValue: T;
           end;
-        var B: TBox<Integer>;
+        var B: TBox<Int32>;
         begin
         end.
         ''';
@@ -207,7 +207,7 @@ const
             FKey: K;
             FVal: V;
           end;
-        var P: TPair<string, Integer>;
+        var P: TPair<string, Int32>;
         begin
         end.
         ''';
@@ -227,9 +227,9 @@ const
               Self.FValue := AVal
             end;
           end;
-        var B: TBox<Integer>;
+        var B: TBox<Int32>;
         begin
-          B := TBox<Integer>.Create();
+          B := TBox<Int32>.Create();
           B.SetValue(42);
           WriteLn(B.GetValue())
         end.
@@ -244,7 +244,7 @@ const
             FValue: T;
           end;
         var
-          G: TBox<Integer>;
+          G: TBox<Int32>;
         implementation
         end.
         ''';
@@ -452,7 +452,7 @@ begin
   try
     AssertEquals('one var decl', 1, Prog.Block.Decls.Count);
     VD := TVarDecl(Prog.Block.Decls[0]);
-    AssertEquals('var type is TBox<Integer>', 'TBox<Integer>', VD.TypeName);
+    AssertEquals('var type is TBox<Integer>', 'TBox<Int32>', VD.TypeName);
   finally
     Prog.Free();
   end;
@@ -467,7 +467,7 @@ begin
   try
     VD := TVarDecl(Prog.Block.Decls[0]);
     AssertEquals('var type is TPair<string,Integer>',
-      'TPair<string,Integer>', VD.TypeName);
+      'TPair<string,Int32>', VD.TypeName);
   finally
     Prog.Free();
   end;
@@ -486,7 +486,7 @@ begin
     Assign := TAssignment(Prog.Block.Stmts[0]);
     AssertTrue('rhs is TMethodCallExpr', Assign.Expr is TMethodCallExpr);
     MC := TMethodCallExpr(Assign.Expr);
-    AssertEquals('object name is TBox<Integer>', 'TBox<Integer>', MC.ObjectName);
+    AssertEquals('object name is TBox<Integer>', 'TBox<Int32>', MC.ObjectName);
     AssertEquals('method is Create', 'Create', MC.Name);
   finally
     Prog.Free();
@@ -615,7 +615,7 @@ const
       TBox<T> = class
         FValue: T;
       end;
-    var B: tbox<Integer>;
+    var B: tbox<Int32>;
     begin
     end.
     ''';
@@ -640,7 +640,7 @@ const
       TBox<T> = class
         FValue: T;
       end;
-    var B: TBOX<Integer>;
+    var B: TBOX<Int32>;
     begin
     end.
     ''';
@@ -668,7 +668,7 @@ const
       TBox<T> = class
         FValue: T;
       end;
-      TIntBox = tbox<Integer>;
+      TIntBox = tbox<Int32>;
     var B: TIntBox;
     begin
     end.
@@ -707,9 +707,9 @@ const
         FValue: T;
       end;
     var
-      A: tbox<Integer>;
-      B: TBOX<Integer>;
-      C: TBox<Integer>;
+      A: tbox<Int32>;
+      B: TBOX<Int32>;
+      C: TBox<Int32>;
     begin
     end.
     ''';
@@ -772,7 +772,7 @@ const
     program PU;
     uses U;
     begin
-      G := TBox<Integer>.Create();
+      G := TBox<Int32>.Create();
       G.FValue := 1
     end.
     ''';
@@ -822,7 +822,7 @@ const
             constructor Create(AKey: K; AVal: V);
           end;
         var
-          GPair: TPair<Integer, Integer>;
+          GPair: TPair<Int32, Int32>;
         procedure InitPair;
         implementation
         constructor TPair<K, V>.Create(AKey: K; AVal: V);
@@ -832,7 +832,7 @@ const
         end;
         procedure InitPair;
         begin
-          GPair := TPair<Integer, Integer>.Create(10, 20);
+          GPair := TPair<Int32, Int32>.Create(10, 20);
         end;
         end.
         ''';
@@ -966,17 +966,17 @@ const
     unit gfb;
     interface
     function Twice<T>(A: T): T;
-    function UseOwn: Integer;
+    function UseOwn: Int32;
     implementation
     function Twice<T>(A: T): T; begin Result := A + A end;
-    function UseOwn: Integer; begin Result := Twice<Integer>(4) end;
+    function UseOwn: Int32; begin Result := Twice<Int32>(4) end;
     end.
     ''';
   ProgSrc = '''
     program pgf;
     uses gfb;
     begin
-      WriteLn(Twice<Integer>(21), UseOwn())
+      WriteLn(Twice<Int32>(21), UseOwn())
     end.
     ''';
 var
@@ -1014,9 +1014,9 @@ const
   ProgSrc = '''
     program pdecl;
     uses gdecl;
-    var M: TMaker<Integer>;
+    var M: TMaker<Int>;
     begin
-      WriteLn(M.Get(), Twice<Integer>(2))
+      WriteLn(M.Get(), Twice<Int>(2))
     end.
     ''';
 var
@@ -1167,7 +1167,7 @@ const
             end;
           end;
         var
-          CI: TCell<Integer>;
+          CI: TCell<Int32>;
           CS: TCell<String>;
         begin end.
         ''';
@@ -1233,7 +1233,7 @@ const
     '''
         program Prg;
         type
-          TIntAlias = Integer;
+          TIntAlias = Int32;
           TInner<T> = class
             FV: T;
           end;
@@ -1292,7 +1292,7 @@ const
               Self.FValue := AVal
             end;
           end;
-        var B: TBox<Integer>;
+        var B: TBox<Int32>;
         begin
           B := TBox<>.Create();
           B.SetValue(42);
@@ -1308,7 +1308,7 @@ const
             FKey: K;
             FVal: V;
           end;
-        var P: TPair<string, Integer>;
+        var P: TPair<string, Int32>;
         begin
           P := TPair<>.Create()
         end.
@@ -1412,9 +1412,9 @@ begin
             FKey: K;
             FVal: V;
           end;
-        var P: TPair<string, Integer>;
+        var P: TPair<string, Int32>;
         begin
-          P := TPair<string, Integer>.Create()
+          P := TPair<string, Int32>.Create()
         end.
         ''';
   AssertEquals('x86-64: diamond asm identical to explicit',
@@ -1461,7 +1461,7 @@ const
   Src = '''
     program P;
     type
-      TArr = array[-1..3] of Integer;
+      TArr = array[-1..3] of Int32;
       TBox<T> = class
         V: T;
         procedure Put(const A: T);
@@ -1494,15 +1494,15 @@ const
     type
       TBox<T> = class
         procedure Put(A: T); overload;
-        procedure Put(A: T; B: Integer); overload;
-        procedure Put(A: Integer); overload;
+        procedure Put(A: T; B: Int32); overload;
+        procedure Put(A: Int32); overload;
       end;
     procedure TBox<T>.Put(A: T); begin end;
-    procedure TBox<T>.Put(A: T; B: Integer); begin end;
-    procedure TBox<T>.Put(A: Integer); begin end;
-    var B: TBox<Integer>;
+    procedure TBox<T>.Put(A: T; B: Int32); begin end;
+    procedure TBox<T>.Put(A: Int32); begin end;
+    var B: TBox<Int32>;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int32>.Create();
       B.Put(1, 2)
     end.
     ''';
@@ -1530,7 +1530,7 @@ const
     function TBase<T>.D(): string; begin Result := '' end;
     function TBase<T>.D(const S: string): string; begin Result := S end;
     function TKid<T>.D(const S: string): string; begin Result := S end;
-    var K: TKid<Integer>;
+    var K: TKid<Int>;
     begin
     end.
     ''';

@@ -285,15 +285,15 @@ const
         program Prg;
         type
           TCounter = class
-            FN: Integer;
+            FN: Int32;
             procedure Inc;
             begin Self.FN := Self.FN + 1 end;
-            property Value: Integer read FN;
+            property Value: Int32 read FN;
           end;
-        var N: Integer;
+        var N: Int32;
         type
           TDoubler = class
-            function Double(X: Integer): Integer;
+            function Double(X: Int32): Int32;
             begin Result := X * 2 end;
           end;
         var
@@ -523,7 +523,7 @@ const
         function Name: string; virtual;
       end;
       TChild = class(TBase)
-        FVal: Integer;
+        FVal: Int;
         function Name: string; override;
       end;
     function TBase.Name: string;
@@ -542,15 +542,15 @@ const
     program Prg;
     type
       TBase = class
-        function Val: Integer; virtual;
+        function Val: Int; virtual;
       end;
       TChild = class(TBase)
-        function Val: Integer; override;
+        function Val: Int; override;
       end;
-    function TBase.Val: Integer;
+    function TBase.Val: Int;
     begin Result := 10 end;
-    function TChild.Val: Integer;
-    var B: Integer;
+    function TChild.Val: Int;
+    var B: Int;
     begin
       inherited Val();
       B := Result;
@@ -575,14 +575,14 @@ const
     program Prg;
     type
       TBase = class
-        function Sum(a, b, c, d, e, f, g: Integer): Integer; virtual;
+        function Sum(a, b, c, d, e, f, g: Int): Int; virtual;
       end;
       TChild = class(TBase)
-        function Sum(a, b, c, d, e, f, g: Integer): Integer; override;
+        function Sum(a, b, c, d, e, f, g: Int): Int; override;
       end;
-    function TBase.Sum(a, b, c, d, e, f, g: Integer): Integer;
+    function TBase.Sum(a, b, c, d, e, f, g: Int): Int;
     begin Result := a + b + c + d + e + f + g end;
-    function TChild.Sum(a, b, c, d, e, f, g: Integer): Integer;
+    function TChild.Sum(a, b, c, d, e, f, g: Int): Int;
     begin Result := inherited Sum(a, b, c, d, e, f, g) * 2 end;
     var o: TChild;
     begin
@@ -600,21 +600,21 @@ const
     program Prg;
     type
       TBase = class
-        procedure Bump(var X: Integer); virtual;
+        procedure Bump(var X: Int); virtual;
       end;
       TDer = class(TBase)
-        procedure Bump(var X: Integer); override;
+        procedure Bump(var X: Int); override;
       end;
-    procedure TBase.Bump(var X: Integer);
+    procedure TBase.Bump(var X: Int);
     begin X := X + 10 end;
-    procedure TDer.Bump(var X: Integer);
+    procedure TDer.Bump(var X: Int);
     begin
       inherited Bump(X);
       X := X + 1
     end;
     var
       D: TDer;
-      N: Integer;
+      N: Int;
     begin
       D := TDer.Create();
       N := 5;
@@ -628,15 +628,15 @@ const
     program Prg;
     type
       TShape = class
-        function Area: Integer; virtual;
+        function Area: Int; virtual;
       end;
       TSquare = class(TShape)
-        FSide: Integer;
-        function Area: Integer; override;
+        FSide: Int;
+        function Area: Int; override;
       end;
-    function TShape.Area: Integer;
+    function TShape.Area: Int;
     begin Result := 0 end;
-    function TSquare.Area: Integer;
+    function TSquare.Area: Int;
     begin Result := FSide * FSide end;
     var S: TShape;
     begin
@@ -651,17 +651,17 @@ const
     program Prg;
     type
       TA = class
-        function Lvl: Integer; virtual;
+        function Lvl: Int; virtual;
       end;
       TB = class(TA)
-        function Lvl: Integer; override;
+        function Lvl: Int; override;
       end;
       TC = class(TB)
-        function Lvl: Integer; override;
+        function Lvl: Int; override;
       end;
-    function TA.Lvl: Integer; begin Result := 1 end;
-    function TB.Lvl: Integer; begin Result := 2 end;
-    function TC.Lvl: Integer; begin Result := 3 end;
+    function TA.Lvl: Int; begin Result := 1 end;
+    function TB.Lvl: Int; begin Result := 2 end;
+    function TC.Lvl: Int; begin Result := 3 end;
     var A: TA;
     begin
       A := TC.Create();
@@ -750,17 +750,17 @@ const
     program Prg;
     type
       IGreeter = interface
-        function Greet: Integer;
+        function Greet: Int;
       end;
       THello = class(TObject, IGreeter)
-        function Greet: Integer;
+        function Greet: Int;
       end;
       TUser = class
-        function Use(G: IGreeter): Integer;
+        function Use(G: IGreeter): Int;
       end;
-    function THello.Greet: Integer;
+    function THello.Greet: Int;
     begin Result := 42 end;
-    function TUser.Use(G: IGreeter): Integer;
+    function TUser.Use(G: IGreeter): Int;
     begin Result := G.Greet() + 1 end;
     var
       H: THello;
@@ -869,12 +869,12 @@ const
     '''
         program GlobalAccessBug;
         var
-          gValue: Integer;
+          gValue: Int;
         type
           TFoo = class
-            function GetValue: Integer;
+            function GetValue: Int;
           end;
-        function TFoo.GetValue: Integer;
+        function TFoo.GetValue: Int;
         begin
           Result := gValue
         end;
@@ -920,17 +920,17 @@ const
   SrcResolve_LocalVar_OverOwnMethod =
     '''
         program ResLocalVar;
-        function Helper: Integer;
+        function Helper: Int;
         begin Result := 42 end;
         type
-          TFn  = function: Integer;
+          TFn  = function: Int;
           TFoo = class
-            function Compute: Integer;
-            function Run: Integer;
+            function Compute: Int;
+            function Run: Int;
           end;
-        function TFoo.Compute: Integer;
+        function TFoo.Compute: Int;
         begin Result := 100 end;
-        function TFoo.Run: Integer;
+        function TFoo.Run: Int;
         var Compute: TFn;
         begin
           Compute := @Helper;
@@ -954,18 +954,18 @@ const
   SrcResolve_ParentMethod_OverProgramProc =
     '''
         program ResParentOverProgram;
-        function Tag: Integer;
+        function Tag: Int;
         begin Result := 1 end;
         type
           TParent = class
-            function Tag: Integer;
-            function Echo: Integer;
+            function Tag: Int;
+            function Echo: Int;
           end;
           TChild = class(TParent)
           end;
-        function TParent.Tag: Integer;
+        function TParent.Tag: Int;
         begin Result := 2 end;
-        function TParent.Echo: Integer;
+        function TParent.Echo: Int;
         begin Result := Tag() end;
         var C: TChild;
         begin
@@ -985,17 +985,17 @@ const
         program ResInherited;
         type
           TParent = class
-            function Tag: Integer;
+            function Tag: Int;
           end;
           TChild = class(TParent)
-            function Tag: Integer;
-            function FromInh: Integer;
+            function Tag: Int;
+            function FromInh: Int;
           end;
-        function TParent.Tag: Integer;
+        function TParent.Tag: Int;
         begin Result := 1 end;
-        function TChild.Tag: Integer;
+        function TChild.Tag: Int;
         begin Result := 2 end;
-        function TChild.FromInh: Integer;
+        function TChild.FromInh: Int;
         begin
           inherited Tag()
         end;
@@ -1015,13 +1015,13 @@ const
         program ResExplicitSelf;
         type
           TFoo = class
-            function Compute: Integer;
-            function Run: Integer;
+            function Compute: Int;
+            function Run: Int;
           end;
-        function TFoo.Compute: Integer;
+        function TFoo.Compute: Int;
         begin Result := 200 end;
-        function TFoo.Run: Integer;
-        var Compute: Integer;
+        function TFoo.Run: Int;
+        var Compute: Int;
         begin
           Compute := 7;
           Result  := Self.Compute()
@@ -1040,13 +1040,13 @@ const
         program Prg;
         type
           TFoo = class
-            FA: Integer;
-            constructor Create(A: Integer; B: Integer); overload;
-            constructor Create(A: Integer); overload;
+            FA: Int;
+            constructor Create(A: Int; B: Int); overload;
+            constructor Create(A: Int); overload;
           end;
-          constructor TFoo.Create(A: Integer; B: Integer);
+          constructor TFoo.Create(A: Int; B: Int);
           begin Self.FA := A + B end;
-          constructor TFoo.Create(A: Integer);
+          constructor TFoo.Create(A: Int);
           begin Self.FA := A end;
         var F: TFoo;
         begin
@@ -1448,7 +1448,7 @@ begin
     type
       TThing = class
       public
-        V: Integer;
+        V: Int;
       end;
     procedure EnsureThing(var T: TThing);
     begin
@@ -1472,8 +1472,8 @@ begin
   AssertRunsOnAll(
     '''
     program c;
-    type TX = class procedure Take(d: Double); end;
-    procedure TX.Take(d: Double); begin WriteLn(d); end;
+    type TX = class procedure Take(d: Float64); end;
+    procedure TX.Take(d: Float64); begin WriteLn(d); end;
     var x: TX;
     begin x := TX.Create(); x.Take(1.5); end.
     ''',
@@ -1485,9 +1485,9 @@ begin
   AssertRunsOnAll(
     '''
     program f;
-    type TX = class procedure Take(d: Double); end;
-    procedure TX.Take(d: Double); begin WriteLn(d); end;
-    var x: TX; y: Double;
+    type TX = class procedure Take(d: Float64); end;
+    procedure TX.Take(d: Float64); begin WriteLn(d); end;
+    var x: TX; y: Float64;
     begin x := TX.Create(); y := 1.5; x.Take(y); end.
     ''',
     '1.5' + LE, 0);
@@ -1498,8 +1498,8 @@ begin
   AssertRunsOnAll(
     '''
     program ctl;
-    type TN = class V: Double; constructor CreateFloat(d: Double); end;
-    constructor TN.CreateFloat(d: Double); begin V := d; end;
+    type TN = class V: Float64; constructor CreateFloat(d: Float64); end;
+    constructor TN.CreateFloat(d: Float64); begin V := d; end;
     var n: TN;
     begin n := TN.CreateFloat(2.5); WriteLn(n.V); end.
     ''',
@@ -1511,9 +1511,9 @@ begin
   AssertRunsOnAll(
     '''
     program ct;
-    type TN = class V: Double; constructor CreateFloat(d: Double); end;
-    constructor TN.CreateFloat(d: Double); begin V := d; end;
-    var n: TN; y: Double;
+    type TN = class V: Float64; constructor CreateFloat(d: Float64); end;
+    constructor TN.CreateFloat(d: Float64); begin V := d; end;
+    var n: TN; y: Float64;
     begin y := 2.5; n := TN.CreateFloat(y); WriteLn(n.V); end.
     ''',
     '2.5' + LE, 0);
@@ -1526,8 +1526,8 @@ begin
   AssertRunsOnAll(
     '''
     program mix;
-    type TX = class procedure M(const s: string; i: Int64; d: Double); end;
-    procedure TX.M(const s: string; i: Int64; d: Double);
+    type TX = class procedure M(const s: string; i: Int64; d: Float64); end;
+    procedure TX.M(const s: string; i: Int64; d: Float64);
     begin WriteLn('s=', s, ' i=', i, ' d=', d); end;
     var x: TX;
     begin x := TX.Create(); x.M('hi', 7, 3.5); end.
@@ -1542,8 +1542,8 @@ begin
   AssertRunsOnAll(
     '''
     program mf;
-    type TX = class procedure M(a: Double; i: Int64; b: Double; c: Single); end;
-    procedure TX.M(a: Double; i: Int64; b: Double; c: Single);
+    type TX = class procedure M(a: Float64; i: Int64; b: Float64; c: Float32); end;
+    procedure TX.M(a: Float64; i: Int64; b: Float64; c: Float32);
     begin WriteLn('a=', a, ' i=', i, ' b=', b, ' c=', c); end;
     var x: TX;
     begin x := TX.Create(); x.M(1.5, 9, 2.5, 3.5); end.
@@ -1561,9 +1561,9 @@ begin
     '''
     program ovm;
     type TX = class
-      procedure M(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64);
+      procedure M(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64);
     end;
-    procedure TX.M(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64);
+    procedure TX.M(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64);
     begin WriteLn(i1,' ',i2,' ',i3,' ',i4,' ',i5,' ',d1,' ',d2,' ',i6); end;
     var x: TX;
     begin x := TX.Create(); x.M(1,2,3,4,5, 6.5, 7.5, 8); end.
@@ -1577,10 +1577,10 @@ begin
     '''
     program ovc;
     type TN = class
-      R: Double;
-      constructor Create(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64);
+      R: Float64;
+      constructor Create(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64);
     end;
-    constructor TN.Create(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64);
+    constructor TN.Create(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64);
     begin R := d1 + d2 + i6; end;
     var n: TN;
     begin n := TN.Create(1,2,3,4,5, 6.5, 7.5, 8); WriteLn(n.R); end.
@@ -1595,14 +1595,14 @@ begin
     program ovi;
     type
       TBase = class
-        procedure M(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64); virtual;
+        procedure M(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64); virtual;
       end;
       TDer = class(TBase)
-        procedure M(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64); override;
+        procedure M(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64); override;
       end;
-    procedure TBase.M(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64);
+    procedure TBase.M(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64);
     begin WriteLn('base ',i1,' ',d1,' ',d2,' ',i6); end;
-    procedure TDer.M(i1,i2,i3,i4,i5: Int64; d1,d2: Double; i6: Int64);
+    procedure TDer.M(i1,i2,i3,i4,i5: Int64; d1,d2: Float64; i6: Int64);
     begin inherited M(i1,i2,i3,i4,i5,d1,d2,i6); WriteLn('der ',d1,' ',d2); end;
     var x: TDer;
     begin x := TDer.Create(); x.M(1,2,3,4,5, 6.5, 7.5, 9); end.
@@ -1810,25 +1810,25 @@ const
     program Prg;
     type
       IInter = interface
-        function GetValue(): Integer;
-        procedure SetValue(AValue: Integer);
-        property Value: Integer read GetValue write SetValue;
+        function GetValue(): Int;
+        procedure SetValue(AValue: Int);
+        property Value: Int read GetValue write SetValue;
       end;
       IChild = interface(IInter)
         procedure Bump();
       end;
       TFace = class(TObject, IInter, IChild)
-        FVal: Integer;
-        function GetValue(): Integer;
-        procedure SetValue(AValue: Integer);
+        FVal: Int;
+        function GetValue(): Int;
+        procedure SetValue(AValue: Int);
         procedure Bump();
-        property Value: Integer read GetValue write SetValue;
+        property Value: Int read GetValue write SetValue;
       end;
-    function TFace.GetValue(): Integer;
+    function TFace.GetValue(): Int;
     begin
       Result := FVal;
     end;
-    procedure TFace.SetValue(AValue: Integer);
+    procedure TFace.SetValue(AValue: Int);
     begin
       FVal := AValue;
     end;
@@ -1871,18 +1871,18 @@ const
     type
       Tbase = class
       private
-        fValue: Integer;
+        fValue: Int;
       public
-        procedure setValue(AValue: Integer);
-        function getValue: Integer;
-        property classValue: Integer read getValue write setValue;
+        procedure setValue(AValue: Int);
+        function getValue: Int;
+        property classValue: Int read getValue write setValue;
       end;
       Tchild = class(Tbase)
         procedure childAct;
       end;
-    procedure Tbase.setValue(AValue: Integer);
+    procedure Tbase.setValue(AValue: Int);
     begin fValue := AValue end;
-    function Tbase.getValue: Integer;
+    function Tbase.getValue: Int;
     begin Result := fValue end;
     procedure Tchild.childAct;
     begin writeln('act') end;
@@ -1924,7 +1924,7 @@ const
     type
       TThing = class
         const MaxCount = 10;
-        function Limit: Integer; begin Result := MaxCount end;
+        function Limit: Int; begin Result := MaxCount end;
       end;
     var t: TThing;
     begin
@@ -1964,20 +1964,20 @@ begin
         const KF = 2.5;
         const KNeg = -0.75;
         const KQ = 1.0 / 4;
-        const KS: Single = 1.25;
-        const KD: Double = 3.5;
+        const KS: Float32 = 1.25;
+        const KD: Float64 = 3.5;
         const KSum = 2 + 3 * 4;
         const KB: Boolean = True;
         const KBig = 40000000000;
-        const KA: array[0..2] of Double = (0.5, 1.5, 2.5);
-        const KSA: array[0..1] of Single = (4.25, 8.5);
-        function Total(): Double;
+        const KA: array[0..2] of Float64 = (0.5, 1.5, 2.5);
+        const KSA: array[0..1] of Float32 = (4.25, 8.5);
+        function Total(): Float64;
       end;
-    function TC.Total(): Double;
+    function TC.Total(): Float64;
     begin
       Result := KF + KD + KA[2] + KS;
     end;
-    var C: TC; D: Double; S: Single; I: Integer;
+    var C: TC; D: Float64; S: Float32; I: Int;
     begin
       C := TC.Create();
       D := TC.KF;
@@ -2004,20 +2004,20 @@ begin
     program P;
     type
       TBase = class
-        V: Integer;
-        constructor Init(A: Integer);
+        V: Int;
+        constructor Init(A: Int);
         static function CreateDefault(): TBase;
-        static function CreateCount(): Integer;
+        static function CreateCount(): Int;
       end;
       TDerived = class(TBase)
-        constructor Init(A: Integer);
+        constructor Init(A: Int);
       end;
       TBaseClass = class of TBase;
-    var Made: Integer;
-    constructor TBase.Init(A: Integer); begin V := A; Made := Made + 1; end;
+    var Made: Int;
+    constructor TBase.Init(A: Int); begin V := A; Made := Made + 1; end;
     function TBase.CreateDefault(): TBase; begin Result := TBase.Init(42); end;
-    function TBase.CreateCount(): Integer; begin Result := Made * 10; end;
-    constructor TDerived.Init(A: Integer); begin V := A * 2; Made := Made + 1; end;
+    function TBase.CreateCount(): Int; begin Result := Made * 10; end;
+    constructor TDerived.Init(A: Int); begin V := A * 2; Made := Made + 1; end;
     var B: TBase; C: TBaseClass;
     begin
       B := TBase.CreateDefault();
@@ -2038,21 +2038,21 @@ begin
     '''
     program P;
     type
-      TFn = function(A: Double): Double;
-      TSFn = function(A: Single): Single;
-      TObjFn = function(A: Double): Double of object;
+      TFn = function(A: Float64): Float64;
+      TSFn = function(A: Float32): Float32;
+      TObjFn = function(A: Float64): Float64 of object;
       TC = class
         FFn: TFn;
         FSFn: TSFn;
         FM: TObjFn;
-        FBase: Double;
-        function Twice(A: Double): Double;
-        function Use(): Double;
+        FBase: Float64;
+        function Twice(A: Float64): Float64;
+        function Use(): Float64;
       end;
-    function Sq(A: Double): Double; begin Result := A * A; end;
-    function Half(A: Single): Single; begin Result := A / 2; end;
-    function TC.Twice(A: Double): Double; begin Result := A * 2 + FBase; end;
-    function TC.Use(): Double;
+    function Sq(A: Float64): Float64; begin Result := A * A; end;
+    function Half(A: Float32): Float32; begin Result := A / 2; end;
+    function TC.Twice(A: Float64): Float64; begin Result := A * 2 + FBase; end;
+    function TC.Use(): Float64;
     begin
       Result := FFn(3.0) + 1;
       Result := Result + FM(1.5) + FSFn(5.0);
@@ -2075,21 +2075,21 @@ const
     uses classes;
     type
       Iinter = interface
-        function GetValue(): Integer;
-        procedure SetValue(AValue: Integer);
-        property prop: Integer read getValue write setValue;
+        function GetValue(): Int;
+        procedure SetValue(AValue: Int);
+        property prop: Int read getValue write setValue;
       end;
       Tface = class(TObject, Iinter)
-        fProp: Integer;
-        function GetValue(): Integer;
-        procedure SetValue(AValue: Integer);
-        property prop: Integer read getValue write setValue;
+        fProp: Int;
+        function GetValue(): Int;
+        procedure SetValue(AValue: Int);
+        property prop: Int read getValue write setValue;
       end;
-    function Tface.GetValue(): Integer;
+    function Tface.GetValue(): Int;
     begin
       Result := fProp;
     end;
-    procedure Tface.SetValue(AValue: Integer);
+    procedure Tface.SetValue(AValue: Int);
     begin
       fProp := AValue;
     end;
@@ -2122,11 +2122,11 @@ const
     type
       IShape = interface
         procedure Note();
-        function Area(K: Integer): Integer;
+        function Area(K: Int): Int;
       end;
       TSq = class(TObject, IShape)
         procedure Note();
-        function Area(K: Integer): Integer;
+        function Area(K: Int): Int;
       end;
       THolder = class
         S: IShape;
@@ -2135,7 +2135,7 @@ const
     begin
       writeln('note');
     end;
-    function TSq.Area(K: Integer): Integer;
+    function TSq.Area(K: Int): Int;
     begin
       Result := K * K;
     end;
@@ -2159,8 +2159,8 @@ const
     program Prg;
     type
       TBox = class
-        V: Integer;
-        W: Integer;
+        V: Int;
+        W: Int;
       end;
     procedure MutB(var B: TBox);
     begin
@@ -2192,9 +2192,9 @@ const
     program Prg;
     procedure Outer();
     var
-      Total: Integer;
+      Total: Int;
       Name: string;
-      procedure Inner(K: Integer; Tag: string);
+      procedure Inner(K: Int; Tag: string);
       begin
         Total := Total + K;
         Name := Name + Tag;
@@ -2229,14 +2229,14 @@ const Src = '''
         type
           PNode = ^TNode;
           TNode = record
-            Val: Integer;
+            Val: Int32;
             Next: PNode;
           end;
         var
           Head: PNode;
-        function Sum: Integer;
+        function Sum: Int32;
       end;
-    function TList1.Sum: Integer;
+    function TList1.Sum: Int32;
     var Q: PNode;
     begin
       Result := 0;
@@ -2251,7 +2251,7 @@ const Src = '''
       L: TList1;
       N1, N2, N3: TList1.TNode;
     begin
-      N3.Val := High(Integer) - 10; N3.Next := nil;
+      N3.Val := High(Int32) - 10; N3.Next := nil;
       N2.Val := 7; N2.Next := @N3;
       N1.Val := 3; N1.Next := @N2;
       L := TList1.Create();
@@ -2272,28 +2272,28 @@ const Src = '''
     program RF;
     type
       TInner = record
-        A: Integer;
-        function Get: Integer;
-        procedure Bump(N: Integer);
+        A: Int32;
+        function Get: Int32;
+        procedure Bump(N: Int32);
       end;
       TBox = class
         R: TInner;
-        function Peek: Integer;
+        function Peek: Int32;
         procedure Poke;
       end;
       TPair = record
         X: TInner;
-        function Sum: Integer;
+        function Sum: Int32;
       end;
-    function TInner.Get: Integer; begin Result := A end;
-    procedure TInner.Bump(N: Integer); begin A := A + N end;
-    function TBox.Peek: Integer; begin Result := R.Get() end;
+    function TInner.Get: Int32; begin Result := A end;
+    procedure TInner.Bump(N: Int32); begin A := A + N end;
+    function TBox.Peek: Int32; begin Result := R.Get() end;
     procedure TBox.Poke; begin R.Bump(5) end;
-    function TPair.Sum: Integer; begin X.Bump(1); Result := X.Get() + 100 end;
+    function TPair.Sum: Int32; begin X.Bump(1); Result := X.Get() + 100 end;
     var B: TBox; P: TPair;
     begin
       B := TBox.Create();
-      B.R.A := High(Integer) - 5;
+      B.R.A := High(Int32) - 5;
       B.Poke();
       WriteLn(B.Peek());
       P.X.A := -1;
@@ -2311,9 +2311,9 @@ begin
   AssertRunsOnAll('''
     program NR;
     type
-      TArr = array[0..1] of Integer;
+      TArr = array[0..1] of Int;
       TBig = record A: array[0..9] of Int64; S: string; end;
-    function G: Integer;
+    function G: Int;
       procedure Inner; begin result := result + 5 end;
     begin Result := 1; Inner(); Inner() end;
     function A1: TArr;
@@ -2327,8 +2327,8 @@ begin
         procedure Leaf; begin Result[1] := 77 end;
       begin Result[0] := 66; Leaf() end;
     begin Mid() end;
-    function Mix: Integer;
-      function Helper: Integer;
+    function Mix: Int;
+      function Helper: Int;
         procedure Leaf; begin Result := 3 end;
       begin Leaf(); Result := Result * 10 end;
     begin Result := Helper() + 1 end;
@@ -2352,14 +2352,14 @@ end;
 const
   SrcVarParamFloat = '''
     program Prg;
-    procedure SetD(var D: Double);
+    procedure SetD(var D: Float64);
     begin
       D := 2.5;
     end;
     procedure Outer();
     var
-      X: Double;
-      procedure Bump(F: Double);
+      X: Float64;
+      procedure Bump(F: Float64);
       begin
         X := X + F;
       end;
@@ -2386,7 +2386,7 @@ const
   SrcVarParamDynArr = '''
     program Prg;
     type
-      TIntArr = array of Integer;
+      TIntArr = array of Int;
     procedure MutArr(var A: TIntArr);
     begin
       writeln(A[1]);
@@ -2399,7 +2399,7 @@ const
     end;
     var
       Arr: TIntArr;
-      I: Integer;
+      I: Int;
     begin
       SetLength(Arr, 4);
       for I := 0 to 3 do
@@ -2414,7 +2414,7 @@ const
   SrcVarParamSAPChar = '''
     program Prg;
     type
-      TFive = array[0..4] of Integer;
+      TFive = array[0..4] of Int;
     procedure MutSA(var A: TFive);
     begin
       writeln(A[1]);
@@ -2428,7 +2428,7 @@ const
       SA: TFive;
       Buf: string;
       PC: PChar;
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 4 do
         SA[I] := I * 10;
@@ -2448,7 +2448,7 @@ const
         procedure Greet;
       end;
       THello = class(TObject, IGreeter)
-        FCount: Integer;
+        FCount: Int;
         procedure Greet;
         begin
           FCount := FCount + 1;
@@ -2532,8 +2532,8 @@ const
       FData := A;
       A := T;
     end;
-    procedure Fill(var A: TBytes; N: Integer);
-    var B: TBytes; I: Integer;
+    procedure Fill(var A: TBytes; N: Int);
+    var B: TBytes; I: Int;
     begin
       SetLength(B, N);
       for I := 0 to N - 1 do
@@ -2593,18 +2593,18 @@ const SrcMetaclassCreateArgs = '''
     program Prg;
     type
       TBase = class(TObject)
-        FVal: Integer;
-        constructor Create(N: Integer);
+        FVal: Int;
+        constructor Create(N: Int);
       end;
       TChild = class(TBase)
-        constructor Create(N: Integer);
+        constructor Create(N: Int);
       end;
       TBaseClass = class of TBase;
-    constructor TBase.Create(N: Integer);
+    constructor TBase.Create(N: Int);
     begin FVal := N end;
-    constructor TChild.Create(N: Integer);
+    constructor TChild.Create(N: Int);
     begin FVal := N * 10 end;
-    procedure Run(C: TBaseClass; N: Integer);
+    procedure Run(C: TBaseClass; N: Int);
     var B: TBase;
     begin
       B := C.Create(N);
@@ -2627,22 +2627,22 @@ const SrcMetaclassCreateStatement = '''
     program Prg;
     type
       TBase = class(TObject)
-        constructor Create(N: Integer); virtual;
+        constructor Create(N: Int); virtual;
         destructor Destroy; override;
       end;
       TChild = class(TBase)
-        constructor Create(N: Integer); override;
+        constructor Create(N: Int); override;
       end;
       TBaseClass = class of TBase;
-    var gVal: Integer;
-    var gFreed: Integer;
-    constructor TBase.Create(N: Integer);
+    var gVal: Int;
+    var gFreed: Int;
+    constructor TBase.Create(N: Int);
     begin gVal := N end;
     destructor TBase.Destroy;
     begin gFreed := gFreed + 1; inherited Destroy() end;
-    constructor TChild.Create(N: Integer);
+    constructor TChild.Create(N: Int);
     begin inherited Create(N); gVal := gVal * 10 end;
-    procedure Run(C: TBaseClass; N: Integer);
+    procedure Run(C: TBaseClass; N: Int);
     begin
       C.Create(N)
     end;
@@ -2721,20 +2721,20 @@ const
     program P;
     type
       TBase = class
-        N: Integer;
-        constructor Create(AN: Integer; ATag: string = 'd'); virtual;
+        N: Int;
+        constructor Create(AN: Int; ATag: string = 'd'); virtual;
         destructor Destroy(); override;
       end;
       TDerived = class(TBase)
-        constructor Create(AN: Integer; ATag: string = 'd'); override;
+        constructor Create(AN: Int; ATag: string = 'd'); override;
       end;
       TBaseClass = class of TBase;
       THolder = class
         FCls: TBaseClass;
         procedure Run();
       end;
-    var Frees: Integer;
-    constructor TBase.Create(AN: Integer; ATag: string);
+    var Frees: Int;
+    constructor TBase.Create(AN: Int; ATag: string);
     begin
       N := AN;
       WriteLn('base ', AN, ATag)
@@ -2744,7 +2744,7 @@ const
       Frees := Frees + 1;
       inherited Destroy()
     end;
-    constructor TDerived.Create(AN: Integer; ATag: string);
+    constructor TDerived.Create(AN: Int; ATag: string);
     begin
       inherited Create(AN * 10, ATag);
       WriteLn('derived ', AN, ATag)
@@ -2861,7 +2861,7 @@ const
     uses SysUtils;
     type
       TBase = class
-        static function Kind(N: Integer): string;
+        static function Kind(N: Int): string;
         static procedure Note(const S: string);
       end;
       TDerived = class(TBase) end;
@@ -2870,7 +2870,7 @@ const
         FCls: TBaseClass;
         procedure Run();
       end;
-    static function TBase.Kind(N: Integer): string; begin Result := 'base' + IntToStr(N) end;
+    static function TBase.Kind(N: Int): string; begin Result := 'base' + IntToStr(N) end;
     static procedure TBase.Note(const S: string); begin WriteLn('note ', S) end;
     function GetCls(): TBaseClass; begin Result := TDerived end;
     procedure THolder.Run();
@@ -2913,14 +2913,14 @@ const
     program P;
     type
       TPt = class
-        X, Y: Integer;
-        constructor Create(AX, AY: Integer); overload;
+        X, Y: Int;
+        constructor Create(AX, AY: Int); overload;
         constructor Create(); overload;
-        constructor CreateDiag(N: Integer);
+        constructor CreateDiag(N: Int);
       end;
-    constructor TPt.Create(AX, AY: Integer); begin X := AX; Y := AY end;
+    constructor TPt.Create(AX, AY: Int); begin X := AX; Y := AY end;
     constructor TPt.Create(); begin Self.Create(1, 2); X := X + 10 end;
-    constructor TPt.CreateDiag(N: Integer); begin Create(N, N) end;
+    constructor TPt.CreateDiag(N: Int); begin Create(N, N) end;
     var Pt: TPt;
     begin
       Pt := TPt.Create();
@@ -3012,15 +3012,15 @@ const
         program Prg;
         type
           TFoo = class
-            FD: Double;
-            FS: Single;
+            FD: Float64;
+            FS: Float32;
             procedure SetD(AValue: Int64);
             begin Self.FD := AValue end;     { Int64 -> Double, Self.Field }
             procedure SetDBare(AValue: Int64);
             begin FD := AValue end;          { Int64 -> Double, implicit Self }
-            procedure SetS(AValue: Integer);
+            procedure SetS(AValue: Int32);
             begin Self.FS := AValue end;     { Integer -> Single, Self.Field }
-            procedure SetSBare(AValue: Integer);
+            procedure SetSBare(AValue: Int32);
             begin FS := AValue end;          { Integer -> Single, implicit Self }
           end;
         var F: TFoo;
@@ -3087,19 +3087,19 @@ const
     type
       TCalc = class
       public
-        function Total(A: Integer): Integer;
-        function Twice(A: Integer): Integer;
+        function Total(A: Int): Int;
+        function Twice(A: Int): Int;
       end;
-    function TCalc.Total(A: Integer): Integer;
+    function TCalc.Total(A: Int): Int;
     begin
       Result := A + 1
     end;
-    function TCalc.Twice(A: Integer): Integer;
+    function TCalc.Twice(A: Int): Int;
     begin
       Result := Total(A) * 2   { must bind to TCalc.Total, not global TOTAL }
     end;
     var
-      TOTAL: Integer;
+      TOTAL: Int;
       C: TCalc;
     begin
       TOTAL := 99;
@@ -3119,13 +3119,13 @@ const
     type
       THold = class
       public
-        FCount: Integer;
-        FArr: array[0..2] of Integer;
-        FDyn: array of Integer;
+        FCount: Int;
+        FArr: array[0..2] of Int;
+        FDyn: array of Int;
       end;
       TRec = record
-        RI: array[0..2] of Integer;
-        RD: array of Integer;
+        RI: array[0..2] of Int;
+        RD: array of Int;
       end;
     var
       H: THold;
@@ -3161,17 +3161,17 @@ const
     type
       TInner = class
       public
-        Count: Integer;
+        Count: Int;
         S: string;
-        Arr: array[0..2] of Integer;
-        Dyn: array of Integer;
+        Arr: array[0..2] of Int;
+        Dyn: array of Int;
       end;
       TOuter = class
       public
         FInner: TInner;
         procedure Go;
       end;
-    procedure AddOne(var X: Integer);
+    procedure AddOne(var X: Int);
     begin X := X + 1 end;
     procedure TOuter.Go;
     begin
@@ -3206,11 +3206,11 @@ const
   Src = '''
     program P;
     type
-      PInt = ^Integer;
+      PInt = ^Int;
       TInner = class
       public
-        Arr: array[0..3] of Integer;
-        Dyn: array of Integer;
+        Arr: array[0..3] of Int;
+        Dyn: array of Int;
       end;
       TOuter = class
       public
@@ -3252,17 +3252,17 @@ begin
     type
       TThing = class
       private
-        FMagic: Integer;
+        FMagic: Int;
       public
         constructor Create();
-        function Magic(): Integer;
+        function Magic(): Int;
       end;
       TAlias = TThing;
     constructor TThing.Create();
     begin
       FMagic := 12345;
     end;
-    function TThing.Magic(): Integer;
+    function TThing.Magic(): Int;
     begin
       Result := FMagic;
     end;
@@ -3292,24 +3292,24 @@ const
       end;
       TOther = class(TObject) end;
       TFoo = class(TObject)
-        Value: Integer;
-        constructor Create(N: Integer); virtual;
+        Value: Int;
+        constructor Create(N: Int); virtual;
         destructor Destroy; override;
       end;
       TBar = class(TFoo)
-        constructor Create(N: Integer); override;
+        constructor Create(N: Int); override;
       end;
       TBaseClass = class of TBase;
       TFooClass = class of TFoo;
     var
-      Freed: Integer;
+      Freed: Int;
     destructor TBase.Destroy;
     begin Freed := Freed + 1; inherited Destroy() end;
-    constructor TFoo.Create(N: Integer);
+    constructor TFoo.Create(N: Int);
     begin Self.Value := N end;
     destructor TFoo.Destroy;
     begin Freed := Freed + 1; inherited Destroy() end;
-    constructor TBar.Create(N: Integer);
+    constructor TBar.Create(N: Int);
     begin Self.Value := N * 100 end;
     procedure Run;
     var
@@ -3360,26 +3360,26 @@ const
   Src = '''
     program Prg;
     type
-      TStep = procedure(N: Integer) of object;
+      TStep = procedure(N: Int) of object;
       TBase = class(TObject)
-        FVal: Integer;
+        FVal: Int;
       public
-        procedure Hidden(N: Integer);
+        procedure Hidden(N: Int);
       published
-        procedure FromBase(N: Integer);
+        procedure FromBase(N: Int);
       end;
       TCalc = class(TBase)
       published
-        procedure Add(N: Integer);
-        procedure Mul(N: Integer);
-        procedure Neg(N: Integer);
+        procedure Add(N: Int);
+        procedure Mul(N: Int);
+        procedure Neg(N: Int);
       end;
-    procedure TBase.Hidden(N: Integer); begin FVal := -1 end;
-    procedure TBase.FromBase(N: Integer); begin FVal := FVal + N * 1000 end;
-    procedure TCalc.Add(N: Integer); begin FVal := FVal + N end;
-    procedure TCalc.Mul(N: Integer); begin FVal := FVal * N end;
-    procedure TCalc.Neg(N: Integer); begin FVal := -FVal end;
-    procedure Call(C: TCalc; const AName: string; N: Integer);
+    procedure TBase.Hidden(N: Int); begin FVal := -1 end;
+    procedure TBase.FromBase(N: Int); begin FVal := FVal + N * 1000 end;
+    procedure TCalc.Add(N: Int); begin FVal := FVal + N end;
+    procedure TCalc.Mul(N: Int); begin FVal := FVal * N end;
+    procedure TCalc.Neg(N: Int); begin FVal := -FVal end;
+    procedure Call(C: TCalc; const AName: string; N: Int);
     var M: TMethod; P: TStep;
     begin
       M.Code := MethodAddress(C, AName);
@@ -3431,7 +3431,7 @@ const
     program MethodPtrs;
     type
       TM = procedure of object;
-      TBinOp = function(X, Y: Integer): Integer of object;
+      TBinOp = function(X, Y: Int): Int of object;
       TProc = procedure(const S: string) of object;
       TRec = record
         Handler: TM;
@@ -3444,8 +3444,8 @@ const
         procedure Speak; override;
       end;
       TCalc = class(TObject)
-        FBias: Integer;
-        function Add(X, Y: Integer): Integer;
+        FBias: Int;
+        function Add(X, Y: Int): Int;
         function GetOp: TBinOp;
       end;
       TA = class(TObject)
@@ -3458,7 +3458,7 @@ const
     begin WriteLn('animal ', FName) end;
     procedure TDog.Speak;
     begin WriteLn('dog ', FName) end;
-    function TCalc.Add(X, Y: Integer): Integer;
+    function TCalc.Add(X, Y: Int): Int;
     begin Result := X + Y + FBias end;
     function TCalc.GetOp: TBinOp;
     begin Result := @Self.Add end;
@@ -3542,10 +3542,10 @@ const
     type
       TFoo = class(TObject)
       published
-        procedure Show(const S: string; N: Integer);
+        procedure Show(const S: string; N: Int);
       end;
-      TShow = procedure (const S: string; N: Integer) of object;
-    procedure TFoo.Show(const S: string; N: Integer);
+      TShow = procedure (const S: string; N: Int) of object;
+    procedure TFoo.Show(const S: string; N: Int);
     begin
       WriteLn(S);
       WriteLn(IntToStr(N))
@@ -3572,7 +3572,7 @@ const
     program P;
     type
       TCounter = class(TObject)
-        Value: Integer;
+        Value: Int;
       published
         procedure Print;
       end;
@@ -3678,28 +3678,28 @@ const
     (leak-checked). }
   Src = '''
     program P;
-    var gValue: Integer;
+    var gValue: Int;
     type
       TBase = class
-        X: Integer;
-        procedure SetX(AVal: Integer);
-        function GetValue: Integer;
+        X: Int;
+        procedure SetX(AVal: Int);
+        function GetValue: Int;
         function Kind: string; virtual;
         procedure Bar(S: string);
       end;
       TDer = class(TBase)
-        FN: Integer;
-        constructor Create(N: Integer);
+        FN: Int;
+        constructor Create(N: Int);
         function Kind: string; override;
       end;
       TThing = class
-        X: Integer;
+        X: Int;
         constructor Create();
       end;
       TAlias = TThing;
       TFwd = class;
       TFwd = class
-        Y: Integer;
+        Y: Int;
       end;
       TState = class;
       Tstate = class
@@ -3708,14 +3708,14 @@ const
       TOv = class
       public
         Buf: string;
-        destructor Destroy(Why: Integer); overload;
+        destructor Destroy(Why: Int); overload;
         destructor Destroy; overload;
       end;
-    procedure TBase.SetX(AVal: Integer);
+    procedure TBase.SetX(AVal: Int);
     begin
       Self.X := AVal
     end;
-    function TBase.GetValue: Integer;
+    function TBase.GetValue: Int;
     begin
       Result := gValue + X
     end;
@@ -3727,7 +3727,7 @@ const
     begin
       WriteLn('bar ', S)
     end;
-    constructor TDer.Create(N: Integer);
+    constructor TDer.Create(N: Int);
     begin
       FN := N
     end;
@@ -3739,7 +3739,7 @@ const
     begin
       X := 7
     end;
-    destructor TOv.Destroy(Why: Integer);
+    destructor TOv.Destroy(Why: Int);
     begin
       WriteLn('destroy ', Why)
     end;
@@ -3800,7 +3800,7 @@ const
     program P;
     type
       TInner = class
-        V: Integer;
+        V: Int;
         destructor Destroy; override;
       end;
       TOuter = class
@@ -3809,8 +3809,8 @@ const
         destructor Destroy; override;
       end;
       TCtor = class
-        FN: Integer;
-        constructor Create(N: Integer);
+        FN: Int;
+        constructor Create(N: Int);
         destructor Destroy; override;
       end;
     destructor TInner.Destroy;
@@ -3823,7 +3823,7 @@ const
       WriteLn('outer ', Tag, ' gone');
       inherited Destroy()
     end;
-    constructor TCtor.Create(N: Integer);
+    constructor TCtor.Create(N: Int);
     begin
       FN := N
     end;
@@ -3889,9 +3889,9 @@ const
   Src = '''
     program Sc1;
     type
-      TArr = array[0..3] of Integer;
-      TInner = record A: TArr; N: Integer; end;
-      TRec = record A: TArr; In1: TInner; N: Integer; end;
+      TArr = array[0..3] of Int;
+      TInner = record A: TArr; N: Int; end;
+      TRec = record A: TArr; In1: TInner; N: Int; end;
       TObj = class
       public
         R: TRec;
@@ -3899,7 +3899,7 @@ const
         procedure Direct;
       end;
     var R: TRec;
-    procedure ShowGlobal(I: Integer); begin WriteLn('global ', R.N, ' ', R.A[I], ' ', R.In1.N, ' ', R.In1.A[I]); end;
+    procedure ShowGlobal(I: Int); begin WriteLn('global ', R.N, ' ', R.A[I], ' ', R.In1.N, ' ', R.In1.A[I]); end;
     procedure TObj.Run;
     var F: reference to procedure;
     begin
@@ -3933,12 +3933,12 @@ const
   Src = '''
     program CC2;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TColour = (cRed, cGreen, cBlue);
       TNames = array[0..1] of string;
       TObj = class
       public
-        const CI: array[0..3] of Integer = (1, 2, 3, 4);
+        const CI: array[0..3] of Int32 = (1, 2, 3, 4);
         const CA: TArr = (5, 6, 7, 8);
         const CN: TNames = ('ann', 'bob');
         procedure Show;
@@ -3948,8 +3948,8 @@ const
       end;
     const GA: TArr = (9, 10, 11, 12);
     procedure TObj.Show; begin WriteLn(CA[1], ' ', CN[0]); end;
-    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
-    var O: TObj; X: Integer;
+    procedure ShowOpen(const A: array of Int); var X: Int; begin for X in A do Write(X, ' '); WriteLn(); end;
+    var O: TObj; X: Int;
     begin
       WriteLn(TObj.CI[2], ' ', TObj.CA[2], ' ', GA[2], ' ', TObj.CN[1], ' ', TRec.RA[3]);
       O := TObj.Create(); O.Show(); O.Free();
@@ -4003,21 +4003,21 @@ const
     type
       TH = class
       private
-        function GetI(I: Integer): Integer;
-        procedure SetI(I: Integer; A: Integer);
+        function GetI(I: Int): Int;
+        procedure SetI(I: Int; A: Int);
       public
-        V: Integer;
-        procedure Put(A: Integer);
-        function Get(A: Integer): Integer;
-        procedure Put7(A, B, C, D, E, F, G: Integer);
-        property Items[I: Integer]: Integer read GetI write SetI; default;
+        V: Int;
+        procedure Put(A: Int);
+        function Get(A: Int): Int;
+        procedure Put7(A, B, C, D, E, F, G: Int);
+        property Items[I: Int]: Int read GetI write SetI; default;
       end;
-    var G: TH; N: Integer;
-    function TH.GetI(I: Integer): Integer; begin Result := V; end;
-    procedure TH.SetI(I: Integer; A: Integer); begin V := A; end;
-    procedure TH.Put(A: Integer); begin V := A; end;
-    function TH.Get(A: Integer): Integer; begin Result := A; end;
-    procedure TH.Put7(A, B, C, D, E, F, G: Integer); begin V := G; end;
+    var G: TH; N: Int;
+    function TH.GetI(I: Int): Int; begin Result := V; end;
+    procedure TH.SetI(I: Int; A: Int); begin V := A; end;
+    procedure TH.Put(A: Int); begin V := A; end;
+    function TH.Get(A: Int): Int; begin Result := A; end;
+    procedure TH.Put7(A, B, C, D, E, F, G: Int); begin V := G; end;
     function MkH(): TH; begin Inc(N); Result := G; end;
     begin
       G := TH.Create();

@@ -75,7 +75,7 @@ const
     program P;
     type
       TRect = record
-        L, T: Integer;
+        L, T: Int;
         class operator Add(const A, C: TRect): TRect;
         class operator Subtract(const A, C: TRect): TRect;
       end;
@@ -111,7 +111,7 @@ const
     type
       TTag = record
         Name: string;
-        N: Integer;
+        N: Int;
         class operator Add(const A, C: TTag): TTag;
       end;
     class operator TTag.Add(const A, C: TTag): TTag;
@@ -138,7 +138,7 @@ const
     program P;
     type
       TRect = record
-        L, T: Integer;
+        L, T: Int;
         class operator Add(const A, C: TRect): TRect;
       end;
     class operator TRect.Add(const A, C: TRect): TRect;
@@ -166,7 +166,7 @@ const
     program P;
     type
       TRect = record
-        L, T: Integer;
+        L, T: Int;
         class operator Add(const A, C: TRect): TRect;
       end;
     class operator TRect.Add(const A, C: TRect): TRect;
@@ -199,7 +199,7 @@ const
     type
       TTag = record
         Name: string;
-        N: Integer;
+        N: Int;
         class operator Add(const A, C: TTag): TTag;
       end;
     class operator TTag.Add(const A, C: TTag): TTag;
@@ -235,7 +235,7 @@ const
       TCol = (cRed, cGreen, cBlue);
       TCols = set of TCol;
       TRect = record
-        L: Integer;
+        L: Int;
         class operator Add(const A, C: TRect): TRect;
       end;
     class operator TRect.Add(const A, C: TRect): TRect;
@@ -244,7 +244,7 @@ const
     end;
     var
       S1, S2: string;
-      I1, I2: Integer;
+      I1, I2: Int;
       C1, C2, C3: TCols;
       R1, R2: TRect;
     begin
@@ -280,7 +280,7 @@ const
     end;
     var
       X, Y, Z: TTag;
-      I: Integer;
+      I: Int;
     begin
       X.Name := 'a';
       Y.Name := 'b';
@@ -309,12 +309,12 @@ const
     program P;
     type
       TRect = record
-        W, H: Integer;
+        W, H: Int;
         class operator Add(const A, B: TRect): TRect;
       end;
       TTag = record
         Name: string;
-        N: Integer;
+        N: Int;
         class operator Add(const A, C: TTag): TTag;
       end;
     class operator TRect.Add(const A, B: TRect): TRect;
@@ -327,7 +327,7 @@ const
       Result.Name := A.Name + C.Name;
       Result.N := A.N + C.N
     end;
-    var R1, R2, R3: TRect; X, Y, Z: TTag; S1, S2: string; I, J: Integer;
+    var R1, R2, R3: TRect; X, Y, Z: TTag; S1, S2: string; I, J: Int;
     begin
       R1.W := 1; R1.H := 2; R2.W := 10; R2.H := 20;
       R3 := R1 + R2;
@@ -356,7 +356,7 @@ const
     program P;
     type
       TP = record
-        X: Integer;
+        X: Int;
         Name: string;
         class operator Equal(const A, B: TP): Boolean;
         class operator NotEqual(const A, B: TP): Boolean;
@@ -379,7 +379,7 @@ const
     begin
       Result := A.X >= B.X
     end;
-    function Mk(AX: Integer; const AName: string): TP;
+    function Mk(AX: Int; const AName: string): TP;
     begin
       Result.X := AX;
       Result.Name := AName
@@ -410,18 +410,18 @@ const
     program P;
     type
       TP = record
-        X: Integer;
+        X: Int;
         S: string;
         class operator Equal(const A, B: TP): Boolean;
       end;
       TQ = record
-        X: Integer;
+        X: Int;
       end;
       TBag<T> = class
         FItems: array of T;
         procedure Add(const V: T);
         function Has(const V: T): Boolean;
-        function Count(): Integer;
+        function Count(): Int;
       end;
     class operator TP.Equal(const A, B: TP): Boolean;
     begin
@@ -433,18 +433,18 @@ const
       FItems[High(FItems)] := V
     end;
     function TBag<T>.Has(const V: T): Boolean;
-    var I: Integer;
+    var I: Int;
     begin
       Result := False;
       for I := 0 to High(FItems) do
         if FItems[I] = V then
           Result := True
     end;
-    function TBag<T>.Count(): Integer;
+    function TBag<T>.Count(): Int;
     begin
       Result := Length(FItems)
     end;
-    function Mk(AX: Integer; const AStr: string): TP;
+    function Mk(AX: Int; const AStr: string): TP;
     begin
       Result.X := AX;
       Result.S := AStr
@@ -473,12 +473,12 @@ const
     program P;
     type
       TNum = record
-        V: Integer;
+        V: Int;
         S: string;
         function Add(const B: TNum): TNum;
         class operator Add(const A, B: TNum): TNum;
-        class operator Multiply(const A: TNum; B: Integer): TNum;
-        class operator Multiply(A: Integer; const B: TNum): TNum;
+        class operator Multiply(const A: TNum; B: Int): TNum;
+        class operator Multiply(A: Int; const B: TNum): TNum;
       end;
     function TNum.Add(const B: TNum): TNum;
     begin
@@ -490,12 +490,12 @@ const
       Result.V := A.V + B.V;
       Result.S := 'operator'
     end;
-    class operator TNum.Multiply(const A: TNum; B: Integer): TNum;
+    class operator TNum.Multiply(const A: TNum; B: Int): TNum;
     begin
       Result.V := A.V * B;
       Result.S := 'num*int'
     end;
-    class operator TNum.Multiply(A: Integer; const B: TNum): TNum;
+    class operator TNum.Multiply(A: Int; const B: TNum): TNum;
     begin
       Result.V := A * B.V * 10;
       Result.S := 'int*num'

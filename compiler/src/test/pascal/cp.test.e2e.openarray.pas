@@ -131,8 +131,8 @@ const
   SrcOpenArraySum =
     '''
     program P;
-    function Sum(const A: array of Integer): Integer;
-    var I: Integer;
+    function Sum(const A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do
@@ -146,7 +146,7 @@ const
   SrcOpenArrayHighLow =
     '''
     program P;
-    procedure PrintBounds(const A: array of Integer);
+    procedure PrintBounds(const A: array of Int);
     begin
       WriteLn(Low(A));
       WriteLn(High(A))
@@ -159,7 +159,7 @@ const
   SrcOpenArrayLength =
     '''
     program P;
-    function Count(const A: array of Integer): Integer;
+    function Count(const A: array of Int): Int;
     begin
       Result := Length(A)
     end;
@@ -171,11 +171,11 @@ const
   SrcStaticLenZeroBase =
     '''
     program P;
-    procedure PrintLen(const A: array of Integer);
+    procedure PrintLen(const A: array of Int);
     begin
       WriteLn(Length(A))
     end;
-    var B: array[0..4] of Integer;
+    var B: array[0..4] of Int;
     begin
       PrintLen(B)
     end.
@@ -184,11 +184,11 @@ const
   SrcStaticLenNonZero =
     '''
     program P;
-    procedure PrintLen(const A: array of Integer);
+    procedure PrintLen(const A: array of Int);
     begin
       WriteLn(Length(A))
     end;
-    var B: array[3..7] of Integer;
+    var B: array[3..7] of Int;
     begin
       PrintLen(B)
     end.
@@ -197,14 +197,14 @@ const
   SrcStaticSum =
     '''
     program P;
-    function Sum(const A: array of Integer): Integer;
-    var I: Integer;
+    function Sum(const A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do
         Result := Result + A[I]
     end;
-    var B: array[0..2] of Integer;
+    var B: array[0..2] of Int;
     begin
       B[0] := 10;
       B[1] := 20;
@@ -216,18 +216,18 @@ const
   SrcStaticPassNested =
     '''
     program P;
-    function Sum(const A: array of Integer): Integer;
-    var I: Integer;
+    function Sum(const A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do
         Result := Result + A[I]
     end;
-    procedure Process(const A: array of Integer);
+    procedure Process(const A: array of Int);
     begin
       WriteLn(Sum(A))
     end;
-    var B: array[0..2] of Integer;
+    var B: array[0..2] of Int;
     begin
       B[0] := 5;
       B[1] := 10;
@@ -239,11 +239,11 @@ const
   SrcStaticConstRead =
     '''
     program P;
-    function First(const A: array of Integer): Integer;
+    function First(const A: array of Int): Int;
     begin
       Result := A[0]
     end;
-    var B: array[0..2] of Integer;
+    var B: array[0..2] of Int;
     begin
       B[0] := 77; B[1] := 88; B[2] := 99;
       WriteLn(First(B));
@@ -365,19 +365,19 @@ const
   SrcProcTypeOpenArray =
     '''
     program P;
-    type TIntFn = function: Integer;
+    type TIntFn = function: Int;
 
-    function ApplyAll(const Fns: array of TIntFn): Integer;
-    var I: Integer;
+    function ApplyAll(const Fns: array of TIntFn): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(Fns) do
         Result := Result + Fns[I]();
     end;
 
-    function One: Integer; begin Result := 1; end;
-    function Two: Integer; begin Result := 2; end;
-    function Three: Integer; begin Result := 3; end;
+    function One: Int; begin Result := 1; end;
+    function Two: Int; begin Result := 2; end;
+    function Three: Int; begin Result := 3; end;
 
     var A: array[0..2] of TIntFn;
     begin
@@ -402,26 +402,26 @@ const
     program P;
     type
       TFoo = class
-        FSeed: Integer;
-        constructor Create(const Init: array of Integer);
-        function Sum(const A: array of Integer): Integer;
-        procedure Note(const A: array of Integer);
+        FSeed: Int;
+        constructor Create(const Init: array of Int);
+        function Sum(const A: array of Int): Int;
+        procedure Note(const A: array of Int);
       end;
-    constructor TFoo.Create(const Init: array of Integer);
-    var I: Integer;
+    constructor TFoo.Create(const Init: array of Int);
+    var I: Int;
     begin
       FSeed := 0;
       for I := 0 to High(Init) do
         FSeed := FSeed + Init[I];
     end;
-    function TFoo.Sum(const A: array of Integer): Integer;
-    var I: Integer;
+    function TFoo.Sum(const A: array of Int): Int;
+    var I: Int;
     begin
       Result := FSeed;
       for I := 0 to High(A) do
         Result := Result + A[I];
     end;
-    procedure TFoo.Note(const A: array of Integer);
+    procedure TFoo.Note(const A: array of Int);
     begin
       writeln(High(A) + 1);
     end;
@@ -448,13 +448,13 @@ end;
 const
   SrcDynSum = '''
     program P;
-    function Sum(const A: array of Integer): Integer;
-    var I: Integer;
+    function Sum(const A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do Result := Result + A[I];
     end;
-    var X: array of Integer; I: Integer;
+    var X: array of Int; I: Int;
     begin
       SetLength(X, 5);
       for I := 0 to 4 do X[I] := I + 1;
@@ -464,12 +464,12 @@ const
 
   SrcDynHighLen = '''
     program P;
-    procedure Report(const A: array of Integer);
+    procedure Report(const A: array of Int);
     begin
       WriteLn(Length(A));
       WriteLn(High(A));
     end;
-    var X: array of Integer;
+    var X: array of Int;
     begin
       SetLength(X, 7);
       Report(X);
@@ -478,11 +478,11 @@ const
 
   SrcDynEmpty = '''
     program P;
-    function Count(const A: array of Integer): Integer;
+    function Count(const A: array of Int): Int;
     begin
       Result := Length(A);
     end;
-    var X: array of Integer;
+    var X: array of Int;
     begin
       SetLength(X, 0);
       WriteLn(Count(X));
@@ -492,7 +492,7 @@ const
   SrcDynOfString = '''
     program P;
     function Join(const A: array of string): string;
-    var I: Integer;
+    var I: Int;
     begin
       Result := '';
       for I := 0 to High(A) do Result := Result + A[I];
@@ -507,17 +507,17 @@ const
 
   SrcDynNested = '''
     program P;
-    function Sum(const A: array of Integer): Integer;
-    var I: Integer;
+    function Sum(const A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do Result := Result + A[I];
     end;
-    procedure Process(const A: array of Integer);
+    procedure Process(const A: array of Int);
     begin
       WriteLn(Sum(A));
     end;
-    var X: array of Integer; I: Integer;
+    var X: array of Int; I: Int;
     begin
       SetLength(X, 4);
       for I := 0 to 3 do X[I] := (I + 1) * 10;
@@ -563,8 +563,8 @@ const Src = '''
     program P;
     procedure ShowS(const A: array of string);
     begin WriteLn(Length(A)) end;
-    procedure ShowI(const A: array of Integer);
-    var i, s: Integer;
+    procedure ShowI(const A: array of Int);
+    var i, s: Int;
     begin
       s := 0;
       for i := 0 to Length(A) - 1 do s := s + A[i];
@@ -588,7 +588,7 @@ procedure TE2EOpenArrayTests.TestRun_EmptyLiteral_OverloadDisambiguation;
   argument still picks the scalar overload. }
 const Src = '''
     program P;
-    procedure F(X: Integer); overload;
+    procedure F(X: Int); overload;
     begin WriteLn('int') end;
     procedure F(const A: array of string); overload;
     begin WriteLn('oa ', Length(A)) end;
@@ -608,10 +608,10 @@ const
   { Read-only body on a var open array — the exact issue #130 repro. }
   Src = '''
     program P;
-    procedure SumVar(var a: array of Integer);
-    var i, s: Integer;
+    procedure SumVar(var a: array of Int);
+    var i, s: Int;
     begin s := 0; for i := 0 to High(a) do s := s + a[i]; WriteLn(s) end;
-    var x: array[0..2] of Integer;
+    var x: array[0..2] of Int;
     begin x[0] := 1; x[1] := 2; x[2] := 3; SumVar(x) end.
     ''';
 begin
@@ -624,10 +624,10 @@ const
   { Element write through a var open array mutates the caller's storage. }
   Src = '''
     program P;
-    procedure Zero(var a: array of Integer);
-    var i: Integer;
+    procedure Zero(var a: array of Int);
+    var i: Int;
     begin for i := 0 to High(a) do a[i] := 0 end;
-    var x: array[0..2] of Integer; i: Integer;
+    var x: array[0..2] of Int; i: Int;
     begin
       x[0] := 1; x[1] := 2; x[2] := 3;
       Zero(x);
@@ -645,13 +645,13 @@ const
     array, then read it back via a const open array. }
   Src = '''
     program P;
-    procedure Scale(var a: array of Integer; by: Integer);
-    var i: Integer;
+    procedure Scale(var a: array of Int; by: Int);
+    var i: Int;
     begin for i := 0 to High(a) do a[i] := a[i] * by end;
-    function SumC(const a: array of Integer): Integer;
-    var i: Integer;
+    function SumC(const a: array of Int): Int;
+    var i: Int;
     begin Result := 0; for i := 0 to High(a) do Result := Result + a[i] end;
-    var x: array[0..3] of Integer; i: Integer;
+    var x: array[0..3] of Int; i: Int;
     begin
       for i := 0 to 3 do x[i] := i + 1;
       Scale(x, 10);
@@ -681,11 +681,11 @@ begin
       public
         function RunOnLibs(ABk: TBk; const ASrc: string;
                            const ALibs: array of string;
-                           out AOut: string; out ACode: Integer): Boolean;
+                           out AOut: string; out ACode: Int): Boolean;
       end;
     function TC.RunOnLibs(ABk: TBk; const ASrc: string;
                           const ALibs: array of string;
-                          out AOut: string; out ACode: Integer): Boolean;
+                          out AOut: string; out ACode: Int): Boolean;
     begin
       WriteLn('high=', IntToStr(High(ALibs)));
       AOut := 'out:' + ASrc;
@@ -696,7 +696,7 @@ begin
       C: TC;
       A: array[0..1] of string;
       O: string;
-      Code: Integer;
+      Code: Int;
     begin
       C := TC.Create();
       A[0] := 'x';
@@ -713,17 +713,17 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TCnt = function(const A: array of Integer): Integer;
-      TSum = function(A: array of Integer): Integer;
+      TCnt = function(const A: array of Int): Int;
+      TSum = function(A: array of Int): Int;
       TFmt = procedure(const S: string; const Args: array of const);
-      TGCnt<T> = function(const A: array of T): Integer;
-    function Cnt(const A: array of Integer): Integer;
+      TGCnt<T> = function(const A: array of T): Int;
+    function Cnt(const A: array of Int): Int;
     begin
       Result := Length(A)
     end;
-    function Sum(A: array of Integer): Integer;
+    function Sum(A: array of Int): Int;
     var
-      I: Integer;
+      I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do
@@ -733,7 +733,7 @@ begin
     begin
       WriteLn(Format(S, Args))
     end;
-    function Apply(F: TCnt; const A: array of Integer): Integer;
+    function Apply(F: TCnt; const A: array of Int): Int;
     begin
       Result := F(A)                  { proc-type PARAM, open-array passthrough }
     end;
@@ -741,9 +741,9 @@ begin
       C: TCnt;
       S: TSum;
       F: TFmt;
-      G: TGCnt<Integer>;
-      D: array of Integer;
-      St: array[0..2] of Integer;
+      G: TGCnt<Int>;
+      D: array of Int;
+      St: array[0..2] of Int;
     begin
       C := @Cnt;
       S := @Sum;
@@ -772,29 +772,29 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TCnt = function(const A: array of Integer): Integer;
-      TShow = procedure(const A: array of Integer);
-      TRefCnt = reference to function(const A: array of Integer): Integer;
-      TMSum = function(const A: array of Integer): Integer of object;
+      TCnt = function(const A: array of Int): Int;
+      TShow = procedure(const A: array of Int);
+      TRefCnt = reference to function(const A: array of Int): Int;
+      TMSum = function(const A: array of Int): Int of object;
       TBox = class
       public
         FC: TCnt;
         FS: TShow;
-        FBase: Integer;
-        function Total(const A: array of Integer): Integer;
+        FBase: Int;
+        function Total(const A: array of Int): Int;
         procedure Drv();
       end;
-    function Cnt(const A: array of Integer): Integer;
+    function Cnt(const A: array of Int): Int;
     begin
       Result := Length(A)
     end;
-    procedure ShowLen(const A: array of Integer);
+    procedure ShowLen(const A: array of Int);
     begin
       WriteLn('len=', Length(A))
     end;
-    function TBox.Total(const A: array of Integer): Integer;
+    function TBox.Total(const A: array of Int): Int;
     var
-      I: Integer;
+      I: Int;
     begin
       Result := FBase;
       for I := 0 to High(A) do
@@ -809,10 +809,10 @@ begin
       R: TRefCnt;
       M: TMSum;
       B: TBox;
-      K: Integer;
+      K: Int;
     begin
       K := 100;
-      R := function(const A: array of Integer): Integer
+      R := function(const A: array of Int): Int
         begin
           Result := Length(A) + K
         end;
@@ -843,7 +843,7 @@ const
   Src = '''
     program P;
     procedure Inner(const B: array of string);
-    var I: Integer;
+    var I: Int;
     begin
       Write(High(B), ':');
       for I := Low(B) to High(B) do
@@ -876,36 +876,36 @@ const Src =
   const K = 300;
   type
     TBase = class
-      procedure Put(const A: array of Word); virtual;
+      procedure Put(const A: array of UInt16); virtual;
     end;
     TKid = class(TBase)
-      procedure Put(const A: array of Word); override;
+      procedure Put(const A: array of UInt16); override;
     end;
-  procedure TBase.Put(const A: array of Word);
-  var I: Integer;
+  procedure TBase.Put(const A: array of UInt16);
+  var I: Int;
   begin
     for I := 0 to High(A) do Write(A[I], ' ');
     WriteLn()
   end;
-  procedure TKid.Put(const A: array of Word);
+  procedure TKid.Put(const A: array of UInt16);
   begin
     Write('kid ');
     inherited Put([60000, K, 1])
   end;
   procedure Bytes(const A: array of Byte);
-  var I: Integer;
+  var I: Int;
   begin
     for I := 0 to High(A) do Write(A[I], ' ');
     WriteLn()
   end;
-  procedure Smalls(const A: array of SmallInt);
-  var I: Integer;
+  procedure Smalls(const A: array of Int16);
+  var I: Int;
   begin
     for I := 0 to High(A) do Write(A[I], ' ');
     WriteLn()
   end;
   procedure Bigs(const A: array of Int64);
-  var I: Integer;
+  var I: Int;
   begin
     for I := 0 to High(A) do Write(A[I], ' ');
     WriteLn()
@@ -914,7 +914,7 @@ const Src =
   begin
     WriteLn('byte ', Length(A))
   end;
-  procedure Pick(const A: array of Integer); overload;
+  procedure Pick(const A: array of Int); overload;
   begin
     WriteLn('integer ', Length(A))
   end;
@@ -983,16 +983,16 @@ procedure TE2EOpenArrayTests.TestRun_NestedRoutine_CapturesOpenArray;
 const Src =
   '''
   program P;
-  procedure Run(const A: array of Integer; var V: array of Byte);
+  procedure Run(const A: array of Int; var V: array of Byte);
     procedure ShowLen;
     begin
       WriteLn('len ', Length(A), ' high ', High(A))
     end;
     procedure Inner;
     var
-      I, X: Integer;
+      I, X: Int;
       procedure Deeper;
-      var Y: Integer;
+      var Y: Int;
       begin
         for Y in A do Write('d', Y, ' ');
         WriteLn();
@@ -1049,7 +1049,7 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..2] of Integer;
+      TArr = array[0..2] of Int;
       TC = class
         A: TArr;
         function GetA: TArr;
@@ -1057,8 +1057,8 @@ const
       TR = record A: TArr; end;
       PRec = ^TR;
     function TC.GetA: TArr; begin Result := A end;
-    procedure Show(const V: array of Integer);
-    var I: Integer;
+    procedure Show(const V: array of Int);
+    var I: Int;
     begin
       for I := 0 to High(V) do Write(V[I], ' ');
       WriteLn(High(V))
@@ -1094,11 +1094,11 @@ procedure TE2EOpenArrayTests.TestRun_StaticArrayParamsAndCalls_ToOpenArray;
 const
   Src = '''
     program se;
-    type TArr = array[0..2] of Integer;
-    procedure Show(const V: array of Integer);
-    var I: Integer;
+    type TArr = array[0..2] of Int;
+    procedure Show(const V: array of Int);
+    var I: Int;
     begin for I := 0 to High(V) do Write(V[I], ' '); WriteLn(High(V)) end;
-    function MakeA(K: Integer): TArr; begin Result[0] := K; Result[1] := 0; Result[2] := K * 2 end;
+    function MakeA(K: Int): TArr; begin Result[0] := K; Result[1] := 0; Result[2] := K * 2 end;
     procedure ByVar(var X: TArr); begin Show(X) end;
     procedure ByVal(X: TArr); begin Show(X) end;
     procedure ByConst(const X: TArr); begin Show(X) end;
@@ -1109,9 +1109,9 @@ const
     var L: TArr;
       procedure Inner; begin Show(L) end;
     begin L[0] := 8; Inner() end;
-    function Sum(K: Integer): Integer;
+    function Sum(K: Int): Int;
     begin Result := MakeA(K)[0] + MakeA(K)[2] end;
-    var G: TArr; K: Integer;
+    var G: TArr; K: Int;
     begin
       WriteLn(MakeA(3)[2]);
       G[1] := 6;
@@ -1137,19 +1137,19 @@ const
   Src = '''
     program s1;
     uses SysUtils;
-    function SumOA(const V: array of Integer): Integer;
-    var I: Integer;
+    function SumOA(const V: array of Int): Int;
+    var I: Int;
     begin Result := 0; for I := 0 to High(V) do Result := Result + V[I] end;
-    function F7(A, B, C, D, E, G, H: Integer; const V: array of Integer): Integer;
+    function F7(A, B, C, D, E, G, H: Int; const V: array of Int): Int;
     begin Result := A + B + C + D + E + G + H + SumOA(V) * 100 + High(V) * 10000 end;
-    function F8(A, B, C, D, E, G, H, K: Integer; const V: array of Integer; L: Integer): Integer;
+    function F8(A, B, C, D, E, G, H, K: Int; const V: array of Int; L: Int): Int;
     begin Result := A + H + K + L * 1000 + SumOA(V) * 100 + High(V) * 100000 end;
-    function Two(const P: array of Integer; A, B, C, D, E: Integer; const Q: array of string): string;
-    var I: Integer;
+    function Two(const P: array of Int; A, B, C, D, E: Int; const Q: array of string): string;
+    var I: Int;
     begin Result := IntToStr(SumOA(P) + A + E) + ':'; for I := 0 to High(Q) do Result := Result + Q[I] end;
-    procedure ManyVar(A, B, C, D, E, G: Integer; var X: Integer; const V: array of Integer);
+    procedure ManyVar(A, B, C, D, E, G: Int; var X: Int; const V: array of Int);
     begin X := SumOA(V) + G end;
-    var Arr: array[0..3] of Integer; D: array of Integer; X: Integer;
+    var Arr: array[0..3] of Int; D: array of Int; X: Int;
     begin
       Arr[0] := 1; Arr[1] := 2; Arr[2] := 3; Arr[3] := 4;
       SetLength(D, 2); D[0] := 5; D[1] := 6;
@@ -1173,23 +1173,23 @@ const
   Src = '''
     program OALits;
     uses SysUtils;
-    type TTag = class N: Integer; end;
-    function MkS(N: Integer): string; begin Result := 'f' + IntToStr(N) end;
-    function MkT(N: Integer): TTag; begin Result := TTag.Create(); Result.N := N end;
-    procedure Show(const AExe: string; const A: array of string; ATail: Integer);
-    var I: Integer; Line: string;
+    type TTag = class N: Int; end;
+    function MkS(N: Int): string; begin Result := 'f' + IntToStr(N) end;
+    function MkT(N: Int): TTag; begin Result := TTag.Create(); Result.N := N end;
+    procedure Show(const AExe: string; const A: array of string; ATail: Int);
+    var I: Int; Line: string;
     begin
       Line := AExe;
       for I := 0 to High(A) do Line := Line + ' ' + A[I];
       WriteLn(Line, ' ', ATail)
     end;
-    function SumTags(const A: array of TTag): Integer;
-    var I: Integer;
+    function SumTags(const A: array of TTag): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do Result := Result + A[I].N
     end;
-    var I: Integer;
+    var I: Int;
     begin
       for I := 1 to 2 do
         Show('gcc', ['-o', MkS(I), MkS(I * 10)], 7);
@@ -1206,56 +1206,56 @@ const
   Src = '''
     program P;
     type
-      TTot = function(var A: array of Integer): Integer;
-      TTotM = function(var A: array of Integer): Integer of object;
+      TTot = function(var A: array of Int): Int;
+      TTotM = function(var A: array of Int): Int of object;
       TRec = record
-        K: Integer;
-        function Tot(var A: array of Integer): Integer;
+        K: Int;
+        function Tot(var A: array of Int): Int;
       end;
       TC = class
-        S: Integer;
-        constructor Create(var A: array of Integer);
-        function Tot(var A: array of Integer): Integer;
-        function Many(P1, P2, P3, P4: Integer; var A: array of Integer;
-          P5: Integer): Integer;
-        static function STot(var A: array of Integer): Integer;
+        S: Int;
+        constructor Create(var A: array of Int);
+        function Tot(var A: array of Int): Int;
+        function Many(P1, P2, P3, P4: Int; var A: array of Int;
+          P5: Int): Int;
+        static function STot(var A: array of Int): Int;
       end;
       ISvc = interface
-        function Total(var A: array of Integer): Integer;
-        procedure Fill(out A: array of Integer; V: Integer);
+        function Total(var A: array of Int): Int;
+        procedure Fill(out A: array of Int; V: Int);
       end;
       TSvc = class(TObject, ISvc)
-        function Total(var A: array of Integer): Integer;
-        procedure Fill(out A: array of Integer; V: Integer);
+        function Total(var A: array of Int): Int;
+        procedure Fill(out A: array of Int; V: Int);
       end;
-    function Sum(var A: array of Integer): Integer;
-    var I: Integer;
+    function Sum(var A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do Result := Result + A[I]
     end;
-    function TRec.Tot(var A: array of Integer): Integer; begin Result := Sum(A) + K end;
-    constructor TC.Create(var A: array of Integer); begin S := Sum(A); A[0] := 100 end;
-    function TC.Tot(var A: array of Integer): Integer; begin Result := Sum(A) end;
-    function TC.Many(P1, P2, P3, P4: Integer; var A: array of Integer;
-      P5: Integer): Integer;
+    function TRec.Tot(var A: array of Int): Int; begin Result := Sum(A) + K end;
+    constructor TC.Create(var A: array of Int); begin S := Sum(A); A[0] := 100 end;
+    function TC.Tot(var A: array of Int): Int; begin Result := Sum(A) end;
+    function TC.Many(P1, P2, P3, P4: Int; var A: array of Int;
+      P5: Int): Int;
     begin
       Result := P1 + P2 + P3 + P4 + P5 + Sum(A)
     end;
-    static function TC.STot(var A: array of Integer): Integer; begin Result := Sum(A) * 2 end;
-    function TSvc.Total(var A: array of Integer): Integer;
-    var I: Integer;
+    static function TC.STot(var A: array of Int): Int; begin Result := Sum(A) * 2 end;
+    function TSvc.Total(var A: array of Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(A) do begin Result := Result + A[I]; A[I] := 0 end
     end;
-    procedure TSvc.Fill(out A: array of Integer; V: Integer);
-    var I: Integer;
+    procedure TSvc.Fill(out A: array of Int; V: Int);
+    var I: Int;
     begin
       for I := 0 to High(A) do A[I] := V + I
     end;
     var F: TTot; M: TTotM; R: TRec; C: TC; S: ISvc;
-      Arr: array[0..2] of Integer; D: array of Integer;
+      Arr: array[0..2] of Int; D: array of Int;
     begin
       Arr[0] := 1; Arr[1] := 2; Arr[2] := 3;
       F := @Sum; WriteLn(F(Arr));
@@ -1287,40 +1287,40 @@ const
   Src = '''
     program P;
     type
-      TFn = function(X: Double): Double;
-      TFnS = function(X: Single): Single;
-      TRef = reference to function(X: Double): Double;
-      TRefS = reference to function(X: Single): Single;
-      TMeth = function(X: Double): Double of object;
+      TFn = function(X: Float64): Float64;
+      TFnS = function(X: Float32): Float32;
+      TRef = reference to function(X: Float64): Float64;
+      TRefS = reference to function(X: Float32): Float32;
+      TMeth = function(X: Float64): Float64 of object;
       TK = class
-        function Half(X: Double): Double;
-        function HalfS(X: Single): Single;
+        function Half(X: Float64): Float64;
+        function HalfS(X: Float32): Float32;
         procedure Run();
       end;
-    function Sum(const A: array of Double): Double;
-    var I: Integer;
+    function Sum(const A: array of Float64): Float64;
+    var I: Int;
     begin Result := 0; for I := 0 to High(A) do Result := Result + A[I] end;
-    function SumS(const A: array of Single): Single;
-    var I: Integer;
+    function SumS(const A: array of Float32): Float32;
+    var I: Int;
     begin Result := 0; for I := 0 to High(A) do Result := Result + A[I] end;
-    function Twice(X: Double): Double; begin Result := X * 2 end;
-    function TwiceS(X: Single): Single; begin Result := X * 2 end;
+    function Twice(X: Float64): Float64; begin Result := X * 2 end;
+    function TwiceS(X: Float32): Float32; begin Result := X * 2 end;
     function GetFn(): TFn; begin Result := @Twice end;
-    function TK.Half(X: Double): Double; begin Result := X / 2 end;
-    function TK.HalfS(X: Single): Single; begin Result := X / 2 end;
+    function TK.Half(X: Float64): Float64; begin Result := X / 2 end;
+    function TK.HalfS(X: Float32): Float32; begin Result := X / 2 end;
     procedure TK.Run();
     begin
       WriteLn('self ', Sum([Half(3), 1.0]):0:2, ' ', SumS([HalfS(3)]):0:2);
     end;
     var
       Fns: array[0..0] of TFn; FnsS: array[0..0] of TFnS;
-      F: TFn; R: TRef; RS: TRefS; M: TMeth; K: TK; D: Double; S: Single;
+      F: TFn; R: TRef; RS: TRefS; M: TMeth; K: TK; D: Float64; S: Float32;
     begin
       K := TK.Create();
       D := 1.5; S := 2.5;
       Fns[0] := @Twice; FnsS[0] := @TwiceS; F := @Twice; M := @K.Half;
-      R := function(X: Double): Double begin Result := X * 3 end;
-      RS := function(X: Single): Single begin Result := X * 3 end;
+      R := function(X: Float64): Float64 begin Result := X * 3 end;
+      RS := function(X: Float32): Float32 begin Result := X * 3 end;
       WriteLn('values ', Sum([1.0, 2.0]):0:2, ' ', Sum([D, D * 2]):0:2, ' ',
         Sum([-D]):0:2, ' ', SumS([S, S + S]):0:2);
       WriteLn('direct ', Sum([Twice(D)]):0:2, ' ', SumS([TwiceS(S)]):0:2);
@@ -1348,21 +1348,21 @@ const
   Src = '''
     program OA1;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TObj = class
       private
         FArr: TArr;
         function GetArr: TArr;
-        function GetArrI(I: Integer): TArr;
+        function GetArrI(I: Int): TArr;
       public
         property AG: TArr read GetArr;
-        property AI[I: Integer]: TArr read GetArrI;
+        property AI[I: Int]: TArr read GetArrI;
         procedure Run;
       end;
     function TObj.GetArr: TArr; begin Result := FArr; Result[0] := 99; end;
-    function TObj.GetArrI(I: Integer): TArr; begin Result := FArr; Result[1] := I; end;
-    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
-    procedure ShowVal(A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    function TObj.GetArrI(I: Int): TArr; begin Result := FArr; Result[1] := I; end;
+    procedure ShowOpen(const A: array of Int); var X: Int; begin for X in A do Write(X, ' '); WriteLn(); end;
+    procedure ShowVal(A: array of Int); var X: Int; begin for X in A do Write(X, ' '); WriteLn(); end;
     procedure TObj.Run; begin ShowOpen(AG); ShowOpen(Self.AG); ShowOpen(GetArr()); end;
     var O: TObj;
     begin
@@ -1408,36 +1408,36 @@ const
       Result := 'B'
     end;
     function Names(const L: array of TA): string;
-    var I: Integer;
+    var I: Int;
     begin
       Result := '';
       for I := 0 to High(L) do
         Result := Result + L[I].Name()
     end;
-    function Sum(const L: array of Double): Double;
-    var I: Integer;
+    function Sum(const L: array of Float64): Float64;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(L) do
         Result := Result + L[I]
     end;
-    function SumS(const L: array of Single): Single;
-    var I: Integer;
+    function SumS(const L: array of Float32): Float32;
+    var I: Int;
     begin
       Result := 0;
       for I := 0 to High(L) do
         Result := Result + L[I]
     end;
-    function Pick(const L: array of Integer): string; overload;
+    function Pick(const L: array of Int): string; overload;
     begin
       Result := 'int'
     end;
-    function Pick(const L: array of Double): string; overload;
+    function Pick(const L: array of Float64): string; overload;
     begin
       Result := 'dbl'
     end;
     function Kinds(const L: array of TAC): string;
-    var I: Integer;
+    var I: Int;
     begin
       Result := '';
       for I := 0 to High(L) do
@@ -1446,7 +1446,7 @@ const
         else
           Result := Result + 'a'
     end;
-    var X: TA; Y: TB; I: Integer; D: Double;
+    var X: TA; Y: TB; I: Int; D: Float64;
     begin
       X := TA.Create();
       Y := TB.Create();
@@ -1471,40 +1471,40 @@ const
     program P;
     type
       IFoo = interface
-        function N(): Integer;
+        function N(): Int;
       end;
       TFoo = class(TObject, IFoo)
-        FN: Integer;
-        constructor Create(A: Integer);
+        FN: Int;
+        constructor Create(A: Int);
         destructor Destroy; override;
-        function N(): Integer;
+        function N(): Int;
       end;
-      TRec = record S: string; K: Integer; end;
-      TPt = record X, Y: Integer; end;
+      TRec = record S: string; K: Int; end;
+      TPt = record X, Y: Int; end;
       TSA = array[0..1] of string;
-      TProc = reference to function(): Integer;
-      TM = procedure(A: Integer) of object;
+      TProc = reference to function(): Int;
+      TM = procedure(A: Int) of object;
       TObj = class
         Tag: string;
-        procedure Hello(A: Integer);
+        procedure Hello(A: Int);
         procedure Take(const A: array of TRec);
       end;
       TTaker = procedure(const A: array of TRec);
-    constructor TFoo.Create(A: Integer); begin FN := A; end;
+    constructor TFoo.Create(A: Int); begin FN := A; end;
     destructor TFoo.Destroy; begin WriteLn('free ', FN); end;
-    function TFoo.N(): Integer; begin Result := FN; end;
-    procedure TObj.Hello(A: Integer); begin WriteLn('hello ', Tag, ' ', A); end;
+    function TFoo.N(): Int; begin Result := FN; end;
+    procedure TObj.Hello(A: Int); begin WriteLn('hello ', Tag, ' ', A); end;
     procedure TObj.Take(const A: array of TRec); begin WriteLn('meth ', A[High(A)].S); end;
-    function MkI(A: Integer): IFoo; begin Result := TFoo.Create(A); end;
-    function MkR(A: Integer): TRec; begin Result.S := 'r' + IntToStr(A); Result.K := A; end;
-    function MkP(A: Integer): TProc; begin Result := function(): Integer begin Result := A * 2; end; end;
-    function Pt(X, Y: Integer): TPt; begin Result.X := X; Result.Y := Y; end;
-    procedure SI(const A: array of IFoo); var I: Integer; begin for I := 0 to High(A) do WriteLn('i ', A[I].N()); end;
-    procedure SR(const A: array of TRec); var I: Integer; begin for I := 0 to High(A) do WriteLn('r ', A[I].S, ' ', A[I].K); end;
-    procedure SP(const A: array of TProc); var I: Integer; begin for I := 0 to High(A) do WriteLn('p ', A[I]()); end;
-    procedure SPt(const A: array of TPt); var I, T: Integer; begin T := 0; for I := 0 to High(A) do T := T + A[I].X * A[I].Y; WriteLn('pt ', T); end;
+    function MkI(A: Int): IFoo; begin Result := TFoo.Create(A); end;
+    function MkR(A: Int): TRec; begin Result.S := 'r' + IntToStr(A); Result.K := A; end;
+    function MkP(A: Int): TProc; begin Result := function(): Int begin Result := A * 2; end; end;
+    function Pt(X, Y: Int): TPt; begin Result.X := X; Result.Y := Y; end;
+    procedure SI(const A: array of IFoo); var I: Int; begin for I := 0 to High(A) do WriteLn('i ', A[I].N()); end;
+    procedure SR(const A: array of TRec); var I: Int; begin for I := 0 to High(A) do WriteLn('r ', A[I].S, ' ', A[I].K); end;
+    procedure SP(const A: array of TProc); var I: Int; begin for I := 0 to High(A) do WriteLn('p ', A[I]()); end;
+    procedure SPt(const A: array of TPt); var I, T: Int; begin T := 0; for I := 0 to High(A) do T := T + A[I].X * A[I].Y; WriteLn('pt ', T); end;
     procedure SSA(const A: array of TSA); begin WriteLn('sa ', A[1][0], A[0][1]); end;
-    procedure SM(const A: array of TM); var I: Integer; begin for I := 0 to High(A) do A[I](I); end;
+    procedure SM(const A: array of TM); var I: Int; begin for I := 0 to High(A) do A[I](I); end;
     procedure Plain(const A: array of TRec); begin WriteLn('proc ', A[0].S); end;
     var
       O: TObj; T: TTaker; R1: TRec; P1: TProc; X: IFoo; S1, S2: TSA;
@@ -1545,33 +1545,33 @@ const
   Src = '''
     program P;
     type
-      TRec = record S: string; K: Integer; end;
+      TRec = record S: string; K: Int; end;
       ISink = interface
         procedure Take(const A: array of TRec);
-        procedure TakeI(N: Integer; const A: array of Integer; M: Integer);
+        procedure TakeI(N: Int; const A: array of Int; M: Int);
       end;
       TSink = class(TObject, ISink)
         procedure Take(const A: array of TRec);
-        procedure TakeI(N: Integer; const A: array of Integer; M: Integer);
+        procedure TakeI(N: Int; const A: array of Int; M: Int);
       end;
       THold = class
         S: ISink;
       end;
     procedure TSink.Take(const A: array of TRec); begin WriteLn('rec ', A[0].S, ' ', Length(A)); end;
-    procedure TSink.TakeI(N: Integer; const A: array of Integer; M: Integer);
-    var I, T: Integer;
+    procedure TSink.TakeI(N: Int; const A: array of Int; M: Int);
+    var I, T: Int;
     begin
       T := 0;
       for I := 0 to High(A) do T := T + A[I];
       WriteLn('int ', N, ' ', Length(A), ' ', T, ' ', M);
     end;
-    function MkA(N: Integer): array of Integer;
-    var I: Integer;
+    function MkA(N: Int): array of Int;
+    var I: Int;
     begin
       SetLength(Result, N);
       for I := 0 to N - 1 do Result[I] := I + 1;
     end;
-    var I: ISink; H: THold; D: array of TRec; DI: array of Integer;
+    var I: ISink; H: THold; D: array of TRec; DI: array of Int;
     begin
       I := TSink.Create();
       SetLength(D, 1); D[0].S := 'x';
@@ -1600,7 +1600,7 @@ const
   Src = '''
     program P;
     type
-      TSI = array[0..1] of Integer;
+      TSI = array[0..1] of Int;
       TSS = array[0..1] of string;
     procedure SI(const A: array of TSI); begin WriteLn('si ', A[1][0], ' ', A[0][1], ' ', Length(A)); end;
     procedure SS(const A: array of TSS); begin WriteLn('ss ', A[1][0], A[0][1]); end;

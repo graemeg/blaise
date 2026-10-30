@@ -109,7 +109,7 @@ const
   SrcPosIntSar =
     '''
     program P;
-    var A, B: Integer;
+    var A, B: Int;
     begin
       A := 64;
       B := A sar 2;
@@ -144,7 +144,7 @@ const
     the QBE IR check TestCodegen_Integer_Sar_EmitsSar. }
   Src = '''
     program P;
-    var I: Integer;
+    var I: Int;
     begin
       I := -16;
       WriteLn(I sar 2);

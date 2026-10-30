@@ -105,7 +105,7 @@ const
         type
           TFoo = packed record
             A: Byte;
-            B: Integer;
+            B: Int;
           end;
         begin end.
         ''';
@@ -129,7 +129,7 @@ procedure TPackedRecordTests.TestParse_PlainRecord_IsPackedFalse;
 const
   Src = '''
         program P;
-        type TFoo = record A: Integer; end;
+        type TFoo = record A: Int; end;
         begin end.
         ''';
 var
@@ -149,7 +149,7 @@ procedure TPackedRecordTests.TestSemantic_PackedRecord_TypeDescIsPacked;
 const
   Src = '''
         program P;
-        type TFoo = packed record A: Integer; end;
+        type TFoo = packed record A: Int; end;
         var R: TFoo;
         begin end.
         ''';
@@ -172,7 +172,7 @@ const
         program P;
         type TFoo = packed record
           A: Byte;
-          B: Integer;
+          B: Int;
         end;
         var R: TFoo;
         begin end.
@@ -200,7 +200,7 @@ const
         program P;
         type TFoo = packed record
           A: Byte;
-          B: Integer;
+          B: Int32;
         end;
         var R: TFoo;
         begin end.
@@ -276,7 +276,7 @@ procedure TPackedRecordTests.TestParse_PackedClass_RaisesError;
 const
   Src = '''
         program P;
-        type TFoo = packed class A: Integer; end;
+        type TFoo = packed class A: Int; end;
         begin end.
         ''';
 var
@@ -437,7 +437,7 @@ const
     program P;
     type TFoo = packed record
       A: Byte;
-      B: Integer;
+      B: Int32;
     end;
     var R: TFoo;
     begin
@@ -492,11 +492,11 @@ const
     type
       TPk = packed record
         A: Byte;
-        B: Integer;
+        B: Int32;
       end;
       TUnpk = record
         A: Byte;
-        B: Integer;
+        B: Int32;
       end;
     begin
       WriteLn(SizeOf(TPk), ' ', SizeOf(TUnpk))

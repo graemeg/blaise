@@ -162,14 +162,14 @@ const
     '''
         unit MathUtils;
         interface
-        function Add(A, B: Integer): Integer;
-        function Mul(A, B: Integer): Integer;
+        function Add(A, B: Int): Int;
+        function Mul(A, B: Int): Int;
         implementation
-        function Add(A, B: Integer): Integer;
+        function Add(A, B: Int): Int;
         begin
           Result := A + B
         end;
-        function Mul(A, B: Integer): Integer;
+        function Mul(A, B: Int): Int;
         begin
           Result := A * B
         end;
@@ -182,12 +182,12 @@ const
         interface
         type
           TBox = record
-            W: Integer;
-            H: Integer;
+            W: Int;
+            H: Int;
           end;
-        function Area(W, H: Integer): Integer;
+        function Area(W, H: Int): Int;
         implementation
-        function Area(W, H: Integer): Integer;
+        function Area(W, H: Int): Int;
         begin
           Result := W * H
         end;
@@ -198,13 +198,13 @@ const
     '''
         unit Internals;
         interface
-        function Pub(X: Integer): Integer;
+        function Pub(X: Int): Int;
         implementation
-        function Helper(X: Integer): Integer;
+        function Helper(X: Int): Int;
         begin
           Result := X + 1
         end;
-        function Pub(X: Integer): Integer;
+        function Pub(X: Int): Int;
         begin
           Result := Helper(X)
         end;
@@ -218,15 +218,15 @@ const
     '''
         unit Nested;
         interface
-        function Outer(N: Integer): Integer;
+        function Outer(N: Int): Int;
         implementation
-        function Outer(N: Integer): Integer;
-          function Inner(X: Integer): Integer;
+        function Outer(N: Int): Int;
+          function Inner(X: Int): Int;
           begin
             Result := X + 1
           end;
         var
-          T: Integer;
+          T: Int;
         begin
           T := Inner(N);
           Result := T
@@ -242,9 +242,9 @@ const
     '''
         unit QualT;
         interface
-        function Twice(N: System.Integer): System.Integer;
+        function Twice(N: System.Int): System.Int;
         implementation
-        function Twice(N: System.Integer): System.Integer;
+        function Twice(N: System.Int): System.Int;
         begin
           Result := N * 2
         end;
@@ -404,7 +404,7 @@ const
     '''
     unit tunit;
     interface
-    var x: Integer;
+    var x: Int;
     implementation
     begin
       x := 1;
@@ -470,7 +470,7 @@ begin
     '''
         unit Bad;
         interface
-        function Add(A, B: Integer): Integer;
+        function Add(A, B: Int): Int;
         implementation
         end.
         ''');                                     { no implementation of Add }
@@ -482,7 +482,7 @@ begin
     '''
         unit Clash;
         interface
-        var Clash: Integer;
+        var Clash: Int;
         implementation
         end.
         ''');
@@ -495,7 +495,7 @@ begin
         unit Clash;
         interface
         implementation
-        var Clash: Integer;
+        var Clash: Int;
         end.
         ''');
 end;
@@ -509,7 +509,7 @@ begin
         procedure P;
         implementation
         procedure P;
-        var Outer: Integer;
+        var Outer: Int;
         begin
           Outer := 1;
         end;
@@ -568,7 +568,7 @@ begin
     '''
         unit U;
         interface
-        var Counter: Integer;
+        var Counter: Int;
         procedure Bump;
         implementation
         procedure Bump;
@@ -606,12 +606,12 @@ begin
     '''
         unit U;
         interface
-        function Add(A, B: Integer): Integer; overload;
-        function Add(A, B: Double):  Double;  overload;
+        function Add(A, B: Int): Int; overload;
+        function Add(A, B: Float64):  Float64;  overload;
         implementation
-        function Add(A, B: Integer): Integer; overload;
+        function Add(A, B: Int): Int; overload;
         begin Result := A + B end;
-        function Add(A, B: Double): Double; overload;
+        function Add(A, B: Float64): Float64; overload;
         begin Result := A + B end;
         end.
         ''');
@@ -665,8 +665,8 @@ begin
       unit ua;
       interface
       var
-        X: Integer;
-        X: Integer;
+        X: Int;
+        X: Int;
       implementation
       end.
       ''', 'program p; uses ua; begin end.', TargetX86_64);
@@ -684,19 +684,19 @@ const
     unit KU;
     interface
     type
-      IGr = interface function Hi(): Integer; end;
-      TCls = class(TObject, IGr) public function Hi(): Integer; end;
+      IGr = interface function Hi(): Int; end;
+      TCls = class(TObject, IGr) public function Hi(): Int; end;
     implementation
-    function TCls.Hi(): Integer; begin Result := 7 end;
+    function TCls.Hi(): Int; begin Result := 7 end;
     end.
     ''';
   ProgSrc = '''
     program KP;
     uses KU;
     type
-      IGr = interface function Hi(): Integer; end;
-      TMine = class(TObject, IGr) public function Hi(): Integer; end;
-    function TMine.Hi(): Integer; begin Result := 3 end;
+      IGr = interface function Hi(): Int; end;
+      TMine = class(TObject, IGr) public function Hi(): Int; end;
+    function TMine.Hi(): Int; begin Result := 3 end;
     begin
     end.
     ''';
@@ -772,12 +772,12 @@ begin
     const
       K = 40;
     var
-      VA: Integer = 2 + 3;
-      VB: Integer = K;
-      VC: Integer = K * 2 + 1;
+      VA: Int32 = 2 + 3;
+      VB: Int32 = K;
+      VC: Int32 = K * 2 + 1;
     implementation
     var
-      VD: Integer = 1 shl 4;
+      VD: Int32 = 1 shl 4;
     end.
     ''');
   try

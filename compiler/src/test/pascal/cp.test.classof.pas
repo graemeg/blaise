@@ -324,7 +324,7 @@ const
     '''
         program P;
         type
-          TInt = class of Integer;
+          TInt = class of Int;
         begin end.
         ''';
 begin
@@ -421,14 +421,14 @@ const Src = '''
     program P;
     type
       TFoo = class(TObject)
-        constructor Create(N: Integer);
+        constructor Create(N: Int);
       end;
       TFooClass = class of TFoo;
       THolder = class
         FCls: TFooClass;
         procedure Run();
       end;
-    constructor TFoo.Create(N: Integer); begin end;
+    constructor TFoo.Create(N: Int); begin end;
     function GetCls(): TFooClass; begin Result := TFoo end;
     procedure THolder.Run();
     var F: TFoo;
@@ -476,10 +476,10 @@ const Src = '''
     program P;
     type
       TFoo = class(TObject)
-        constructor Create(N: Integer);
+        constructor Create(N: Int);
       end;
       TBar = class(TObject) end;
-    constructor TFoo.Create(N: Integer); begin end;
+    constructor TFoo.Create(N: Int); begin end;
     begin
       TFoo.Create(1);
       TBar.Create()
@@ -508,7 +508,7 @@ const Src = '''
     program P;
     type
       TShape = class(TObject)
-        function Area(): Integer; virtual; abstract;
+        function Area(): Int; virtual; abstract;
       end;
     begin
       TShape.Create()
@@ -523,7 +523,7 @@ const Src = '''
     program P;
     type
       TFoo = class(TObject)
-        static function Make(N: Integer): Integer;
+        static function Make(N: Int): Int;
         static procedure Note();
       end;
       TFooClass = class of TFoo;
@@ -531,16 +531,16 @@ const Src = '''
         FCls: TFooClass;
         procedure Run();
       end;
-    static function TFoo.Make(N: Integer): Integer; begin Result := N end;
+    static function TFoo.Make(N: Int): Int; begin Result := N end;
     static procedure TFoo.Note(); begin end;
     function GetCls(): TFooClass; begin Result := TFoo end;
     procedure THolder.Run();
-    var N: Integer;
+    var N: Int;
     begin
       FCls.Note();
       N := FCls.Make(1)
     end;
-    var C: TFooClass; A: array of TFooClass; H: THolder; N: Integer;
+    var C: TFooClass; A: array of TFooClass; H: THolder; N: Int;
     begin
       C.Note();
       A[0].Note();
@@ -601,9 +601,9 @@ const Src = '''
     program P;
     type
       TFoo = class(TObject)
-        constructor Create(N: Integer);
+        constructor Create(N: Int);
       end;
-    constructor TFoo.Create(N: Integer); begin end;
+    constructor TFoo.Create(N: Int); begin end;
     var F: TFoo;
     begin
       F := TFoo.Create(1);
@@ -619,10 +619,10 @@ const Src = '''
     program P;
     type
       TFoo = class(TObject)
-        constructor Create(N: Integer);
+        constructor Create(N: Int);
         procedure Reset();
       end;
-    constructor TFoo.Create(N: Integer); begin end;
+    constructor TFoo.Create(N: Int); begin end;
     procedure TFoo.Reset(); begin Self.Create(0) end;
     begin
     end.
@@ -636,10 +636,10 @@ const Src = '''
     program P;
     type
       TFoo = class(TObject)
-        constructor Create(N: Integer);
+        constructor Create(N: Int);
         procedure Reset();
       end;
-    constructor TFoo.Create(N: Integer); begin end;
+    constructor TFoo.Create(N: Int); begin end;
     procedure TFoo.Reset(); begin Create(0) end;
     begin
     end.
@@ -653,12 +653,12 @@ const Src = '''
     program P;
     type
       TFoo = class(TObject)
-        X: Integer;
-        constructor Create(N: Integer); overload;
+        X: Int;
+        constructor Create(N: Int); overload;
         constructor Create(); overload;
         constructor CreateTwo();
       end;
-    constructor TFoo.Create(N: Integer); begin X := N end;
+    constructor TFoo.Create(N: Int); begin X := N end;
     constructor TFoo.Create(); begin Self.Create(5) end;
     constructor TFoo.CreateTwo(); begin Create(7) end;
     begin

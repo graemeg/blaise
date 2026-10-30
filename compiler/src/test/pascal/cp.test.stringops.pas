@@ -187,7 +187,7 @@ const
     '''
         program P;
         var s: string;
-        var n: Integer;
+        var n: Int;
         begin
           n := Length(s)
         end.
@@ -197,7 +197,7 @@ const
     '''
         program P;
         var s, sub: string;
-        var n: Integer;
+        var n: Int;
         begin
           n := Pos(sub, s)
         end.
@@ -207,7 +207,7 @@ const
     '''
         program P;
         var s, t: string;
-        var i, n: Integer;
+        var i, n: Int;
         begin
           t := Copy(s, i, n)
         end.
@@ -244,7 +244,7 @@ const
   SrcIntToStr =
     '''
         program P;
-        var n: Integer;
+        var n: Int;
         var s: string;
         begin
           s := IntToStr(n)
@@ -255,7 +255,7 @@ const
     '''
         program P;
         var s: string;
-        var n: Integer;
+        var n: Int32;
         begin
           n := StrToInt(s)
         end.
@@ -275,8 +275,8 @@ begin
   SemanticError(
     '''
         program P;
-        var n: Integer;
-        var r: Integer;
+        var n: Int;
+        var r: Int;
         begin
           r := Length(n)
         end.
@@ -522,7 +522,7 @@ const
   SrcFormatOneInt =
     '''
         program P;
-        var n: Integer;
+        var n: Int;
         var s: string;
         begin
           n := 42;
@@ -545,7 +545,7 @@ const
     '''
         program P;
         var name: string;
-        var age: Integer;
+        var age: Int;
         var s: string;
         begin
           name := 'Bob';
@@ -557,7 +557,7 @@ const
   SrcFormatFloat =
     '''
         program P;
-        var x: Double;
+        var x: Float64;
         var s: string;
         begin
           x := 3.5;
@@ -619,8 +619,8 @@ const
   Src =
     '''
         program T;
-        var N: Integer;
-        var B: Integer;
+        var N: Int;
+        var B: Int;
         begin
           B := N[0]
         end.
@@ -664,7 +664,7 @@ procedure TStringOpsTests.TestSemantic_Delete_NonStringError;
 begin
   SemanticError(
     '''
-        program P; var N: Integer;
+        program P; var N: Int;
         begin Delete(N, 1, 1) end.
         ''');
 end;
@@ -682,7 +682,7 @@ procedure TStringOpsTests.TestSemantic_SetLength_NonStringError;
 begin
   SemanticError(
     '''
-        program P; var N: Integer;
+        program P; var N: Int;
         begin SetLength(N, 5) end.
         ''');
 end;

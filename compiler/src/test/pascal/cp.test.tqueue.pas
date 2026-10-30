@@ -36,17 +36,17 @@ const
         type
           TQueue<T> = class
             FData:     ^T;
-            FCount:    Integer;
-            FCapacity: Integer;
-            FHead:     Integer;
-            FTail:     Integer;
+            FCount:    Int;
+            FCapacity: Int;
+            FHead:     Int;
+            FTail:     Int;
             procedure Grow;
             procedure Enqueue(Value: T);
             function  Dequeue: T;
             function  Peek: T;
             procedure Clear;
             procedure Destroy;
-            property Count: Integer read FCount;
+            property Count: Int read FCount;
           end;
         ''';
 
@@ -54,10 +54,10 @@ const
     '''
         procedure TQueue<T>.Grow;
         var
-          NewCap:  Integer;
-          OldCap:  Integer;
+          NewCap:  Int;
+          OldCap:  Int;
           NewData: ^T;
-          I:       Integer;
+          I:       Int;
           Src:     ^T;
           Dst:     ^T;
         begin
@@ -131,9 +131,9 @@ const
     QueueDecl +
     QueueImpls +
     '''
-        var Q: TQueue<Integer>;
+        var Q: TQueue<Int>;
         begin
-          Q := TQueue<Integer>.Create()
+          Q := TQueue<Int>.Create()
         end.
         ''';
 
@@ -142,9 +142,9 @@ const
     QueueDecl +
     QueueImpls +
     '''
-        var Q: TQueue<Integer>;
+        var Q: TQueue<Int>;
         begin
-          Q := TQueue<Integer>.Create();
+          Q := TQueue<Int>.Create();
           Q.Enqueue(1);
           Q.Enqueue(2);
           Q.Enqueue(3)
@@ -157,10 +157,10 @@ const
     QueueImpls +
     '''
         var
-          Q: TQueue<Integer>;
-          V: Integer;
+          Q: TQueue<Int>;
+          V: Int;
         begin
-          Q := TQueue<Integer>.Create();
+          Q := TQueue<Int>.Create();
           Q.Enqueue(10);
           V := Q.Dequeue()
         end.
@@ -172,10 +172,10 @@ const
     QueueImpls +
     '''
         var
-          Q: TQueue<Integer>;
-          V: Integer;
+          Q: TQueue<Int>;
+          V: Int;
         begin
-          Q := TQueue<Integer>.Create();
+          Q := TQueue<Int>.Create();
           Q.Enqueue(99);
           V := Q.Peek()
         end.

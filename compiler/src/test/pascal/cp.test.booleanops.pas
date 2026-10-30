@@ -191,7 +191,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var I, J: Integer; C: Boolean;
+        var I, J: Int; C: Boolean;
         begin
           I := 1; J := 2;
           C := I and J
@@ -204,7 +204,7 @@ var Prog: TProgram; Assn: TAssignment;
 begin
   Prog := AnalyseSrc('''
       program P;
-      var I, R: Integer;
+      var I, R: Int32;
       begin
         I := 1;
         R := not I
@@ -237,7 +237,7 @@ var Prog: TProgram; Assn: TAssignment;
 begin
   Prog := AnalyseSrc('''
       program P;
-      var B: Byte; R: Integer;
+      var B: Byte; R: Int;
       begin
         B := 1;
         R := not B
@@ -254,7 +254,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var D: Double; R: Double;
+        var D: Float64; R: Float64;
         begin
           D := 1.0;
           R := not D

@@ -529,10 +529,10 @@ const
     '''
     unit MyDep;
     interface
-    function Triple(N: Integer): Integer;
+    function Triple(N: Int): Int;
     implementation
-    function Triple(N: Integer): Integer;
-    var I: Integer;
+    function Triple(N: Int): Int;
+    var I: Int;
     begin
       Result := 0;
       for I := 1 to 3 do Result := Result + N
@@ -631,7 +631,7 @@ const
     '''
     program UseGRec;
     uses GRecUnit;
-    var P: TPair<Integer>;
+    var P: TPair<Int>;
     begin
       P.A := 20;
       P.B := 2;
@@ -697,7 +697,7 @@ const
     '''
     program UseGRecCached;
     uses GRecCached;
-    var P: TPair<Integer>;
+    var P: TPair<Int>;
     begin
       P.A := 30;
       P.B := 3;
@@ -762,7 +762,7 @@ const
       TCfg = class
         type
           TEntry = record
-            Key: Integer;
+            Key: Int;
             Name: String;
           end;
           TLevel = 1..9;
@@ -873,7 +873,7 @@ const
     program UseSub;
     uses SubDep;
     var
-      a: array[TStd] of Integer;
+      a: array[TStd] of Int32;
     begin
       WriteLn(Low(TStd), ' ', High(TStd), ' ', SizeOf(a))
     end.
@@ -940,7 +940,7 @@ const
     uses ESubDep;
     var
       m: TMid;
-      a: array[TMid] of Integer;
+      a: array[TMid] of Int32;
     begin
       m := eC;
       WriteLn(Ord(m), ' ', Ord(Low(TMid)), ' ', Ord(High(TMid)), ' ', SizeOf(a))
@@ -1106,9 +1106,9 @@ const
     '''
     program UseBox;
     uses MyContainers;
-    var B: TBox<Integer>;
+    var B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create(42);
+      B := TBox<Int>.Create(42);
       WriteLn('Box = ', B.Get());
       B.Free()
     end.
@@ -1179,9 +1179,9 @@ const
     '''
     unit UTest2;
     interface
-    function Answer(): Integer;
+    function Answer(): Int;
     implementation
-    function Answer(): Integer;
+    function Answer(): Int;
     begin
       Result := 42
     end;
@@ -1245,8 +1245,8 @@ const
     unit DupVarDep;
     interface
     var
-      X: Integer;
-      X: Integer;
+      X: Int;
+      X: Int;
     implementation
     end.
     ''';
@@ -1287,14 +1287,14 @@ const
     unit NameKU;
     interface
     type
-      IGr = interface function Hi(): Integer; end;
-      TCls = class(TObject, IGr) public function Hi(): Integer; end;
+      IGr = interface function Hi(): Int; end;
+      TCls = class(TObject, IGr) public function Hi(): Int; end;
     function MakeGr(): IGr;
-    function UnitSees(O: TObject): Integer;
+    function UnitSees(O: TObject): Int;
     implementation
-    function TCls.Hi(): Integer; begin Result := 7 end;
+    function TCls.Hi(): Int; begin Result := 7 end;
     function MakeGr(): IGr; begin Result := TCls.Create() end;
-    function UnitSees(O: TObject): Integer;
+    function UnitSees(O: TObject): Int;
     var G: IGr;
     begin
       Result := 0;
@@ -1308,9 +1308,9 @@ const
     program NameKP;
     uses NameKU;
     type
-      IGr = interface function Hi(): Integer; end;
-      TCls = class(TObject, IGr) public function Hi(): Integer; end;
-    function TCls.Hi(): Integer; begin Result := 3 end;
+      IGr = interface function Hi(): Int; end;
+      TCls = class(TObject, IGr) public function Hi(): Int; end;
+    function TCls.Hi(): Int; begin Result := 3 end;
     var
       A: NameKU.IGr;
       B: IGr;
@@ -1365,11 +1365,11 @@ const
       end;
       TGauge = class
       private
-        FV: Integer;
-        function GetV: Integer;
+        FV: Int;
+        function GetV: Int;
       public
         constructor Create();
-        property V: Integer read GetV;
+        property V: Int read GetV;
       end;
     procedure RunUnit();
     implementation
@@ -1380,7 +1380,7 @@ const
     begin
       FV := 7;
     end;
-    function TGauge.GetV: Integer;
+    function TGauge.GetV: Int;
     begin
       Result := FV * 10;
     end;
@@ -1411,15 +1411,15 @@ const
       end;
       TGauge = class
       private
-        FX: Integer;
-        function GetV: Integer;
+        FX: Int;
+        function GetV: Int;
       public
-        property V: Integer read GetV;
+        property V: Int read GetV;
       end;
     constructor TagAttribute.Create();
     begin
     end;
-    function TGauge.GetV: Integer;
+    function TGauge.GetV: Int;
     begin
       Result := -1;
     end;
@@ -1644,16 +1644,16 @@ const
     const
       K = 40;
     var
-      A: Integer = 2 + 3;
-      B: Integer = K;
-      C: Integer = K * 2 + 1;
-      D: Double = 1.5 * 2;
-      E: Integer = 7;
-    function Hidden(): Integer;
+      A: Int32 = 2 + 3;
+      B: Int32 = K;
+      C: Int32 = K * 2 + 1;
+      D: Float64 = 1.5 * 2;
+      E: Int32 = 7;
+    function Hidden(): Int;
     implementation
     var
-      F: Integer = 1 shl 4;
-    function Hidden(): Integer; begin Result := F end;
+      F: Int32 = 1 shl 4;
+    function Hidden(): Int; begin Result := F end;
     end.
     ''';
   ProgSrc =
@@ -1693,9 +1693,9 @@ const
     '''
     unit BesideDep;
     interface
-    function Beside(): Integer;
+    function Beside(): Int;
     implementation
-    function Beside(): Integer;
+    function Beside(): Int;
     begin
       Result := 7
     end;
@@ -1783,9 +1783,9 @@ const
     '''
     unit AsideDep;
     interface
-    function Aside(): Integer;
+    function Aside(): Int;
     implementation
-    function Aside(): Integer;
+    function Aside(): Int;
     begin
       Result := 9
     end;
@@ -1864,7 +1864,7 @@ const
     function JoinIt(const Sep: string; const Parts: array of string): string;
     implementation
     function JoinIt(const Sep: string; const Parts: array of string): string;
-    var I: Integer;
+    var I: Int;
     begin
       Result := '';
       for I := 0 to High(Parts) do
@@ -1964,14 +1964,14 @@ const
     interface
     type
       TBox<T> = class
-        FLen: Integer;
+        FLen: Int;
         constructor Create(const AName: string);
       end;
     implementation
     uses ExtLeaf;
     constructor TBox<T>.Create(const AName: string);
     begin
-      Self.FLen := Integer(ext_strlen(PChar(AName)))
+      Self.FLen := Int32(ext_strlen(PChar(AName)))
     end;
     end.
     ''';
@@ -1979,9 +1979,9 @@ const
     '''
     program UseGenDep;
     uses GenDep;
-    var B: TBox<Integer>;
+    var B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create('hello');
+      B := TBox<Int>.Create('hello');
       WriteLn(B.FLen)
     end.
     ''';
@@ -2049,10 +2049,10 @@ const
     '''
     unit MyMaxUnit;
     interface
-    function Doubled(N: Integer): Integer;
+    function Doubled(N: Int): Int;
     function FindMaxValue<T>(arr: array of T): T;
     implementation
-    function Doubled(N: Integer): Integer;
+    function Doubled(N: Int): Int;
     begin
       Result := N * 2
     end;
@@ -2134,12 +2134,12 @@ const
     '''
     unit DupExtA;
     interface
-    function LenA(const S: string): Integer;
+    function LenA(const S: string): Int;
     implementation
     function _strlenA(S: Pointer): Int64; external name 'strlen';
-    function LenA(const S: string): Integer;
+    function LenA(const S: string): Int;
     begin
-      Result := Integer(_strlenA(PChar(S)))
+      Result := Int32(_strlenA(PChar(S)))
     end;
     end.
     ''';
@@ -2147,12 +2147,12 @@ const
     '''
     unit DupExtB;
     interface
-    function LenB(const S: string): Integer;
+    function LenB(const S: string): Int;
     implementation
     function _strlenA(S: Pointer): Int64; external name 'strlen';
-    function LenB(const S: string): Integer;
+    function LenB(const S: string): Int;
     begin
-      Result := Integer(_strlenA(PChar(S)))
+      Result := Int32(_strlenA(PChar(S)))
     end;
     end.
     ''';
@@ -2441,7 +2441,7 @@ const
         function Kind: string;
       end;
       TGh174Base = class(IGh174)
-        Tag: Integer;
+        Tag: Int;
       published
         function Kind: string; virtual; abstract;
       end;
@@ -2565,19 +2565,19 @@ const
     '''
     unit ImplCls;
     interface
-    function MakeAndGet: Integer;
+    function MakeAndGet: Int;
     implementation
     type
       TFoo = class
-        FX: Integer;
-        constructor Create(AX: Integer);
-        function GetX: Integer;
+        FX: Int;
+        constructor Create(AX: Int);
+        function GetX: Int;
       end;
-    constructor TFoo.Create(AX: Integer);
+    constructor TFoo.Create(AX: Int);
     begin FX := AX end;
-    function TFoo.GetX: Integer;
+    function TFoo.GetX: Int;
     begin Result := FX end;
-    function MakeAndGet: Integer;
+    function MakeAndGet: Int;
     var F: TFoo;
     begin
       F := TFoo.Create(7);
@@ -2639,22 +2639,22 @@ const
     '''
     unit ImplMetaN;
     interface
-    function MakeViaMeta: Integer;
+    function MakeViaMeta: Int;
     implementation
     type
       TFoo = class
-        FX: Integer;
+        FX: Int;
         constructor Create;
-        function GetX: Integer;
+        function GetX: Int;
       end;
       TFooClass = class of TFoo;
     var
       GCls: TFooClass;
     constructor TFoo.Create;
     begin FX := 42 end;
-    function TFoo.GetX: Integer;
+    function TFoo.GetX: Int;
     begin Result := FX end;
-    function MakeViaMeta: Integer;
+    function MakeViaMeta: Int;
     var F: TFoo;
     begin
       F := GCls.Create();
@@ -2721,7 +2721,7 @@ const
     implementation
     type
       TPrivate = class
-        V: Integer;
+        V: Int;
       end;
     procedure Noop; begin end;
     end.
@@ -2730,9 +2730,9 @@ const
     '''
     unit LeakB;
     interface
-    function Use: Integer;
+    function Use: Int;
     implementation
-    function Use: Integer;
+    function Use: Int;
     var X: TPrivate;       // LeakB does NOT use LeakA — must be unknown
     begin
       X := TPrivate.Create();
@@ -2789,10 +2789,10 @@ const
     '''
     unit BaseU;
     interface
-    type TFoo = record A: Integer; end;
-    function MakeFoo(N: Integer): TFoo;
+    type TFoo = record A: Int; end;
+    function MakeFoo(N: Int): TFoo;
     implementation
-    function MakeFoo(N: Integer): TFoo;
+    function MakeFoo(N: Int): TFoo;
     begin Result.A := N end;
     end.
     ''';
@@ -2801,9 +2801,9 @@ const
     unit DerivedU;
     interface
     uses BaseU;
-    function Doubled(N: Integer): Integer;
+    function Doubled(N: Int): Int;
     implementation
-    function Doubled(N: Integer): Integer;
+    function Doubled(N: Int): Int;
     var F: TFoo;
     begin F := MakeFoo(N); Result := F.A * 2 end;
     end.
@@ -2870,13 +2870,13 @@ const
     interface
     type
       TNum = class
-        FFloat: Double;
-        procedure SetF(v: Double);
-        function GetF: Double;
+        FFloat: Float64;
+        procedure SetF(v: Float64);
+        function GetF: Float64;
       end;
     implementation
-    procedure TNum.SetF(v: Double); begin FFloat := v; end;
-    function TNum.GetF: Double; begin Result := FFloat; end;
+    procedure TNum.SetF(v: Float64); begin FFloat := v; end;
+    function TNum.GetF: Float64; begin Result := FFloat; end;
     end.
     ''';
   ProgSrc =
@@ -2933,9 +2933,9 @@ const
     '''
     unit HelperU;
     interface
-    function HelperVal: Integer;
+    function HelperVal: Int;
     implementation
-    function HelperVal: Integer;
+    function HelperVal: Int;
     begin Result := 42 end;
     end.
     ''';
@@ -2946,10 +2946,10 @@ const
     '''
     unit MidU;
     interface
-    function MidVal: Integer;
+    function MidVal: Int;
     implementation
     uses HelperU;
-    function MidVal: Integer;
+    function MidVal: Int;
     begin Result := HelperVal() + 1 end;
     end.
     ''';
@@ -3031,9 +3031,9 @@ const
     '''
     unit LeafE;
     interface
-    function LeafVal: Integer;
+    function LeafVal: Int;
     implementation
-    function LeafVal: Integer;
+    function LeafVal: Int;
     begin Result := 42 end;
     end.
     ''';
@@ -3041,9 +3041,9 @@ const
     '''
     unit LeafE;
     interface
-    function LeafVal: Integer;
+    function LeafVal: Int;
     implementation
-    function LeafVal: Integer;
+    function LeafVal: Int;
     begin Result := 50 end;
     end.
     ''';
@@ -3051,10 +3051,10 @@ const
     '''
     unit HelperE;
     interface
-    function HelperVal: Integer;
+    function HelperVal: Int;
     implementation
     uses LeafE;
-    function HelperVal: Integer;
+    function HelperVal: Int;
     begin Result := LeafVal() + 1 end;
     end.
     ''';
@@ -3062,10 +3062,10 @@ const
     '''
     unit MidE;
     interface
-    function MidVal: Integer;
+    function MidVal: Int;
     implementation
     uses HelperE;
-    function MidVal: Integer;
+    function MidVal: Int;
     begin Result := HelperVal() + 1 end;
     end.
     ''';
@@ -3146,10 +3146,10 @@ const
     interface
     type
       TGBox<T> = class
-        function Tag(): Integer;
+        function Tag(): Int;
       end;
     implementation
-    function TGBox<T>.Tag(): Integer;
+    function TGBox<T>.Tag(): Int;
     begin
       Result := 111
     end;
@@ -3163,10 +3163,10 @@ const
     interface
     type
       TGBox<T> = class
-        function Tag(): Integer;
+        function Tag(): Int;
       end;
     implementation
-    function TGBox<T>.Tag(): Integer;
+    function TGBox<T>.Tag(): Int;
     begin
       Result := 222
     end;
@@ -3176,13 +3176,13 @@ const
     '''
     unit ConsumerU;
     interface
-    function Run(): Integer;
+    function Run(): Int;
     implementation
     uses GBodyDep;
-    function Run(): Integer;
-    var B: TGBox<Integer>;
+    function Run(): Int;
+    var B: TGBox<Int>;
     begin
-      B := TGBox<Integer>.Create();
+      B := TGBox<Int>.Create();
       Result := B.Tag();
       B.Free()
     end;
@@ -3458,10 +3458,10 @@ const
     interface
     type
       TBase = class
-        function Greet: Integer;
+        function Greet: Int;
       end;
     implementation
-    function TBase.Greet: Integer;
+    function TBase.Greet: Int;
     begin Result := 7 end;
     end.
     ''';
@@ -3474,10 +3474,10 @@ const
     uses chain.base;
     type
       TMid = class(TBase)
-        function MidOnly: Integer;
+        function MidOnly: Int;
       end;
     implementation
-    function TMid.MidOnly: Integer;
+    function TMid.MidOnly: Int;
     begin Result := 1 end;
     end.
     ''';
@@ -3491,11 +3491,11 @@ const
     uses chain.mid;
     type
       TLeaf = class(TMid)
-        function Run: Integer;
+        function Run: Int;
       end;
     implementation
     { rev 1 }
-    function TLeaf.Run: Integer;
+    function TLeaf.Run: Int;
     begin Result := Greet() + MidOnly() end;
     end.
     ''';
@@ -3506,11 +3506,11 @@ const
     uses chain.mid;
     type
       TLeaf = class(TMid)
-        function Run: Integer;
+        function Run: Int;
       end;
     implementation
     { rev 2 — edited to force recompile from source }
-    function TLeaf.Run: Integer;
+    function TLeaf.Run: Int;
     begin Result := Greet() + MidOnly() end;
     end.
     ''';
@@ -3592,9 +3592,9 @@ const
     '''
     unit xtgt.u;
     interface
-    function Twice(X: Integer): Integer;
+    function Twice(X: Int): Int;
     implementation
-    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    function Twice(X: Int): Int; begin Result := X * 2 end;
     end.
     ''';
   ProgSrc =
@@ -3647,9 +3647,9 @@ const
     '''
     unit xos.u;
     interface
-    function Twice(X: Integer): Integer;
+    function Twice(X: Int): Int;
     implementation
-    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    function Twice(X: Int): Int; begin Result := X * 2 end;
     end.
     ''';
   ProgSrc =
@@ -3697,9 +3697,9 @@ const
     '''
     unit pcleaf;
     interface
-    function Twice(X: Integer): Integer;
+    function Twice(X: Int): Int;
     implementation
-    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    function Twice(X: Int): Int; begin Result := X * 2 end;
     end.
     ''';
   MidSrc =
@@ -3707,16 +3707,16 @@ const
     unit pcmid;
     interface
     uses pcleaf;
-    function Four(X: Integer): Integer;
+    function Four(X: Int): Int;
     implementation
-    function Four(X: Integer): Integer; begin Result := Twice(Twice(X)) end;
+    function Four(X: Int): Int; begin Result := Twice(Twice(X)) end;
     end.
     ''';
   ProgSrc =
     '''
     program pcleaf;
     uses pcmid;
-    var G: Integer;
+    var G: Int;
     begin
       G := Four(10);
       WriteLn(G)
@@ -3755,9 +3755,9 @@ const
     '''
     unit ucmiss.u;
     interface
-    function Twice(X: Integer): Integer;
+    function Twice(X: Int): Int;
     implementation
-    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    function Twice(X: Int): Int; begin Result := X * 2 end;
     end.
     ''';
   ProgSrc =
@@ -3909,11 +3909,11 @@ const
     type
       TBase = class(TObject)
       private
-        FValue: Integer;
+        FValue: Int;
       public
         constructor Create;
-        function Tag: Integer; virtual;
-        property Value: Integer read FValue;
+        function Tag: Int; virtual;
+        property Value: Int read FValue;
       end;
       TBaseClass = class of TBase;
     implementation
@@ -3922,7 +3922,7 @@ const
       inherited Create();
       Self.FValue := 7
     end;
-    function TBase.Tag: Integer;
+    function TBase.Tag: Int;
     begin
       Result := 100
     end;
@@ -4005,12 +4005,12 @@ const
       TOpt = (oA, oB, oC);
       TOpts = set of TOpt;
       TByteSet = set of Byte;
-    function PlainEnum(const O: TOpts): Integer;
-    function CountBytes(const B: TByteSet): Integer;
-    function Pick(const O: TOpts): Integer; overload;
-    function Pick(const O: TOpts; AExtra: Integer): Integer; overload;
+    function PlainEnum(const O: TOpts): Int;
+    function CountBytes(const B: TByteSet): Int;
+    function Pick(const O: TOpts): Int; overload;
+    function Pick(const O: TOpts; AExtra: Int): Int; overload;
     implementation
-    function PlainEnum(const O: TOpts): Integer;
+    function PlainEnum(const O: TOpts): Int;
     var
       E: TOpt;
     begin
@@ -4018,19 +4018,19 @@ const
       for E := oA to oC do
         if E in O then Inc(Result)
     end;
-    function CountBytes(const B: TByteSet): Integer;
+    function CountBytes(const B: TByteSet): Int;
     var
-      I: Integer;
+      I: Int;
     begin
       Result := 0;
       for I := 0 to 255 do
         if I in B then Inc(Result)
     end;
-    function Pick(const O: TOpts): Integer;
+    function Pick(const O: TOpts): Int;
     begin
       Result := 1
     end;
-    function Pick(const O: TOpts; AExtra: Integer): Integer;
+    function Pick(const O: TOpts; AExtra: Int): Int;
     begin
       Result := 2 + AExtra
     end;
@@ -4133,10 +4133,10 @@ const
     unit OAProc;
     interface
     type
-      TCnt = function(const A: array of Integer): Integer;
-    function Cnt(const A: array of Integer): Integer;
+      TCnt = function(const A: array of Int): Int;
+    function Cnt(const A: array of Int): Int;
     implementation
-    function Cnt(const A: array of Integer): Integer;
+    function Cnt(const A: array of Int): Int;
     begin
       Result := Length(A)
     end;
@@ -4148,7 +4148,7 @@ const
     uses OAProc;
     var
       C: TCnt;
-      D: array of Integer;
+      D: array of Int;
     begin
       C := @Cnt;
       SetLength(D, 5);
@@ -4201,14 +4201,14 @@ const
     interface
     type
       TColour = (cRed, cGreen, cBlue);
-      TTriple = array[0..2] of Integer;
+      TTriple = array[0..2] of Int32;
     const
-      Fixed: array[1..3] of Integer = (7, 8, 9);
+      Fixed: array[1..3] of Int32 = (7, 8, 9);
       Dyn: array of Byte = (4, 5, 6, 250);
       Names: array[TColour] of string = ('red', 'green', 'blue');
-      Grid: array[0..1, 0..2] of Integer = ((1, 2, 3), (4, 5, 6));
+      Grid: array[0..1, 0..2] of Int32 = ((1, 2, 3), (4, 5, 6));
       Named: TTriple = (10, 20, 30);
-      Flags: array[Boolean] of Integer = (100, 200);
+      Flags: array[Boolean] of Int32 = (100, 200);
     implementation
     end.
     ''';
@@ -4216,7 +4216,7 @@ const
     '''
     program UseArrConsts;
     uses ArrConsts;
-    var I: Integer;
+    var I: Int32;
     begin
       I := 2;
       WriteLn(Fixed[1], ' ', Fixed[I], ' ', Low(Fixed), ' ', High(Fixed));
@@ -4298,7 +4298,7 @@ const
     program UseScalConsts;
     uses ScalConsts;
     { an untyped constant is Int (D4): Show(Alias) reaches Int64 }
-    procedure Show(X: Integer); overload; begin Write('int ') end;
+    procedure Show(X: Int32); overload; begin Write('int ') end;
     procedure Show(X: Int64); overload; begin Write('int64 ') end;
     procedure Show(X: TColour); overload; begin Write('colour ') end;
     procedure Show(X: Boolean); overload; begin Write('bool ') end;
@@ -4358,15 +4358,15 @@ const
       N = 4;
     type
       TR = record
-        A: Integer;
+        A: Int32;
         CC: array[0..N - 1] of Byte;
-        M: array[1..N * 2] of array[0..N - 2] of Integer;
+        M: array[1..N * 2] of array[0..N - 2] of Int32;
       end;
       TC = class
         Buf: array[0..N + 1] of Byte;
       end;
     var
-      G: array[-1..N] of Word;
+      G: array[-1..N] of UInt16;
     procedure Fill(var R: TR);
     implementation
     procedure Fill(var R: TR);
@@ -4438,7 +4438,7 @@ const
     interface
     type
       TBag = class
-        N: Integer;
+        N: Int32;
       end;
     implementation
     end.
@@ -4450,10 +4450,10 @@ const
     uses ubase;
     type
       TLinker = class
-        function Collect(ADest: TBag): Integer;
+        function Collect(ADest: TBag): Int32;
       end;
     implementation
-    function TLinker.Collect(ADest: TBag): Integer;
+    function TLinker.Collect(ADest: TBag): Int32;
     begin
       ADest.N := ADest.N + 1;
       Result := ADest.N
@@ -4468,7 +4468,7 @@ const
     begin
       L := TLinker.Create();
       B := TBag.Create();
-      B.N := High(Integer) - 1;
+      B.N := High(Int32) - 1;
       WriteLn(L.Collect(B))
     end.
     ''';
@@ -4568,24 +4568,24 @@ const
         type
           PNode = ^TNode;
           TNode = record
-            Val: Integer;
+            Val: Int;
             Next: PNode;
           end;
         var
           Head: PNode;
-        function Count: Integer;
+        function Count: Int;
       end;
       TList2 = class
         type
           TItem = record
-            Val: Integer;
+            Val: Int;
           end;
           PItem = ^TItem;
         var
           First: PItem;
       end;
     implementation
-    function TList1.Count: Integer;
+    function TList1.Count: Int;
     var Q: PNode;
     begin
       Result := 0;
@@ -4651,11 +4651,11 @@ const
     interface
     type
       TC = (cRed, cGreen, cBlue);
-      TArr = array[boolean] of integer;
-      TByC = array[TC] of Integer;
+      TArr = array[boolean] of Int32;
+      TByC = array[TC] of Int32;
       TByB = array[Byte] of Byte;
       TFT = array[False..True] of Int64;
-      TGrid = array[Boolean, TC] of Word;
+      TGrid = array[Boolean, TC] of UInt16;
     implementation
     end.
     ''';
@@ -4714,18 +4714,18 @@ const
     interface
     type
       TThing = class
-        V: Integer;
-        constructor Init(A: Integer);
+        V: Int;
+        constructor Init(A: Int);
         static function CreateDefault(): TThing;
       end;
       TThingClass = class of TThing;
       TBigThing = class(TThing)
-        constructor Init(A: Integer);
+        constructor Init(A: Int);
       end;
     implementation
-    constructor TThing.Init(A: Integer); begin V := A; end;
+    constructor TThing.Init(A: Int); begin V := A; end;
     function TThing.CreateDefault(): TThing; begin Result := TThing.Init(42); end;
-    constructor TBigThing.Init(A: Integer); begin V := A * 100; end;
+    constructor TBigThing.Init(A: Int); begin V := A * 100; end;
     end.
     ''';
   ProgSrc =
@@ -4789,10 +4789,10 @@ const
       TShape = (sBox, sShared, sDot);
       TColours = set of TColour;
       TShapes = set of TShape;
-    function CountColours(const C: TColours): Integer;
-    function CountShapes(const S: TShapes): Integer;
+    function CountColours(const C: TColours): Int;
+    function CountShapes(const S: TShapes): Int;
     implementation
-    function CountColours(const C: TColours): Integer;
+    function CountColours(const C: TColours): Int;
     var
       E: TColour;
     begin
@@ -4800,7 +4800,7 @@ const
       for E := cRed to cBlue do
         if E in C then Inc(Result)
     end;
-    function CountShapes(const S: TShapes): Integer;
+    function CountShapes(const S: TShapes): Int;
     var
       E: TShape;
     begin
@@ -4936,7 +4936,7 @@ const
     implementation
     procedure Greet(const AName: string);
     var
-      Total: Integer;
+      Total: Int;
       Msg: string;
     begin
       Total := 0;
@@ -5036,9 +5036,9 @@ const
     type
       TRate = (rLow = 8000, rHigh = 44100);
       TSettings = record
-        Wpm: Integer;
+        Wpm: Int;
         Rate: TRate;
-        Level: Single;
+        Level: Float32;
       end;
     var
       Defaults: TSettings;
@@ -5046,7 +5046,7 @@ const
     implementation
     function Describe(): string;
     var
-      N: Integer;
+      N: Int;
     begin
       N := Ord(Defaults.Rate);
       Result := IntToStr(Defaults.Wpm) + ' ' + IntToStr(N)
@@ -5138,18 +5138,18 @@ const
     type
       TReg = class
       private static var
-        FCount: Integer;
+        FCount: Int;
       public
-        static function Next: Integer;
+        static function Next: Int;
         { Static property whose getter is a static method: exercises
           TPropertyDecl.IsStatic surviving the .bif round-trip (a non-static
           import would dispatch with a bogus Self). }
-        static property Counter: Integer read Next;
+        static property Counter: Int read Next;
       public static const
         Tag = 7;
       end;
     implementation
-    static function TReg.Next: Integer;
+    static function TReg.Next: Int;
     begin
       FCount := FCount + 1;
       Result := FCount;
@@ -5175,9 +5175,9 @@ const
     interface
     type
       TVal = record
-        X: Integer;
-        static function Make(A: Integer): TVal;
-        function Doubled: Integer;
+        X: Int;
+        static function Make(A: Int): TVal;
+        function Doubled: Int;
       end;
       TStep = reference to procedure;
       TWalker = class
@@ -5186,11 +5186,11 @@ const
         procedure Walk(AStep: TStep); overload;
       end;
     implementation
-    static function TVal.Make(A: Integer): TVal;
+    static function TVal.Make(A: Int): TVal;
     begin
       Result.X := A
     end;
-    function TVal.Doubled: Integer;
+    function TVal.Doubled: Int;
     begin
       Result := X * 2
     end;
@@ -5322,34 +5322,34 @@ const
     '''
     unit uaMV;
     interface
-    procedure SetA(X: Integer);
-    function GetA: Integer;
-    procedure SetTlsA(X: Integer);
-    function GetTlsA: Integer;
+    procedure SetA(X: Int);
+    function GetA: Int;
+    procedure SetTlsA(X: Int);
+    function GetTlsA: Int;
     implementation
-    var GVal: Integer;
-    threadvar GTls: Integer;
-    procedure SetA(X: Integer); begin GVal := X; end;
-    function GetA: Integer; begin Result := GVal; end;
-    procedure SetTlsA(X: Integer); begin GTls := X; end;
-    function GetTlsA: Integer; begin Result := GTls; end;
+    var GVal: Int;
+    threadvar GTls: Int;
+    procedure SetA(X: Int); begin GVal := X; end;
+    function GetA: Int; begin Result := GVal; end;
+    procedure SetTlsA(X: Int); begin GTls := X; end;
+    function GetTlsA: Int; begin Result := GTls; end;
     end.
     ''';
   UnitBSrc =
     '''
     unit ubMV;
     interface
-    procedure SetB(X: Integer);
-    function GetB: Integer;
-    procedure SetTlsB(X: Integer);
-    function GetTlsB: Integer;
+    procedure SetB(X: Int);
+    function GetB: Int;
+    procedure SetTlsB(X: Int);
+    function GetTlsB: Int;
     implementation
-    var GVal: Integer;
-    threadvar GTls: Integer;
-    procedure SetB(X: Integer); begin GVal := X; end;
-    function GetB: Integer; begin Result := GVal; end;
-    procedure SetTlsB(X: Integer); begin GTls := X; end;
-    function GetTlsB: Integer; begin Result := GTls; end;
+    var GVal: Int;
+    threadvar GTls: Int;
+    procedure SetB(X: Int); begin GVal := X; end;
+    function GetB: Int; begin Result := GVal; end;
+    procedure SetTlsB(X: Int); begin GTls := X; end;
+    function GetTlsB: Int; begin Result := GTls; end;
     end.
     ''';
   ProgSrc =
@@ -5411,19 +5411,19 @@ const
       TReg<T> = class
       private
         FVal: T;
-        function GetItem(AKey: Integer): T;
-        procedure SetItem(AKey: Integer; AVal: T);
+        function GetItem(AKey: Int): T;
+        procedure SetItem(AKey: Int; AVal: T);
       public
         procedure Put(AVal: T);
         function Get(): T;
-        property Items[AKey: Integer]: T read GetItem write SetItem; default;
+        property Items[AKey: Int]: T read GetItem write SetItem; default;
       end;
     implementation
-    function TReg<T>.GetItem(AKey: Integer): T;
+    function TReg<T>.GetItem(AKey: Int): T;
     begin
       Result := FVal
     end;
-    procedure TReg<T>.SetItem(AKey: Integer; AVal: T);
+    procedure TReg<T>.SetItem(AKey: Int; AVal: T);
     begin
       FVal := AVal
     end;
@@ -5442,11 +5442,11 @@ const
     unit uproviderBP;
     interface
     uses ugenBP;
-    function ProvideReg(): TReg<Integer>;
+    function ProvideReg(): TReg<Int>;
     implementation
-    function ProvideReg(): TReg<Integer>;
+    function ProvideReg(): TReg<Int>;
     begin
-      Result := TReg<Integer>.Create();
+      Result := TReg<Int>.Create();
       Result[0] := 5
     end;
     end.
@@ -5459,13 +5459,13 @@ const
     type
       THolder = class
       public
-        FReg: TReg<Integer>;
+        FReg: TReg<Int>;
         constructor Create();
       end;
     implementation
     constructor THolder.Create();
     begin
-      FReg := TReg<Integer>.Create()
+      FReg := TReg<Int>.Create()
     end;
     end.
     ''';
@@ -5485,9 +5485,9 @@ const
     unit uconsumer1BP;
     interface
     uses ugenBP, ureexportBP;
-    function ReadHolder(AH: THolder): Integer;
+    function ReadHolder(AH: THolder): Int;
     implementation
-    function ReadHolder(AH: THolder): Integer;
+    function ReadHolder(AH: THolder): Int;
     begin
       Result := AH.FReg.Get()
     end;
@@ -5498,9 +5498,9 @@ const
     unit uconsumer2BP;
     interface
     uses ugenBP, ureexportBP;
-    procedure WriteHolder(AH: THolder; AVal: Integer);
+    procedure WriteHolder(AH: THolder; AVal: Int);
     implementation
-    procedure WriteHolder(AH: THolder; AVal: Integer);
+    procedure WriteHolder(AH: THolder; AVal: Int);
     begin
       AH.FReg[0] := AVal
     end;
@@ -5621,12 +5621,12 @@ const
     program useclos;
     uses uclosgen;
     var
-      BI: TBox<Integer>;
+      BI: TBox<Int>;
       BS: TBox<string>;
-      GI: TGetter<Integer>;
+      GI: TGetter<Int>;
       GS: TGetter<string>;
     begin
-      BI := TBox<Integer>.Create();
+      BI := TBox<Int>.Create();
       BI.FVal := 41;
       BS := TBox<string>.Create();
       BS.FVal := 'boxed';
@@ -5686,12 +5686,12 @@ const
       public
         FValue: T;
       end;
-    function MakeA(): Integer;
+    function MakeA(): Int;
     implementation
-    function MakeA(): Integer;
-    var B: TBox<Integer>;
+    function MakeA(): Int;
+    var B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int>.Create();
       B.FValue := 41;
       Result := B.FValue;
       B.Free()
@@ -5705,15 +5705,15 @@ const
     type
       TBox<T> = class
       public
-        FTag: Integer;
+        FTag: Int;
         FValue: T;
       end;
-    function MakeB(): Integer;
+    function MakeB(): Int;
     implementation
-    function MakeB(): Integer;
-    var B: TBox<Integer>;
+    function MakeB(): Int;
+    var B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int>.Create();
       B.FValue := 1;
       Result := B.FValue;
       B.Free()
@@ -5774,12 +5774,12 @@ const
       public
         FValue: T;
       end;
-    function MakeA(): Integer;
+    function MakeA(): Int;
     implementation
-    function MakeA(): Integer;
-    var B: TBox<Integer>;
+    function MakeA(): Int;
+    var B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int>.Create();
       B.FValue := 41;
       Result := B.FValue;
       B.Free()
@@ -5793,15 +5793,15 @@ const
     type
       TBox<T> = class
       public
-        FTag: Integer;
+        FTag: Int;
         FValue: T;
       end;
-    function MakeB(): Integer;
+    function MakeB(): Int;
     implementation
-    function MakeB(): Integer;
-    var B: TBox<Integer>;
+    function MakeB(): Int;
+    var B: TBox<Int>;
     begin
-      B := TBox<Integer>.Create();
+      B := TBox<Int>.Create();
       B.FValue := 1;
       Result := B.FValue;
       B.Free()
@@ -5891,7 +5891,7 @@ const
     program UseFs;
     uses GfsA, GfsB;
     begin
-      WriteLn(Pick<Integer>(7))
+      WriteLn(Pick<Int>(7))
     end.
     ''';
 var
@@ -5924,11 +5924,11 @@ const
     unit gfb;
     interface
     function Twice<T>(A: T): T;
-    function UseOwn: Integer;
+    function UseOwn: Int;
     implementation
-    function Helper(A: Integer): Integer; begin Result := A end;
+    function Helper(A: Int): Int; begin Result := A end;
     function Twice<T>(A: T): T; begin Result := A + A end;
-    function UseOwn: Integer; begin Result := Helper(Twice<Integer>(4)) end;
+    function UseOwn: Int; begin Result := Helper(Twice<Int>(4)) end;
     end.
     ''';
   CSrc =
@@ -5946,7 +5946,7 @@ const
     program pgf;
     uses gfb, gfc;
     begin
-      WriteLn(Twice<Integer>(21), ' ', UseOwn(), ' ', FromC(), ' ',
+      WriteLn(Twice<Int>(21), ' ', UseOwn(), ' ', FromC(), ' ',
         Twice<string>('x'))
     end.
     ''';
@@ -6020,7 +6020,7 @@ const
     program UseFn;
     uses GfnA, GfnB;
     begin
-      WriteLn(Pick<Integer>(7))
+      WriteLn(Pick<Int>(7))
     end.
     ''';
 var
@@ -6193,19 +6193,19 @@ const
     interface
     type
       IG = interface
-        function Greet(N: Integer): Integer;
+        function Greet(N: Int): Int;
       end;
       TG = class(IG)
-        function Greet(N: Integer): Integer;
+        function Greet(N: Int): Int;
       end;
     var
       GPub: IG;
     procedure Setup;
-    function UsePriv(N: Integer): Integer;
+    function UsePriv(N: Int): Int;
     implementation
     var
       GPriv: IG;
-    function TG.Greet(N: Integer): Integer;
+    function TG.Greet(N: Int): Int;
     begin
       Result := N * 2;
     end;
@@ -6214,7 +6214,7 @@ const
       GPriv := TG.Create();
       GPub := GPriv;
     end;
-    function UsePriv(N: Integer): Integer;
+    function UsePriv(N: Int): Int;
     begin
       Result := GPriv.Greet(N);
     end;
@@ -6323,7 +6323,7 @@ const
     type
       TPtrBox<T> = class
         F: ^T;
-        N: Integer;
+        N: Int;
       end;
     function Make<T>(): TPtrBox<T>;
     function Same<T>(A: TPtrBox<T>): TPtrBox<T>;
@@ -6344,7 +6344,7 @@ const
     program UseGenSig;
     uses GenSig;
     begin
-      WriteLn(Same<Integer>(Make<Integer>()).N)
+      WriteLn(Same<Int>(Make<Int>()).N)
     end.
     ''';
 var
@@ -6396,22 +6396,22 @@ const
     interface
     type
       TVec = record
-        X: Integer;
+        X: Int;
         class operator Add(const A, B: TVec): TVec;
-        class operator Multiply(const A: TVec; B: Integer): TVec;
-        class operator Multiply(A: Integer; const B: TVec): TVec;
+        class operator Multiply(const A: TVec; B: Int): TVec;
+        class operator Multiply(A: Int; const B: TVec): TVec;
         class operator Negative(const A: TVec): TVec;
         class operator Equal(const A, B: TVec): Boolean;
         class operator LessThan(const A, B: TVec): Boolean;
       end;
       TBag = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         class operator Add(const A, B: TBag): TBag;
       end;
-    function Vec(AX: Integer): TVec;
+    function Vec(AX: Int): TVec;
     implementation
-    function Vec(AX: Integer): TVec;
+    function Vec(AX: Int): TVec;
     begin
       Result.X := AX
     end;
@@ -6419,11 +6419,11 @@ const
     begin
       Result.X := A.X + B.X
     end;
-    class operator TVec.Multiply(const A: TVec; B: Integer): TVec;
+    class operator TVec.Multiply(const A: TVec; B: Int): TVec;
     begin
       Result.X := A.X * B
     end;
-    class operator TVec.Multiply(A: Integer; const B: TVec): TVec;
+    class operator TVec.Multiply(A: Int; const B: TVec): TVec;
     begin
       Result.X := A * B.X
     end;
@@ -6439,7 +6439,7 @@ const
     begin
       Result := A.X < B.X
     end;
-    constructor TBag.Create(AN: Integer);
+    constructor TBag.Create(AN: Int);
     begin
       N := AN
     end;
@@ -6692,7 +6692,7 @@ const
     interface
     type
       TUnitRec = record
-        One: Integer;
+        One: Int;
       end;
     implementation
     end.
@@ -6822,11 +6822,11 @@ const
     end;
     procedure Run();
     var
-      B: TCapBox<Integer>;
+      B: TCapBox<Int>;
     begin
-      B := TCapBox<Integer>.Create();
+      B := TCapBox<Int>.Create();
       WriteLn(B.Get());
-      WriteLn(CapGet<Integer>(1));
+      WriteLn(CapGet<Int>(1));
       WriteLn(Hello, ' ', Greet())
     end;
     begin
@@ -6873,9 +6873,9 @@ const
     interface
     const
       LeafBase = 40;
-    function LeafAdd(N: Integer): Integer;
+    function LeafAdd(N: Int): Int;
     implementation
-    function LeafAdd(N: Integer): Integer;
+    function LeafAdd(N: Int): Int;
     begin
       Result := N + LeafBase
     end;
@@ -6888,11 +6888,11 @@ const
     type
       TIuBox<T> = class
         FValue: T;
-        function Total(): Integer;
+        function Total(): Int;
       end;
     implementation
     uses IuLeaf;
-    function TIuBox<T>.Total(): Integer;
+    function TIuBox<T>.Total(): Int;
     begin
       Result := LeafAdd(SizeOf(T)) + LeafBase
     end;
@@ -6947,7 +6947,7 @@ const
     interface
     type
       TRec = record
-        X: Integer;
+        X: Int;
       end;
     implementation
     end.
@@ -6960,18 +6960,18 @@ const
     type
       TTaBox<T> = class
         FValue: T;
-        function Size(): Integer;
+        function Size(): Int;
       end;
-    function TaSize<T>(const A: T): Integer;
+    function TaSize<T>(const A: T): Int;
     implementation
-    function TTaBox<T>.Size(): Integer;
+    function TTaBox<T>.Size(): Int;
     var
       Tmp: T;
     begin
       Tmp := FValue;
       Result := SizeOf(Tmp)
     end;
-    function TaSize<T>(const A: T): Integer;
+    function TaSize<T>(const A: T): Int;
     var
       Tmp: T;
     begin

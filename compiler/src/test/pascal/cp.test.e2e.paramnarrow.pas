@@ -62,10 +62,10 @@ procedure TE2EParamNarrowTests.TestRun_Int64Arg_RegisterParam_EveryKind;
 const
   Src = '''
     program P;
-    procedure PI(X: Integer); begin WriteLn('Integer ', X) end;
+    procedure PI(X: Int32); begin WriteLn('Integer ', X) end;
     procedure PU(X: UInt32); begin WriteLn('UInt32 ', X) end;
-    procedure PS(X: SmallInt); begin WriteLn('SmallInt ', X) end;
-    procedure PW(X: Word); begin WriteLn('Word ', X) end;
+    procedure PS(X: Int16); begin WriteLn('SmallInt ', X) end;
+    procedure PW(X: UInt16); begin WriteLn('Word ', X) end;
     procedure PB(X: Byte); begin WriteLn('Byte ', X) end;
     procedure P8(X: Int8); begin WriteLn('Int8 ', X) end;
     var L: Int64;
@@ -98,7 +98,7 @@ const
   Src = '''
     program P;
     procedure Q(A, B, C, D, E, F, G, H: Int64;
-                XI: Integer; XU: UInt32; XS: SmallInt; XW: Word;
+                XI: Int32; XU: UInt32; XS: Int16; XW: UInt16;
                 XB: Byte; X8: Int8);
     begin
       WriteLn(XI, ' ', XU, ' ', XS, ' ', XW, ' ', XB, ' ', X8)
@@ -123,14 +123,14 @@ const
   Src = '''
     program P;
     procedure Q(A, B, C, D, E, F, G, H: Int64;
-                XI: Integer; XS: SmallInt; X8: Int8);
+                XI: Int32; XS: Int16; X8: Int8);
     begin
       WriteLn(XI, ' ', XS, ' ', X8);
       WriteLn(XI < 0, ' ', XS < 0, ' ', X8 < 0)
     end;
-    var I: Integer; S: SmallInt; T: Int8;
+    var I: Int32; S: Int16; T: Int8;
     begin
-      I := Low(Integer); S := Low(SmallInt); T := Low(Int8);
+      I := Low(Int32); S := Low(Int16); T := Low(Int8);
       Q(0, 0, 0, 0, 0, 0, 0, 0, I, S, T);
       Q(0, 0, 0, 0, 0, 0, 0, 0, -1, -2, -3)
     end.
@@ -149,19 +149,19 @@ const
   Src = '''
     program P;
     type
-      TProcI = procedure(X: Integer);
+      TProcI = procedure(X: Int32);
       TObj = class
-        procedure M(X: Integer; Y: Byte);
+        procedure M(X: Int32; Y: Byte);
       end;
-    procedure TObj.M(X: Integer; Y: Byte);
+    procedure TObj.M(X: Int32; Y: Byte);
     begin
       WriteLn('method ', X, ' ', Y)
     end;
-    procedure ByVar(X: Integer);
+    procedure ByVar(X: Int32);
     begin
       WriteLn('procvar ', X)
     end;
-    function Widen(X: Integer): Int64;
+    function Widen(X: Int32): Int64;
     begin
       Result := X
     end;

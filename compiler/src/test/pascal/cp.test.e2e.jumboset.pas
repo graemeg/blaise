@@ -125,7 +125,7 @@ const
       G := L
     end;
     procedure Scribble;
-    var A: array[0..15] of Int64; I: Integer;
+    var A: array[0..15] of Int64; I: Int;
     begin
       for I := 0 to 15 do A[I] := -1;
       if A[3] = 0 then WriteLn('never')
@@ -532,11 +532,11 @@ const
       TBig = 0..199;
       TJumbo = set of TBig;
       THold = class
-        function Pair(A, B: Integer): TJumbo;
+        function Pair(A, B: Int): TJumbo;
       end;
-    function Mine(A, B: Integer): TJumbo; begin Result := [A, B] end;
-    function THold.Pair(A, B: Integer): TJumbo; begin Result := [A, B] end;
-    var H: THold; X: TJumbo; I: Integer;
+    function Mine(A, B: Int): TJumbo; begin Result := [A, B] end;
+    function THold.Pair(A, B: Int): TJumbo; begin Result := [A, B] end;
+    var H: THold; X: TJumbo; I: Int;
     begin
       H := THold.Create();
       I := 150;
@@ -563,27 +563,27 @@ const
       TJumbo = set of TBig;
       TTri = array[0..2] of string;
       ISets = interface
-        function Pair(A, B: Integer): TJumbo;
+        function Pair(A, B: Int): TJumbo;
         function Tri(const S: string): TTri;
       end;
       TBase = class(TObject, ISets)
       public
-        Tag: Integer;
-        function Pair(A, B: Integer): TJumbo; virtual;
+        Tag: Int;
+        function Pair(A, B: Int): TJumbo; virtual;
         function Tri(const S: string): TTri; virtual;
       end;
       TKid = class(TBase)
       public
-        function Pair(A, B: Integer): TJumbo; override;
+        function Pair(A, B: Int): TJumbo; override;
         procedure Go();
       end;
-    var Calls: Integer;
-    function TBase.Pair(A, B: Integer): TJumbo; begin Inc(Calls); Result := [A, B] end;
+    var Calls: Int;
+    function TBase.Pair(A, B: Int): TJumbo; begin Inc(Calls); Result := [A, B] end;
     function TBase.Tri(const S: string): TTri;
     begin
       Inc(Calls); Result[0] := S; Result[1] := S + S; Result[2] := '!'
     end;
-    function TKid.Pair(A, B: Integer): TJumbo; begin Inc(Calls); Result := [A] end;
+    function TKid.Pair(A, B: Int): TJumbo; begin Inc(Calls); Result := [A] end;
     procedure TKid.Go();
     var X: TJumbo;
     begin

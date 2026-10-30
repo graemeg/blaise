@@ -138,12 +138,12 @@ begin
   AssertEquals('', '', SemanticError('''
     program p;
     var
-      I: Integer; I32: Int32;
+      I: Int; I32: Int32;
       L: Int64; N: Int;
       Q: UInt64; U: UInt;
       B: Byte; U8: UInt8;
-      D: Double; F: Float; F64: Float64;
-      S: Single; F32: Float32;
+      D: Float64; F: Float; F64: Float64;
+      S: Float32; F32: Float32;
     begin
       I32 := I; I := I32;
       N := L; L := N;
@@ -262,7 +262,7 @@ const
     type TE = (eA, eB);
     var
       L: Int64; S: string; A: array of Byte; SA: array[1..3] of Byte;
-      I: Integer; B: Byte; E: TE; U: UInt64;
+      I: Int32; B: Byte; E: TE; U: UInt64;
     begin
       L := Length(S);
       L := Length(A);
@@ -326,7 +326,7 @@ procedure TTypeStdTests.TestAsm_GetMemSize_Extended;
 const
   Src = '''
     program p;
-    var N: Integer; Q: Pointer;
+    var N: Int32; Q: Pointer;
     begin
       N := 64;
       Q := GetMem(N);
@@ -388,25 +388,25 @@ const
   NarrowHead = '''
     program p;
     type
-      IK = interface procedure Put(X: Integer); end;
+      IK = interface procedure Put(X: Int32); end;
       TK = class(IK)
-        F: Integer;
-        FP: Integer;
-        constructor Create(X: Integer);
-        procedure Put(X: Integer);
-        procedure Ov(X: Integer); overload;
+        F: Int32;
+        FP: Int32;
+        constructor Create(X: Int32);
+        procedure Put(X: Int32);
+        procedure Ov(X: Int32); overload;
         procedure Ov(X: string); overload;
-        property P: Integer read FP write FP;
+        property P: Int32 read FP write FP;
       end;
-      TPP = procedure(X: Integer);
-    constructor TK.Create(X: Integer); begin F := X end;
-    procedure TK.Put(X: Integer); begin F := X end;
-    procedure TK.Ov(X: Integer); begin F := X end;
+      TPP = procedure(X: Int32);
+    constructor TK.Create(X: Int32); begin F := X end;
+    procedure TK.Put(X: Int32); begin F := X end;
+    procedure TK.Ov(X: Int32); begin F := X end;
     procedure TK.Ov(X: string); begin end;
-    procedure Take(X: Integer); begin end;
+    procedure Take(X: Int32); begin end;
     var
-      L: Int64; I: Integer; B: Byte; W: Word; U: UInt64; N: Int;
-      SA: array[0..3] of Integer; DA: array of Integer; PI: ^Integer;
+      L: Int64; I: Int32; B: Byte; W: UInt16; U: UInt64; N: Int;
+      SA: array[0..3] of Int32; DA: array of Int32; PI: ^Int32;
       K: TK; IntfK: IK; PP: TPP; S: string;
     ''';
 

@@ -147,7 +147,7 @@ const
         program P;
         type
           TNode = class
-            Value: Integer;
+            Value: Int;
             Next:  TNode;
           end;
         var N: TNode;
@@ -163,10 +163,10 @@ const
         program P;
         type
           TAnimal = class
-            Age: Integer;
+            Age: Int32;
           end;
           TDog = class(TAnimal)
-            Legs: Integer;
+            Legs: Int32;
           end;
         var D: TDog;
         begin
@@ -181,14 +181,14 @@ const
         program P;
         type
           TBase = class
-            X: Integer;
-            procedure SetX(V: Integer);
+            X: Int;
+            procedure SetX(V: Int);
             begin
               Self.X := V
             end;
           end;
           TChild = class(TBase)
-            Y: Integer;
+            Y: Int;
           end;
         var C: TChild;
         begin
@@ -236,7 +236,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := nil
         end.
@@ -250,10 +250,10 @@ begin
         program P;
         type
           TFoo = class
-            X: Integer;
+            X: Int;
           end;
         var F: TFoo;
-        var N: Integer;
+        var N: Int;
         begin
           F := TFoo.Create();
           if F = nil then
@@ -359,10 +359,10 @@ begin
         program P;
         type
           TBase = class
-            X: Integer;
+            X: Int;
           end;
           TChild = class(TBase)
-            Y: Integer;
+            Y: Int;
           end;
         var C: TChild;
         begin
@@ -382,11 +382,11 @@ const
         program P;
         type
           TBase = class
-            X: Integer;
+            X: Int;
             procedure Init;
           end;
           TChild = class(TBase)
-            Y: Integer;
+            Y: Int;
             procedure Init;
           end;
         procedure TBase.Init;
@@ -409,17 +409,17 @@ const
         program P;
         type
           TBase = class
-            X: Integer;
-            procedure SetX(V: Integer);
+            X: Int;
+            procedure SetX(V: Int);
           end;
           TChild = class(TBase)
-            procedure SetX(V: Integer);
+            procedure SetX(V: Int);
           end;
-        procedure TBase.SetX(V: Integer);
+        procedure TBase.SetX(V: Int);
         begin
           Self.X := V
         end;
-        procedure TChild.SetX(V: Integer);
+        procedure TChild.SetX(V: Int);
         begin
           inherited SetX(V)
         end;
@@ -498,16 +498,16 @@ const Src = '''
     program P;
     type
       TBase = class
-        function Value: Integer;
+        function Value: Int;
       end;
       TChild = class(TBase)
-        function Value: Integer;
+        function Value: Int;
       end;
-    function TBase.Value: Integer;
+    function TBase.Value: Int;
     begin
       Result := 1
     end;
-    function TChild.Value: Integer;
+    function TChild.Value: Int;
     begin
       Result := inherited Value + 1
     end;

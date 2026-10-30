@@ -88,9 +88,9 @@ const
     program P;
     uses generics.collections;
     var
-      L: TList<Integer>;
+      L: TList<Int>;
     begin
-      L := TList<Integer>.Create();
+      L := TList<Int>.Create();
       L.Add(10);
       L.Add(20);
       L.Add(30);
@@ -105,9 +105,9 @@ const
     program P;
     uses generics.collections;
     var
-      L: TList<Integer>;
+      L: TList<Int>;
     begin
-      L := TList<Integer>.Create();
+      L := TList<Int>.Create();
       L.Add(10);
       L.Add(20);
       L.Add(30);
@@ -142,7 +142,7 @@ const
   SrcTListRecordArg = '''
     program P;
     uses generics.collections;
-    type TInfo = record X: Integer; end;
+    type TInfo = record X: Int; end;
     var L: TList<TInfo>;
     begin
       L := TList<TInfo>.Create();
@@ -226,7 +226,7 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
+        N: Int;
       end;
     procedure Fill(L: TList<TC>; S: TStack<TC>);
     var C: TC;
@@ -264,9 +264,9 @@ const
   SrcTListDefaultRW = '''
     program P;
     uses Generics.Collections;
-    var lst: TList<Integer>;
+    var lst: TList<Int>;
     begin
-      lst := TList<Integer>.Create;
+      lst := TList<Int>.Create;
       lst.Add(1); lst.Add(2);
       lst[0] := 100; lst[1] := 200;
       WriteLn(lst[0] + lst[1]);
@@ -278,13 +278,13 @@ const
     program P;
     uses Generics.Collections;
     type
-      TShape = class function Area: Integer; virtual; begin Result := 0 end; end;
+      TShape = class function Area: Int; virtual; begin Result := 0 end; end;
       TBox = class(TShape)
-        FS: Integer;
-        constructor Create(s: Integer); begin FS := s end;
-        function Area: Integer; override; begin Result := FS * FS end;
+        FS: Int;
+        constructor Create(s: Int); begin FS := s end;
+        function Area: Int; override; begin Result := FS * FS end;
       end;
-    var lst: TList<TShape>; i, total: Integer;
+    var lst: TList<TShape>; i, total: Int;
     begin
       lst := TList<TShape>.Create;
       lst.Add(TBox.Create(3)); lst.Add(TBox.Create(4));
@@ -321,11 +321,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -364,11 +364,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -394,11 +394,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -422,11 +422,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -451,18 +451,18 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
     var
       Q: TQueue<TC>;
       C: TC;
-      I: Integer;
+      I: Int;
     begin
       Q := TQueue<TC>.Create();
       for I := 1 to 3 do
@@ -485,11 +485,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -514,11 +514,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -546,11 +546,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -573,11 +573,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -599,11 +599,11 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
@@ -691,17 +691,17 @@ const
     uses generics.collections;
     type
       TC = class
-        N: Integer;
-        constructor Create(AN: Integer);
+        N: Int;
+        constructor Create(AN: Int);
         destructor Destroy; override;
       end;
-    constructor TC.Create(AN: Integer);
+    constructor TC.Create(AN: Int);
     begin N := AN end;
     destructor TC.Destroy;
     begin WriteLn('d', N) end;
     var
       Q: TQueue<TC>;
-      I: Integer;
+      I: Int;
     begin
       Q := TQueue<TC>.Create();
       for I := 1 to 6 do

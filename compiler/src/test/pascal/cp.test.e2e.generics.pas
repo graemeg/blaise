@@ -125,7 +125,7 @@ const
     function Max<T>(A, B: T): T; begin if A > B then Result := A else Result := B end;
     function Pick<T>(C: Boolean; A, B: T): T; begin if C then Result := A else Result := B end;
     begin
-      WriteLn(Max<Integer>(3, 7));
+      WriteLn(Max<Int>(3, 7));
       WriteLn(Pick<string>(True, 'yes', 'no'))
     end.
     ''';
@@ -133,19 +133,19 @@ const
   SrcFuncTypedLocal = '''
     program Prg;
     function Echo<T>(X: T): T; var tmp: T; begin tmp := X; Result := tmp end;
-    begin WriteLn(Echo<Integer>(8)) end.
+    begin WriteLn(Echo<Int>(8)) end.
     ''';
 
   SrcFuncParamlessLocal = '''
     program Prg;
     function Zero<T>: T; var v: T; begin Result := v end;
-    begin WriteLn(Zero<Integer>()) end.
+    begin WriteLn(Zero<Int>()) end.
     ''';
 
   SrcFuncTwoLocals = '''
     program Prg;
     function Sum<T>(A, B: T): T; var x, y: T; begin x := A; y := B; Result := x + y end;
-    begin WriteLn(Sum<Integer>(20, 22)) end.
+    begin WriteLn(Sum<Int>(20, 22)) end.
     ''';
 
   SrcClassGetSet = '''
@@ -155,14 +155,14 @@ const
       procedure SetV(V: T); begin FV := V end;
       function GetV: T; begin Result := FV end;
     end;
-    var b: TBox<Integer>;
-    begin b := TBox<Integer>.Create(); b.SetV(99); WriteLn(b.GetV()); b.Free() end.
+    var b: TBox<Int>;
+    begin b := TBox<Int>.Create(); b.SetV(99); WriteLn(b.GetV()); b.Free() end.
     ''';
 
   SrcRecordFields = '''
     program Prg;
     type TPair<T> = record A, B: T; end;
-    var pr: TPair<Integer>;
+    var pr: TPair<Int>;
     begin pr.A := 10; pr.B := 32; WriteLn(pr.A + pr.B) end.
     ''';
 
@@ -173,23 +173,23 @@ const
       function Get: T; var tmp: T; begin tmp := FV; Result := tmp end;
       procedure Put(X: T); var local: T; begin local := X; FV := local end;
     end;
-    var b: TBox<Integer>;
-    begin b := TBox<Integer>.Create(); b.Put(33); WriteLn(b.Get()); b.Free() end.
+    var b: TBox<Int>;
+    begin b := TBox<Int>.Create(); b.Put(33); WriteLn(b.Get()); b.Free() end.
     ''';
 
   SrcRecordTwoParams = '''
     program Prg;
     type TKV<K, V> = record Key: K; Val: V; end;
-    var kv: TKV<string, Integer>;
+    var kv: TKV<string, Int>;
     begin kv.Key := 'age'; kv.Val := 40; WriteLn(kv.Key, '=', kv.Val) end.
     ''';
 
   SrcDistinctInst = '''
     program Prg;
     type TBox<T> = class FV: T; procedure SetV(V: T); begin FV := V end; function GetV: T; begin Result := FV end; end;
-    var bi: TBox<Integer>; bs: TBox<string>;
+    var bi: TBox<Int>; bs: TBox<string>;
     begin
-      bi := TBox<Integer>.Create(); bi.SetV(5);
+      bi := TBox<Int>.Create(); bi.SetV(5);
       bs := TBox<string>.Create(); bs.SetV('hi');
       WriteLn(bi.GetV(), ' ', bs.GetV());
       bi.Free(); bs.Free()
@@ -203,10 +203,10 @@ const
       procedure SetV(V: T); begin FV := V end;
       function GetV: T; begin Result := FV end;
     end;
-    var outer: TBox<TBox<Integer>>; inner: TBox<Integer>;
+    var outer: TBox<TBox<Int>>; inner: TBox<Int>;
     begin
-      inner := TBox<Integer>.Create(); inner.SetV(7);
-      outer := TBox<TBox<Integer>>.Create(); outer.SetV(inner);
+      inner := TBox<Int>.Create(); inner.SetV(7);
+      outer := TBox<TBox<Int>>.Create(); outer.SetV(inner);
       WriteLn(outer.GetV().GetV());
       outer.Free(); inner.Free()
     end.
@@ -233,7 +233,7 @@ const
         procedure SetV(AV: T);
         function GetV(): T;
       end;
-      TIntBox = tbox<Integer>;
+      TIntBox = tbox<Int>;
     procedure TBox<T>.SetV(AV: T);
     begin
       Self.FValue := AV
@@ -243,14 +243,14 @@ const
       Result := Self.FValue
     end;
     var
-      a: tbox<Integer>;
-      b: TBOX<Integer>;
+      a: tbox<Int>;
+      b: TBOX<Int>;
       c: TIntBox;
     begin
-      a := tbox<Integer>.Create();
+      a := tbox<Int>.Create();
       a.SetV(11);
       WriteLn(a.GetV());
-      b := TBOX<Integer>.Create();
+      b := TBOX<Int>.Create();
       b.SetV(22);
       WriteLn(b.GetV());
       c := a;
@@ -332,8 +332,8 @@ const
       V: T;
       function R: T; var t: T; begin t := V; Result := t end;
     end;
-    var b: TB<Integer>;
-    begin b := TB<Integer>.Create(); b.V := 7; WriteLn(b.R()); b.Free() end.
+    var b: TB<Int>;
+    begin b := TB<Int>.Create(); b.V := 7; WriteLn(b.R()); b.Free() end.
     ''';
 
   SrcRecordLocalLikeParam = '''
@@ -342,7 +342,7 @@ const
       V: T;
       function R: T; var t: T; begin t := V; Result := t end;
     end;
-    var w: TW<Integer>;
+    var w: TW<Int>;
     begin w.V := 55; WriteLn(w.R()) end.
     ''';
 
@@ -367,7 +367,7 @@ const
         procedure SetIt(v: T); begin FVal := v; end;
         function GetIt: T; begin Result := FVal; end;
       end;
-      TIntBox = class(TBox<Integer>) end;
+      TIntBox = class(TBox<Int>) end;
     var b: TIntBox;
     begin
       b := TIntBox.Create;
@@ -385,10 +385,10 @@ const
         function Describe: string; virtual; begin Result := 'base' end;
         function Wrap: string; begin Result := '[' + Self.Describe() + ']' end;
       end;
-      TIntD = class(TBase<Integer>)
+      TIntD = class(TBase<Int>)
         function Describe: string; override; begin Result := 'derived' end;
       end;
-    var d: TBase<Integer>;
+    var d: TBase<Int>;
     begin
       d := TIntD.Create;
       WriteLn(d.Wrap());
@@ -412,15 +412,15 @@ const
   SrcGenericImplementsIntf = '''
     program P;
     type
-      IVal = interface function Get: Integer; end;
+      IVal = interface function Get: Int; end;
       TBox<T> = class(IVal)
-        FV: Integer;
-        constructor Create(v: Integer); begin FV := v end;
-        function Get: Integer; begin Result := FV end;
+        FV: Int;
+        constructor Create(v: Int); begin FV := v end;
+        function Get: Int; begin Result := FV end;
       end;
     var iv: IVal;
     begin
-      iv := TBox<Integer>.Create(77);
+      iv := TBox<Int>.Create(77);
       WriteLn(iv.Get());
       iv := nil
     end.
@@ -429,13 +429,13 @@ const
   SrcGenericImplementsIntfArgs = '''
     program P;
     type
-      IAdder = interface function Add(a, b: Integer): Integer; end;
+      IAdder = interface function Add(a, b: Int): Int; end;
       TCalc<T> = class(IAdder)
-        function Add(a, b: Integer): Integer; begin Result := a + b end;
+        function Add(a, b: Int): Int; begin Result := a + b end;
       end;
     var ad: IAdder;
     begin
-      ad := TCalc<Integer>.Create;
+      ad := TCalc<Int>.Create;
       WriteLn(ad.Add(15, 27));
       ad := nil
     end.
@@ -464,8 +464,8 @@ const
     var u: TUtil;
     begin
       u := TUtil.Create;
-      WriteLn(u.Pick<Integer>(True, 7, 9));
-      WriteLn(u.Pick<Integer>(False, 7, 9));
+      WriteLn(u.Pick<Int>(True, 7, 9));
+      WriteLn(u.Pick<Int>(False, 7, 9));
       u := nil
     end.
     ''';
@@ -479,7 +479,7 @@ const
     var u: TUtil;
     begin
       u := TUtil.Create;
-      WriteLn(u.Echo<Integer>(42));
+      WriteLn(u.Echo<Int>(42));
       WriteLn(u.Echo<string>('hi'));
       u := nil
     end.
@@ -489,15 +489,15 @@ const
     program Prog;
     type
       TBox = class
-        FBase: Integer;
-        constructor Create(b: Integer); begin FBase := b end;
+        FBase: Int;
+        constructor Create(b: Int); begin FBase := b end;
         function Combine<T>(x: T): T; begin Result := x end;
-        function Offset: Integer; begin Result := FBase end;
+        function Offset: Int; begin Result := FBase end;
       end;
     var b: TBox;
     begin
       b := TBox.Create(100);
-      WriteLn(b.Combine<Integer>(5) + b.Offset());
+      WriteLn(b.Combine<Int>(5) + b.Offset());
       b := nil
     end.
     ''';
@@ -511,7 +511,7 @@ const
     var u: TUtil;
     begin
       u := TUtil.Create;
-      WriteLn(u.First<Integer, string>(7, 'ignored'));
+      WriteLn(u.First<Int, string>(7, 'ignored'));
       u := nil
     end.
     ''';
@@ -554,7 +554,7 @@ const
     begin
       u := TUtil.Create;
       WriteLn(u.Pick<string>(True, 'aa', 'bb'));
-      WriteLn(u.Pick<Integer>(False, 1, 2));
+      WriteLn(u.Pick<Int>(False, 1, 2));
       u := nil
     end.
     ''';
@@ -619,7 +619,7 @@ begin
       FAcc := FAcc + V
     end;
     procedure TBox<T>.AddAll(const AItems: array of T);
-    var I: Integer;
+    var I: Int;
     begin
       for I := Low(AItems) to High(AItems) do
         Self.Add(AItems[I])
@@ -643,7 +643,7 @@ begin
     program P;
     type
       TBox<T> = class
-        FN: Integer;
+        FN: Int;
         FFirst: T;
         static function From(const AItems: array of T): TBox<T>;
       end;
@@ -684,10 +684,10 @@ begin
     end;
     var
       S: TBox<string>;
-      N: TBox<Integer>;
+      N: TBox<Int>;
     begin
       S := TBox<string>.Create();
-      N := TBox<Integer>.Create();
+      N := TBox<Int>.Create();
       S.First(['str']);
       N.First([42])
     end.
@@ -785,23 +785,23 @@ const
   Src = '''
     program P;
     uses Generics.Collections;
-    var S: TStack<Integer>; Q: TQueue<Integer>; L: TList<Integer>; I: Integer;
+    var S: TStack<Int>; Q: TQueue<Int>; L: TList<Int>; I: Int;
     begin
-      S := TStack<Integer>.Create();
+      S := TStack<Int>.Create();
       for I := 1 to 10 do
         S.Push(I * 10);
       Write(S.Count, ' ', S.Peek(), ' ', S.Count, ':');
       while not S.IsEmpty() do
         Write(' ', S.Pop());
       WriteLn('');
-      Q := TQueue<Integer>.Create();
+      Q := TQueue<Int>.Create();
       for I := 1 to 10 do
         Q.Enqueue(I);
       Write(Q.Count, ' ', Q.Peek(), ' ', Q.Count, ':');
       while not Q.IsEmpty() do
         Write(' ', Q.Dequeue());
       WriteLn('');
-      L := TList<Integer>.Create();
+      L := TList<Int>.Create();
       for I := 0 to 19 do
         L.Add(I * I);
       WriteLn(L.Count, ' ', L[0], ' ', L[19], ' ', L[7])
@@ -824,9 +824,9 @@ const
   Src = '''
     program P;
     uses Generics.Collections;
-    var S: TSet<Integer>; I, N: Integer;
+    var S: TSet<Int>; I, N: Int;
     begin
-      S := TSet<Integer>.Create();
+      S := TSet<Int>.Create();
       for I := 1 to 20 do
         S.Include(I);
       S.Include(5);
@@ -857,9 +857,9 @@ const
   Src = '''
     program P;
     uses Generics.Collections;
-    var D: TDictionary<Integer, Integer>; I, V: Integer;
+    var D: TDictionary<Int, Int>; I, V: Int;
     begin
-      D := TDictionary<Integer, Integer>.Create();
+      D := TDictionary<Int, Int>.Create();
       for I := 1 to 20 do
         D.Add(I, I * 100);
       WriteLn(D.Count, ' ', D[5], ' ', D[20]);
@@ -892,9 +892,9 @@ const
   Src = '''
     program P;
     uses Generics.Collections;
-    var D: TOrderedDictionary<Integer, Integer>; I, V: Integer;
+    var D: TOrderedDictionary<Int, Int>; I, V: Int;
     begin
-      D := TOrderedDictionary<Integer, Integer>.Create();
+      D := TOrderedDictionary<Int, Int>.Create();
       D.Add(30, 3);
       D.Add(10, 1);
       D.Add(20, 2);
@@ -928,8 +928,8 @@ const
   Src = '''
     program P;
     uses Generics.Collections;
-    procedure Fill(M: IMap<Integer, Integer>; const Tag: string);
-    var V: Integer;
+    procedure Fill(M: IMap<Int, Int>; const Tag: string);
+    var V: Int;
     begin
       M.Add(1, 10);
       M.Add(2, 20);
@@ -940,8 +940,8 @@ const
         WriteLn(Tag, ' ', M.GetCount(), ' ', V, ' ', M.ContainsKey(2), ' ', M.ContainsKey(1));
     end;
     begin
-      Fill(TDictionary<Integer, Integer>.Create(), 'dict');
-      Fill(TOrderedDictionary<Integer, Integer>.Create(), 'ordered')
+      Fill(TDictionary<Int, Int>.Create(), 'dict');
+      Fill(TOrderedDictionary<Int, Int>.Create(), 'ordered')
     end.
     ''';
 begin
@@ -962,8 +962,8 @@ const
     type
       TListEnumerator<T> = class
         FList:  ^T;
-        FIndex: Integer;
-        FCount: Integer;
+        FIndex: Int;
+        FCount: Int;
         function MoveNext: Boolean;
         begin
           Self.FIndex := Self.FIndex + 1;
@@ -977,7 +977,7 @@ const
       end;
       TMyList<T> = class
         FData:  ^T;
-        FCount: Integer;
+        FCount: Int;
         procedure Add(V: T);
         var Slot: ^T;
         begin
@@ -995,10 +995,10 @@ const
         end;
       end;
     var
-      L: TMyList<Integer>;
-      X: Integer;
+      L: TMyList<Int>;
+      X: Int;
     begin
-      L := TMyList<Integer>.Create();
+      L := TMyList<Int>.Create();
       L.Add(4);
       L.Add(8);
       L.Add(15);
@@ -1039,10 +1039,10 @@ const
         end;
       end;
     var
-      A: TBox<Integer>;
+      A: TBox<Int>;
       B: TBox<string>;
     begin
-      A := TBox<Integer>.Create();
+      A := TBox<Int>.Create();
       B := TBox<string>.Create();
       A.Init(42);
       B.Init('forty-two');
@@ -1111,7 +1111,7 @@ const
     end;
     var
       B: TBox<string>;
-      R: TRB<Integer>;
+      R: TRB<Int>;
     begin
       B := TBox<string>.Create();
       B.Add('x');
@@ -1146,11 +1146,11 @@ const
       TPair<T> = record
         A: T;
         function Get(): T; overload;
-        function Get(D: Integer): Integer; overload;
+        function Get(D: Int): Int; overload;
       end;
       TBox<T> = class
         procedure Put(A: T); overload;
-        procedure Put(A: Integer); overload;
+        procedure Put(A: Int); overload;
       end;
     implementation
     constructor TBase<T>.Create(); begin end;
@@ -1159,29 +1159,29 @@ const
     function TBase<T>.Describe(const P: string): string; begin Result := 'base1 ' + P end;
     function TKid<T>.Describe(const P: string): string; begin Result := 'kid ' + P end;
     function TPair<T>.Get(): T; begin Result := A end;
-    function TPair<T>.Get(D: Integer): Integer; begin Result := D * 2 end;
+    function TPair<T>.Get(D: Int): Int; begin Result := D * 2 end;
     procedure TBox<T>.Put(A: T); begin WriteLn('T') end;
-    procedure TBox<T>.Put(A: Integer); begin WriteLn('Int') end;
+    procedure TBox<T>.Put(A: Int); begin WriteLn('Int') end;
     end.
     ''';
   Src = '''
     program UseGOver;
     uses gover;
-    var B: TBase<string>; K: TBase<Integer>; P: TPair<string>;
-      BS: TBox<string>; BI: TBox<Integer>;
+    var B: TBase<string>; K: TBase<Int>; P: TPair<string>;
+      BS: TBox<string>; BI: TBox<Int>;
     begin
       B := TBase<string>.Create('hi');
       WriteLn(B.FV, ' ', B.Describe(), ' ', B.Describe('x'));
-      K := TKid<Integer>.Create(7);
+      K := TKid<Int>.Create(7);
       WriteLn(K.FV, ' ', K.Describe(), ' ', K.Describe('y'));
-      K := TKid<Integer>.Create();
+      K := TKid<Int>.Create();
       WriteLn(K.FV);
       P.A := 'pa';
       WriteLn(P.Get(), ' ', P.Get(21));
       BS := TBox<string>.Create();
       BS.Put('a');
       BS.Put(1);
-      BI := TBox<Integer>.Create();
+      BI := TBox<Int>.Create();
       WriteLn(BI <> nil)
     end.
     ''';
@@ -1204,12 +1204,12 @@ const
     program P;
     uses Generics.Collections;
     type
-      Tar = array[0..3] of Integer;
+      Tar = array[0..3] of Int;
       TNeg = array[-2..1] of string;
     var
       D1: TDictionary<Byte, Tar>;
-      D2: TDictionary<Byte, Integer>;
-      D3: TDictionary<Integer, TNeg>;
+      D2: TDictionary<Byte, Int>;
+      D3: TDictionary<Int, TNeg>;
       A: Tar;
       N: TNeg;
       X: Byte;
@@ -1226,11 +1226,11 @@ const
         Write(A[3], ' ')
       end;
       WriteLn();
-      D2 := TDictionary<Byte, Integer>.Create();
+      D2 := TDictionary<Byte, Int>.Create();
       for X := 0 to 4 do
         D2.Add(X, 32 * X);
       WriteLn(D2[4]);
-      D3 := TDictionary<Integer, TNeg>.Create();
+      D3 := TDictionary<Int, TNeg>.Create();
       N[-2] := 'lo';
       N[1] := 'hi';
       D3.Add(-7, N);
@@ -1250,12 +1250,12 @@ const
     begin
       Result := a + a
     end;
-    var I: Integer; S: string;
+    var I: Int; S: string;
     begin
-      I := Twice<Integer>(4);
-      I := Twice<Integer>(I);
+      I := Twice<Int>(4);
+      I := Twice<Int>(I);
       S := Twice<string>('ab');
-      WriteLn(I, ' ', Twice<Integer>(1), ' ', S, ' ', Twice<string>(S))
+      WriteLn(I, ' ', Twice<Int>(1), ' ', S, ' ', Twice<string>(S))
     end.
     ''';
 begin
@@ -1286,20 +1286,20 @@ const
     begin
       WriteLn(P.Key, '=', P.Val)
     end;
-    var X, Y: Integer; S1, S2: string; Pr: TPair<string, Integer>;
+    var X, Y: Int; S1, S2: string; Pr: TPair<string, Int>;
     begin
-      GenericProc<Integer>(10, 11);
+      GenericProc<Int>(10, 11);
       GenericProc<string>('x', 'y');
       X := 1; Y := 2;
-      Swap<Integer>(X, Y);
+      Swap<Int>(X, Y);
       S1 := 'a'; S2 := 'b';
       Swap<string>(S1, S2);
       WriteLn(X, Y, S1, S2);
-      Twice<Integer>(4);
-      WriteLn(Twice<Integer>(4));
+      Twice<Int>(4);
+      WriteLn(Twice<Int>(4));
       Pr.Key := 'k'; Pr.Val := 9;
-      Show<string, Integer>(Pr);
-      if X > 1 then GenericProc<Integer>(7, 8)
+      Show<string, Int>(Pr);
+      if X > 1 then GenericProc<Int>(7, 8)
     end.
     ''';
 begin
@@ -1331,15 +1331,15 @@ const
       Result := TList<T>.Create();
       Result.Add(V)
     end;
-    function Size<T>(): Integer;
+    function Size<T>(): Int;
     begin
       Result := SizeOf(T)
     end;
-    var L: TList<Integer>;
+    var L: TList<Int>;
     begin
-      L := TList<Integer>.Create();
+      L := TList<Int>.Create();
       L.Add(5); L.Add(6);
-      WriteLn(Wrap<Integer>(L).Items.Count);
+      WriteLn(Wrap<Int>(L).Items.Count);
       WriteLn(Single<string>('s')[0]);
       WriteLn(Size<Int64>(), ' ', Size<Byte>())
     end.
@@ -1369,16 +1369,16 @@ const
     begin
       WriteLn(TConv<Byte>.Create().Conv(300), ' ',
               TConv<Int8>.Create().Conv(200), ' ',
-              TConv<SmallInt>.Create().Conv(40000), ' ',
-              TConv<Word>.Create().Conv(70000));
-      WriteLn(TConv<Integer>.Create().Conv(4294967297), ' ',
+              TConv<Int16>.Create().Conv(40000), ' ',
+              TConv<UInt16>.Create().Conv(70000));
+      WriteLn(TConv<Int32>.Create().Conv(4294967297), ' ',
               TConv<UInt32>.Create().Conv(-1), ' ',
               TConv<Int64>.Create().Conv(-5), ' ',
               TConv<UInt64>.Create().Conv(4294967297), ' ',
               Ord(TConv<TColour>.Create().Conv(2)));
       WriteLn(Conv<Byte>(300), ' ', Conv<Int8>(200), ' ',
-              Conv<SmallInt>(40000), ' ', Conv<Word>(70000));
-      WriteLn(Conv<Integer>(4294967297), ' ', Conv<UInt32>(-1), ' ',
+              Conv<Int16>(40000), ' ', Conv<UInt16>(70000));
+      WriteLn(Conv<Int32>(4294967297), ' ', Conv<UInt32>(-1), ' ',
               Conv<Int64>(-5), ' ', Conv<UInt64>(4294967297), ' ',
               Ord(Conv<TColour>(2)))
     end.

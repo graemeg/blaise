@@ -98,7 +98,7 @@ const
     '''
     program P;
     uses Classes;
-    var L: TStringList; I: Integer;
+    var L: TStringList; I: Int;
     begin
       L := TStringList.Create();
       L.Add('first');
@@ -114,7 +114,7 @@ const
     '''
     program P;
     uses Classes;
-    var L: TStringList; I: Integer;
+    var L: TStringList; I: Int;
     begin
       L := TStringList.Create();
       L.Add('foo');
@@ -250,7 +250,7 @@ const
     '''
     program P;
     uses Classes;
-    var L: TStringList; I: Integer; T: string;
+    var L: TStringList; I: Int; T: string;
     begin
       L := TStringList.Create();
       I := 0;
@@ -297,7 +297,7 @@ const
     '''
     program P;
     uses Classes;
-    var L: TStringList; I: Integer;
+    var L: TStringList; I: Int;
     begin
       L := TStringList.Create();
       L.Text := 'a' + #10 + '  indented' + #10 + 'trailing  ';
@@ -316,7 +316,7 @@ const
     '''
     program P;
     uses Classes;
-    var L: TStringList; I: Integer;
+    var L: TStringList; I: Int;
     begin
       L := TStringList.Create();
       I := 0;
@@ -374,7 +374,7 @@ const
     '''
     program P;
     uses Classes;
-    var L: TStringList; I: Integer;
+    var L: TStringList; I: Int;
     begin
       L := TStringList.Create();
       L.CaseSensitive := False;
@@ -411,7 +411,7 @@ const
     '''
     program P;
     uses Classes;
-    function DescCmp(const A: string; const B: string): Integer;
+    function DescCmp(const A: string; const B: string): Int32;
     begin
       { reverse lexicographic: B vs A }
       Result := CompareStr(B, A)
@@ -850,7 +850,7 @@ const
     uses Classes;
     var L: TStringList; Idx: Int;
     procedure Show(L: TStringList);
-    var I: Integer; S: string;
+    var I: Int; S: string;
     begin
       S := '';
       for I := 0 to L.Count - 1 do S := S + L[I] + ' ';
@@ -952,7 +952,7 @@ const
     uses Classes;
     type
       TTag = class
-        N: Integer;
+        N: Int;
       end;
     var L: TStringList; A, B: TTag; Idx: Int;
     begin
@@ -990,7 +990,7 @@ const
   Src = '''
     program P;
     uses Classes;
-    var L, M: TStringList; Path: string; I: Integer;
+    var L, M: TStringList; Path: string; I: Int;
     begin
       Path := GetTempDir() + 'blaise_e2e_tstringlist.txt';
       L := TStringList.Create();
@@ -1024,7 +1024,7 @@ const
     the ordering. }
   Src = '''
     program P;
-    function Sign(N: Integer): Integer;
+    function Sign(N: Int): Int;
     begin
       if N < 0 then Result := -1
       else if N > 0 then Result := 1

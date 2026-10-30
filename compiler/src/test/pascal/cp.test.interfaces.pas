@@ -165,7 +165,7 @@ const
         type
           IFoo = interface
             procedure DoIt;
-            function GetVal: Integer;
+            function GetVal: Int;
           end;
         begin
         end.
@@ -191,16 +191,16 @@ const
         type
           IFoo = interface
             procedure DoIt;
-            function GetVal: Integer;
+            function GetVal: Int;
           end;
           TFoo = class(TObject, IFoo)
             procedure DoIt;
-            function GetVal: Integer;
+            function GetVal: Int;
           end;
         procedure TFoo.DoIt;
         begin
         end;
-        function TFoo.GetVal: Integer;
+        function TFoo.GetVal: Int;
         begin
           Result := 42
         end;
@@ -318,7 +318,7 @@ const
             procedure print;
           end;
           Toutput = class(TObject, Iprinter)
-            fField: Integer;
+            fField: Int;
             procedure print;
           end;
           Tmi = class
@@ -553,7 +553,7 @@ begin
     program P;
     type
       IG = interface
-        function Scale(D: Double; N: Integer): Double;
+        function Scale(D: Float64; N: Int): Float64;
       end;
     var G: IG;
     begin
@@ -569,7 +569,7 @@ begin
     program P;
     type
       IG = interface
-        procedure Run(N: Integer);
+        procedure Run(N: Int);
       end;
     var G: IG;
     begin
@@ -585,9 +585,9 @@ begin
     program P;
     type
       IG = interface
-        function Scale(D: Double; N: Integer): Double;
+        function Scale(D: Float64; N: Int): Float64;
       end;
-    var G: IG; K: Integer;
+    var G: IG; K: Int;
     begin
       K := 2;
       if G <> nil then WriteLn(G.Scale(K, 4))
@@ -605,9 +605,9 @@ begin
     program P;
     type
       IG = interface
-        function Scale(D: Double; N: Integer): Double;
+        function Scale(D: Float64; N: Int32): Float64;
       end;
-    var G: IG; K: Integer;
+    var G: IG; K: Int32;
     begin
       K := 2;
       if G <> nil then WriteLn(G.Scale(K, 4))
@@ -698,15 +698,15 @@ begin
       program P;
       type
         IA = interface(IB)
-          function GetA: Integer;
+          function GetA: Int;
         end;
         IB = interface(IA)
-          function GetB: Integer;
+          function GetB: Int;
         end;
         TImpl = class(IA)
-          function GetA: Integer;
+          function GetA: Int;
           begin Result := 1 end;
-          function GetB: Integer;
+          function GetB: Int;
           begin Result := 2 end;
         end;
       var
@@ -722,7 +722,7 @@ begin
       program P;
       type
         IA = interface(IA)
-          function GetA: Integer;
+          function GetA: Int;
         end;
       begin
       end.
@@ -743,8 +743,8 @@ begin
   AssertEquals('an acyclic chain is still accepted', '', SemanticError('''
       program P;
       type
-        IA = interface function GetA: Integer; end;
-        IB = interface(IA) function GetB: Integer; end;
+        IA = interface function GetA: Int; end;
+        IB = interface(IA) function GetB: Int; end;
         IC = interface(IB) end;
       begin
       end.
@@ -765,7 +765,7 @@ begin
           function GetB: T;
         end;
       var
-        X: IA<Integer>;
+        X: IA<Int32>;
       begin
         X := nil
       end.
@@ -963,20 +963,20 @@ const
         program P;
         type
           IInter = interface
-            function GetValue(): Integer;
-            procedure SetValue(AValue: Integer);
-            property Value: Integer read GetValue write SetValue;
+            function GetValue(): Int;
+            procedure SetValue(AValue: Int);
+            property Value: Int read GetValue write SetValue;
           end;
           TFace = class(TObject, IInter)
-            FVal: Integer;
-            function GetValue(): Integer;
-            procedure SetValue(AValue: Integer);
+            FVal: Int;
+            function GetValue(): Int;
+            procedure SetValue(AValue: Int);
           end;
-        function TFace.GetValue(): Integer;
+        function TFace.GetValue(): Int;
         begin
           Result := FVal;
         end;
-        procedure TFace.SetValue(AValue: Integer);
+        procedure TFace.SetValue(AValue: Int);
         begin
           FVal := AValue;
         end;
@@ -1026,8 +1026,8 @@ begin
       program P;
       type
         IInter = interface
-          function GetValue(): Integer;
-          property Value: Integer read NoSuchMethod;
+          function GetValue(): Int;
+          property Value: Int read NoSuchMethod;
         end;
       begin
       end.
@@ -1057,13 +1057,13 @@ begin
       program P;
       type
         IInter = interface
-          function GetValue(): Integer;
-          property Value: Integer read GetValue;
+          function GetValue(): Int;
+          property Value: Int read GetValue;
         end;
         TFace = class(TObject, IInter)
-          function GetValue(): Integer;
+          function GetValue(): Int;
         end;
-      function TFace.GetValue(): Integer;
+      function TFace.GetValue(): Int;
       begin
         Result := 1;
       end;
@@ -1098,8 +1098,8 @@ begin
       program P;
       type
         IBase = interface
-          function GetValue(): Integer;
-          property Value: Integer read GetValue;
+          function GetValue(): Int;
+          property Value: Int read GetValue;
         end;
         IChild = interface(IBase)
           procedure Extra();
@@ -1197,11 +1197,11 @@ const
     program P;
     type
       IV = interface
-        function GetV(I: Integer): Double;
-        procedure SetV(I: Integer; V: Double);
-        property Vals[I: Integer]: Double read GetV write SetV;
+        function GetV(I: Int32): Float64;
+        procedure SetV(I: Int32; V: Float64);
+        property Vals[I: Int32]: Float64 read GetV write SetV;
       end;
-    var X: IV; D: Double;
+    var X: IV; D: Float64;
     begin
       X.Vals[2] := 1.5;
       D := X.Vals[3];
@@ -1294,7 +1294,7 @@ const
       program P;
       type
         IThing = interface
-          function N(): Integer;
+          function N(): Int;
         end;
         TBig = record A, B, C: Int64; end;
         TIFac = function(): IThing of object;
@@ -1331,7 +1331,7 @@ const
       program P;
       type
         IThing = interface
-          function N(): Integer;
+          function N(): Int;
         end;
         THold = class
           FS: IThing;
@@ -1362,16 +1362,16 @@ const
       program P;
       type
         IThing = interface
-          function N(): Integer;
+          function N(): Int;
         end;
         TThing = class(TObject, IThing)
-          function N(): Integer;
+          function N(): Int;
         end;
-      function TThing.N(): Integer;
+      function TThing.N(): Int;
       begin
         Result := 1
       end;
-      procedure Many(A, B, C, D, E: Integer; X, Y, Z: IThing);
+      procedure Many(A, B, C, D, E: Int; X, Y, Z: IThing);
       begin
       end;
       var T: TThing;
@@ -1398,7 +1398,7 @@ const
       program P;
       type
         IThing = interface
-          function N(): Integer;
+          function N(): Int;
         end;
       procedure Take(const X: IThing);
       begin
@@ -1425,24 +1425,24 @@ const
       program P;
       type
         IBase = interface
-          function A(): Integer;
+          function A(): Int;
         end;
         IDer = interface(IBase)
-          function B(): Integer;
+          function B(): Int;
         end;
         IOther = interface
-          function C(): Integer;
+          function C(): Int;
         end;
         TImp = class(TObject, IDer)
-          function A(): Integer;
-          function B(): Integer;
+          function A(): Int;
+          function B(): Int;
         end;
         TNo = class end;
-      function TImp.A(): Integer;
+      function TImp.A(): Int;
       begin
         Result := 1
       end;
-      function TImp.B(): Integer;
+      function TImp.B(): Int;
       begin
         Result := 2
       end;
@@ -1473,24 +1473,24 @@ const
       program P;
       type
         IBase = interface
-          function A(): Integer;
+          function A(): Int;
         end;
         IDer = interface(IBase)
-          function B(): Integer;
+          function B(): Int;
         end;
         IOther = interface
-          function C(): Integer;
+          function C(): Int;
         end;
         TImp = class(TObject, IDer)
-          function A(): Integer;
-          function B(): Integer;
+          function A(): Int;
+          function B(): Int;
         end;
         TNo = class end;
-      function TImp.A(): Integer;
+      function TImp.A(): Int;
       begin
         Result := 1
       end;
-      function TImp.B(): Integer;
+      function TImp.B(): Int;
       begin
         Result := 2
       end;
@@ -1516,7 +1516,7 @@ const
       program P;
       type
         IThing = interface
-          function N(): Integer;
+          function N(): Int;
         end;
       function ExtMake(): IThing; external name 'RealMake';
       var I: IThing;
@@ -1539,7 +1539,7 @@ const
       program P;
       type
         IThing = interface
-          function N(): Integer;
+          function N(): Int;
         end;
         THold = class
           [Weak] FW: IThing;
@@ -1567,7 +1567,7 @@ begin
   AsmT := GenAsm('''
     program P;
     type
-      IGr = interface function Hi(): Integer; end;
+      IGr = interface function Hi(): Int; end;
     procedure Q(A: IGr; B: IGr; var C: IGr; out D: IGr); begin end;
     begin
     end.

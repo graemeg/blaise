@@ -189,7 +189,7 @@ const
       program P;
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Add(const A, B: TFoo): TFoo;
         end;
       begin
@@ -221,7 +221,7 @@ const
       program P;
       type
         TBar = class
-          X: Integer;
+          X: Int;
           class operator Add(const A, B: TBar): TBar;
         end;
       begin
@@ -250,7 +250,7 @@ const
       program P;
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Negative(const A: TFoo): TFoo;
         end;
       begin
@@ -277,7 +277,7 @@ const
       program P;
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Add(const A, B: TFoo): TFoo;
           class operator Subtract(const A, B: TFoo): TFoo;
           class operator Multiply(const A, B: TFoo): TFoo;
@@ -322,7 +322,7 @@ const
       program P;
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Add(const A, B: TFoo): TFoo;
         end;
       class operator TFoo.Add(const A, B: TFoo): TFoo;
@@ -366,7 +366,7 @@ const
       interface
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Add(const A, B: TFoo): TFoo;
         end;
       implementation
@@ -417,7 +417,7 @@ const
       program P;
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Frobnicate(const A, B: TFoo): TFoo;
         end;
       begin
@@ -433,7 +433,7 @@ const
       program P;
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Add(const A: TFoo): TFoo;
         end;
       begin
@@ -449,7 +449,7 @@ const
       program P;
       type
         TFoo = record
-          X: Integer;
+          X: Int;
           class operator Negative(const A, B: TFoo): TFoo;
         end;
       begin
@@ -499,7 +499,7 @@ const
       program P;
       type
         TFoo = record
-          Operator: Integer;
+          Operator: Int;
         end;
       var F: TFoo;
       begin
@@ -522,7 +522,7 @@ const
       program P;
       type
         TRect = record
-          L, T, R, B: Integer;
+          L, T, R, B: Int;
           class operator Add(const A, C: TRect): TRect;
         end;
       class operator TRect.Add(const A, C: TRect): TRect;
@@ -596,7 +596,7 @@ const
       program P;
       type
         TRect = record
-          L: Integer;
+          L: Int;
         end;
       var X, Y, Z: TRect;
       begin
@@ -638,7 +638,7 @@ const
       program P;
       type
         TBar = class
-          X: Integer;
+          X: Int;
           class operator Equal(const A, B: TBar): Boolean;
         end;
       class operator TBar.Equal(const A, B: TBar): Boolean;
@@ -687,7 +687,7 @@ const
       program P;
       type
         TP = record
-          X: Integer;
+          X: Int;
           class operator Equal(const A, B: TP): Boolean;
           class operator LessThan(const A, B: TP): Boolean;
         end;
@@ -737,7 +737,7 @@ const
       program P;
       type
         TP = record
-          X: Integer;
+          X: Int;
         end;
       var A, B: TP;
       begin
@@ -748,7 +748,7 @@ const
       program P;
       type
         TP = record
-          X: Integer;
+          X: Int;
           class operator Equal(const A, B: TP): Boolean;
         end;
       class operator TP.Equal(const A, B: TP): Boolean;
@@ -770,7 +770,7 @@ const
   Src = '''
       program P;
       type
-        TArr = array[0..2] of Integer;
+        TArr = array[0..2] of Int;
       var A, B: TArr;
       begin
         if A = B then WriteLn('eq')
@@ -786,27 +786,27 @@ const
       program P;
       type
         TQ = record
-          X: Integer;
+          X: Int;
         end;
         TBag<T> = class
           FItems: array of T;
           function HasBoth(const A, B: T): Boolean;
           function Has(const V: T): Boolean;
-          function Count(): Integer;
+          function Count(): Int;
         end;
       function TBag<T>.HasBoth(const A, B: T): Boolean;
       begin
         Result := Has(A) and Self.Has(B)
       end;
       function TBag<T>.Has(const V: T): Boolean;
-      var I: Integer;
+      var I: Int;
       begin
         Result := False;
         for I := 0 to High(FItems) do
           if FItems[I] = V then
             Result := True
       end;
-      function TBag<T>.Count(): Integer;
+      function TBag<T>.Count(): Int;
       begin
         Result := Length(FItems)
       end;
@@ -821,27 +821,27 @@ const
       program P;
       type
         TQ = record
-          X: Integer;
+          X: Int;
         end;
         TBag<T> = class
           FItems: array of T;
           function HasBoth(const A, B: T): Boolean;
           function Has(const V: T): Boolean;
-          function Count(): Integer;
+          function Count(): Int;
         end;
       function TBag<T>.HasBoth(const A, B: T): Boolean;
       begin
         Result := Has(A) and Self.Has(B)
       end;
       function TBag<T>.Has(const V: T): Boolean;
-      var I: Integer;
+      var I: Int;
       begin
         Result := False;
         for I := 0 to High(FItems) do
           if FItems[I] = V then
             Result := True
       end;
-      function TBag<T>.Count(): Integer;
+      function TBag<T>.Count(): Int;
       begin
         Result := Length(FItems)
       end;
@@ -877,15 +877,15 @@ const
       program P;
       type
         TVec = record
-          X: Integer;
-          class operator Multiply(const A: TVec; B: Integer): TVec;
-          class operator Multiply(A: Integer; const B: TVec): TVec;
+          X: Int;
+          class operator Multiply(const A: TVec; B: Int): TVec;
+          class operator Multiply(A: Int; const B: TVec): TVec;
         end;
-      class operator TVec.Multiply(const A: TVec; B: Integer): TVec;
+      class operator TVec.Multiply(const A: TVec; B: Int): TVec;
       begin
         Result.X := A.X * B
       end;
-      class operator TVec.Multiply(A: Integer; const B: TVec): TVec;
+      class operator TVec.Multiply(A: Int; const B: TVec): TVec;
       begin
         Result.X := A * B.X
       end;
@@ -908,7 +908,7 @@ const
       program P;
       type
         TNum = record
-          V: Integer;
+          V: Int;
           function Add(const B: TNum): TNum;
           class operator Add(const A, B: TNum): TNum;
         end;
@@ -939,7 +939,7 @@ const
       program P;
       type
         TVec = record
-          X: Integer;
+          X: Int;
           class operator Add(const A, B: TVec): TVec;
           class operator Add(const A, B: TVec): TVec;
         end;

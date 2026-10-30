@@ -389,7 +389,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Numerics.Money;
-    var A, B: TMoney; R: Integer;
+    var A, B: TMoney; R: Int;
     begin
       A := MoneyFromStr('5.00', 'EUR');
       B := MoneyFromStr('5.00', 'USD');
@@ -589,11 +589,11 @@ begin
     program P; uses Numerics.Money, Numerics.Decimal;
     type
       TTrunc = class(TObject, IRoundingStrategy)
-        function RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;
-          DiscardedCompareHalf: Integer; AnyDiscarded: Boolean): Boolean;
+        function RoundIncrement(Negative: Boolean; LastKeptDigit: Int;
+          DiscardedCompareHalf: Int; AnyDiscarded: Boolean): Boolean;
       end;
-    function TTrunc.RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;
-      DiscardedCompareHalf: Integer; AnyDiscarded: Boolean): Boolean;
+    function TTrunc.RoundIncrement(Negative: Boolean; LastKeptDigit: Int;
+      DiscardedCompareHalf: Int; AnyDiscarded: Boolean): Boolean;
     begin Result := False end;
     var M: TMoney; S: IRoundingStrategy;
     begin
@@ -680,7 +680,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Numerics.Money, Numerics.Decimal;
-    var Price, Gross, Net, Q, Total: TMoney; R: TDecimal; I: Integer;
+    var Price, Gross, Net, Q, Total: TMoney; R: TDecimal; I: Int;
     begin
       Price := MoneyFromStr('2.50', 'GBP');
       R := DecFromStr('0.10');

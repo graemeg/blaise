@@ -174,7 +174,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         begin end.
         ''');
@@ -195,7 +195,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         begin end.
         ''');
@@ -219,7 +219,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int32;
           end;
         begin end.
         ''');
@@ -228,7 +228,7 @@ begin
     AssertEquals('1 field', 1, Rec.Fields.Count);
     Fld := TFieldDecl(Rec.Fields.Items[0]);
     AssertEquals('Field name', 'X', Fld.Names.Strings[0]);
-    AssertEquals('Field type', 'Integer', Fld.TypeName);
+    AssertEquals('Field type', 'Int32', Fld.TypeName);
   finally
     Prog.Free();
   end;
@@ -244,8 +244,8 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
-            Y: Integer;
+            X: Int;
+            Y: Int;
           end;
         begin end.
         ''');
@@ -276,7 +276,7 @@ begin
           TOuter = record
             type
               TInner = record
-                F: Integer;
+                F: Int;
               end;
           end;
         begin end.
@@ -304,9 +304,9 @@ begin
           TOuter = record
             type
               TInner = record
-                F: Integer;
+                F: Int;
               end;
-            X: Integer;
+            X: Int;
           end;
         begin end.
         ''');
@@ -334,12 +334,12 @@ begin
           strict private
             type
               THidden = record
-                F: Integer;
+                F: Int;
               end;
           public
             type
               TShown = record
-                G: Integer;
+                G: Int;
               end;
           end;
         begin end.
@@ -367,7 +367,7 @@ begin
         program P;
         type
           TPoint = record
-            X, Y: Integer;
+            X, Y: Int;
           end;
         begin end.
         ''');
@@ -393,7 +393,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         var P: TPoint;
         begin end.
@@ -418,7 +418,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         var Pt: TPoint;
         begin
@@ -448,9 +448,9 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
-        var Pt: TPoint; N: Integer;
+        var Pt: TPoint; N: Int;
         begin
           N := Pt.X + 1
         end.
@@ -478,7 +478,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         begin end.
         ''');
@@ -503,8 +503,8 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
-            Y: Integer;
+            X: Int32;
+            Y: Int32;
           end;
         begin end.
         ''');
@@ -529,7 +529,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         var Pt: TPoint;
         begin end.
@@ -550,7 +550,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         var Pt: TPoint;
         begin
@@ -567,7 +567,7 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
         var Pt: TPoint;
         begin
@@ -586,9 +586,9 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int32;
           end;
-        var Pt: TPoint; N: Integer;
+        var Pt: TPoint; N: Int32;
         begin
           N := Pt.X
         end.
@@ -609,9 +609,9 @@ begin
         program P;
         type
           TPoint = record
-            X: Integer;
+            X: Int;
           end;
-        var Pt: TPoint; N: Integer;
+        var Pt: TPoint; N: Int;
         begin
           N := Pt.Z
         end.
@@ -623,7 +623,7 @@ begin
   AnalyseExpectError(
     '''
         program P;
-        var N: Integer;
+        var N: Int;
         begin
           N := N.X
         end.
@@ -671,7 +671,7 @@ const
         type
           TMixed = record
             A: Byte;
-            B: Integer;
+            B: Int32;
           end;
         var R: TMixed;
         begin end.
@@ -730,9 +730,9 @@ const
         program P;
         type
           TVec3 = record
-            X: Single;
-            Y: Single;
-            Z: Single;
+            X: Float32;
+            Y: Float32;
+            Z: Float32;
           end;
         var V: TVec3;
         begin end.
@@ -761,7 +761,7 @@ const
     program P;
     type TR = record S: string; end;
     procedure ReadOnly(const R: TR);
-    var L: Integer;
+    var L: Int;
     begin
       L := Length(R.S);
       WriteLn(L)
@@ -794,11 +794,11 @@ const
     program P;
     type
       TInner = record
-        A, B: Integer;
+        A, B: Int32;
         procedure Bump;
       end;
       TBox = class
-        N: Integer;
+        N: Int32;
         R: TInner;
       end;
     procedure TInner.Bump; begin A := A + 100 end;
@@ -830,9 +830,9 @@ const
       TTag = class end;
       TM = record
         T: TTag;
-        function Show: Integer;
+        function Show: Int;
       end;
-    function TM.Show: Integer; begin Result := 1 end;
+    function TM.Show: Int; begin Result := 1 end;
     function Make: TM; begin Result.T := TTag.Create() end;
     begin
       Make().Show()
@@ -844,11 +844,11 @@ const
       TTag = class end;
       TM = record
         T: TTag;
-        function Show: Integer;
+        function Show: Int;
       end;
-    function TM.Show: Integer; begin Result := 1 end;
+    function TM.Show: Int; begin Result := 1 end;
     function Make: TM; begin Result.T := TTag.Create() end;
-    var K: Integer;
+    var K: Int;
     begin
       K := Make().Show()
     end.
@@ -891,8 +891,8 @@ procedure TRecordTests.TestCodegen_FloatFieldOfRecordCall_FreesBuffer;
 const
   Src = '''
     program P;
-    type TF2 = record A, B: Single; end;
-    function M2(A, B: Single): TF2;
+    type TF2 = record A, B: Float32; end;
+    function M2(A, B: Float32): TF2;
     begin
       Result.A := A;
       Result.B := B
@@ -916,7 +916,7 @@ const
   Src = '''
     program P;
     type
-      TTok = record Kind: Integer; Value: string; end;
+      TTok = record Kind: Int; Value: string; end;
       TLexer = class
         function Next(): TTok;
         procedure Again();
@@ -996,21 +996,21 @@ const
   Src = '''
     program P;
     type
-      TRect = record Name: string; N: Integer; end;
+      TRect = record Name: string; N: Int; end;
       IShape = interface
-        function MakeRect(AN: Integer): TRect;
+        function MakeRect(AN: Int): TRect;
       end;
       TShape = class(IShape)
-        function MakeRect(AN: Integer): TRect;
+        function MakeRect(AN: Int): TRect;
       end;
       TDeriv = class(TShape)
-        function MakeRect(AN: Integer): TRect;
+        function MakeRect(AN: Int): TRect;
       end;
-    function TShape.MakeRect(AN: Integer): TRect;
+    function TShape.MakeRect(AN: Int): TRect;
     begin
       Result.N := AN
     end;
-    function TDeriv.MakeRect(AN: Integer): TRect;
+    function TDeriv.MakeRect(AN: Int): TRect;
     begin
       inherited MakeRect(AN)
     end;
@@ -1037,7 +1037,7 @@ const
   Src = '''
     program P;
     type
-      TT = record K: Integer; V: string; end;
+      TT = record K: Int; V: string; end;
       TL = class function Next(): TT; end;
     function TL.Next(): TT; begin Result.K := 1; Result.V := 'v' end;
     function MakeL(): TL; begin Result := TL.Create() end;
@@ -1062,7 +1062,7 @@ const
   Src = '''
       program P;
       type
-        TMR = record S: string; N: Integer; end;
+        TMR = record S: string; N: Int; end;
         TObj = class
           MR: TMR;
         end;
@@ -1091,28 +1091,28 @@ begin
       program RF;
       type
         TInner = record
-          A: Integer;
-          function Get: Integer;
-          procedure Bump(N: Integer);
+          A: Int;
+          function Get: Int;
+          procedure Bump(N: Int);
         end;
         TBox = class
           R: TInner;
-          function Peek: Integer;
+          function Peek: Int;
           procedure Poke;
         end;
         TPair = record
           X: TInner;
-          function Sum: Integer;
+          function Sum: Int;
         end;
-      function TInner.Get: Integer; begin Result := A end;
-      procedure TInner.Bump(N: Integer); begin A := A + N end;
-      function TBox.Peek: Integer; begin Result := R.Get() end;
+      function TInner.Get: Int; begin Result := A end;
+      procedure TInner.Bump(N: Int); begin A := A + N end;
+      function TBox.Peek: Int; begin Result := R.Get() end;
       procedure TBox.Poke; begin R.Bump(5) end;
-      function TPair.Sum: Integer; begin X.Bump(1); Result := X.Get() + 100 end;
+      function TPair.Sum: Int; begin X.Bump(1); Result := X.Get() + 100 end;
       var B: TBox; P: TPair;
       begin
         B := TBox.Create();
-        B.R.A := High(Integer) - 5;
+        B.R.A := High(Int) - 5;
         B.Poke();
         WriteLn(B.Peek());
         P.X.A := -1;

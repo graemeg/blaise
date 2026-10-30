@@ -75,9 +75,9 @@ procedure TNativeCallAlignTests.TestOddPinnedInnerCall_PadWrapsInnerCall;
 const
   Src = '''
       program P;
-      function Inner: Integer; begin Result := 7 end;
-      function Add2(A, B: Integer): Integer; begin Result := A + B end;
-      var X: Integer;
+      function Inner: Int; begin Result := 7 end;
+      function Add2(A, B: Int): Int; begin Result := A + B end;
+      var X: Int;
       begin
         X := Add2(1, Inner())
       end.
@@ -98,9 +98,9 @@ procedure TNativeCallAlignTests.TestZeroPinnedInnerCall_NoPad;
 const
   Src = '''
       program P;
-      function Inner: Integer; begin Result := 7 end;
-      function Add2(A, B: Integer): Integer; begin Result := A + B end;
-      var X: Integer;
+      function Inner: Int; begin Result := 7 end;
+      function Add2(A, B: Int): Int; begin Result := A + B end;
+      var X: Int;
       begin
         X := Add2(Inner(), 1)
       end.
@@ -118,10 +118,10 @@ procedure TNativeCallAlignTests.TestTwoLevelNesting_PadOnlyAtOddDepth;
 const
   Src = '''
       program P;
-      function Inner: Integer; begin Result := 7 end;
-      function Add2(A, B: Integer): Integer; begin Result := A + B end;
-      function Add3(A, B, C: Integer): Integer; begin Result := A + B + C end;
-      var X: Integer;
+      function Inner: Int; begin Result := 7 end;
+      function Add2(A, B: Int): Int; begin Result := A + B end;
+      function Add3(A, B, C: Int): Int; begin Result := A + B + C end;
+      var X: Int;
       begin
         X := Add3(1, 2, Add2(3, Inner()))
       end.
@@ -144,12 +144,12 @@ procedure TNativeCallAlignTests.TestOverflowArgsCall_FreshRegionNotWrapPad;
 const
   Src = '''
       program P;
-      function Sum8(A, B, C, D, E, F, G, H: Integer): Integer;
+      function Sum8(A, B, C, D, E, F, G, H: Int): Int;
       begin
         Result := A + B + C + D + E + F + G + H
       end;
-      function Add2(A, B: Integer): Integer; begin Result := A + B end;
-      var X: Integer;
+      function Add2(A, B: Int): Int; begin Result := A + B end;
+      var X: Int;
       begin
         X := Add2(1, Sum8(1, 2, 3, 4, 5, 6, 7, 8))
       end.

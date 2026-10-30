@@ -283,7 +283,7 @@ const
     '''
         program SA;
         procedure Foo;
-        var A: array[0..3] of Integer;
+        var A: array[0..3] of Int32;
         begin
           A[2] := 99
         end;
@@ -294,7 +294,7 @@ const
     '''
         program SA;
         procedure Foo;
-        var R: array[5..9] of Integer;
+        var R: array[5..9] of Int;
         begin
           R[5] := 1
         end;
@@ -316,8 +316,8 @@ const
   SrcLowHigh =
     '''
         program SA;
-        function Len: Integer;
-        var A: array[3..7] of Integer;
+        function Len: Int;
+        var A: array[3..7] of Int;
         begin
           Result := High(A) - Low(A) + 1
         end;
@@ -519,7 +519,7 @@ const
     '''
         program SA;
         type
-          TIntRange = array[1..5] of Integer;
+          TIntRange = array[1..5] of Int;
         var A: TIntRange;
         begin
           A[1] := 99
@@ -530,8 +530,8 @@ const
     '''
         program SA;
         type
-          TWordArr = array[0..3] of Integer;
-        var W: TWordArr; X: Integer;
+          TWordArr = array[0..3] of Int;
+        var W: TWordArr; X: Int;
         begin
           W[0] := 7;
           X := W[0]
@@ -545,7 +545,7 @@ const
         program SA;
         type
           TIdx = 0..2;
-          TBuf = array[TIdx] of Integer;
+          TBuf = array[TIdx] of Int;
         var A: TBuf;
         begin
           A[0] := 11
@@ -558,7 +558,7 @@ const
         program SA;
         type
           TIdx = 2..4;
-          TBuf = array[TIdx] of Integer;
+          TBuf = array[TIdx] of Int;
         var A: TBuf;
         begin
           A[2] := 11
@@ -692,7 +692,7 @@ const
     '''
         program SA;
         procedure Foo;
-        var A: array[0..1, 0..2] of Integer;
+        var A: array[0..1, 0..2] of Int32;
         begin
           A[1, 2] := 99
         end;
@@ -703,7 +703,7 @@ const
     '''
         program SA;
         procedure Foo;
-        var A: array[0..1, 0..2, 0..3] of Integer;
+        var A: array[0..1, 0..2, 0..3] of Int32;
         begin
           A[0, 0, 0] := 1
         end;
@@ -720,7 +720,7 @@ begin
     MD   := TMethodDecl(P.Block.ProcDecls[0]);
     Decl := TVarDecl(MD.Body.Decls[0]);
     AssertEquals('desugared to nested array type',
-      'array[0..1] of array[0..2] of Integer', Decl.TypeName);
+      'array[0..1] of array[0..2] of Int32', Decl.TypeName);
   finally P.Free(); end;
 end;
 
@@ -789,7 +789,7 @@ begin
   P := AnalyseSrc('''
     program P;
     const N = 5;
-    var A: array[0..N] of Integer;
+    var A: array[0..N] of Int;
     begin end.
     ''');
   try
@@ -810,7 +810,7 @@ begin
   P := AnalyseSrc('''
     program P;
     const Lo = 1; Hi = 10;
-    var A: array[Lo..Hi] of Integer;
+    var A: array[Lo..Hi] of Int;
     begin end.
     ''');
   try
@@ -829,7 +829,7 @@ begin
   P := AnalyseSrc('''
     program P;
     const N = 10;
-    var A: array[0..N-1] of Integer;
+    var A: array[0..N-1] of Int;
     begin end.
     ''');
   try
@@ -872,7 +872,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TColor = (Red, Green, Blue);
-    var A: array[TColor] of Integer;
+    var A: array[TColor] of Int;
     begin end.
     ''');
   try
@@ -909,7 +909,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TDir = (North, South, East, West);
-    var D: array[TDir] of Integer;
+    var D: array[TDir] of Int;
     begin end.
     ''');
   try
@@ -945,7 +945,7 @@ var P: TProgram; VD: TVarDecl; SAT: TStaticArrayTypeDesc;
 begin
   P := AnalyseSrc('''
     program P;
-    var B: array[Boolean] of Integer;
+    var B: array[Boolean] of Int;
     begin end.
     ''');
   try
@@ -978,11 +978,11 @@ begin
     program P;
     type TC = (cRed, cGreen, cBlue); TMid = cGreen..cBlue; TIdx = 3..5;
     var
-      A: array[Boolean, 0..1] of Integer;
-      B: array[0..1, Boolean] of Integer;
+      A: array[Boolean, 0..1] of Int;
+      B: array[0..1, Boolean] of Int;
       C: array[Byte, TC] of Byte;
       D: array[TIdx, Int8] of Byte;
-      E: array[TMid, Boolean] of Integer;
+      E: array[TMid, Boolean] of Int;
     begin end.
     ''');
   try
@@ -1001,7 +1001,7 @@ var Msg: string;
 begin
   Msg := SemanticError('''
     program P;
-    var A: array[Integer, 0..1] of Byte;
+    var A: array[Int32, 0..1] of Byte;
     begin end.
     ''');
   AssertTrue('Integer dimension rejected: ' + Msg,
@@ -1019,7 +1019,7 @@ procedure TStaticArrayTests.TestNative_SretResultAsVarArg_PassesBuffer;
 const
   Src = '''
     program P;
-    type TArr = array[0..1] of Integer;
+    type TArr = array[0..1] of Int32;
     procedure Clear(var A: TArr); begin A[0] := 0 end;
     function NewArr: TArr;
     begin
@@ -1054,9 +1054,9 @@ var P: TProgram; SAT: TStaticArrayTypeDesc;
 begin
   P := AnalyseSrc('''
     program P;
-    var A: array[Byte] of Integer;
-    var B: array[Int8] of Integer;
-    var C: array[Word] of Byte;
+    var A: array[Byte] of Int32;
+    var B: array[Int8] of Int32;
+    var C: array[UInt16] of Byte;
     var D: array[Int16] of Byte;
     begin end.
     ''');
@@ -1090,7 +1090,7 @@ begin
     the analyser publishes for the constant. }
   P := AnalyseSrc('''
     program P;
-    const C: array[Boolean] of Integer = (10, 20);
+    const C: array[Boolean] of Int32 = (10, 20);
     begin end.
     ''');
   try
@@ -1114,7 +1114,7 @@ begin
   try
     AnalyseSrc('''
       program P;
-      const C: array[Boolean] of Integer = (1, 2, 3);
+      const C: array[Boolean] of Int32 = (1, 2, 3);
       begin end.
       ''');
   except
@@ -1132,7 +1132,7 @@ begin
   try
     AnalyseSrc('''
       program P;
-      type TBad = array[string] of Integer;
+      type TBad = array[string] of Int;
       begin end.
       ''');
   except
@@ -1173,7 +1173,7 @@ var Msg: string;
 begin
   Msg := SemanticErrMsg('''
     program P;
-    var a: array[0..4] of Integer;
+    var a: array[0..4] of Int;
     begin a[99] := 7 end.
     ''');
   AssertTrue('a[99] on array[0..4] must be rejected, got: ' + Msg,
@@ -1187,7 +1187,7 @@ begin
     handle it rather than only spotting a negative literal. }
   Msg := SemanticErrMsg('''
     program P;
-    var a: array[0..4] of Integer;
+    var a: array[0..4] of Int;
     begin a[-3] := 5 end.
     ''');
   AssertTrue('a[-3] must be rejected, got: ' + Msg,
@@ -1199,7 +1199,7 @@ var Msg: string;
 begin
   Msg := SemanticErrMsg('''
     program P;
-    var a: array[0..4] of Integer; x: Integer;
+    var a: array[0..4] of Int; x: Int;
     begin x := a[77] end.
     ''');
   AssertTrue('read of a[77] must be rejected, got: ' + Msg,
@@ -1211,7 +1211,7 @@ var Msg: string;
 begin
   Msg := SemanticErrMsg('''
     program P;
-    var a: array[0..4] of Integer; x: Integer;
+    var a: array[0..4] of Int; x: Int;
     begin x := a[-1] end.
     ''');
   AssertTrue('read of a[-1] must be rejected, got: ' + Msg,
@@ -1225,7 +1225,7 @@ begin
     must use the declared LowBound, not assume 0-based. }
   Msg := SemanticErrMsg('''
     program P;
-    var a: array[1..5] of Integer;
+    var a: array[1..5] of Int;
     begin a[0] := 1 end.
     ''');
   AssertTrue('a[0] on array[1..5] must be rejected, got: ' + Msg,
@@ -1238,7 +1238,7 @@ begin
   Msg := SemanticErrMsg('''
     program P;
     const K = 9;
-    var a: array[0..4] of Integer;
+    var a: array[0..4] of Int;
     begin a[K] := 1 end.
     ''');
   AssertTrue('a[K] with K=9 must be rejected, got: ' + Msg,
@@ -1250,7 +1250,7 @@ var Msg: string;
 begin
   Msg := SemanticErrMsg('''
     program P;
-    var a: array[0..4] of Integer;
+    var a: array[0..4] of Int;
     begin a[2 + 3] := 1 end.
     ''');
   AssertTrue('a[2+3] on array[0..4] must be rejected, got: ' + Msg,
@@ -1264,7 +1264,7 @@ begin
     the programmer does not have to go and look the declaration up. }
   Msg := SemanticErrMsg('''
     program P;
-    var a: array[1..5] of Integer;
+    var a: array[1..5] of Int;
     begin a[42] := 1 end.
     ''');
   AssertTrue('names the index 42, got: ' + Msg, Pos('42', Msg) >= 0);
@@ -1277,7 +1277,7 @@ begin
     SemanticError(
       '''
     program P;
-    var a: array[0..4] of Integer;
+    var a: array[0..4] of Int;
     begin a[3] := 7 end.
     '''));
 end;
@@ -1289,7 +1289,7 @@ begin
     SemanticError(
       '''
     program P;
-    var a: array[0..4] of Integer;
+    var a: array[0..4] of Int;
     begin a[0] := 1; a[4] := 2 end.
     '''));
 end;
@@ -1300,7 +1300,7 @@ begin
     SemanticError(
       '''
     program P;
-    var a: array[1..5] of Integer;
+    var a: array[1..5] of Int;
     begin a[1] := 1; a[5] := 2 end.
     '''));
 end;
@@ -1313,7 +1313,7 @@ begin
     SemanticError(
       '''
     program P;
-    var a: array[0..4] of Integer; i: Integer;
+    var a: array[0..4] of Int; i: Int;
     begin i := 99; a[i] := 7 end.
     '''));
 end;
@@ -1326,7 +1326,7 @@ begin
     SemanticError(
       '''
     program P;
-    var d: array of Integer;
+    var d: array of Int;
     begin SetLength(d, 3); d[50] := 9 end.
     '''));
 end;
@@ -1338,7 +1338,7 @@ begin
     is a static-array-typed expression rather than a named variable. }
   Msg := SemanticErrMsg('''
     program P;
-    var m: array[0..2, 0..2] of Integer;
+    var m: array[0..2, 0..2] of Int;
     begin m[1, 7] := 3 end.
     ''');
   AssertTrue('m[1,7] must be rejected, got: ' + Msg,
@@ -1354,7 +1354,7 @@ begin
       '''
     program P;
     type TColor = (Red, Green, Blue);
-    var A: array[1..5] of Integer; Red: Integer;
+    var A: array[1..5] of Int; Red: Int;
     begin Red := 3; A[Red] := 1 end.
     '''));
 end;
@@ -1366,9 +1366,9 @@ begin
       '''
     program P;
     type TColor = (Red, Green, Blue);
-    var A: array[1..5] of Integer;
+    var A: array[1..5] of Int;
     procedure Fill();
-    var Blue: Integer;
+    var Blue: Int;
     begin Blue := 4; A[Blue] := 1 end;
     begin Fill() end.
     '''));
@@ -1381,8 +1381,8 @@ begin
       '''
     program P;
     type TColor = (Red, Green, Blue);
-    var A: array[5..9] of Integer;
-    procedure Fill(Green: Integer);
+    var A: array[5..9] of Int;
+    procedure Fill(Green: Int);
     begin A[Green] := 1 end;
     begin Fill(7) end.
     '''));
@@ -1400,8 +1400,8 @@ begin
     type
       TColor = (Red, Green, Blue);
       TC = class
-        Red: Integer;
-        A: array[1..5] of Integer;
+        Red: Int;
+        A: array[1..5] of Int;
         procedure Go();
       end;
     procedure TC.Go();
@@ -1421,7 +1421,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TColor = (Red = 5, Green = 10);
-    var A: array[TColor] of Integer;
+    var A: array[TColor] of Int;
     begin end.
     ''');
   try
@@ -1441,7 +1441,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TS = (sA = -3, sB = 2);
-    var A: array[TS] of Integer;
+    var A: array[TS] of Int;
     begin end.
     ''');
   try
@@ -1461,7 +1461,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TN = (nA = 10, nB = 20, nC = 15);
-    var A: array[TN] of Integer;
+    var A: array[TN] of Int;
     begin end.
     ''');
   try
@@ -1480,7 +1480,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TColor = (Red = 5, Green = 10);
-    var A: array[TColor, 0..1] of Integer;
+    var A: array[TColor, 0..1] of Int;
     begin end.
     ''');
   try
@@ -1499,7 +1499,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TColor = (Red = 5, Green = 10);
-    var A: array[0..1, TColor] of Integer;
+    var A: array[0..1, TColor] of Int;
     begin end.
     ''');
   try
@@ -1521,7 +1521,7 @@ begin
   Msg := SemanticErrMsg('''
     program P;
     type TColor = (Red = 5, Green = 10);
-    const A: array[TColor] of Integer = (1, 2);
+    const A: array[TColor] of Int32 = (1, 2);
     begin end.
     ''');
   AssertTrue('2 elements for a 6-slot span must be rejected, got: ' + Msg,
@@ -1537,7 +1537,7 @@ begin
       '''
     program P;
     type TColor = (Red = 5, Green = 10);
-    const A: array[TColor] of Integer = (1, 0, 0, 0, 0, 2);
+    const A: array[TColor] of Int32 = (1, 0, 0, 0, 0, 2);
     begin WriteLn(A[Red]) end.
     '''));
 end;
@@ -1551,7 +1551,7 @@ begin
       TColor = (Red = 5, Green = 10);
       TC = class
       public
-        const Names: array[TColor] of Integer = (1, 2);
+        const Names: array[TColor] of Int32 = (1, 2);
       end;
     begin end.
     ''');
@@ -1565,7 +1565,7 @@ begin
   Msg := SemanticErrMsg('''
     program P;
     type TColor = (Red = 5, Green = 10);
-    var A: array[TColor] of Integer = (1, 2);
+    var A: array[TColor] of Int32 = (1, 2);
     begin end.
     ''');
   AssertTrue('global initialiser needs span elements, got: ' + Msg,
@@ -1580,7 +1580,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TDir = (North, South, East, West);
-    var D: array[TDir] of Integer;
+    var D: array[TDir] of Int;
     begin end.
     ''');
   try
@@ -1600,7 +1600,7 @@ begin
   P := AnalyseSrc('''
     program P;
     type TP = (pA, pB = 1, pC);
-    var A: array[TP] of Integer;
+    var A: array[TP] of Int;
     begin end.
     ''');
   try
@@ -1626,7 +1626,7 @@ begin
       TE = (eA, eB);
       TC = class
       public
-        const Names: array[TE] of Integer = (1, 2);
+        const Names: array[TE] of Int32 = (1, 2);
       end;
     begin WriteLn(TC.Names[7]) end.
     ''');
@@ -1643,7 +1643,7 @@ begin
       TE = (eA, eB);
       TC = class
       public
-        const Names: array[TE] of Integer = (1, 2);
+        const Names: array[TE] of Int32 = (1, 2);
       end;
     begin WriteLn(TC.Names[-3]) end.
     ''');
@@ -1662,7 +1662,7 @@ begin
       TE = (eA, eB);
       TC = class
       public
-        const Names: array[TE] of Integer = (1, 2);
+        const Names: array[TE] of Int32 = (1, 2);
       end;
     var c: TC;
     begin c := TC.Create(); WriteLn(c.Names[9]) end.
@@ -1681,7 +1681,7 @@ begin
       TE = (eA, eB);
       TC = class
       public
-        const Names: array[TE] of Integer = (11, 22);
+        const Names: array[TE] of Int32 = (11, 22);
       end;
     begin WriteLn(TC.Names[0], ' ', TC.Names[1]) end.
     '''));
@@ -1698,9 +1698,9 @@ begin
       TE = (eA, eB);
       TC = class
       public
-        const Names: array[TE] of Integer = (1, 2);
+        const Names: array[TE] of Int32 = (1, 2);
       end;
-    var i: Integer;
+    var i: Int;
     begin i := 9; WriteLn(TC.Names[i]) end.
     '''));
 end;
@@ -1709,7 +1709,7 @@ procedure TStaticArrayTests.TestNative_ByValueArrayParam_WritesThroughPointer;
 const
   Src = '''
     program P;
-    type TArr = array[0..2] of Integer;
+    type TArr = array[0..2] of Int32;
     procedure Outer(A: TArr; B: TArr);
     begin
       A[1] := 9;
@@ -1765,8 +1765,8 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..2] of Integer;
-      TRec = record N: Integer; A: TArr; end;
+      TArr = array[0..2] of Int32;
+      TRec = record N: Int32; A: TArr; end;
     var G: TArr; R: TRec;
     begin
       R.A := G;
@@ -1820,7 +1820,7 @@ procedure TStaticArrayTests.TestNative_DynArrayElement_Retained;
 const
   Src = '''
     program P;
-    type TDyn = array of Integer;
+    type TDyn = array of Int;
     var M: array of TDyn; D: TDyn;
     begin
       M[0] := D;
@@ -1840,8 +1840,8 @@ procedure TStaticArrayTests.TestNative_FloatArrayFieldElement_LoadsElement;
 const
   Src = '''
     program P;
-    type TObj = class A: array[0..2] of Double; end;
-    var O: TObj; X: Double;
+    type TObj = class A: array[0..2] of Float64; end;
+    var O: TObj; X: Float64;
     begin
       X := O.A[1];
     end.
@@ -1906,9 +1906,9 @@ const
   SrcIntfArrayParam = '''
     program P;
     type
-      IFoo = interface function Get: Integer; end;
+      IFoo = interface function Get: Int; end;
       TSA = array[0..1] of IFoo;
-    function Pick(const A: TSA): Integer; begin Result := A[1].Get() end;
+    function Pick(const A: TSA): Int; begin Result := A[1].Get() end;
     var G: TSA;
     begin
       WriteLn(Pick(G))
@@ -1948,9 +1948,9 @@ const
   Src = '''
     program Prg;
     type
-      TF = reference to function: Integer;
+      TF = reference to function: Int;
       TSA = array[0..1] of TF;
-    function Use(E: TF): Integer; begin Result := E() end;
+    function Use(E: TF): Int; begin Result := E() end;
     var L: TSA;
     begin
       WriteLn(Use(L[1]))
@@ -1969,7 +1969,7 @@ const
   Src = '''
       program P;
       type
-        TRow = array[0..2] of Integer;
+        TRow = array[0..2] of Int;
         TObj = class
           Rows: array[0..1] of TRow;
         end;

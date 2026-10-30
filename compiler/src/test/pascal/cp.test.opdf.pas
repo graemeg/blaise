@@ -337,7 +337,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var MyVar: Integer;
+        var MyVar: Int;
         begin end.
         ''');
   AssertTrue('global var .quad label', Contains(IR, '.quad MyVar'));
@@ -350,7 +350,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var MyVar: Integer;
+        var MyVar: Int;
         begin end.
         ''');
   AssertTrue('recGlobalVar comment', Contains(IR, '# recGlobalVar: MyVar'));
@@ -465,7 +465,7 @@ begin
     '''
         program P;
         procedure Compute;
-        var Total: Integer;
+        var Total: Int;
         begin end;
         begin end.
         ''');
@@ -480,7 +480,7 @@ begin
     '''
         program P;
         procedure Compute;
-        var Total: Integer;
+        var Total: Int;
         begin end;
         begin end.
         ''');
@@ -496,7 +496,7 @@ begin
     '''
         program P;
         procedure Work;
-        var X: Integer;
+        var X: Int;
         begin
           X := 1;
         end;
@@ -513,7 +513,7 @@ begin
     '''
         program P;
         procedure Work;
-        var X: Integer;
+        var X: Int;
         begin
           X := 1;
         end;
@@ -530,7 +530,7 @@ begin
     '''
         program P;
         procedure Work;
-        var X: Integer;
+        var X: Int;
         begin
           X := 1;
         end;
@@ -546,7 +546,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           X := 1;
         end.
@@ -561,7 +561,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           X := 1;
         end.
@@ -576,7 +576,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var X: Integer;
+        var X: Int;
         begin
           X := 1;
         end.
@@ -595,7 +595,7 @@ begin
     '''
         program P;
         type TFoo = class
-          FNext: ^Integer;
+          FNext: ^Int32;
         end;
         begin end.
         ''');
@@ -610,7 +610,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var A: array[1..5] of Integer;
+        var A: array[1..5] of Int32;
         begin end.
         ''');
   AssertTrue('recArray comment',
@@ -624,7 +624,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var A: array[1..5] of Integer;
+        var A: array[1..5] of Int;
         begin end.
         ''');
   AssertTrue('IsDynamic=0 for static array', Contains(IR, '.byte 0  # IsDynamic'));
@@ -642,7 +642,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        var A: array[0..1, 0..2] of Integer;
+        var A: array[0..1, 0..2] of Int32;
         begin end.
         ''');
   AssertTrue('outer recArray emitted',
@@ -661,7 +661,7 @@ begin
   IR := GenOPDF(
     '''
         program P;
-        procedure Bar(a: array of Integer);
+        procedure Bar(a: array of Int32);
         begin end;
         begin end.
         ''');
@@ -751,8 +751,8 @@ begin
     '''
         program P;
         type TFoo = class
-          FVal: Integer;
-          property Val: Integer read FVal write FVal;
+          FVal: Int;
+          property Val: Int read FVal write FVal;
         end;
         begin end.
         ''');
@@ -776,14 +776,14 @@ begin
     '''
         program P;
         type TGadget = class
-          FVal: Integer;
-          function GetVal: Integer;
-          procedure SetVal(AValue: Integer);
-          property Val: Integer read GetVal write SetVal;
+          FVal: Int;
+          function GetVal: Int;
+          procedure SetVal(AValue: Int);
+          property Val: Int read GetVal write SetVal;
         end;
-        function TGadget.GetVal: Integer;
+        function TGadget.GetVal: Int;
         begin Result := FVal; end;
-        procedure TGadget.SetVal(AValue: Integer);
+        procedure TGadget.SetVal(AValue: Int);
         begin FVal := AValue; end;
         begin end.
         ''');
@@ -943,7 +943,7 @@ begin
       program P;
       type
         TThing = class
-          N: Integer;
+          N: Int;
           procedure Bump();
         end;
       procedure TThing.Bump();
@@ -967,7 +967,7 @@ begin
       program P;
       type
         TThing = class
-          N: Integer;
+          N: Int;
           destructor Destroy();
         end;
       destructor TThing.Destroy();

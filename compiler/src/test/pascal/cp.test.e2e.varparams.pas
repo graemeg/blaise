@@ -71,9 +71,9 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TArr = array[0..1] of Integer;
+      TArr = array[0..1] of Int;
       TBigRec = record A: array[0..9] of Int64; end;
-      TSRec = record S: string; N: Integer; X: array[0..5] of Int64; end;
+      TSRec = record S: string; N: Int; X: array[0..5] of Int64; end;
     procedure Clear(var A: TArr); begin A[0] := 0 end;
     procedure OutA(out A: TArr); begin A[0] := 5; A[1] := 0 end;
     procedure ClrBR(var R: TBigRec); begin R.A[0] := 4 end;
@@ -108,15 +108,15 @@ end;
 const
   SrcVarInt = '''
     program Prg;
-    procedure Inc2(var X: Integer); begin X := X + 2 end;
-    var a: Integer;
+    procedure Inc2(var X: Int); begin X := X + 2 end;
+    var a: Int;
     begin a := 10; Inc2(a); WriteLn(a) end.
     ''';
 
   SrcVarSwap = '''
     program Prg;
-    procedure Swap(var A, B: Integer); var t: Integer; begin t := A; A := B; B := t end;
-    var x, y: Integer;
+    procedure Swap(var A, B: Int); var t: Int; begin t := A; A := B; B := t end;
+    var x, y: Int;
     begin x := 1; y := 9; Swap(x, y); WriteLn(x, ' ', y) end.
     ''';
 
@@ -129,14 +129,14 @@ const
 
   SrcOut = '''
     program Prg;
-    procedure GetVals(out A, B: Integer); begin A := 100; B := 200 end;
-    var x, y: Integer;
+    procedure GetVals(out A, B: Int); begin A := 100; B := 200 end;
+    var x, y: Int;
     begin GetVals(x, y); WriteLn(x + y) end.
     ''';
 
   SrcVarRecord = '''
     program Prg;
-    type TP = record X, Y: Integer; end;
+    type TP = record X, Y: Int; end;
     procedure Bump(var R: TP); begin R.X := R.X + 1; R.Y := R.Y + 1 end;
     var r: TP;
     begin r.X := 5; r.Y := 7; Bump(r); WriteLn(r.X, ',', r.Y) end.
@@ -144,16 +144,16 @@ const
 
   SrcVarNested = '''
     program Prg;
-    procedure Inner(var X: Integer); begin X := X * 2 end;
-    procedure Outer(var Y: Integer); begin Inner(Y); Inner(Y) end;
-    var a: Integer;
+    procedure Inner(var X: Int); begin X := X * 2 end;
+    procedure Outer(var Y: Int); begin Inner(Y); Inner(Y) end;
+    var a: Int;
     begin a := 3; Outer(a); WriteLn(a) end.
     ''';
 
   SrcVarField = '''
     program Prg;
-    type TC = class FX: Integer; end;
-    procedure Set5(var X: Integer); begin X := 5 end;
+    type TC = class FX: Int; end;
+    procedure Set5(var X: Int); begin X := 5 end;
     var c: TC;
     begin c := TC.Create(); Set5(c.FX); WriteLn(c.FX); c.Free() end.
     ''';
@@ -186,22 +186,22 @@ const
 
   SrcStaticArrElem = '''
     program Prg;
-    procedure S9(var X: Integer); begin X := 9 end;
-    var a: array[0..3] of Integer;
+    procedure S9(var X: Int); begin X := 9 end;
+    var a: array[0..3] of Int;
     begin a[2] := 0; S9(a[2]); WriteLn(a[2]) end.
     ''';
 
   SrcDynArrElem = '''
     program Prg;
-    procedure S9(var X: Integer); begin X := 9 end;
-    var a: array of Integer;
+    procedure S9(var X: Int); begin X := 9 end;
+    var a: array of Int;
     begin SetLength(a, 4); a[2] := 0; S9(a[2]); WriteLn(a[2]) end.
     ''';
 
   SrcSwapElems = '''
     program Prg;
-    procedure Swap(var A, B: Integer); var t: Integer; begin t := A; A := B; B := t end;
-    var a: array[0..3] of Integer;
+    procedure Swap(var A, B: Int); var t: Int; begin t := A; A := B; B := t end;
+    var a: array[0..3] of Int;
     begin a[0] := 1; a[1] := 2; Swap(a[0], a[1]); WriteLn(a[0], ' ', a[1]) end.
     ''';
 
@@ -216,17 +216,17 @@ const
     program Prg;
     type
       TRec = record
-        A: Integer;
-        B: Integer;
+        A: Int;
+        B: Int;
       end;
       PRec = ^TRec;
     procedure FillRec(var R: TRec); begin R.A := 7; R.B := 11 end;
-    procedure Set9(var X: Integer); begin X := 9 end;
+    procedure Set9(var X: Int); begin X := 9 end;
     var
       Rec: TRec;
       P: PRec;
-      V: Integer;
-      PI: ^Integer;
+      V: Int;
+      PI: ^Int;
     begin
       P := @Rec;
       FillRec(P^);
@@ -244,9 +244,9 @@ const
     program P;
     type
       TR = record A, B, C, D: Byte; end;
-      TW = record P: Word; Q: Word; end;
+      TW = record P: UInt16; Q: UInt16; end;
     procedure SB(var X: Byte); begin X := 9 end;
-    procedure SW(var X: Word); begin X := 999 end;
+    procedure SW(var X: UInt16); begin X := 999 end;
     procedure SL(var X: Int64); begin X := 4096 end;
     var R: TR; W: TW; L: Int64; M: Int64;
     begin
@@ -353,7 +353,7 @@ procedure TE2EVarParamTests.TestRun_SetLengthVarParamString;
 const
   Src = '''
     program Prg;
-    procedure Grow(var S: string; N: Integer); begin SetLength(S, N) end;
+    procedure Grow(var S: string; N: Int); begin SetLength(S, N) end;
     var s: string;
     begin
       s := 'ab';
@@ -377,33 +377,33 @@ const
     program VarParams;
     type
       THelper = class
-        procedure SetVal(var N: Integer);
+        procedure SetVal(var N: Int);
       end;
       TNode = class
-        Pad: Integer;
-        Value: Integer;
+        Pad: Int;
+        Value: Int;
       end;
-    procedure THelper.SetVal(var N: Integer);
+    procedure THelper.SetVal(var N: Int);
     begin N := 7 end;
-    procedure SetVal(var X: Integer);
+    procedure SetVal(var X: Int);
     begin X := 42 end;
-    procedure Swap(var A, B: Integer);
-    var T: Integer;
+    procedure Swap(var A, B: Int);
+    var T: Int;
     begin
       T := A;
       A := B;
       B := T
     end;
-    procedure SetToFive(var N: Integer);
+    procedure SetToFive(var N: Int);
     begin N := 5 end;
-    procedure SetViaCaller(var N: Integer);
+    procedure SetViaCaller(var N: Int);
     begin SetToFive(N) end;
-    procedure Wrapper(H: THelper; var N: Integer);
+    procedure Wrapper(H: THelper; var N: Int);
     begin H.SetVal(N) end;
-    procedure Fill(var V: Integer);
+    procedure Fill(var V: Int);
     begin V := 4096 end;
     var
-      V, X, Y: Integer;
+      V, X, Y: Int;
       H: THelper;
       N: TNode;
     begin

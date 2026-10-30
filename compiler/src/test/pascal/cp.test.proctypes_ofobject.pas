@@ -117,7 +117,7 @@ const
   Src =
     '''
         program P;
-        type TF = function (X: Integer): Integer of object;
+        type TF = function (X: Int32): Int32 of object;
         begin end.
         ''';
 var
@@ -126,7 +126,7 @@ begin
   Def := TProceduralTypeDef(TTypeDecl(ParseSrc(Src).Block.TypeDecls.Items[0]).Def);
   AssertTrue('IsFunction set',   Def.IsFunction);
   AssertTrue('IsMethodPtr set',  Def.IsMethodPtr);
-  AssertEquals('return type',    'Integer', Def.ReturnTypeName);
+  AssertEquals('return type',    'Int32', Def.ReturnTypeName);
 end;
 
 { ------------------------------------------------------------------ }

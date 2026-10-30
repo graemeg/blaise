@@ -185,9 +185,9 @@ const
   Src = '''
     program P;
     var
-      A: Integer;
+      A: Int;
     threadvar
-      Counter: Integer;
+      Counter: Int;
       Name: String;
       Ptr: Pointer;
       Buckets: array[0..7] of Pointer;
@@ -266,7 +266,7 @@ procedure TThreadVarTests.TestCodegen_RecordThreadVar_FieldStoreThroughTls;
 const
   Src = '''
     program Prg;
-    type TRec = record Tag: Integer; end;
+    type TRec = record Tag: Int32; end;
     threadvar TVR: TRec;
     begin
       TVR.Tag := 4;
@@ -285,11 +285,11 @@ const
     program P;
     type
       IGreet = interface function Hi(): string; end;
-      TC = class N: Integer; end;
-      TR = record S: string; A, B: Integer; end;
+      TC = class N: Int32; end;
+      TR = record S: string; A, B: Int32; end;
     function Mk(): TR; begin Result.A := 1 end;
     threadvar
-      A: array of Integer;
+      A: array of Int32;
       S: string;
       G: IGreet;
       F: reference to procedure;
@@ -392,8 +392,8 @@ const
   Src = '''
     program P;
     threadvar
-      N: Integer = 5;
-      Z: Integer;
+      N: Int32 = 5;
+      Z: Int32;
     begin
       WriteLn(N + Z)
     end.
@@ -412,7 +412,7 @@ const
   Src = '''
     program P;
     threadvar S: string;
-    procedure Put(const A: string; N: Integer);
+    procedure Put(const A: string; N: Int32);
     begin
       S := A
     end;
@@ -432,8 +432,8 @@ procedure TThreadVarTests.TestCodegen_UnmanagedThreadVar_NoNode;
 const
   Src = '''
     program P;
-    type TPair = record A, B: Integer; end;
-    threadvar N: Integer; D: Double; R: TPair;
+    type TPair = record A, B: Int; end;
+    threadvar N: Int; D: Float64; R: TPair;
     begin
       N := 1; D := 2.0; R.A := 3
     end.

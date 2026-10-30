@@ -107,7 +107,7 @@ begin
   Prog := ParseSrc('''
       program Prg;
       type
-        TIntArr = array of Integer;
+        TIntArr = array of Int;
       begin
       end.
       ''');
@@ -122,7 +122,7 @@ begin
   Prog := ParseSrc('''
       program Prg;
       var
-        A: array of Integer;
+        A: array of Int;
       begin
       end.
       ''');
@@ -155,7 +155,7 @@ begin
   Prog := ParseSrc('''
       program Prg;
       type
-        TIntArr = array of Integer;
+        TIntArr = array of Int32;
       begin
       end.
       ''');
@@ -163,7 +163,7 @@ begin
     TD := TTypeDecl(Prog.Block.TypeDecls.Items[0]);
     AD := TTypeAliasDef(TD.Def);
     AssertEquals('type name encoded as array of Integer',
-      'array of Integer', AD.TypeName);
+      'array of Int32', AD.TypeName);
   finally Prog.Free(); end;
 end;
 
@@ -177,7 +177,7 @@ begin
   Prog := AnalyseSrc('''
       program Prg;
       type
-        TIntArr = array of Integer;
+        TIntArr = array of Int;
       begin
       end.
       ''');
@@ -194,7 +194,7 @@ begin
   Prog := AnalyseSrc('''
       program Prg;
       type
-        TIntArr = array of Integer;
+        TIntArr = array of Int32;
       begin
       end.
       ''');
@@ -228,7 +228,7 @@ begin
   Prog := AnalyseSrc('''
       program Prg;
       var
-        A: array of Integer;
+        A: array of Int;
       begin
       end.
       ''');
@@ -249,9 +249,9 @@ begin
   { High() on a named dynamic array type must not raise a semantic error }
   Prog := AnalyseSrc('''
       program Prg;
-      type Tar = array of Integer;
+      type Tar = array of Int;
       var ar: Tar;
-          i: Integer;
+          i: Int;
       begin
         i := High(ar);
       end.
@@ -266,9 +266,9 @@ begin
   { Low() on a named dynamic array type must not raise a semantic error }
   Prog := AnalyseSrc('''
       program Prg;
-      type Tar = array of Integer;
+      type Tar = array of Int;
       var ar: Tar;
-          i: Integer;
+          i: Int;
       begin
         i := Low(ar);
       end.
@@ -285,7 +285,7 @@ begin
     accepted ':=' directly after ']'. }
   Prog := ParseSrc('''
       program Prg;
-      type TRec = record Name: String; Number: Integer; end;
+      type TRec = record Name: String; Number: Int; end;
       var A: array of TRec;
       begin
         SetLength(A, 2);
@@ -306,7 +306,7 @@ begin
   Prog := AnalyseSrc('''
       program Prg;
       type
-        TIA = array of Integer;
+        TIA = array of Int32;
         TR  = record A: TIA; end;
       var r: TR;
       begin
@@ -326,7 +326,7 @@ begin
   Prog := ParseSrc('''
       program Prg;
       type
-        TIA    = array of Integer;
+        TIA    = array of Int;
         TInner = record A: TIA; end;
         TC     = class N: TInner; end;
       var c: TC;
@@ -379,7 +379,7 @@ const
     begin
       SetLength(Result, 3)
     end;
-    var I: Integer;
+    var I: Int;
     begin
       I := MakeArr()[1]
     end.
@@ -393,22 +393,22 @@ procedure TDynArrayTests.TestSemantic_DynArrayLiteral_TypedFromTarget;
 const
   SrcOk = '''
     program P;
-    type TIA = array of Integer;
-    var C: array of Integer; D: array of Double; M: array of TIA;
+    type TIA = array of Int32;
+    var C: array of Int32; D: array of Float64; M: array of TIA;
     begin
       C := [1, 2]; C := []; D := [1.5, 2]; M := [[1], [], [2, 3]];
     end.
     ''';
   SrcElem = '''
     program P;
-    var C: array of Integer;
+    var C: array of Int32;
     begin
       C := [1, 'a'];
     end.
     ''';
   SrcRange = '''
     program P;
-    var C: array of Integer;
+    var C: array of Int32;
     begin
       C := [1..3];
     end.
@@ -456,9 +456,9 @@ var Prog: TProgram;
 begin
   Prog := AnalyseSrc('''
       program Prg;
-      type TIA = array of Integer;
+      type TIA = array of Int;
       var A: TIA; B: Boolean;
-      function Count(X: TIA): Integer; begin Result := Length(X) end;
+      function Count(X: TIA): Int; begin Result := Length(X) end;
       function None: TIA; begin Result := nil end;
       begin
         A := nil;

@@ -123,12 +123,12 @@ const
   Src =
     '''
         program P;
-        var B: Byte; W: Word; N: Int64; C: Cardinal;
+        var B: Byte; W: UInt16; N: Int64; C: UInt32;
         begin
           B := Byte(',');
-          W := Word('A');
+          W := UInt16('A');
           N := Int64(':');
-          C := Cardinal('/');
+          C := UInt32('/');
           WriteLn(B);
           WriteLn(W);
           WriteLn(N);

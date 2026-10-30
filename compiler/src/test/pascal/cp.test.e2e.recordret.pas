@@ -337,8 +337,8 @@ const
 
   SrcTwoSmallIntNeg = '''
     program P;
-    type TS = record A, B: SmallInt; end;
-    function MakeIt(A, B: SmallInt): TS;
+    type TS = record A, B: Int16; end;
+    function MakeIt(A, B: Int16): TS;
     begin
       Result.A := A;
       Result.B := B
@@ -352,8 +352,8 @@ const
 
   SrcTwoInteger = '''
     program P;
-    type TXY = record X, Y: Integer; end;
-    function MakeIt(X, Y: Integer): TXY;
+    type TXY = record X, Y: Int; end;
+    function MakeIt(X, Y: Int): TXY;
     begin
       Result.X := X;
       Result.Y := Y
@@ -396,8 +396,8 @@ const
 
   SrcOneDouble = '''
     program P;
-    type TF = record V: Double; end;
-    function MakeIt(V: Double): TF;
+    type TF = record V: Float64; end;
+    function MakeIt(V: Float64): TF;
     begin
       Result.V := V
     end;
@@ -410,8 +410,8 @@ const
 
   SrcTwoDouble = '''
     program P;
-    type T2D = record A, B: Double; end;
-    function MakeIt(A, B: Double): T2D;
+    type T2D = record A, B: Float64; end;
+    function MakeIt(A, B: Float64): T2D;
     begin
       Result.A := A;
       Result.B := B
@@ -426,8 +426,8 @@ const
 
   SrcOneSingle = '''
     program P;
-    type TF = record V: Single; end;
-    function MakeIt(V: Single): TF;
+    type TF = record V: Float32; end;
+    function MakeIt(V: Float32): TF;
     begin
       Result.V := V
     end;
@@ -440,8 +440,8 @@ const
 
   SrcIntSSE = '''
     program P;
-    type TM = record I: Int64; D: Double; end;
-    function MakeIt(I: Int64; D: Double): TM;
+    type TM = record I: Int64; D: Float64; end;
+    function MakeIt(I: Int64; D: Float64): TM;
     begin
       Result.I := I;
       Result.D := D
@@ -456,8 +456,8 @@ const
 
   SrcSSEInt = '''
     program P;
-    type TM = record D: Double; I: Int64; end;
-    function MakeIt(D: Double; I: Int64): TM;
+    type TM = record D: Float64; I: Int64; end;
+    function MakeIt(D: Float64; I: Int64): TM;
     begin
       Result.D := D;
       Result.I := I
@@ -472,8 +472,8 @@ const
 
   SrcMixIntInt64 = '''
     program P;
-    type TM = record X: Integer; Y: Int64; end;
-    function MakeIt(X: Integer; Y: Int64): TM;
+    type TM = record X: Int32; Y: Int64; end;
+    function MakeIt(X: Int32; Y: Int64): TM;
     begin
       Result.X := X;
       Result.Y := Y
@@ -598,29 +598,29 @@ begin
   AssertRunsOnAll('''
     program P;
     type
-      TF1 = record A: Single; end;
-      TF2 = record A, B: Single; end;
-      TF3 = record A, B, C: Single; end;
-      TF4 = record A, B, C, D: Single; end;
-      TD2 = record A, B: Double; end;
+      TF1 = record A: Float32; end;
+      TF2 = record A, B: Float32; end;
+      TF3 = record A, B, C: Float32; end;
+      TF4 = record A, B, C, D: Float32; end;
+      TD2 = record A, B: Float64; end;
       TB3 = packed record A, B, C: Byte; end;
-      TB7 = packed record A: Integer; B: Word; C: Byte; end;
-      T12 = record A, B, C: Integer; end;
+      TB7 = packed record A: Int; B: UInt16; C: Byte; end;
+      T12 = record A, B, C: Int; end;
       THold = packed record X: TB3; G: Byte; Y: TB7; H: Byte; end;
-    function M1(A: Single): TF1; begin Result.A := A end;
-    function M2(A, B: Single): TF2; begin Result.A := A; Result.B := B end;
-    function M3(A, B, C: Single): TF3; begin Result.A := A; Result.B := B; Result.C := C end;
-    function M4(A: Single): TF4; begin Result.A := A; Result.B := A * 2; Result.C := A * 3; Result.D := A * 4 end;
-    function Sum4(R: TF4): Single; begin Result := R.A + R.B + R.C + R.D end;
-    function Sum3(X: Double; R: TF3; Y: Single): Double; begin Result := X + R.A + R.B + R.C + Y end;
-    function Mix(R: TF2; D: TD2; S: TF1): Double; begin Result := R.A + R.B + D.A + D.B + S.A end;
-    function Spill(A, B, C, D, E, F, G: Double; R: TF2): Double;
+    function M1(A: Float32): TF1; begin Result.A := A end;
+    function M2(A, B: Float32): TF2; begin Result.A := A; Result.B := B end;
+    function M3(A, B, C: Float32): TF3; begin Result.A := A; Result.B := B; Result.C := C end;
+    function M4(A: Float32): TF4; begin Result.A := A; Result.B := A * 2; Result.C := A * 3; Result.D := A * 4 end;
+    function Sum4(R: TF4): Float32; begin Result := R.A + R.B + R.C + R.D end;
+    function Sum3(X: Float64; R: TF3; Y: Float32): Float64; begin Result := X + R.A + R.B + R.C + Y end;
+    function Mix(R: TF2; D: TD2; S: TF1): Float64; begin Result := R.A + R.B + D.A + D.B + S.A end;
+    function Spill(A, B, C, D, E, F, G: Float64; R: TF2): Float64;
     begin Result := A + B + C + D + E + F + G + R.A * 100 + R.B * 1000 end;
     function MB3(V: Byte): TB3; begin Result.A := V; Result.B := V + 1; Result.C := V + 2 end;
-    function MB7(V: Integer): TB7; begin Result.A := V; Result.B := 7; Result.C := 9 end;
-    function M12(V: Integer): T12; begin Result.A := V; Result.B := V; Result.C := V end;
+    function MB7(V: Int): TB7; begin Result.A := V; Result.B := 7; Result.C := 9 end;
+    function M12(V: Int): T12; begin Result.A := V; Result.B := V; Result.C := V end;
     var
-      R1: TF1; G1: Integer; R2: TF2; R3: TF3; R4: TF4; G2: Integer;
+      R1: TF1; G1: Int; R2: TF2; R3: TF3; R4: TF4; G2: Int;
       H: THold; Q: T12; PD: TD2;
     begin
       G1 := 111; G2 := 222;
@@ -660,9 +660,9 @@ const
   Src = '''
     program P;
     type
-      TInner = record X, Y: Integer; end;
-      TOuter = record A: TInner; B: Integer; end;
-    function MakeIt(X, Y, B: Integer): TOuter;
+      TInner = record X, Y: Int; end;
+      TOuter = record A: TInner; B: Int; end;
+    function MakeIt(X, Y, B: Int): TOuter;
     begin
       Result.A.X := X;
       Result.A.Y := Y;
@@ -686,8 +686,8 @@ procedure TE2ERecordReturnTests.TestRun_RcSSE1_TwoSingle_RoundTrip;
 const
   Src = '''
     program P;
-    type T2S = record A, B: Single; end;
-    function MakeIt(A, B: Single): T2S;
+    type T2S = record A, B: Float32; end;
+    function MakeIt(A, B: Float32): T2S;
     begin
       Result.A := A;
       Result.B := B
@@ -764,12 +764,12 @@ const
   Src = '''
     program P;
     type
-      TR = record A, B: Integer; end;
+      TR = record A, B: Int; end;
       TFoo = class
         function MakeR: TR;
         procedure Run;
       end;
-    function Sum(const R: TR): Integer;
+    function Sum(const R: TR): Int;
     begin
       Result := R.A + R.B
     end;
@@ -798,13 +798,13 @@ procedure TE2ERecordReturnTests.TestRun_RecordCallFieldArg_WithStringArg;
 const
   Src = '''
     program P;
-    type TR = record A, B: Integer; end;
+    type TR = record A, B: Int; end;
     function MakeR: TR;
     begin
       Result.A := 1;
       Result.B := 2
     end;
-    procedure Check(const Msg: string; Expected, Actual: Integer);
+    procedure Check(const Msg: string; Expected, Actual: Int);
     begin
       WriteLn(Msg, ' ', Expected, ' ', Actual)
     end;
@@ -821,8 +821,8 @@ procedure TE2ERecordReturnTests.TestRun_FloatArg_ManagedRecordReturn_Func;
 const
   Src = '''
     program P;
-    type TR = record X: Double; M: array of UInt32; end;
-    function Make(V: Double): TR;
+    type TR = record X: Float64; M: array of UInt32; end;
+    function Make(V: Float64): TR;
     begin Result.X := V end;
     var R: TR;
     begin
@@ -839,8 +839,8 @@ procedure TE2ERecordReturnTests.TestRun_TwoFloatArgs_ManagedRecordReturn_Func;
 const
   Src = '''
     program P;
-    type TR = record X, Y: Double; M: array of UInt32; end;
-    function Make2(A, B: Double): TR;
+    type TR = record X, Y: Float64; M: array of UInt32; end;
+    function Make2(A, B: Float64): TR;
     begin Result.X := A; Result.Y := B end;
     var R: TR;
     begin
@@ -858,11 +858,11 @@ const
   Src = '''
     program P;
     type
-      TR = record X: Double; M: array of UInt32; end;
+      TR = record X: Float64; M: array of UInt32; end;
       TMaker = class
-        function Make(V: Double): TR;
+        function Make(V: Float64): TR;
       end;
-    function TMaker.Make(V: Double): TR;
+    function TMaker.Make(V: Float64): TR;
     begin Result.X := V end;
     var K: TMaker; R: TR;
     begin
@@ -887,13 +887,13 @@ const
     program P;
     type
       TR = record
-        V: Integer;
+        V: Int;
         function Plus(const B: TR): TR;
-        function Val: Integer;
+        function Val: Int;
       end;
     function TR.Plus(const B: TR): TR; begin Result.V := Self.V + B.V end;
-    function TR.Val: Integer; begin Result := Self.V end;
-    var A, B: TR; N: Integer;
+    function TR.Val: Int; begin Result := Self.V end;
+    var A, B: TR; N: Int;
     begin
       A.V := 10; B.V := 5;
       N := A.Plus(B).Val();
@@ -913,14 +913,14 @@ const
     program P;
     type
       TR = record
-        V: Integer;
+        V: Int;
         function Plus(const B: TR): TR;
-        function Scale(F: Integer): TR;
-        function Val: Integer;
+        function Scale(F: Int): TR;
+        function Val: Int;
       end;
     function TR.Plus(const B: TR): TR; begin Result.V := Self.V + B.V end;
-    function TR.Scale(F: Integer): TR; begin Result.V := Self.V * F end;
-    function TR.Val: Integer; begin Result := Self.V end;
+    function TR.Scale(F: Int): TR; begin Result.V := Self.V * F end;
+    function TR.Val: Int; begin Result := Self.V end;
     var A, B, C: TR;
     begin
       A.V := 10; B.V := 5;
@@ -941,14 +941,14 @@ const
     program P;
     type
       TR = record
-        V: Integer;
+        V: Int;
         function Plus(const B: TR): TR;
-        function Sum6(A1,A2,A3,A4,A5,A6: Integer): Integer;
+        function Sum6(A1,A2,A3,A4,A5,A6: Int): Int;
       end;
     function TR.Plus(const B: TR): TR; begin Result.V := Self.V + B.V end;
-    function TR.Sum6(A1,A2,A3,A4,A5,A6: Integer): Integer;
+    function TR.Sum6(A1,A2,A3,A4,A5,A6: Int): Int;
     begin Result := Self.V + A1+A2+A3+A4+A5+A6 end;
-    var A, B: TR; N: Integer;
+    var A, B: TR; N: Int;
     begin
       A.V := 10; B.V := 5;
       N := A.Plus(B).Sum6(1,2,3,4,5,6);
@@ -969,13 +969,13 @@ const
     program P;
     type
       TR = record
-        V: Integer;
+        V: Int;
         function Plus(const B: TR): TR;
-        function Val: Integer;
+        function Val: Int;
       end;
     function TR.Plus(const B: TR): TR; begin Result.V := Self.V + B.V end;
-    function TR.Val: Integer; begin Result := Self.V end;
-    var A, B: TR; N: Integer;
+    function TR.Val: Int; begin Result := Self.V end;
+    var A, B: TR; N: Int;
     begin
       A.V := 10; B.V := 5;
       N := A.Plus(B).Plus(A).Val();
@@ -995,14 +995,14 @@ const
     program P;
     type
       TR = record
-        V: Integer;
+        V: Int;
         M: array of UInt32;
         function Plus(const B: TR): TR;
-        function Val: Integer;
+        function Val: Int;
       end;
     function TR.Plus(const B: TR): TR;
     begin SetLength(Result.M, 1); Result.M[0] := 0; Result.V := Self.V + B.V end;
-    function TR.Val: Integer; begin Result := Self.V end;
+    function TR.Val: Int; begin Result := Self.V end;
     var A, B: TR;
     begin
       A.V := 10; B.V := 5;
@@ -1052,7 +1052,7 @@ const
     program P;
     type
       TR = record
-        A, B: Integer;
+        A, B: Int;
         function Add(const X: TR): TR;
       end;
     function TR.Add(const X: TR): TR;
@@ -1078,10 +1078,10 @@ const
     program P;
     type
       TR = record
-        A, B: Integer;
+        A, B: Int;
       end;
       TBig = record
-        A, B, C, D, E: Integer;
+        A, B, C, D, E: Int;
       end;
     function CompR(const S: TR): TR;
     begin Result.A := S.B; Result.B := S.A end;
@@ -1119,9 +1119,9 @@ const
     program P;
     type
       TR = record
-        A, B: Integer;
+        A, B: Int;
       end;
-    function Pick(const N: Integer; const S: TR): TR;
+    function Pick(const N: Int; const S: TR): TR;
     begin Result.A := S.B + N; Result.B := S.A + N end;
     var R: TR;
     begin
@@ -1143,7 +1143,7 @@ const
     program P;
     type
       TR = record
-        A, B: Integer;
+        A, B: Int;
         function Comp(const X: TR): TR;
       end;
     function TR.Comp(const X: TR): TR;
@@ -1171,15 +1171,15 @@ const
   Src = '''
     program P;
     type
-      IThing = interface function Val: Integer; end;
-      TThing = class(TObject, IThing) function Val: Integer; end;
+      IThing = interface function Val: Int; end;
+      TThing = class(TObject, IThing) function Val: Int; end;
       TR = record
-        V: Integer;
+        V: Int;
         M: array of UInt32;
-        function Scale(N: Integer; const S: IThing): TR;
+        function Scale(N: Int; const S: IThing): TR;
       end;
-    function TThing.Val: Integer; begin Result := 7 end;
-    function TR.Scale(N: Integer; const S: IThing): TR;
+    function TThing.Val: Int; begin Result := 7 end;
+    function TR.Scale(N: Int; const S: IThing): TR;
     begin SetLength(Result.M, 1); Result.V := Self.V * N + S.Val() end;
     var A, R: TR; T: IThing;
     begin
@@ -1200,14 +1200,14 @@ const
   Src = '''
     program P;
     type
-      IThing = interface function Val: Integer; end;
-      TThing = class(TObject, IThing) function Val: Integer; end;
+      IThing = interface function Val: Int; end;
+      TThing = class(TObject, IThing) function Val: Int; end;
       TR = record
-        V: Integer;
-        function Scale(N: Integer; const S: IThing): TR;
+        V: Int;
+        function Scale(N: Int; const S: IThing): TR;
       end;
-    function TThing.Val: Integer; begin Result := 7 end;
-    function TR.Scale(N: Integer; const S: IThing): TR;
+    function TThing.Val: Int; begin Result := 7 end;
+    function TR.Scale(N: Int; const S: IThing): TR;
     begin Result.V := Self.V * N + S.Val() end;
     var A, R: TR; T: IThing;
     begin
@@ -1228,19 +1228,19 @@ const
   Src = '''
     program P;
     type
-      IThing = interface function Tag: Integer; end;
+      IThing = interface function Tag: Int; end;
       TThing = class(TObject, IThing)
-        FT: Integer;
-        function Tag: Integer;
+        FT: Int;
+        function Tag: Int;
       end;
       TR = record
-        V: Integer;
-        function Combine(N: Integer; const S: IThing): Integer;
+        V: Int;
+        function Combine(N: Int; const S: IThing): Int;
       end;
-    function TThing.Tag: Integer; begin Result := Self.FT end;
-    function TR.Combine(N: Integer; const S: IThing): Integer;
+    function TThing.Tag: Int; begin Result := Self.FT end;
+    function TR.Combine(N: Int; const S: IThing): Int;
     begin Result := Self.V + N * 100 + S.Tag() end;
-    var A: TR; T: TThing; N: Integer;
+    var A: TR; T: TThing; N: Int;
     begin
       A.V := 1;
       T := TThing.Create; T.FT := 9;
@@ -1258,10 +1258,10 @@ const
   Src = '''
     program P;
     type
-      IThing = interface function V: Integer; end;
-      TT = class(TObject, IThing) function V: Integer; end;
-      TR = record A: Integer; M: array of UInt32; end;
-    function TT.V: Integer; begin Result := 7 end;
+      IThing = interface function V: Int; end;
+      TT = class(TObject, IThing) function V: Int; end;
+      TR = record A: Int; M: array of UInt32; end;
+    function TT.V: Int; begin Result := 7 end;
     function Mk(const S: IThing): TR;
     begin SetLength(Result.M, 1); Result.A := S.V() end;
     var R: TR; T: IThing;
@@ -1284,11 +1284,11 @@ const
   Src = '''
     program P;
     type
-      IThing = interface function V: Integer; end;
-      TT = class(TObject, IThing) function V: Integer; end;
-      TR = record A: Integer; M: array of UInt32; end;
-    function TT.V: Integer; begin Result := 7 end;
-    function Mk(N: Integer; const S: IThing): TR;
+      IThing = interface function V: Int; end;
+      TT = class(TObject, IThing) function V: Int; end;
+      TR = record A: Int; M: array of UInt32; end;
+    function TT.V: Int; begin Result := 7 end;
+    function Mk(N: Int; const S: IThing): TR;
     begin SetLength(Result.M, 1); Result.A := N + S.V() end;
     var R: TR; T: IThing;
     begin
@@ -1307,20 +1307,20 @@ const
   Src = '''
     program P;
     type
-      TTok = record Kind: Integer; Value: string; Line: Integer; end;
+      TTok = record Kind: Int; Value: string; Line: Int; end;
       TBase = class
-        function Next(N: Integer): TTok; virtual;
+        function Next(N: Int): TTok; virtual;
       end;
       TDeriv = class(TBase)
-        function Next(N: Integer): TTok; override;
+        function Next(N: Int): TTok; override;
       end;
-    function TBase.Next(N: Integer): TTok;
+    function TBase.Next(N: Int): TTok;
     begin
       Result.Kind := N;
       Result.Value := 'hello-world';
       Result.Line := 99
     end;
-    function TDeriv.Next(N: Integer): TTok;
+    function TDeriv.Next(N: Int): TTok;
     begin
       Result := inherited Next(N)
     end;
@@ -1344,19 +1344,19 @@ const
   Src = '''
     program P;
     type
-      TTok = record Kind: Integer; Value: string; end;
+      TTok = record Kind: Int; Value: string; end;
       TBase = class
-        function Make(N: Integer): TTok; virtual;
+        function Make(N: Int): TTok; virtual;
       end;
       TDeriv = class(TBase)
-        function Make(N: Integer): TTok; override;
+        function Make(N: Int): TTok; override;
       end;
-    function TBase.Make(N: Integer): TTok;
+    function TBase.Make(N: Int): TTok;
     begin
       Result.Kind := N + 100;
       Result.Value := 'base'
     end;
-    function TDeriv.Make(N: Integer): TTok;
+    function TDeriv.Make(N: Int): TTok;
     begin
       inherited Make(N)
     end;
@@ -1380,14 +1380,14 @@ procedure TE2ERecordReturnTests.TestRun_SretResult_ReadModifyOffsetZeroField;
 const
   Src = '''
     program P;
-    type TR = record A: Integer; S: string; B: Integer; end;
-    function Raw(N: Integer): TR;
+    type TR = record A: Int; S: string; B: Int; end;
+    function Raw(N: Int): TR;
     begin
       Result.A := N;
       Result.S := 'hi';
       Result.B := 20
     end;
-    function Make(N: Integer): TR;
+    function Make(N: Int): TR;
     begin
       Result := Raw(N);
       Result.A := Result.A + 1
@@ -1411,7 +1411,7 @@ const
     program P;
     type
       TToken = record
-        Kind: Integer;
+        Kind: Int;
         Value: string;
       end;
       TLexer = class
@@ -1447,7 +1447,7 @@ const
   Src = '''
     program P;
     type
-      TPoint = record X, Y: Integer; end;
+      TPoint = record X, Y: Int; end;
       TObj = class
         function Pos(): TPoint;
       end;
@@ -1474,7 +1474,7 @@ const
   Src = '''
     program P;
     type
-      TRec = record N: Integer; S: string; end;
+      TRec = record N: Int; S: string; end;
       TFactory = class
         FTag: string;
         function Make(): TRec;
@@ -1513,11 +1513,11 @@ const
   Src = '''
     program P;
     type
-      TToken = record Kind: Integer; Value: string; end;
+      TToken = record Kind: Int; Value: string; end;
       TBig = record A, B, C: Int64; end;
       TPt = record
-        X, Y: Integer;
-        function Moved(D: Integer): TPt;
+        X, Y: Int;
+        function Moved(D: Int): TPt;
         function Tok(): TToken;
       end;
       TLexer = class
@@ -1529,7 +1529,7 @@ const
         FLex: TLexer;
         procedure Run();
       end;
-    function TPt.Moved(D: Integer): TPt;
+    function TPt.Moved(D: Int): TPt;
     begin
       Result.X := X + D;
       Result.Y := Y + D
@@ -1603,15 +1603,15 @@ const
   Src = '''
     program P;
     type
-      TToken = record Kind: Integer; Value: string; end;
-      TPt = record X, Y: Integer; end;
+      TToken = record Kind: Int; Value: string; end;
+      TPt = record X, Y: Int; end;
       TLexer = class
         FName: string;
         function Next(): TToken;
         function Pos(): TPt;
         destructor Destroy(); override;
       end;
-    var Frees: Integer;
+    var Frees: Int;
     function TLexer.Next(): TToken;
     begin
       Result.Kind := 42; Result.Value := 'hello-' + FName
@@ -1653,50 +1653,50 @@ const
   Src = '''
     program P;
     type
-      TTok = record Kind: Integer; Value: string; Line: Integer; end;
-      TPt = record X, Y: Integer; end;
+      TTok = record Kind: Int; Value: string; Line: Int; end;
+      TPt = record X, Y: Int; end;
       TBase = class
-        function Next(N: Integer): TTok; virtual;
-        function Pt(N: Integer): TPt; virtual;
-        function S(N: Integer): Single; virtual;
-        function Tag(N: Integer): string; virtual;
+        function Next(N: Int): TTok; virtual;
+        function Pt(N: Int): TPt; virtual;
+        function S(N: Int): Float32; virtual;
+        function Tag(N: Int): string; virtual;
       end;
       TDeriv = class(TBase)
-        function Next(N: Integer): TTok; override;
-        function Pt(N: Integer): TPt; override;
-        function S(N: Integer): Single; override;
+        function Next(N: Int): TTok; override;
+        function Pt(N: Int): TPt; override;
+        function S(N: Int): Float32; override;
         procedure Show();
       end;
-    function TBase.Next(N: Integer): TTok;
+    function TBase.Next(N: Int): TTok;
     begin
       Result.Kind := N;
       Result.Value := 'hello-' + IntToStr(N);
       Result.Line := 99
     end;
-    function TBase.Pt(N: Integer): TPt;
+    function TBase.Pt(N: Int): TPt;
     begin
       Result.X := N;
       Result.Y := N * 2
     end;
-    function TBase.S(N: Integer): Single;
+    function TBase.S(N: Int): Float32;
     begin
       Result := N + 0.5
     end;
-    function TBase.Tag(N: Integer): string;
+    function TBase.Tag(N: Int): string;
     begin
       Result := 'tag' + IntToStr(N)
     end;
-    function TDeriv.Next(N: Integer): TTok;
+    function TDeriv.Next(N: Int): TTok;
     begin
       Result.Value := 'old';
       inherited Next(N);
       Result.Line := Result.Line + 1
     end;
-    function TDeriv.Pt(N: Integer): TPt;
+    function TDeriv.Pt(N: Int): TPt;
     begin
       Result := inherited Pt(N + 1)
     end;
-    function TDeriv.S(N: Integer): Single;
+    function TDeriv.S(N: Int): Float32;
     begin
       inherited S(N)
     end;
@@ -1732,26 +1732,26 @@ const
   Src = '''
     program P;
     type
-      TToken = record Kind: Integer; Value: string; end;
-      TPt = record X, Y: Integer; end;
+      TToken = record Kind: Int; Value: string; end;
+      TPt = record X, Y: Int; end;
       TBig = record A, B, C: Int64; end;
       IGreet = interface
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
       TG = class(TObject, IGreet)
       public
-        function Hi(): Integer;
+        function Hi(): Int;
       end;
       TLexer = class
         FName: string;
-        FCount: Integer;
+        FCount: Int;
         function Next(): TToken;
         function Pos(): TPt;
-        function Big(N: Integer): TBig; virtual;
+        function Big(N: Int): TBig; virtual;
         function Greeter(): IGreet;
         procedure Again();
       end;
-    function TG.Hi(): Integer;
+    function TG.Hi(): Int;
     begin
       Result := 1
     end;
@@ -1767,7 +1767,7 @@ const
       Result.X := 1;
       Result.Y := 2
     end;
-    function TLexer.Big(N: Integer): TBig;
+    function TLexer.Big(N: Int): TBig;
     begin
       FCount := FCount + N;
       Result.A := 1;
@@ -1851,10 +1851,10 @@ const
     type
       TItem = record
         Name: string;
-        N: Integer;
+        N: Int;
       end;
       TEnum = class
-        FI: Integer;
+        FI: Int;
         function GetCurrent: TItem;
         function GetEnumerator: TEnum;
         function MoveNext: Boolean;
@@ -1897,12 +1897,12 @@ const
     program P;
     type
       TBig = record
-        A: Double;
-        B: Double;
-        C: Double;
-        D: Double;
+        A: Float64;
+        B: Float64;
+        C: Float64;
+        D: Float64;
       end;
-    function Make(S: Single; D: Double): TBig;
+    function Make(S: Float32; D: Float64): TBig;
     begin
       Result.A := S;
       Result.B := D;
@@ -1911,7 +1911,7 @@ const
     end;
     var
       R: TBig;
-      Sng: Single;
+      Sng: Float32;
     begin
       Sng := 2.5;
       R := Make(7, Sng);
@@ -1933,16 +1933,16 @@ const
     program P;
     type
       TBig = record
-        A: Double;
-        B: Double;
-        C: Double;
-        D: Double;
+        A: Float64;
+        B: Float64;
+        C: Float64;
+        D: Float64;
       end;
       TMaker = class
       public
-        function Make(S: Single; D: Double): TBig;
+        function Make(S: Float32; D: Float64): TBig;
       end;
-    function TMaker.Make(S: Single; D: Double): TBig;
+    function TMaker.Make(S: Float32; D: Float64): TBig;
     begin
       Result.A := S;
       Result.B := D;
@@ -1952,7 +1952,7 @@ const
     var
       M: TMaker;
       R: TBig;
-      Sng: Single;
+      Sng: Float32;
     begin
       M := TMaker.Create();
       Sng := 2.5;
@@ -1976,7 +1976,7 @@ begin
     type
       TTool = record
         Path: string;
-        Kind: Integer;
+        Kind: Int;
       end;
       TChain = record
         QBE: TTool;
@@ -2006,23 +2006,23 @@ const
     '''
     program P;
     type
-      TQ = record Index: Integer; Other: Integer; end;
-      TBig = record A, B, C, D, E: Integer; end;
-      TMan = record Name: string; N: Integer; end;
+      TQ = record Index: Int; Other: Int; end;
+      TBig = record A, B, C, D, E: Int; end;
+      TMan = record Name: string; N: Int; end;
       TBox = class
         FQ: TQ;
         FBig: TBig;
         FMan: TMan;
-        function Get(A: Integer): TQ;
-        function GetBig(A: Integer): TBig;
-        function GetMan(A: Integer): TMan;
-        property Items[A: Integer]: TQ read Get;
-        property Bigs[A: Integer]: TBig read GetBig;
-        property Mans[A: Integer]: TMan read GetMan;
+        function Get(A: Int): TQ;
+        function GetBig(A: Int): TBig;
+        function GetMan(A: Int): TMan;
+        property Items[A: Int]: TQ read Get;
+        property Bigs[A: Int]: TBig read GetBig;
+        property Mans[A: Int]: TMan read GetMan;
       end;
-    function TBox.Get(A: Integer): TQ; begin Result := FQ end;
-    function TBox.GetBig(A: Integer): TBig; begin Result := FBig end;
-    function TBox.GetMan(A: Integer): TMan; begin Result := FMan end;
+    function TBox.Get(A: Int): TQ; begin Result := FQ end;
+    function TBox.GetBig(A: Int): TBig; begin Result := FBig end;
+    function TBox.GetMan(A: Int): TMan; begin Result := FMan end;
     var B: TBox; T: TQ; Tb: TBig; Tm: TMan;
     begin
       B := TBox.Create();
@@ -2052,27 +2052,27 @@ const
     '''
     program P;
     type
-      TQ = record Index: Integer; Other: Integer; end;
-      TBig = record A, B, C, D, E: Integer; end;
-      TMan = record Name: string; N: Integer; end;
+      TQ = record Index: Int; Other: Int; end;
+      TBig = record A, B, C, D, E: Int; end;
+      TMan = record Name: string; N: Int; end;
       TBoxQ = class
         FQ: TQ;
-        function Get(A: Integer): TQ;
-        property Items[A: Integer]: TQ read Get; default;
+        function Get(A: Int): TQ;
+        property Items[A: Int]: TQ read Get; default;
       end;
       TBoxBig = class
         FBig: TBig;
-        function GetBig(A: Integer): TBig;
-        property Items[A: Integer]: TBig read GetBig; default;
+        function GetBig(A: Int): TBig;
+        property Items[A: Int]: TBig read GetBig; default;
       end;
       TBoxMan = class
         FMan: TMan;
-        function GetMan(A: Integer): TMan;
-        property Items[A: Integer]: TMan read GetMan; default;
+        function GetMan(A: Int): TMan;
+        property Items[A: Int]: TMan read GetMan; default;
       end;
-    function TBoxQ.Get(A: Integer): TQ; begin Result := FQ end;
-    function TBoxBig.GetBig(A: Integer): TBig; begin Result := FBig end;
-    function TBoxMan.GetMan(A: Integer): TMan; begin Result := FMan end;
+    function TBoxQ.Get(A: Int): TQ; begin Result := FQ end;
+    function TBoxBig.GetBig(A: Int): TBig; begin Result := FBig end;
+    function TBoxMan.GetMan(A: Int): TMan; begin Result := FMan end;
     var Bq: TBoxQ; Bb: TBoxBig; Bm: TBoxMan; T: TQ; Tb: TBig; Tm: TMan;
     begin
       Bq := TBoxQ.Create(); Bq.FQ.Index := 9; Bq.FQ.Other := 3;
@@ -2103,16 +2103,16 @@ const
     uses Generics.Collections;
     type
       TTok = record
-        Kind: Integer;
+        Kind: Int;
         Value: string;      { managed field forces the sret class }
-        Line: Integer;
-        Col: Integer;
+        Line: Int;
+        Col: Int;
       end;
       THolder = class
         Toks: TList<TTok>;
         constructor Create;
-        procedure Add(AKind: Integer; const AValue: string; ALine, ACol: Integer);
-        function Bare: Integer;
+        procedure Add(AKind: Int; const AValue: string; ALine, ACol: Int);
+        function Bare: Int;
       end;
       TWrap = class
         H: THolder;
@@ -2123,14 +2123,14 @@ const
     begin
       Self.Toks := TList<TTok>.Create();
     end;
-    procedure THolder.Add(AKind: Integer; const AValue: string; ALine, ACol: Integer);
+    procedure THolder.Add(AKind: Int; const AValue: string; ALine, ACol: Int);
     var T: TTok;
     begin
       T.Kind := AKind; T.Value := AValue; T.Line := ALine; T.Col := ACol;
       Self.Toks.Add(T);
     end;
     { bare FField[I] — the IMPLICIT-Self arm }
-    function THolder.Bare: Integer;
+    function THolder.Bare: Int;
     begin
       Result := Toks[0].Line;
     end;
@@ -2222,14 +2222,14 @@ const
       TColor = (Red, Green, Blue);
       TE = record C: TColor; end;
       TPt = record P: Pointer; end;
-      TBox = class V: Integer; end;
+      TBox = class V: Int; end;
       TCR = record B: TBox; end;
       TOdd = record A, B, C: Byte; end;
-      TSD = record S: Single; D: Double; end;
-      TID = record I: Integer; D: Double; end;
-      TIn = record X, Y: SmallInt; end;
-      TNest = record Inner: TIn; Z: Integer; end;
-    var G: Integer;
+      TSD = record S: Float32; D: Float64; end;
+      TID = record I: Int; D: Float64; end;
+      TIn = record X, Y: Int16; end;
+      TNest = record Inner: TIn; Z: Int; end;
+    var G: Int;
     function MakeE: TE; begin Result.C := Blue end;
     function MakePt: TPt; begin Result.P := @G end;
     function MakeCR: TCR; begin Result.B := TBox.Create(); Result.B.V := 42 end;
@@ -2274,27 +2274,27 @@ begin
     '''
     program P;
     type
-      TPt = record X, Y: Integer; end;
+      TPt = record X, Y: Int; end;
       TBig = record A, B, C: Int64; end;
       TC = class
-        function Mk(N: Integer): TPt;
-        function MkV(N: Integer): TPt; virtual;
-        function MkB(N: Integer): TBig;
-        function Sum(const P: TPt): Integer;
-        function SumV(P: TPt): Integer;
+        function Mk(N: Int): TPt;
+        function MkV(N: Int): TPt; virtual;
+        function MkB(N: Int): TBig;
+        function Sum(const P: TPt): Int;
+        function SumV(P: TPt): Int;
         function SumB(const P: TBig): Int64;
         procedure Run();
       end;
       TD = class(TC)
-        function MkV(N: Integer): TPt; override;
+        function MkV(N: Int): TPt; override;
       end;
-    function TC.Mk(N: Integer): TPt; begin Result.X := N; Result.Y := N * 2; end;
-    function TC.MkV(N: Integer): TPt; begin Result.X := N; Result.Y := 0; end;
-    function TC.MkB(N: Integer): TBig; begin Result.A := N; Result.B := N; Result.C := N; end;
-    function TC.Sum(const P: TPt): Integer; begin Result := P.X + P.Y; end;
-    function TC.SumV(P: TPt): Integer; begin Result := P.X + P.Y; end;
+    function TC.Mk(N: Int): TPt; begin Result.X := N; Result.Y := N * 2; end;
+    function TC.MkV(N: Int): TPt; begin Result.X := N; Result.Y := 0; end;
+    function TC.MkB(N: Int): TBig; begin Result.A := N; Result.B := N; Result.C := N; end;
+    function TC.Sum(const P: TPt): Int; begin Result := P.X + P.Y; end;
+    function TC.SumV(P: TPt): Int; begin Result := P.X + P.Y; end;
     function TC.SumB(const P: TBig): Int64; begin Result := P.A + P.B + P.C; end;
-    function TD.MkV(N: Integer): TPt; begin Result.X := N; Result.Y := 100; end;
+    function TD.MkV(N: Int): TPt; begin Result.X := N; Result.Y := 100; end;
     procedure TC.Run();
     begin
       WriteLn(Sum(Mk(3)), ' ', SumV(Mk(3)), ' ', SumB(MkB(3)), ' ',
@@ -2315,12 +2315,12 @@ const
   Src = '''
     program s4;
     type TBig = record A, B, C: Int64; end;
-    function OA(const V: array of Integer; K: Integer): TBig;
-    var I: Integer;
+    function OA(const V: array of Int; K: Int): TBig;
+    var I: Int;
     begin Result.A := 0; for I := 0 to High(V) do Result.A := Result.A + V[I]; Result.B := High(V); Result.C := K end;
-    function OA6(A, B, C, D: Integer; const V: array of Integer; K: Integer): TBig;
+    function OA6(A, B, C, D: Int; const V: array of Int; K: Int): TBig;
     begin Result.A := A + D; Result.B := High(V) * 10 + V[0]; Result.C := K end;
-    function Fl7(A, B, C, D, E, F: Integer; X: Double; G: Integer): TBig;
+    function Fl7(A, B, C, D, E, F: Int; X: Float64; G: Int): TBig;
     begin Result.A := A + F; Result.B := Trunc(X * 10); Result.C := G end;
     var R: TBig;
     begin
@@ -2341,19 +2341,19 @@ const
     uses SysUtils;
     type
       TBig = record A, B, C: Int64; end;
-      TSmall = record X, Y: Integer; end;
+      TSmall = record X, Y: Int; end;
     procedure Outer;
-    var A, B, C, D, E, F, G, H, I, J: Integer; R: Double;
-      function Mix(X: Double; const V: array of Integer; K, L: Integer; Y: Double): Double;
+    var A, B, C, D, E, F, G, H, I, J: Int; R: Float64;
+      function Mix(X: Float64; const V: array of Int; K, L: Int; Y: Float64): Float64;
       begin Result := A + J + X * 10 + Y * 100 + V[High(V)] * 1000 + K + L * 10000 + R end;
-      function MkBig(K: Integer): TBig;
+      function MkBig(K: Int): TBig;
       begin Result.A := A + K; Result.B := J * K; Result.C := H end;
-      function MkSmall(K: Integer; Z: Double): TSmall;
+      function MkSmall(K: Int; Z: Float64): TSmall;
       begin Result.X := A + K; Result.Y := J + Trunc(Z) end;
-      function BigMany(K1, K2, K3, K4, K5, K6, K7: Integer): TBig;
+      function BigMany(K1, K2, K3, K4, K5, K6, K7: Int): TBig;
       begin Result.A := K1 + K7; Result.B := A + J; Result.C := K4 end;
-      procedure Bump(var Z: Integer); begin Z := Z + I + J end;
-    var Bg: TBig; Sm: TSmall; Q: Integer;
+      procedure Bump(var Z: Int); begin Z := Z + I + J end;
+    var Bg: TBig; Sm: TSmall; Q: Int;
     begin
       A := 1; B := 2; C := 3; D := 4; E := 5; F := 6; G := 7; H := 8; I := 9; J := 10; R := 0.5;
       WriteLn(Trunc(Mix(2.0, [3, 4], 5, 6, 7.0) * 10));
@@ -2378,8 +2378,8 @@ const
     program s5;
     type TBig = record A, B, C: Int64; end;
     procedure Outer;
-    var A, B, C, D, E, F, G: Integer;
-      function SixCap(K: Integer; X: Double; const V: array of Integer): TBig;
+    var A, B, C, D, E, F, G: Int;
+      function SixCap(K: Int; X: Float64; const V: array of Int): TBig;
       begin Result.A := A + B + C + D + E + F + G + K; Result.B := Trunc(X * 10); Result.C := V[High(V)] end;
     var R: TBig;
     begin
@@ -2399,32 +2399,32 @@ const
     program s8;
     type
       TBig = record A, B, C: Int64; end;
-      IN1 = interface function Get: Integer; end;
-      TN = class(TObject, IN1) V: Integer; function Get: Integer; end;
+      IN1 = interface function Get: Int; end;
+      TN = class(TObject, IN1) V: Int; function Get: Int; end;
       TBase = class
-        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; virtual;
-        function Plain(A, B, C, D, E, F, G: Integer; const S: array of Integer): Integer;
-        function WithIntf(A, B, C, D: Integer; const I: IN1; E: Integer): TBig;
+        function Calc(A, B, C, D, E: Int; var Z: Int): TBig; virtual;
+        function Plain(A, B, C, D, E, F, G: Int; const S: array of Int): Int;
+        function WithIntf(A, B, C, D: Int; const I: IN1; E: Int): TBig;
       end;
       TDer = class(TBase)
-        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; override;
+        function Calc(A, B, C, D, E: Int; var Z: Int): TBig; override;
       end;
       TRec = record
-        K: Integer;
-        function Mk(A, B, C, D, E: Integer; X: Double): TBig;
+        K: Int;
+        function Mk(A, B, C, D, E: Int; X: Float64): TBig;
       end;
-    function TN.Get: Integer; begin Result := V end;
-    function TBase.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    function TN.Get: Int; begin Result := V end;
+    function TBase.Calc(A, B, C, D, E: Int; var Z: Int): TBig;
     begin Result.A := 1; Result.B := A + E; Z := 11 end;
-    function TDer.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    function TDer.Calc(A, B, C, D, E: Int; var Z: Int): TBig;
     begin Result.A := 2; Result.B := A + E; Result.C := D; Z := 22 end;
-    function TBase.Plain(A, B, C, D, E, F, G: Integer; const S: array of Integer): Integer;
+    function TBase.Plain(A, B, C, D, E, F, G: Int; const S: array of Int): Int;
     begin Result := A + G + S[High(S)] * 100 end;
-    function TBase.WithIntf(A, B, C, D: Integer; const I: IN1; E: Integer): TBig;
+    function TBase.WithIntf(A, B, C, D: Int; const I: IN1; E: Int): TBig;
     begin Result.A := A + D; Result.B := I.Get(); Result.C := E end;
-    function TRec.Mk(A, B, C, D, E: Integer; X: Double): TBig;
+    function TRec.Mk(A, B, C, D, E: Int; X: Float64): TBig;
     begin Result.A := K + E; Result.B := Trunc(X * 10); Result.C := A end;
-    var O: TBase; R: TBig; Z: Integer; N: TN; Rc: TRec;
+    var O: TBase; R: TBig; Z: Int; N: TN; Rc: TRec;
     begin
       O := TDer.Create();
       R := O.Calc(1, 2, 3, 4, 5, Z); WriteLn(R.A, ' ', R.B, ' ', R.C, ' ', Z);
@@ -2446,20 +2446,20 @@ const
   Src = '''
     program P;
     type
-      TSmall = record A, B: Integer; end;
+      TSmall = record A, B: Int; end;
       TBig = record A, B, C: Int64; end;
-      TFnS = reference to function(X: Integer): TSmall;
-      TFnB = reference to function(X: Integer): TBig;
-      TPlain = function(X: Integer): TSmall;
-    function PlainMk(X: Integer): TSmall;
+      TFnS = reference to function(X: Int): TSmall;
+      TFnB = reference to function(X: Int): TBig;
+      TPlain = function(X: Int): TSmall;
+    function PlainMk(X: Int): TSmall;
     begin Result.A := X; Result.B := X + 1 end;
     procedure ShowS(const R: TSmall); begin WriteLn(R.A + R.B) end;
-    var GS: TFnS; GB: TFnB; PP: TPlain; S: TSmall; B: TBig; K: Integer;
+    var GS: TFnS; GB: TFnB; PP: TPlain; S: TSmall; B: TBig; K: Int;
     begin
       K := 10;
-      GS := function(X: Integer): TSmall
+      GS := function(X: Int): TSmall
         begin Result.A := X + K; Result.B := X * 2 end;
-      GB := function(X: Integer): TBig
+      GB := function(X: Int): TBig
         begin Result.A := X; Result.B := K; Result.C := X + K end;
       PP := @PlainMk;
       S := GS(1); WriteLn(S.A, ' ', S.B);
@@ -2483,7 +2483,7 @@ const
   Src = '''
     program g;
     type
-      TPt = record X, Y: Integer; end;
+      TPt = record X, Y: Int; end;
       TBig = record A, B, C: Int64; S: string; end;
       IThing = interface
         function Name(): string;
@@ -2493,17 +2493,17 @@ const
         constructor Create(const N: string);
         function Name(): string;
       end;
-      TBFn = reference to function(A: Integer): TBig;
-      TPFn = reference to function(A: Integer): TPt;
+      TBFn = reference to function(A: Int): TBig;
+      TPFn = reference to function(A: Int): TPt;
       TIFn = reference to function(): IThing;
-      TKFn = reference to function(A: Integer): Integer;
+      TKFn = reference to function(A: Int): Int;
       TCFn = reference to function(): TKFn;
     constructor TThing.Create(const N: string); begin FN := N; end;
     function TThing.Name(): string; begin Result := FN; end;
-    function GetB(): TBFn; begin Result := function(A: Integer): TBig begin Result.A := A; Result.S := 'B' + IntToStr(A); end; end;
-    function GetP(): TPFn; begin Result := function(A: Integer): TPt begin Result.X := A; Result.Y := A * 2; end; end;
+    function GetB(): TBFn; begin Result := function(A: Int): TBig begin Result.A := A; Result.S := 'B' + IntToStr(A); end; end;
+    function GetP(): TPFn; begin Result := function(A: Int): TPt begin Result.X := A; Result.Y := A * 2; end; end;
     function GetI(): TIFn; begin Result := function(): IThing begin Result := TThing.Create('I'); end; end;
-    function GetC(): TCFn; begin Result := function(): TKFn begin Result := function(A: Integer): Integer begin Result := A + 1000; end; end; end;
+    function GetC(): TCFn; begin Result := function(): TKFn begin Result := function(A: Int): Int begin Result := A + 1000; end; end; end;
     procedure ShowB(const B: TBig); begin WriteLn('showB ', B.S); end;
     procedure ShowBv(B: TBig); begin WriteLn('showBv ', B.S); end;
     procedure ShowP(P: TPt); begin WriteLn('showP ', P.Y); end;
@@ -2557,10 +2557,10 @@ const
   Src = '''
     program h;
     type
-      TPt = record X, Y: Integer; end;
+      TPt = record X, Y: Int; end;
       TBig = record A, B, C: Int64; S: string; end;
-      TKFn = reference to function(A: Integer): Integer;
-      TMFn = function(A: Integer): Integer of object;
+      TKFn = reference to function(A: Int): Int;
+      TMFn = function(A: Int): Int of object;
       IThing = interface
         function GetFn(): TKFn;
         function GetB(): TBig;
@@ -2570,7 +2570,7 @@ const
         function GetM(): TMFn;
         function GetB(): TBig;
         function GetP(): TPt;
-        function Dbl(A: Integer): Integer;
+        function Dbl(A: Int): Int;
         procedure Run();
       end;
       TD = class(TC)
@@ -2578,14 +2578,14 @@ const
         function GetB(): TBig;
         procedure Run2();
       end;
-    function MkFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A + 1; end; end;
-    function MkP(A: Integer): TPt; begin Result.X := A; Result.Y := A * 10; end;
+    function MkFn(): TKFn; begin Result := function(A: Int): Int begin Result := A + 1; end; end;
+    function MkP(A: Int): TPt; begin Result.X := A; Result.Y := A * 10; end;
     function MkC(): TC; begin Result := TC.Create(); end;
-    function TC.GetFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A * 2; end; end;
+    function TC.GetFn(): TKFn; begin Result := function(A: Int): Int begin Result := A * 2; end; end;
     function TC.GetM(): TMFn; begin Result := @Self.Dbl; end;
     function TC.GetB(): TBig; begin Result.S := 'cb'; Result.A := 1; end;
     function TC.GetP(): TPt; begin Result.X := 4; Result.Y := 9; end;
-    function TC.Dbl(A: Integer): Integer; begin Result := A * 4; end;
+    function TC.Dbl(A: Int): Int; begin Result := A * 4; end;
     procedure TC.Run();
     var Fv: TKFn;
     begin
@@ -2658,9 +2658,9 @@ const
     program j;
     type
       TBig = record A, B, C: Int64; S: string; end;
-      TPt = record X, Y: Integer; end;
-      TKFn = reference to function(A: Integer): Integer;
-      TArr = array of Integer;
+      TPt = record X, Y: Int; end;
+      TKFn = reference to function(A: Int): Int;
+      TArr = array of Int;
       IThing = interface
         function Name(): string;
       end;
@@ -2685,12 +2685,12 @@ const
     function TC.GetC(): TC; begin Result := TC.Create(); end;
     function TC.GetA(): TArr; begin SetLength(Result, 3); end;
     function TC.GetI(): IThing; begin Result := TC.Create(); end;
-    function TC.GetFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A; end; end;
+    function TC.GetFn(): TKFn; begin Result := function(A: Int): Int begin Result := A; end; end;
     function TC.GetB(): TBig; begin Result.S := 'x' + IntToStr(2); end;
     function TC.GetP(): TPt; begin Result.X := 1; end;
     static function TC.SGetS(): string; begin Result := 'q' + IntToStr(3); end;
     static function TC.SGetI(): IThing; begin Result := TC.Create(); end;
-    static function TC.SGetFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A; end; end;
+    static function TC.SGetFn(): TKFn; begin Result := function(A: Int): Int begin Result := A; end; end;
     static function TC.SGetB(): TBig; begin Result.S := 'y' + IntToStr(4); end;
     procedure TC.Run();
     begin
@@ -2698,7 +2698,7 @@ const
       Inner.GetS(); Inner.GetC(); Inner.GetA(); Inner.GetI(); Inner.GetFn(); Inner.GetB(); Inner.GetP();
     end;
     function MkC(): TC; begin Result := TC.Create(); end;
-    function MkFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A; end; end;
+    function MkFn(): TKFn; begin Result := function(A: Int): Int begin Result := A; end; end;
     function MkI(): IThing; begin Result := TC.Create(); end;
     function MkB(): TBig; begin Result.S := 'z' + IntToStr(5); end;
     function MkS(): string; begin Result := 'z' + IntToStr(6); end;
@@ -2728,51 +2728,51 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TRec = record
-        A: TArr; S: string; D: array of Integer;
+        A: TArr; S: string; D: array of Int;
         function Clone: TRec;
       end;
-      TRecFn = reference to function(N: Integer): TRec;
+      TRecFn = reference to function(N: Int): TRec;
       IMk = interface
-        function Mk(N: Integer): TRec;
+        function Mk(N: Int): TRec;
       end;
       TBase = class(IMk)
       public
-        function Mk(N: Integer): TRec; virtual;
+        function Mk(N: Int): TRec; virtual;
       end;
       TObj = class(TBase)
       private
         FR: TRec;
         function GetR: TRec;
-        function GetRI(I: Integer): TRec;
+        function GetRI(I: Int): TRec;
         static function GetSR: TRec;
       public
-        function Mk(N: Integer): TRec; override;
+        function Mk(N: Int): TRec; override;
         procedure Run;
-        static function SMk(N: Integer): TRec;
+        static function SMk(N: Int): TRec;
         property R: TRec read GetR;
-        property RI[I: Integer]: TRec read GetRI;
+        property RI[I: Int]: TRec read GetRI;
         static property SR: TRec read GetSR;
       end;
-    function F(N: Integer): TRec;
-    var I: Integer;
+    function F(N: Int): TRec;
+    var I: Int;
     begin
       for I := 0 to 3 do Result.A[I] := N + I;
       Result.S := 's' + IntToStr(N);
       SetLength(Result.D, 3); Result.D[1] := N * 10;
     end;
     function TRec.Clone: TRec; begin Result := Self; Result.A[0] := Result.A[0] + 1000; end;
-    function TBase.Mk(N: Integer): TRec; begin Result := F(N); end;
-    function TObj.Mk(N: Integer): TRec; begin Result := F(N + 1); end;
+    function TBase.Mk(N: Int): TRec; begin Result := F(N); end;
+    function TObj.Mk(N: Int): TRec; begin Result := F(N + 1); end;
     function TObj.GetR: TRec; begin Result := F(40); end;
-    function TObj.GetRI(I: Integer): TRec; begin Result := F(I); end;
+    function TObj.GetRI(I: Int): TRec; begin Result := F(I); end;
     static function TObj.GetSR: TRec; begin Result := F(50); end;
-    static function TObj.SMk(N: Integer): TRec; begin Result := F(N); end;
-    function MkFn: TRecFn; begin Result := function(N: Integer): TRec begin Result := F(N * 2); end; end;
-    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    static function TObj.SMk(N: Int): TRec; begin Result := F(N); end;
+    function MkFn: TRecFn; begin Result := function(N: Int): TRec begin Result := F(N * 2); end; end;
+    procedure ShowOpen(const A: array of Int); var X: Int; begin for X in A do Write(X, ' '); WriteLn(); end;
     procedure TObj.Run; begin WriteLn(Mk(4).A[1], ' ', Mk(4).D[1], ' ', inherited Mk(4).A[2], ' ', Self.Mk(4).A[3]); end;
-    var O: TObj; I: IMk; Fn: TRecFn; R: TRec; Pi: ^Integer; X: Integer;
+    var O: TObj; I: IMk; Fn: TRecFn; R: TRec; Pi: ^Int; X: Int;
     begin
       O := TObj.Create(); I := O; Fn := MkFn();
       WriteLn(F(1).A[1], ' ', F(1).S[1], ' ', F(1).D[1]);
@@ -2804,51 +2804,51 @@ const
   Src = '''
     program P;
     type
-      TArr = array[0..3] of Integer;
+      TArr = array[0..3] of Int;
       TRec = record
-        A: TArr; S: string; D: array of Integer;
+        A: TArr; S: string; D: array of Int;
         function Clone: TRec;
       end;
-      TRecFn = reference to function(N: Integer): TRec;
+      TRecFn = reference to function(N: Int): TRec;
       IMk = interface
-        function Mk(N: Integer): TRec;
+        function Mk(N: Int): TRec;
       end;
       TBase = class(IMk)
       public
-        function Mk(N: Integer): TRec; virtual;
+        function Mk(N: Int): TRec; virtual;
       end;
       TObj = class(TBase)
       private
         FR: TRec;
         function GetR: TRec;
-        function GetRI(I: Integer): TRec;
+        function GetRI(I: Int): TRec;
         static function GetSR: TRec;
       public
-        function Mk(N: Integer): TRec; override;
+        function Mk(N: Int): TRec; override;
         procedure Run;
-        static function SMk(N: Integer): TRec;
+        static function SMk(N: Int): TRec;
         property R: TRec read GetR;
-        property RI[I: Integer]: TRec read GetRI;
+        property RI[I: Int]: TRec read GetRI;
         static property SR: TRec read GetSR;
       end;
-    function F(N: Integer): TRec;
-    var I: Integer;
+    function F(N: Int): TRec;
+    var I: Int;
     begin
       for I := 0 to 3 do Result.A[I] := N + I;
       Result.S := 's' + IntToStr(N);
       SetLength(Result.D, 3); Result.D[1] := N * 10;
     end;
     function TRec.Clone: TRec; begin Result := Self; Result.A[0] := Result.A[0] + 1000; end;
-    function TBase.Mk(N: Integer): TRec; begin Result := F(N); end;
-    function TObj.Mk(N: Integer): TRec; begin Result := F(N + 1); end;
+    function TBase.Mk(N: Int): TRec; begin Result := F(N); end;
+    function TObj.Mk(N: Int): TRec; begin Result := F(N + 1); end;
     function TObj.GetR: TRec; begin Result := F(40); end;
-    function TObj.GetRI(I: Integer): TRec; begin Result := F(I); end;
+    function TObj.GetRI(I: Int): TRec; begin Result := F(I); end;
     static function TObj.GetSR: TRec; begin Result := F(50); end;
-    static function TObj.SMk(N: Integer): TRec; begin Result := F(N); end;
-    function MkFn: TRecFn; begin Result := function(N: Integer): TRec begin Result := F(N * 2); end; end;
-    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    static function TObj.SMk(N: Int): TRec; begin Result := F(N); end;
+    function MkFn: TRecFn; begin Result := function(N: Int): TRec begin Result := F(N * 2); end; end;
+    procedure ShowOpen(const A: array of Int); var X: Int; begin for X in A do Write(X, ' '); WriteLn(); end;
     procedure TObj.Run; begin end;
-    var O: TObj; I: IMk; Fn: TRecFn; R: TRec; Pi: ^Integer; X: Integer;
+    var O: TObj; I: IMk; Fn: TRecFn; R: TRec; Pi: ^Int; X: Int;
     begin
       O := TObj.Create(); I := O; Fn := MkFn();
       ShowOpen(O.Mk(1).A); ShowOpen(I.Mk(1).A); ShowOpen(TObj.SMk(1).A); ShowOpen(Fn(1).A); ShowOpen(O.R.A); ShowOpen(F(1).D);
@@ -2927,8 +2927,8 @@ const
   Src = '''
     program AR;
     type
-      TBig = record X: Integer; A: array[0..3] of Integer; end;
-      TSmall = record X, Y: Integer; end;
+      TBig = record X: Int; A: array[0..3] of Int; end;
+      TSmall = record X, Y: Int; end;
       TObj = class function MkBig: TBig; function MkSmall: TSmall; end;
     function MkBig: TBig; var P: ^TBig; begin P := @Result; P^.X := 4; P^.A[2] := 5; end;
     function MkSmall: TSmall; var P: ^TSmall; begin P := @Result; P^.Y := 6; end;
@@ -2953,13 +2953,13 @@ const
   Src = '''
     program P;
     type
-      TBig = record A, B, C: Integer; end;
+      TBig = record A, B, C: Int; end;
       TH = record
         V: TBig;
-        function Scaled(K: Integer): TBig;
+        function Scaled(K: Int): TBig;
       end;
-      TW = record Tag: Integer; Payload: TH; end;
-      TPay = record N: Integer; S: string; end;
+      TW = record Tag: Int; Payload: TH; end;
+      TPay = record N: Int; S: string; end;
       TWrap = record Payload: TPay; end;
       TBox = class
         FWrap: TWrap;
@@ -2968,11 +2968,11 @@ const
       end;
       TIn = record
         S: string;
-        C: Integer;
+        C: Int;
         function Grow(const X: string): TIn;
       end;
       TZ = record Inner: TIn; end;
-    function TH.Scaled(K: Integer): TBig;
+    function TH.Scaled(K: Int): TBig;
     begin
       Result.A := V.A * K; Result.B := V.B * K; Result.C := V.C * K
     end;

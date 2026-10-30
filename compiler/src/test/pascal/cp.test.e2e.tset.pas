@@ -37,58 +37,58 @@ const
     program P;
     type
       TSet = class
-        FData:     ^Integer;
-        FCount:    Integer;
-        FCapacity: Integer;
+        FData:     ^Int;
+        FCount:    Int;
+        FCapacity: Int;
         procedure Grow;
-        var NewCap, OldCap: Integer;
+        var NewCap, OldCap: Int;
         begin
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 4 else NewCap := OldCap * 2;
-          Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Integer));
-          ZeroMem(Self.FData + OldCap * SizeOf(Integer), (NewCap - OldCap) * SizeOf(Integer));
+          Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Int));
+          ZeroMem(Self.FData + OldCap * SizeOf(Int), (NewCap - OldCap) * SizeOf(Int));
           Self.FCapacity := NewCap
         end;
-        function IndexOf(Value: Integer): Integer;
-        var I: Integer; Ptr: ^Integer;
+        function IndexOf(Value: Int): Int;
+        var I: Int; Ptr: ^Int;
         begin
           Result := -1; I := 0;
           while I < Self.FCount do
           begin
-            Ptr := Self.FData + I * SizeOf(Integer);
+            Ptr := Self.FData + I * SizeOf(Int);
             if Ptr^ = Value then begin Result := I; break end;
             I := I + 1
           end
         end;
-        procedure Include(Value: Integer);
-        var Dest: ^Integer;
+        procedure Include(Value: Int);
+        var Dest: ^Int;
         begin
           if Self.IndexOf(Value) >= 0 then Exit;
           if Self.FCount = Self.FCapacity then Self.Grow();
-          Dest        := Self.FData + Self.FCount * SizeOf(Integer);
+          Dest        := Self.FData + Self.FCount * SizeOf(Int);
           Dest^       := Value;
           Self.FCount := Self.FCount + 1
         end;
-        procedure Exclude(Value: Integer);
-        var Idx, I: Integer; Dst, Src: ^Integer;
+        procedure Exclude(Value: Int);
+        var Idx, I: Int; Dst, Src: ^Int;
         begin
           Idx := Self.IndexOf(Value);
           if Idx < 0 then Exit;
           I := Idx;
           while I < Self.FCount - 1 do
           begin
-            Dst  := Self.FData + I * SizeOf(Integer);
-            Src  := Self.FData + (I + 1) * SizeOf(Integer);
+            Dst  := Self.FData + I * SizeOf(Int);
+            Src  := Self.FData + (I + 1) * SizeOf(Int);
             Dst^ := Src^;
             I    := I + 1
           end;
           Self.FCount := Self.FCount - 1
         end;
-        function Contains(Value: Integer): Boolean;
+        function Contains(Value: Int): Boolean;
         begin
           Result := Self.IndexOf(Value) >= 0
         end;
-        property Count: Integer read FCount;
+        property Count: Int read FCount;
       end;
     ''';
 

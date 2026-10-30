@@ -142,7 +142,7 @@ const
     '''
         program TestP;
         uses MyConsts;
-        var x: Integer;
+        var x: Int;
         begin
           x := dupIgnore
         end.
@@ -243,11 +243,11 @@ const
     '''
         unit Checker;
         interface
-        function GetLimit: Integer;
+        function GetLimit: Int;
         implementation
         const
           Limit = 99;
-        function GetLimit: Integer;
+        function GetLimit: Int;
         begin
           Result := Limit
         end;
@@ -303,7 +303,7 @@ begin
     '''
     unit MyMath;
     interface
-    const Pi: Double = 3.14159265358979;
+    const Pi: Float64 = 3.14159265358979;
     implementation
     end.
     ''');
@@ -341,7 +341,7 @@ begin
     unit W;
     interface
     type TDir = (dNorth, dSouth, dEast, dWest);
-    const DirCost: array[TDir] of Integer = (1, 1, 2, 2);
+    const DirCost: array[TDir] of Int32 = (1, 1, 2, 2);
     implementation
     end.
     ''');
@@ -409,7 +409,7 @@ begin
   L  := TLexer.Create(
     '''
     program P;
-    const Vals: array[0..3] of Integer = (10, 20);
+    const Vals: array[0..3] of Int32 = (10, 20);
     begin end.
     ''');
   P  := TParser.Create(L);
@@ -434,7 +434,7 @@ begin
     '''
     unit W;
     interface
-    const M: array[0..1, 0..2] of Integer = ((1, 2, 3), (4, 5, 6));
+    const M: array[0..1, 0..2] of Int32 = ((1, 2, 3), (4, 5, 6));
     implementation
     end.
     ''');
@@ -454,7 +454,7 @@ begin
     '''
     unit W;
     interface
-    const M: array[0..1] of array[0..1] of Integer = ((10, 20), (30, 40));
+    const M: array[0..1] of array[0..1] of Int32 = ((10, 20), (30, 40));
     implementation
     end.
     ''');
@@ -478,7 +478,7 @@ begin
   L  := TLexer.Create(
     '''
     program P;
-    const M: array[0..1, 0..1] of Integer = ((1, 2, 3), (4, 5, 6));
+    const M: array[0..1, 0..1] of Int32 = ((1, 2, 3), (4, 5, 6));
     begin end.
     ''');
   P  := TParser.Create(L);
@@ -503,7 +503,7 @@ begin
     '''
     unit W;
     interface
-    type TArr = array[0..2] of Integer;
+    type TArr = array[0..2] of Int;
     const A: TArr = (10, 20, 30);
     implementation
     end.
@@ -525,7 +525,7 @@ begin
   L  := TLexer.Create(
     '''
     program P;
-    type TArr = array[0..3] of Integer;
+    type TArr = array[0..3] of Int;
     const Vals: TArr = (10, 20);
     begin end.
     ''');
@@ -549,13 +549,13 @@ procedure TConstTests.TestCodegen_LocalArrayConst_PrivateDataLabel;
 const
   Src = '''
     program P;
-    function DayName(D: Integer): string;
+    function DayName(D: Int): string;
     const Days: array[1..2] of string = ('Sat', 'Sun');
     begin
       Result := Days[D]
     end;
     procedure Tbl;
-    const Vals: array[0..2] of Integer = (100, 200, 300);
+    const Vals: array[0..2] of Int32 = (100, 200, 300);
     begin
       WriteLn(Vals[1])
     end;
@@ -591,7 +591,7 @@ const
     program P;
     type TG = array[0..1] of string;
     const cG: TG = ('K', 'M');
-    var I: Integer;
+    var I: Int;
     begin
       I := 1;
       WriteLn(cG[I])
@@ -602,7 +602,7 @@ const
     program P;
     type TB = array[0..1] of Byte;
     const cB: TB = (7, 250);
-    var I: Integer;
+    var I: Int;
     begin
       I := 1;
       WriteLn(cB[I])
@@ -615,7 +615,7 @@ const
       TColor = (cRed, cGreen, cBlue);
       TC = array[0..1] of TColor;
     const cC: TC = (cBlue, cGreen);
-    var I: Integer;
+    var I: Int;
     begin
       I := 1;
       WriteLn(Ord(cC[I]))
@@ -652,7 +652,7 @@ const
       KE = eB;
       KT: TE = eC;
       KO = Ord(eC);
-    var I: Integer; D: Double; Str: string; Bo: Boolean; E: TE;
+    var I: Int32; D: Float64; Str: string; Bo: Boolean; E: TE;
     begin
       I := B;
       I := C;
@@ -713,10 +713,10 @@ const
     const
       A: array[0..1] of Int16 = (11, 12);
       B: array[0..1] of UInt16 = (21, 22);
-      C: array[0..1] of QWord = (31, 32);
-      D: array[0..1] of PtrUInt = (41, 42);
+      C: array[0..1] of UInt64 = (31, 32);
+      D: array[0..1] of UInt = (41, 42);
       E: array[0..1] of TMyHalf = (51, 52);
-    var I: Integer;
+    var I: Int;
     begin
       I := 1;
       WriteLn(A[I], B[I], C[I], D[I], E[I])

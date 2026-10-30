@@ -63,9 +63,9 @@ const
   Src = '''
     program P;
     uses SysUtils;
-    var I, J: Integer;
+    var I, J: Int32;
     begin
-      I := High(Integer);
+      I := High(Int32);
       WriteLn(I + 1);
       WriteLn(IntToStr(I + 1));
       WriteLn(Format('%d', [I + 1]));
@@ -76,7 +76,7 @@ const
       WriteLn(J);
       WriteLn(I * 2);
       WriteLn(-I - 2);
-      I := Low(Integer);
+      I := Low(Int32);
       WriteLn(-I);
       WriteLn(I div -1);
       WriteLn(I - 1)
@@ -95,16 +95,16 @@ procedure TE2EIntWidthTests.TestRun_PromotedArithmetic_EveryKind;
 const
   Src = '''
     program P;
-    var U: UInt32; S: SmallInt; W: Word; K: Int8; B, C, B2: Byte;
+    var U: UInt32; S: Int16; W: UInt16; K: Int8; B, C, B2: Byte;
     begin
       U := High(UInt32);
       WriteLn(U + 1);
       WriteLn(U * 2);
-      S := High(SmallInt);
+      S := High(Int16);
       WriteLn(S + 1);
-      S := Low(SmallInt);
+      S := Low(Int16);
       WriteLn(S - 1);
-      W := High(Word);
+      W := High(UInt16);
       WriteLn(W + 1);
       K := Low(Int8);
       WriteLn(K - 1);
@@ -129,7 +129,7 @@ procedure TE2EIntWidthTests.TestRun_Shifts_WrapAt32Bits;
 const
   Src = '''
     program P;
-    var I, N: Integer; U: UInt32; B: Byte; W: Word; K: Int8;
+    var I, N: Int32; U: UInt32; B: Byte; W: UInt16; K: Int8;
     begin
       N := 1;
       I := -1;
@@ -139,7 +139,7 @@ const
       WriteLn(I sar N);
       I := 1;
       WriteLn(I shl 31);
-      I := High(Integer);
+      I := High(Int32);
       WriteLn((I shl 1) div 2);
       WriteLn((I shl N) div 2);
       U := High(UInt32);
@@ -148,7 +148,7 @@ const
       WriteLn(U shr 31);
       B := 200;
       WriteLn(B shl 8);
-      W := High(Word);
+      W := High(UInt16);
       WriteLn(W shl 16);
       K := -1;
       WriteLn(K shr 1)
@@ -167,7 +167,7 @@ procedure TE2EIntWidthTests.TestRun_Not_KeepsWidth;
 const
   Src = '''
     program P;
-    var B: Byte; W: Word; S: SmallInt; U: UInt32; I: Integer;
+    var B: Byte; W: UInt16; S: Int16; U: UInt32; I: Int;
     begin
       B := 200;
       WriteLn(not B);
@@ -195,7 +195,7 @@ procedure TE2EIntWidthTests.TestRun_MixedSign_Bitwise;
 const
   Src = '''
     program P;
-    var I: Integer; U: UInt32;
+    var I: Int; U: UInt32;
     begin
       I := -1;
       U := High(UInt32);
@@ -214,11 +214,11 @@ procedure TE2EIntWidthTests.TestRun_Overload_FollowsPromotedType;
 const
   Src = '''
     program P;
-    procedure F(X: Integer); overload; begin WriteLn('Int32 ', X) end;
+    procedure F(X: Int32); overload; begin WriteLn('Int32 ', X) end;
     procedure F(X: Int64); overload; begin WriteLn('Int64 ', X) end;
-    var I: Integer;
+    var I: Int32;
     begin
-      I := High(Integer);
+      I := High(Int32);
       F(I);
       F(I + 1);
       F(5 - 1);
@@ -238,9 +238,9 @@ const
   Src = '''
     program P;
     var
-      I: Integer; L: Int64; U: UInt32; Q: UInt64; S: SmallInt; W: Word;
+      I: Int32; L: Int64; U: UInt32; Q: UInt64; S: Int16; W: UInt16;
       B: Byte; E: Int8;
-    function Neg(X: Integer): Integer; begin Result := -X end;
+    function Neg(X: Int32): Int32; begin Result := -X end;
     begin
       I := 0; L := Int64(1) shl 32;
       WriteLn(I < L, ' ', I = L, ' ', I <> L, ' ', L > I, ' ', L = I);

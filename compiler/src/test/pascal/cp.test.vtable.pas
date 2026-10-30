@@ -99,7 +99,7 @@ const
         program Prg;
         type
           TPoint = class
-            X: Integer;
+            X: Int32;
             procedure Reset; virtual; begin end;
           end;
         var P: TPoint;

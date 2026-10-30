@@ -55,7 +55,7 @@ const
         program P;
         type
           IComparer<T> = interface
-            function Compare(A, B: T): Integer;
+            function Compare(A, B: T): Int32;
           end;
         begin end.
         ''';
@@ -76,9 +76,9 @@ const
         type
           IEqualityComparer<T> = interface
             function Equals(A, B: T): Boolean;
-            function GetHashCode(Value: T): Integer;
+            function GetHashCode(Value: T): Int32;
           end;
-        var C: IEqualityComparer<Integer>;
+        var C: IEqualityComparer<Int32>;
         begin end.
         ''';
 
@@ -88,20 +88,20 @@ const
         type
           IEqualityComparer<T> = interface
             function Equals(A, B: T): Boolean;
-            function GetHashCode(Value: T): Integer;
+            function GetHashCode(Value: T): Int32;
           end;
-          TIntegerComparer = class(IEqualityComparer<Integer>)
-            function Equals(A, B: Integer): Boolean;
+          TIntegerComparer = class(IEqualityComparer<Int32>)
+            function Equals(A, B: Int32): Boolean;
             begin
               Result := A = B
             end;
-            function GetHashCode(Value: Integer): Integer;
+            function GetHashCode(Value: Int32): Int32;
             begin
               Result := Value
             end;
           end;
         var
-          C: IEqualityComparer<Integer>;
+          C: IEqualityComparer<Int32>;
         begin
           C := TIntegerComparer.Create()
         end.
@@ -119,20 +119,20 @@ const
             function Get: T;
           end;
           IDeriv<T> = interface(IBase<T>)
-            function Extra: Integer;
+            function Extra: Int;
           end;
-          TImpl = class(IDeriv<Integer>)
-            function Get: Integer;
+          TImpl = class(IDeriv<Int>)
+            function Get: Int;
             begin
               Result := 3
             end;
-            function Extra: Integer;
+            function Extra: Int;
             begin
               Result := 4
             end;
           end;
         var
-          D: IDeriv<Integer>;
+          D: IDeriv<Int>;
         begin
           D := TImpl.Create()
         end.
@@ -147,7 +147,7 @@ const
           IBase<T> = interface
             function Get: T;
           end;
-          IDeriv<T> = interface(IBase<Integer>)
+          IDeriv<T> = interface(IBase<Int32>)
             function Extra: T;
           end;
         begin
@@ -249,7 +249,7 @@ begin
   try
     GID := TGenericInterfaceDef(TTypeDecl(Prog.Block.TypeDecls[1]).Def);
     AssertEquals('Concrete parent argument preserved',
-      'IBase<Integer>', GID.IntfDef.ParentName);
+      'IBase<Int32>', GID.IntfDef.ParentName);
   finally
     Prog.Free();
   end;
@@ -291,7 +291,7 @@ begin
     AssertEquals('Two params', 2, MDecl.Params.Count);
     Par := TMethodParam(MDecl.Params[0]);
     AssertEquals('First param type is T', 'T', Par.TypeName);
-    AssertEquals('Return type is Integer', 'Integer', MDecl.ReturnTypeName);
+    AssertEquals('Return type is Integer', 'Int32', MDecl.ReturnTypeName);
   finally
     Prog.Free();
   end;
@@ -310,9 +310,9 @@ begin
     AssertTrue('Is class', TD.Def is TClassTypeDef);
     CD := TClassTypeDef(TD.Def);
     { The generic interface name should appear in implements or parent }
-    AssertTrue('Has IEqualityComparer<Integer>',
-      (CD.ParentName = 'IEqualityComparer<Integer>') or
-      (CD.ImplementsNames.IndexOf('IEqualityComparer<Integer>') >= 0));
+    AssertTrue('Has IEqualityComparer<Int32>',
+      (CD.ParentName = 'IEqualityComparer<Int32>') or
+      (CD.ImplementsNames.IndexOf('IEqualityComparer<Int32>') >= 0));
   finally
     Prog.Free();
   end;

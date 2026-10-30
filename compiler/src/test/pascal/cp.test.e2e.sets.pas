@@ -642,7 +642,7 @@ const
     program Prg;
     type TByteFlags = set of Byte;
     var F: TByteFlags;
-        I: Integer;
+        I: Int;
     begin
       F := [10..15];
       for I := 8 to 17 do
@@ -716,7 +716,7 @@ const Src = '''
     program P;
     type TByteSet = set of Byte;
     const C: TByteSet = [1..3];
-    var I: Integer;
+    var I: Int;
     begin
       for I := 0 to 4 do
         if I in C then WriteLn('y') else WriteLn('n')
@@ -976,15 +976,15 @@ const Src = '''
       TDs = set of TD;
       TBox = class
         procedure Chk(S: TCs; C: TC);
-        static function SCard(S: TCs): Integer;
+        static function SCard(S: TCs): Int;
       end;
-    function Card(S: TCs): Integer; overload;
+    function Card(S: TCs): Int; overload;
     var C: TC;
     begin
       Result := 0;
       for C in S do Result := Result + 1
     end;
-    function Card(S: TDs): Integer; overload;
+    function Card(S: TDs): Int; overload;
     begin
       Result := 100
     end;
@@ -996,7 +996,7 @@ const Src = '''
     begin
       WriteLn(C in S)
     end;
-    static function TBox.SCard(S: TCs): Integer;
+    static function TBox.SCard(S: TCs): Int;
     begin
       Result := Card(S)
     end;
@@ -1028,9 +1028,9 @@ const Src = '''
       public
         procedure Chk(S: TCs; C: TC);
         procedure ChkC(const S: TCs; C: TC);
-        function Card(S: TCs): Integer;
+        function Card(S: TCs): Int;
         procedure Drv();
-        static function SCard(S: TCs): Integer;
+        static function SCard(S: TCs): Int;
       end;
     procedure TBox.Chk(S: TCs; C: TC);
     begin
@@ -1040,7 +1040,7 @@ const Src = '''
     begin
       WriteLn(C in S)
     end;
-    function TBox.Card(S: TCs): Integer;
+    function TBox.Card(S: TCs): Int;
     var C: TC;
     begin
       Result := 0;
@@ -1051,7 +1051,7 @@ const Src = '''
       Chk([cRed], cRed);               { implicit-Self, stmt position }
       WriteLn(Card([cGreen, cBlue]))   { implicit-Self, expr position }
     end;
-    static function TBox.SCard(S: TCs): Integer;
+    static function TBox.SCard(S: TCs): Int;
     var C: TC;
     begin
       Result := 0;
@@ -1225,7 +1225,7 @@ const Src = '''
       S: set of TSm;
       T: TSmSet;
       E: TSm;
-      N: Integer;
+      N: Int;
     begin
       S := [sB];
       if sB in S then WriteLn('y') else WriteLn('n');
@@ -1274,7 +1274,7 @@ procedure TE2ESetOpsTests.TestRun_IntegerInSetLiteral;
 const
   Src = '''
     program P;
-    var I, J: Integer; N: Int64; W: Word; S: SmallInt;
+    var I, J: Int; N: Int64; W: UInt16; S: Int16;
     begin
       J := 7;
       for I := -1 to 9 do
@@ -1345,7 +1345,7 @@ const
     end;
     var
       S, T, Empty: TDirSet; N: TNumSet; F: TFoo;
-      A, B: TBigSet; Z: TByteFlags; Z2: TByteFlags; I: Integer;
+      A, B: TBigSet; Z: TByteFlags; Z2: TByteFlags; I: Int;
     begin
       WriteLn(Mask([1..3]), ' ', Mask([3..3]), ' ', Mask([1, 4..6, 10]), ' ', Mask([]));
       S := [dNorth];

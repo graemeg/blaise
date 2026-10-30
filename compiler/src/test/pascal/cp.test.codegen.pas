@@ -135,14 +135,14 @@ procedure TCodeGenTests.TestFloatCompare_X86_NaNSafe;
 const
   SrcValue = '''
     program P;
-    var A, B: Double; E, N, L, LE: Boolean;
+    var A, B: Float64; E, N, L, LE: Boolean;
     begin
       E := A = B; N := A <> B; L := A < B; LE := A <= B
     end.
     ''';
   SrcBranch = '''
     program P;
-    var A, B: Double;
+    var A, B: Float64;
     begin
       if A = B then WriteLn(1);
       if A <> B then WriteLn(2);

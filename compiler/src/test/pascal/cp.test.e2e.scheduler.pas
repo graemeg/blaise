@@ -62,11 +62,11 @@ const
       T0, T1, T2: TFiberTask;
     procedure Worker(AArg: Pointer);
     var
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 2 do
       begin
-        WriteLn('F', Integer(AArg), ':', I);
+        WriteLn('F', Int32(AArg), ':', I);
         FiberYield();
       end;
     end;
@@ -113,7 +113,7 @@ const
       C1, C2: TFiberTask;
     procedure Child(AArg: Pointer);
     begin
-      WriteLn('C', Integer(AArg));
+      WriteLn('C', Int32(AArg));
     end;
     procedure Parent(AArg: Pointer);
     begin
@@ -141,14 +141,14 @@ const
     program schedsmoke;
     uses async.fibers;
     var
-      Counter: Integer;
+      Counter: Int;
     procedure Work(AArg: Pointer);
     begin
       FiberYield();
       Counter := Counter + 1;
     end;
     var
-      I: Integer;
+      I: Int;
       T: TFiberTask;
     begin
       Counter := 0;
@@ -175,7 +175,7 @@ const
     end;
     procedure Steady(AArg: Pointer);
     var
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to 1 do
       begin
@@ -286,21 +286,21 @@ const
     program schedmc;
     uses async.fibers, async.sync, runtime.atomic;
     var
-      GDone: Integer;
-      GSum: Integer;
-      GCh: TChannel<Integer>;
+      GDone: Int;
+      GSum: Int;
+      GCh: TChannel<Int>;
     procedure Worker(AArg: Pointer);
     var
-      V: Integer;
+      V: Int;
     begin
       FiberYield();
-      V := Integer(AArg);
+      V := Int32(AArg);
       GCh.Send(V);
       _AtomicAddInt32(@GDone, 1);
     end;
     procedure Drain(AArg: Pointer);
     var
-      V, Got: Integer;
+      V, Got: Int;
     begin
       Got := 0;
       while Got < 200 do
@@ -315,11 +315,11 @@ const
       end;
     end;
     var
-      I: Integer;
+      I: Int;
     begin
       GDone := 0;
       GSum := 0;
-      GCh := TChannel<Integer>.Create(16);
+      GCh := TChannel<Int>.Create(16);
       SpawnFiber(@Drain, nil);
       for I := 0 to 199 do
         SpawnFiber(@Worker, Pointer(I + 1));
@@ -343,24 +343,24 @@ const
     program schedpool;
     uses async.fibers, async.sync, runtime.atomic;
     var
-      GDone: Integer;
-      GSum: Integer;
-      GCh: TChannel<Integer>;
+      GDone: Int;
+      GSum: Int;
+      GCh: TChannel<Int>;
     procedure Worker(AArg: Pointer);
     var
-      V: Integer;
+      V: Int;
     begin
       FiberYield();
-      V := Integer(AArg);
+      V := Int32(AArg);
       GCh.Send(V);
       _AtomicAddInt32(@GDone, 1);
     end;
     procedure Drain(AArg: Pointer);
     var
-      V, Got: Integer;
+      V, Got: Int;
     begin
       Got := 0;
-      while Got < Integer(AArg) do
+      while Got < Int32(AArg) do
       begin
         if GCh.Recv(V) then
         begin
@@ -371,13 +371,13 @@ const
           Break;
       end;
     end;
-    procedure RunBatch(ACount: Integer);
+    procedure RunBatch(ACount: Int);
     var
-      I: Integer;
+      I: Int;
     begin
       GDone := 0;
       GSum := 0;
-      GCh := TChannel<Integer>.Create(16);
+      GCh := TChannel<Int>.Create(16);
       SpawnFiber(@Drain, Pointer(ACount));
       for I := 0 to ACount - 1 do
         SpawnFiber(@Worker, Pointer(I + 1));

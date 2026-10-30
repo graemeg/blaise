@@ -65,7 +65,7 @@ const
       Cli: TTcpClient;
       Conn: TTcpConn;
       Acc, Chunk: string;
-      Sep, HeadLen: Integer;
+      Sep, HeadLen: Int;
     begin
       Cli := TTcpClient.Create();
       Conn := Cli.Connect('127.0.0.1', PORT);
