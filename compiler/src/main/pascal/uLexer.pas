@@ -464,6 +464,7 @@ function TLexer.UnescapeString(const ARaw: string): string;
   parses under both FPC and the self-hosted Blaise compiler. }
 var
   I, Len, N, C: Int;
+  Digits:       string;
 begin
   Result := '';
   Len := Length(ARaw);
@@ -501,8 +502,13 @@ begin
     begin
       I := I + 1;
       N := 0;
+      { N stops growing once past U+10FFFF, so no digit run can wrap it
+        back into range (#4294967361 once lexed as 'A'); Digits keeps the
+        literal as written for the message. }
+      Digits := '';
       if (I < Len) and (OrdAt(ARaw, I) = 36) then  { '$' -> hexadecimal }
       begin
+        Digits := '$';
         I := I + 1;
         while I < Len do
         begin
@@ -511,6 +517,8 @@ begin
           else if (C >= 65) and (C <= 70) then   N := N * 16 + (C - 55)  { A-F }
           else if (C >= 97) and (C <= 102) then  N := N * 16 + (C - 87)  { a-f }
           else Break;
+          if N > $10FFFF then N := $110000;
+          Digits := Digits + Chr(C);
           I := I + 1;
         end;
       end
@@ -521,10 +529,16 @@ begin
           C := OrdAt(ARaw, I);
           if (C < 48) or (C > 57) then Break;
           N := N * 10 + (C - 48);
+          if N > $10FFFF then N := $110000;
+          Digits := Digits + Chr(C);
           I := I + 1;
         end;
       end;
-      Result := Result + CodepointToUtf8(N);
+      if N > $10FFFF then
+        raise Exception.Create(Format(
+          'Invalid Unicode codepoint in character literal: #%s (must be ' +
+          '0..$10FFFF, excluding surrogates $D800..$DFFF)', [Digits]));
+      Result := Result + CodepointToUtf8(Int32(N));
     end
     else
       I := I + 1;

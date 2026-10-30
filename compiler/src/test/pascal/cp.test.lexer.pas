@@ -87,6 +87,7 @@ type
     procedure TestCodepoint_HexBmp_ThreeBytes;
     procedure TestCodepoint_HexAstral_FourBytes;
     procedure TestCodepoint_MergesWithStringAndEachOther;
+    procedure TestCodepoint_TooLarge_RejectedNotWrapped;
 
     { Operators and punctuation }
     procedure TestOp_Plus;
@@ -493,6 +494,37 @@ begin
   tok := FLexer.Next();
   AssertEquals('Kind', Ord(tkStringLit), Ord(tok.Kind));
   AssertEquals('Value', 'HI!', tok.Value);
+end;
+
+{ A codepoint beyond $10FFFF is rejected however many digits it has.  It was
+  accumulated in 32 bits, so #4294967361 wrapped to 65 and lexed as 'A'. }
+procedure TLexerTests.TestCodepoint_TooLarge_RejectedNotWrapped;
+const
+  Cases: array[0..3] of string = ('#4294967361', '#$100000041',
+    '#18446744073709551681', '''x''#1114112''y''');
+var
+  I:      Int;
+  Raised: Boolean;
+  Msg:    string;
+begin
+  for I := 0 to High(Cases) do
+  begin
+    Raised := False;
+    Msg := '';
+    try
+      SetLexer(Cases[I]);
+      FLexer.Next();
+    except
+      on E: Exception do
+      begin
+        Raised := True;
+        Msg := E.Message;
+      end;
+    end;
+    AssertTrue(Cases[I] + ' is rejected', Raised);
+    AssertTrue(Cases[I] + ' message names the literal: ' + Msg,
+               Pos('Invalid Unicode codepoint', Msg) >= 0);
+  end;
 end;
 
 { Operators and punctuation }
