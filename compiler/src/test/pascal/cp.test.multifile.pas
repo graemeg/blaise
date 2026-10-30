@@ -77,6 +77,11 @@ type
       Blaise resolved them through the flat global symbol table. }
     procedure TestUsesVisibility_TransitiveTypeRejected;
     procedure TestUsesVisibility_TransitiveQualifiedTypeRejected;
+    { A classic name hidden in ClassicPascalTypes gets the D11 hint alone, which
+      already names the unit; one hidden in any other unit gets the unit hint
+      alone, as the D11 advice to add ClassicPascalTypes would mislead. }
+    procedure TestUsesVisibility_HiddenClassicName_OneHint;
+    procedure TestUsesVisibility_HiddenClassicNameElsewhere_UnitHint;
     procedure TestUsesVisibility_TransitiveRoutineRejected;
     procedure TestUsesVisibility_TransitiveConstRejected;
     { ...and as a generic type argument. }
@@ -844,6 +849,90 @@ begin
     Pos('TUnitRec', Msg) >= 0);
   AssertTrue('names the unit to add: ' + Msg,
     Pos('''TUnitRec'' is declared in unit ''VisTypes''', Msg) >= 0);
+end;
+
+const
+  ClassicStubSrc =
+    '''
+        unit ClassicPascalTypes;
+        interface
+        type
+          Integer = Int32;
+        implementation
+        end.
+        ''';
+  ClassicUserSrc =
+    '''
+        unit ClassicUser;
+        interface
+        uses ClassicPascalTypes;
+        var
+          Count: Integer;
+        implementation
+        end.
+        ''';
+  OwnIntegerSrc =
+    '''
+        unit OwnTypes;
+        interface
+        type
+          Integer = Int64;
+        implementation
+        end.
+        ''';
+  OwnUserSrc =
+    '''
+        unit OwnUser;
+        interface
+        uses OwnTypes;
+        var
+          Count: Integer;
+        implementation
+        end.
+        ''';
+
+procedure TMultifileTests.TestUsesVisibility_HiddenClassicName_OneHint;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses ClassicUser;
+        var
+          N: Integer;
+        begin
+          N := 1
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([ClassicStubSrc, ClassicUserSrc], ProgSrc);
+  AssertTrue('D11 hint: ' + Msg,
+    Pos('''Integer'' is not a builtin type: use Int32', Msg) >= 0);
+  AssertTrue('the unit is named once, by the D11 hint: ' + Msg,
+    Pos('is declared in unit', Msg) < 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_HiddenClassicNameElsewhere_UnitHint;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses OwnUser;
+        var
+          N: Integer;
+        begin
+          N := 1
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([OwnIntegerSrc, OwnUserSrc], ProgSrc);
+  AssertTrue('names the declaring unit: ' + Msg,
+    Pos('''Integer'' is declared in unit ''OwnTypes''', Msg) >= 0);
+  AssertTrue('no advice to add ClassicPascalTypes: ' + Msg,
+    Pos('ClassicPascalTypes', Msg) < 0);
 end;
 
 procedure TMultifileTests.TestUsesVisibility_TransitiveRoutineRejected;

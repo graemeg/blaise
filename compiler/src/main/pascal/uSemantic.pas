@@ -1688,15 +1688,19 @@ var
 begin
   Msg := AMsg;
   { A name that failed only because its unit is not in the uses clause (GH
-    #248): say which unit declares it. }
-  if (FTable <> nil) and (FTable.LastHiddenName <> '')
-     and (Pos(LowerCase(FTable.LastHiddenName), LowerCase(Msg)) >= 0) then
-    Msg := Msg + Format(' (''%s'' is declared in unit ''%s'', which is not in the uses clause)',
-      [FTable.LastHiddenName, FTable.LastHiddenUnit]);
-  { Not cleared here: a probe whose error is caught must not erase the note
+    #248): say which unit declares it.  A classic name hidden in
+    ClassicPascalTypes gets the D11 hint instead, which names that unit; one
+    hidden in another unit gets no D11 hint, whose advice would mislead.
+    Not cleared here: a probe whose error is caught must not erase the note
     before the real error is raised.  The hint is only added when the message
     names the hidden symbol, so a stale note is harmless. }
-  Msg := Msg + ClassicTypeHint(Msg);
+  if (FTable <> nil) and (FTable.LastHiddenName <> '')
+     and (Pos(LowerCase(FTable.LastHiddenName), LowerCase(Msg)) >= 0)
+     and not SameText(FTable.LastHiddenUnit, 'ClassicPascalTypes') then
+    Msg := Msg + Format(' (''%s'' is declared in unit ''%s'', which is not in the uses clause)',
+      [FTable.LastHiddenName, FTable.LastHiddenUnit])
+  else
+    Msg := Msg + ClassicTypeHint(Msg);
   if FCurrentUnitName <> '' then
     raise ESemanticError.Create(Format('%s at line %d col %d in %s', [Msg, ALine, ACol, FCurrentUnitName]))
   else
