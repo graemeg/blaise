@@ -341,10 +341,10 @@ const
 
   SrcAmbiguousOverload =
     'program P;'                                            + LineEnding +
-    'procedure F(D: Double); overload;'                     + LineEnding +
+    'procedure F(D: Float64); overload;'                     + LineEnding +
     'begin'                                                 + LineEnding +
     'end;'                                                  + LineEnding +
-    'procedure F(S: Single); overload;'                     + LineEnding +
+    'procedure F(S: Float32); overload;'                     + LineEnding +
     'begin'                                                 + LineEnding +
     'end;'                                                  + LineEnding +
     'begin'                                                 + LineEnding +

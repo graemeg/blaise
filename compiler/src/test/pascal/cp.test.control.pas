@@ -333,7 +333,7 @@ var Prog: TProgram; S: TCaseStmt;
 begin
   Prog := ParseSrc(
     'program P;' + LineEnding +
-    'var I: Integer;' + LineEnding +
+    'var I: Int;' + LineEnding +
     'begin' + LineEnding +
     '  case I of' + LineEnding +
     '    1: I := 2;' + LineEnding +

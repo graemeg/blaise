@@ -179,7 +179,7 @@ end;
 procedure TDecimalIRTests.TestSemantic_Scale_ReturnsInteger_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Decimal; var A: TDecimal; N: Integer; ' +
+    'program P; uses Numerics.Decimal; var A: TDecimal; N: Int; ' +
     'begin A := DecFromStr(''1.50''); N := A.Scale() end.');
 end;
 
@@ -193,14 +193,14 @@ end;
 procedure TDecimalIRTests.TestSemantic_Sign_ReturnsInteger_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Decimal; var A: TDecimal; N: Integer; ' +
+    'program P; uses Numerics.Decimal; var A: TDecimal; N: Int; ' +
     'begin A := DecFromInt(-3); N := A.Sign() end.');
 end;
 
 procedure TDecimalIRTests.TestSemantic_Compare_ReturnsInteger_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Decimal; var A, B: TDecimal; N: Integer; ' +
+    'program P; uses Numerics.Decimal; var A, B: TDecimal; N: Int; ' +
     'begin A := DecFromStr(''2.0''); B := DecFromStr(''2.00''); ' +
     'N := A.Compare(B) end.');
 end;
@@ -216,7 +216,7 @@ end;
 procedure TDecimalIRTests.TestSemantic_GetHashCode_ReturnsInteger_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Decimal; var A: TDecimal; H: Integer; ' +
+    'program P; uses Numerics.Decimal; var A: TDecimal; H: Int; ' +
     'begin A := DecFromStr(''2.0''); H := A.GetHashCode() end.');
 end;
 
@@ -309,11 +309,11 @@ begin
   SemanticOK(
     'program P; uses Numerics.Decimal;' +
     'type TMy = class(TObject, IRoundingStrategy)' +
-    '  function RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;' +
-    '    DiscardedCompareHalf: Integer; AnyDiscarded: Boolean): Boolean;' +
+    '  function RoundIncrement(Negative: Boolean; LastKeptDigit: Int;' +
+    '    DiscardedCompareHalf: Int; AnyDiscarded: Boolean): Boolean;' +
     'end;' +
-    'function TMy.RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;' +
-    '  DiscardedCompareHalf: Integer; AnyDiscarded: Boolean): Boolean;' +
+    'function TMy.RoundIncrement(Negative: Boolean; LastKeptDigit: Int;' +
+    '  DiscardedCompareHalf: Int; AnyDiscarded: Boolean): Boolean;' +
     'begin Result := False end;' +
     'var A, B, C: TDecimal; S: IRoundingStrategy;' +
     'begin S := TMy.Create(); A := DecFromStr(''1''); B := DecFromStr(''3'');' +
@@ -323,14 +323,14 @@ end;
 procedure TDecimalIRTests.TestSemantic_DecFromFloat_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Decimal; var A: TDecimal; D: Double; ' +
+    'program P; uses Numerics.Decimal; var A: TDecimal; D: Float64; ' +
     'begin D := 0.1; A := DecFromFloat(D) end.');
 end;
 
 procedure TDecimalIRTests.TestSemantic_DecFromFloatExact_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Decimal; var A: TDecimal; D: Double; ' +
+    'program P; uses Numerics.Decimal; var A: TDecimal; D: Float64; ' +
     'begin D := 0.1; A := DecFromFloatExact(D) end.');
 end;
 
@@ -344,7 +344,7 @@ end;
 procedure TDecimalIRTests.TestSemantic_ToDouble_ReturnsDouble_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Decimal; var A: TDecimal; D: Double; ' +
+    'program P; uses Numerics.Decimal; var A: TDecimal; D: Float64; ' +
     'begin A := DecFromStr(''3.14''); D := A.ToDouble() end.');
 end;
 
@@ -371,7 +371,7 @@ procedure TDecimalIRTests.TestSemantic_AssignDecimalToInt_Error;
 begin
   { A TDecimal value is not assignable to an Integer. }
   AnalyseExpectError(
-    'program P; uses Numerics.Decimal; var A: TDecimal; N: Integer; ' +
+    'program P; uses Numerics.Decimal; var A: TDecimal; N: Int; ' +
     'begin A := DecFromInt(5); N := A end.');
 end;
 

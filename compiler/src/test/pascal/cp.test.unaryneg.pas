@@ -119,7 +119,7 @@ var
   Prog: TProgram;
   E:    TASTExpr;
 begin
-  Prog := Self.ParseSrc('program P; var X, N: Integer; begin N := -X end.');
+  Prog := Self.ParseSrc('program P; var X, N: Int; begin N := -X end.');
   try
     E := Self.AssignedExpr(Prog, 'N');
     AssertTrue('-X is a TNegExpr, not 0 - X', E is TNegExpr);
@@ -136,7 +136,7 @@ var
   E:    TASTExpr;
 begin
   Prog := Self.ParseSrc(
-    'program P; var A, B, N, M: Integer; begin N := -A * B; M := A - -B end.');
+    'program P; var A, B, N, M: Int; begin N := -A * B; M := A - -B end.');
   try
     E := Self.AssignedExpr(Prog, 'N');
     AssertTrue('-A * B is a multiplication', E is TBinaryExpr);
@@ -252,11 +252,11 @@ var
   Msg: string;
 begin
   Msg := SemanticError(
-    'program P; var A: array[0..3] of Integer; begin A[-1] := 0 end.');
+    'program P; var A: array[0..3] of Int; begin A[-1] := 0 end.');
   AssertTrue('a negated constant index is still range-checked: ' + Msg,
     Msg <> '');
   AssertEquals('an in-range index is fine', '', SemanticError(
-    'program P; var A: array[-2..3] of Integer; begin A[-2] := 0 end.'));
+    'program P; var A: array[-2..3] of Int; begin A[-2] := 0 end.'));
 end;
 
 procedure TUnaryNegTests.TestSem_Neg_ConstSubrangeStore_OutOfRange_Rejected;
@@ -277,11 +277,11 @@ var
 begin
   AssertEquals('negated literals and a named constant', '', SemanticError(
     'program P; const K = 4; ' +
-    'procedure F(A: Integer = -1; B: Double = -0.5; C: Integer = -K); ' +
+    'procedure F(A: Int = -1; B: Float64 = -0.5; C: Int = -K); ' +
     'begin end; begin F() end.'));
   Msg := SemanticError(
-    'program P; var V: Integer; ' +
-    'procedure F(A: Integer = -V); begin end; begin F() end.');
+    'program P; var V: Int; ' +
+    'procedure F(A: Int = -V); begin end; begin F() end.');
   AssertTrue('a negated variable is still not a default value: ' + Msg,
     Pos('Default value', Msg) >= 0);
 end;
@@ -337,7 +337,7 @@ end;
 
 procedure TUnaryNegTests.TestAsm_NegDouble_FlipsSignBit;
 const
-  Src = 'program P; var Z, N: Double; begin Z := 0.0; N := -Z end.';
+  Src = 'program P; var Z, N: Float64; begin Z := 0.0; N := -Z end.';
 begin
   AssertEquals('Double negation flips bit 63, never 0.0 - x', '',
     AsmMissing(Src, 'xorq %rcx, %rax', 'fneg d0, d0'));
@@ -349,7 +349,7 @@ end;
 
 procedure TUnaryNegTests.TestAsm_NegSingle_FlipsSignBit;
 const
-  Src = 'program P; var Z, N: Single; begin Z := 0.0; N := -Z end.';
+  Src = 'program P; var Z, N: Float32; begin Z := 0.0; N := -Z end.';
 begin
   AssertEquals('Single negation flips bit 31', '',
     AsmMissing(Src, 'xorl $-2147483648, %eax', 'fneg d0, d0'));
@@ -359,7 +359,7 @@ end;
 
 procedure TUnaryNegTests.TestAsm_NegInteger_Negates;
 const
-  Src = 'program P; var X, N: Integer; begin X := 5; N := -X end.';
+  Src = 'program P; var X, N: Int; begin X := 5; N := -X end.';
 begin
   AssertEquals('integer negation is a neg', '',
     AsmMissing(Src, 'negq %rax', 'neg x0, x0'));

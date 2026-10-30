@@ -86,7 +86,7 @@ var P: TProgram;
 begin
   { vt* constants resolve as ordinary integer constants. }
   P := AnalyseSrc(
-    'program X; var I: Integer; ' +
+    'program X; var I: Int; ' +
     'begin I := vtInteger + vtAnsiString + vtExtended end.');
   try
     AssertTrue('vt constants available', True);
@@ -164,7 +164,7 @@ procedure TArrayOfConstTests.TestSemantic_FormatOverOpenArrayOfInteger_Rejected;
 begin
   AssertFormatRejected(
     'program X; ' +
-    'procedure P(const A: array of Integer); ' +
+    'procedure P(const A: array of Int); ' +
     'var S: string; begin S := Format(''%d'', A) end; ' +
     'begin P([5, 6]) end.');
 end;
@@ -172,7 +172,7 @@ end;
 procedure TArrayOfConstTests.TestSemantic_FormatOverDynArray_Rejected;
 begin
   AssertFormatRejected(
-    'program X; var D: array of Integer; S: string; ' +
+    'program X; var D: array of Int; S: string; ' +
     'begin SetLength(D, 1); S := Format(''%d %d'', 1, D) end.');
 end;
 

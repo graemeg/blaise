@@ -182,11 +182,11 @@ begin
     'var' + LF +
     '  GV: T;' + LF +
     '  Mode: string;' + LF +
-    '  Bad: Integer;' + LF;
+    '  Bad: Int;' + LF;
   if HasSet then
     Result := Result + '  GS: set of T;' + LF;
   if ASmall then
-    Result := Result + '  GA: array[T] of Integer;' + LF;
+    Result := Result + '  GA: array[T] of Int;' + LF;
   Result := Result + LF +
     'procedure Chk(AOk: Boolean; const AWhat: string);' + LF +
     'begin' + LF +
@@ -216,7 +216,7 @@ begin
     'procedure RunGlobal;' + LF +
     'var' + LF +
     '  W: T;' + LF +
-    '  C: Integer;' + LF +
+    '  C: Int;' + LF +
     'begin' + LF +
     '  Mode := ''global'';' + LF +
     '  ShowLimits();' + LF +
@@ -225,7 +225,7 @@ begin
     'procedure RunLocal;' + LF +
     'var' + LF +
     '  V, W: T;' + LF +
-    '  C: Integer;' + LF +
+    '  C: Int;' + LF +
     'begin' + LF +
     '  Mode := ''local'';' + LF +
     '  ShowLimits();' + LF +
@@ -234,7 +234,7 @@ begin
     'procedure RunNested;' + LF +
     'var' + LF +
     '  V, W: T;' + LF +
-    '  C: Integer;' + LF +
+    '  C: Int;' + LF +
     '  procedure Inner;' + LF +
     '  begin' + LF +
     Body +
@@ -247,7 +247,7 @@ begin
     'procedure RunClosure;' + LF +
     'var' + LF +
     '  V, W: T;' + LF +
-    '  C: Integer;' + LF +
+    '  C: Int;' + LF +
     '  F: reference to procedure;' + LF +
     'begin' + LF +
     '  Mode := ''closure'';' + LF +

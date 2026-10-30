@@ -695,7 +695,7 @@ procedure TStringOpsTests.TestSemantic_Low_StringArg_OK;
 begin
   SemanticOK(
     'program P;'          + LineEnding +
-    'var S: string; I: Integer;' + LineEnding +
+    'var S: string; I: Int;' + LineEnding +
     'begin I := Low(S) end.');
 end;
 
@@ -703,7 +703,7 @@ procedure TStringOpsTests.TestSemantic_High_StringArg_OK;
 begin
   SemanticOK(
     'program P;'          + LineEnding +
-    'var S: string; I: Integer;' + LineEnding +
+    'var S: string; I: Int;' + LineEnding +
     'begin I := High(S) end.');
 end;
 
@@ -718,7 +718,7 @@ begin
   { Parse and analyse: the Int result narrows into an Integer variable }
   SemanticOK(
     'program P;'          + LineEnding +
-    'var S: string; I: Integer;' + LineEnding +
+    'var S: string; I: Int;' + LineEnding +
     'begin I := Low(S) end.');
 end;
 
@@ -726,7 +726,7 @@ procedure TStringOpsTests.TestSemantic_High_StringArg_Accepted;
 begin
   SemanticOK(
     'program P;'          + LineEnding +
-    'var S: string; I: Integer;' + LineEnding +
+    'var S: string; I: Int;' + LineEnding +
     'begin I := High(S) end.');
 end;
 

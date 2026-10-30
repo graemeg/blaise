@@ -116,7 +116,7 @@ begin
   L  := TLexer.Create(
     'program P;' + #10 +
     'threadvar' + #10 +
-    '  X: Integer;' + #10 +
+    '  X: Int;' + #10 +
     'begin' + #10 +
     'end.');
   P  := TParser.Create(L);
@@ -170,7 +170,7 @@ begin
       'program P;' + #10 +
       'procedure Foo;' + #10 +
       'threadvar' + #10 +
-      '  Z: Integer;' + #10 +
+      '  Z: Int;' + #10 +
       'begin end;' + #10 +
       'begin' + #10 +
       'end.').Free();

@@ -223,13 +223,13 @@ var
   Prog: TProgram;
   Decl: TVarDecl;
 begin
-  Prog := ParseSource('program P; var x: Integer; begin end.');
+  Prog := ParseSource('program P; var x: Int; begin end.');
   try
     AssertEquals('1 decl', 1, Prog.Block.Decls.Count);
     Decl := TVarDecl(Prog.Block.Decls.Items[0]);
     AssertEquals('1 name', 1, Decl.Names.Count);
     AssertEquals('Name', 'x', Decl.Names.Strings[0]);
-    AssertEquals('Type', 'Integer', Decl.TypeName);
+    AssertEquals('Type', 'Int', Decl.TypeName);
   finally
     Prog.Free();
   end;
@@ -289,7 +289,7 @@ var
 begin
   { 'MyUnit.Val' in expression position collapses to a bare identifier. }
   Prog := ParseSource(
-    'program P; uses MyUnit; var x: Integer; begin x := MyUnit.Val end.');
+    'program P; uses MyUnit; var x: Int; begin x := MyUnit.Val end.');
   try
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertTrue('RHS collapsed to TIdentExpr', Assign.Expr is TIdentExpr);
@@ -342,7 +342,7 @@ begin
     record field write, NOT a unit qualifier — the trailing symbol is what
     distinguishes the two, so this must stay a TFieldAssignment. }
   Prog := ParseSource(
-    'program P; uses My.Pkg; var My: Integer; begin My.Pkg := 4 end.');
+    'program P; uses My.Pkg; var My: Int; begin My.Pkg := 4 end.');
   try
     AssertTrue('stays a field assignment',
       Prog.Block.Stmts.Items[0] is TFieldAssignment);
@@ -365,7 +365,7 @@ begin
     field-access (.Arr), so it lowers to a TFieldAssignment carrying the
     subscript as PropIndexExpr. }
   Prog := ParseSource(
-    'program P; var O: Integer; x, c, V: Integer;'
+    'program P; var O: Int; x, c, V: Int;'
     + ' begin O.Ora[x].Arr[c] := V end.');
   try
     AssertTrue('parses as a field element assignment',
@@ -383,10 +383,10 @@ var
   Prog: TProgram;
 begin
   Prog := ParseSource(
-    'program P; var x: Integer; s: string; begin end.');
+    'program P; var x: Int; s: string; begin end.');
   try
     AssertEquals('2 decls', 2, Prog.Block.Decls.Count);
-    AssertEquals('First type', 'Integer',
+    AssertEquals('First type', 'Int',
       TVarDecl(Prog.Block.Decls.Items[0]).TypeName);
     AssertEquals('Second type', 'string',
       TVarDecl(Prog.Block.Decls.Items[1]).TypeName);
@@ -400,7 +400,7 @@ var
   Prog: TProgram;
   Decl: TVarDecl;
 begin
-  Prog := ParseSource('program P; var x, y: Integer; begin end.');
+  Prog := ParseSource('program P; var x, y: Int; begin end.');
   try
     AssertEquals('1 decl group', 1, Prog.Block.Decls.Count);
     Decl := TVarDecl(Prog.Block.Decls.Items[0]);
@@ -432,7 +432,7 @@ var
   Assign: TAssignment;
   Lit:    TIntLiteral;
 begin
-  Prog := ParseSource('program P; var n: Integer; begin n := 42 end.');
+  Prog := ParseSource('program P; var n: Int; begin n := 42 end.');
   try
     AssertEquals('1 stmt', 1, Prog.Block.Stmts.Count);
     AssertTrue('Is TAssignment',
@@ -506,14 +506,14 @@ procedure TParserTests.TestExit_WithValue_StillParses;
 begin
   { the Exit(Value) shorthand must keep working }
   ParseSource(
-    'program P; function F(): Integer; begin Exit(7); end; begin end.').Free();
+    'program P; function F(): Int; begin Exit(7); end; begin end.').Free();
 end;
 
 procedure TParserTests.TestBreak_Parens_NamesTheRule;
 begin
   try
     ParseSource(
-      'program P; var I: Integer; begin for I := 0 to 9 do Break(); end.').Free();
+      'program P; var I: Int; begin for I := 0 to 9 do Break(); end.').Free();
     Fail('Expected EParseError for Break()');
   except
     on E: EParseError do
@@ -526,7 +526,7 @@ procedure TParserTests.TestContinue_Parens_NamesTheRule;
 begin
   try
     ParseSource(
-      'program P; var I: Integer; begin for I := 0 to 9 do Continue(); end.').Free();
+      'program P; var I: Int; begin for I := 0 to 9 do Continue(); end.').Free();
     Fail('Expected EParseError for Continue()');
   except
     on E: EParseError do
@@ -611,7 +611,7 @@ var
   Bin:   TBinaryExpr;
 begin
   Prog := ParseSource(
-    'program P; var n: Integer; begin n := 1 + 2 end.');
+    'program P; var n: Int; begin n := 1 + 2 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Op', Ord(boAdd), Ord(Bin.Op));
@@ -628,7 +628,7 @@ var
   Bin:  TBinaryExpr;
 begin
   Prog := ParseSource(
-    'program P; var n: Integer; begin n := 10 - 3 end.');
+    'program P; var n: Int; begin n := 10 - 3 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Op', Ord(boSub), Ord(Bin.Op));
@@ -643,7 +643,7 @@ var
   Bin:  TBinaryExpr;
 begin
   Prog := ParseSource(
-    'program P; var n: Integer; begin n := 3 * 4 end.');
+    'program P; var n: Int; begin n := 3 * 4 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Op', Ord(boMul), Ord(Bin.Op));
@@ -660,7 +660,7 @@ var
 begin
   { 1 + 2 * 3 should parse as 1 + (2 * 3) }
   Prog := ParseSource(
-    'program P; var n: Integer; begin n := 1 + 2 * 3 end.');
+    'program P; var n: Int; begin n := 1 + 2 * 3 end.');
   try
     Outer := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Outer op is Add', Ord(boAdd), Ord(Outer.Op));
@@ -680,7 +680,7 @@ var
 begin
   { (1 + 2) * 3 — outer should be Mul, left child is Add }
   Prog := ParseSource(
-    'program P; var n: Integer; begin n := (1 + 2) * 3 end.');
+    'program P; var n: Int; begin n := (1 + 2) * 3 end.');
   try
     Outer := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Outer op is Mul', Ord(boMul), Ord(Outer.Op));
@@ -699,7 +699,7 @@ var
   Bin:    TBinaryExpr;
 begin
   Prog := ParseSource(
-    'program P; var x, y: Integer; begin y := x + 1 end.');
+    'program P; var x, y: Int; begin y := x + 1 end.');
   try
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     Bin := TBinaryExpr(Assign.Expr);
@@ -721,7 +721,7 @@ var
   Fld:  TFieldAccessExpr;
 begin
   Prog := ParseSource(
-    'program P; var N: Integer; begin N := Obj.GetRec().X end.');
+    'program P; var N: Int; begin N := Obj.GetRec().X end.');
   try
     Stmt := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertTrue('RHS is field access', Stmt.Expr is TFieldAccessExpr);
@@ -740,7 +740,7 @@ var
   Fld:  TFieldAccessExpr;
 begin
   Prog := ParseSource(
-    'program P; var N: Integer; begin N := Tokens[0].Kind end.');
+    'program P; var N: Int; begin N := Tokens[0].Kind end.');
   try
     Stmt := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertTrue('RHS is field access', Stmt.Expr is TFieldAccessExpr);
@@ -760,7 +760,7 @@ var
   MC:   TMethodCallExpr;
 begin
   Prog := ParseSource(
-    'program P; var N: Integer; begin N := A.GetB().GetC().Val end.');
+    'program P; var N: Int; begin N := A.GetB().GetC().Val end.');
   try
     Stmt := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertTrue('RHS is field access', Stmt.Expr is TFieldAccessExpr);
@@ -782,7 +782,7 @@ var
   Sub:  TStringSubscriptExpr;
 begin
   Prog := ParseSource(
-    'program P; var N: Integer; begin N := GetList()[0] end.');
+    'program P; var N: Int; begin N := GetList()[0] end.');
   try
     Stmt := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertTrue('RHS is subscript', Stmt.Expr is TStringSubscriptExpr);
@@ -845,8 +845,8 @@ begin
     implementation as a nested-proc body (issue #130 bug2). }
   Prog := ParseSource(
     'program P; ' +
-    'function F(n: Integer): Boolean; forward; ' +
-    'function F(n: Integer): Boolean; begin Result := n > 0 end; ' +
+    'function F(n: Int): Boolean; forward; ' +
+    'function F(n: Int): Boolean; begin Result := n > 0 end; ' +
     'begin WriteLn(F(5)) end.');
   try
     { Two ProcDecls: the forward (no body) and the implementation (with body). }
@@ -869,7 +869,7 @@ var
   Prog: TProgram;
   C: TProcCall;
 begin
-  Prog := ParseSource('program P; var A, B, C: Integer; begin WriteLn(A < B, C) end.');
+  Prog := ParseSource('program P; var A, B, C: Int; begin WriteLn(A < B, C) end.');
   try
     AssertTrue('a procedure call', Prog.Block.Stmts[0] is TProcCall);
     C := TProcCall(Prog.Block.Stmts[0]);
@@ -886,7 +886,7 @@ var
   Prog: TProgram;
   C: TProcCall;
 begin
-  Prog := ParseSource('program P; var A, B: Integer; begin WriteLn(A < B, '' x'') end.');
+  Prog := ParseSource('program P; var A, B: Int; begin WriteLn(A < B, '' x'') end.');
   try
     C := TProcCall(Prog.Block.Stmts[0]);
     AssertEquals('two arguments', 2, C.Args.Count);
@@ -903,7 +903,7 @@ var
 begin
   { A < B, C > D: '>' closes a would-be argument list, but D follows, not
     '.' or '(' -- so both are comparisons. }
-  Prog := ParseSource('program P; var A, B, C, D: Integer; begin WriteLn(A < B, C > D) end.');
+  Prog := ParseSource('program P; var A, B, C, D: Int; begin WriteLn(A < B, C > D) end.');
   try
     C := TProcCall(Prog.Block.Stmts[0]);
     AssertEquals('two arguments', 2, C.Args.Count);
@@ -919,11 +919,11 @@ var
   Prog: TProgram;
   A: TAssignment;
 begin
-  Prog := ParseSource('program P; var L: Integer; begin L := TList<TPair<Integer, string>>.Create() end.');
+  Prog := ParseSource('program P; var L: Int; begin L := TList<TPair<Int, string>>.Create() end.');
   try
     A := TAssignment(Prog.Block.Stmts[0]);
     AssertTrue('a method call on the generic type', A.Expr is TMethodCallExpr);
-    AssertEquals('generic owner', 'TList<TPair<Integer,string>>',
+    AssertEquals('generic owner', 'TList<TPair<Int,string>>',
       TMethodCallExpr(A.Expr).ObjectName);
   finally
     Prog.Free();
@@ -935,11 +935,11 @@ var
   Prog: TProgram;
   A: TAssignment;
 begin
-  Prog := ParseSource('program P; var X: Integer; begin X := Identity<Integer>(5) end.');
+  Prog := ParseSource('program P; var X: Int; begin X := Identity<Int>(5) end.');
   try
     A := TAssignment(Prog.Block.Stmts[0]);
     AssertTrue('a call', A.Expr is TFuncCallExpr);
-    AssertEquals('generic function name', 'Identity<Integer>',
+    AssertEquals('generic function name', 'Identity<Int>',
       TFuncCallExpr(A.Expr).Name);
   finally
     Prog.Free();
@@ -954,7 +954,7 @@ var
   C: TProcCall;
   F: TFuncCallExpr;
 begin
-  Prog := ParseSource('program P; var X: Double; begin WriteLn(X:8:2, X:5, X) end.');
+  Prog := ParseSource('program P; var X: Float64; begin WriteLn(X:8:2, X:5, X) end.');
   try
     C := TProcCall(Prog.Block.Stmts[0]);
     AssertEquals('three arguments', 3, C.Args.Count);
@@ -977,7 +977,7 @@ var
   Prog: TProgram;
 begin
   { Write(...) parsed through the call-expression path keeps the widths too }
-  Prog := ParseSource('program P; var I: Integer; begin Write(I:3, I:4) end.');
+  Prog := ParseSource('program P; var I: Int; begin Write(I:3, I:4) end.');
   try
     AssertEquals('one statement', 1, Prog.Block.Stmts.Count);
   finally
@@ -992,7 +992,7 @@ begin
   { the width forms belong to Write / WriteLn only }
   Raised := False;
   try
-    ParseSource('program P; procedure Foo(A: Integer); begin end; ' +
+    ParseSource('program P; procedure Foo(A: Int); begin end; ' +
       'begin Foo(1:2) end.').Free();
   except
     on E: Exception do
@@ -1045,8 +1045,8 @@ procedure TParserTests.TestGotoAndLabel_AsIdentifiers_StillParse;
 begin
   AssertEquals('goto and label are ordinary identifiers', '',
     ParseErrorMsg(
-      'program P; var label, goto: Integer; ' +
-      'procedure label2(goto: Integer); begin end; ' +
+      'program P; var label, goto: Int; ' +
+      'procedure label2(goto: Int); begin end; ' +
       'begin label := 1; goto := label + 1; label2(goto); end.'));
 end;
 
@@ -1055,17 +1055,17 @@ var
   Msg: string;
 begin
   Msg := ParseErrorMsg(
-    'program P; var L: specialize TList<Integer>; begin end.');
+    'program P; var L: specialize TList<Int>; begin end.');
   AssertTrue('specialize in a type names the rule, got: ' + Msg,
     Pos('''specialize'' is not needed in Blaise', Msg) >= 0);
   AssertTrue('and shows the Blaise spelling, got: ' + Msg,
     Pos('TList<...>', Msg) >= 0);
   Msg := ParseErrorMsg(
-    'program P; var L: TObject; begin L := specialize TList<Integer>.Create(); end.');
+    'program P; var L: TObject; begin L := specialize TList<Int>.Create(); end.');
   AssertTrue('specialize in an expression names the rule, got: ' + Msg,
     Pos('''specialize'' is not needed in Blaise', Msg) >= 0);
   Msg := ParseErrorMsg(
-    'program P; type TIntList = specialize TList<Integer>; begin end.');
+    'program P; type TIntList = specialize TList<Int>; begin end.');
   AssertTrue('specialize in a type alias names the rule, got: ' + Msg,
     Pos('''specialize'' is not needed in Blaise', Msg) >= 0);
 end;
@@ -1090,11 +1090,11 @@ end;
 procedure TParserTests.TestWith_NamesTheRule;
 const
   Shapes: array[0..4] of string = (
-    'program P; var R: Integer; begin with R do R := 1; end.',
-    'program P; procedure F(); var A, B: Integer; begin with A, B do ; end; begin end.',
-    'program P; type TC = class N: Integer; procedure M(); end; procedure TC.M(); begin with Self do N := 1; end; begin end.',
-    'program P; var R: Integer; begin if R = 0 then with R do R := 2; end.',
-    'program P; var R: Integer; begin begin with R.X.Y do ; end; end.');
+    'program P; var R: Int; begin with R do R := 1; end.',
+    'program P; procedure F(); var A, B: Int; begin with A, B do ; end; begin end.',
+    'program P; type TC = class N: Int; procedure M(); end; procedure TC.M(); begin with Self do N := 1; end; begin end.',
+    'program P; var R: Int; begin if R = 0 then with R do R := 2; end.',
+    'program P; var R: Int; begin begin with R.X.Y do ; end; end.');
 var
   I: Int;
   Msg: string;
@@ -1113,8 +1113,8 @@ procedure TParserTests.TestWith_AsIdentifier_StillParses;
 begin
   AssertEquals('with is an ordinary identifier', '',
     ParseErrorMsg(
-      'program P; var with: Integer; ' +
-      'procedure F(with: Integer); begin end; ' +
+      'program P; var with: Int; ' +
+      'procedure F(with: Int); begin end; ' +
       'begin with := 1; F(with); with := with + 1; end.'));
 end;
 
@@ -1133,7 +1133,7 @@ var
   Sub:  TStaticSubscriptAssign;
 begin
   Prog := ParseSource(
-    'program P; var B, V: Integer;'
+    'program P; var B, V: Int;'
     + ' begin B.O.AR[0].Y := V; B.O.A2[0][1] := V; B.O.AM[1](V) end.');
   try
     AssertTrue('A.B.Arr[I].F := V is a field assignment',
@@ -1163,14 +1163,14 @@ var
   Prog: TProgram;
 begin
   Prog := ParseSource(
-    'program P; var A: Integer;'
-    + ' begin GenericProc<Integer>(A, 2); Show<string, Integer>(A) end.');
+    'program P; var A: Int;'
+    + ' begin GenericProc<Int>(A, 2); Show<string, Int>(A) end.');
   try
     AssertTrue('a call statement',
       Prog.Block.Stmts.Items[0] is TProcCall);
-    AssertEquals('one type argument', 'GenericProc<Integer>',
+    AssertEquals('one type argument', 'GenericProc<Int>',
       TProcCall(Prog.Block.Stmts.Items[0]).Name);
-    AssertEquals('two type arguments', 'Show<string,Integer>',
+    AssertEquals('two type arguments', 'Show<string,Int>',
       TProcCall(Prog.Block.Stmts.Items[1]).Name);
   finally
     Prog.Free();
@@ -1183,7 +1183,7 @@ var
   SA: TStaticSubscriptAssign;
 begin
   Prog := ParseSource(
-    'program P; var P1, V: Integer;'
+    'program P; var P1, V: Int;'
     + ' begin P1^[1] := V; P1^[0].A := V; P1^[1, 2] := V end.');
   try
     AssertTrue('P1^[1] := V is an element write',
@@ -1207,7 +1207,7 @@ var
   FA: TFieldAssignment;
 begin
   Prog := ParseSource(
-    'program P; var Buf, Recs, V: Integer;'
+    'program P; var Buf, Recs, V: Int;'
     + ' begin Buf[0]^[1] := V; Buf[0]^ := V; Recs[0]^.A := V end.');
   try
     AssertTrue('Buf[0]^[1] := V is an element write',
@@ -1236,7 +1236,7 @@ var
   Rd:   TStringSubscriptExpr;
 begin
   Prog := ParseSource(
-    'program P; var R, O, V: Integer;'
+    'program P; var R, O, V: Int;'
     + ' begin R.G[0, 1] := V; O.B.G[1, 0] := V; O.Rows[1, 2].Run();'
     + ' WriteLn(R.G[1, 1]) end.');
   try

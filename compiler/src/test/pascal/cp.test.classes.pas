@@ -1584,9 +1584,9 @@ begin
     'program P;'                                      + LineEnding +
     'type'                                            + LineEnding +
     '  TFoo = class'                                  + LineEnding +
-    '    constructor CreateFmt(S: string; N: Integer);' + LineEnding +
+    '    constructor CreateFmt(S: string; N: Int);' + LineEnding +
     '  end;'                                          + LineEnding +
-    'constructor TFoo.CreateFmt(S: string; N: Integer);' + LineEnding +
+    'constructor TFoo.CreateFmt(S: string; N: Int);' + LineEnding +
     'begin end;'                                      + LineEnding +
     'var F: TFoo;'                                    + LineEnding +
     'begin'                                           + LineEnding +
@@ -1607,7 +1607,7 @@ begin
     'program P;'                                  + LineEnding +
     'type'                                        + LineEnding +
     '  TFoo = class'                              + LineEnding +
-    '    X: Integer;'                             + LineEnding +
+    '    X: Int;'                             + LineEnding +
     '  end;'                                      + LineEnding +
     '  PFoo = ^TFoo;'                             + LineEnding +
     'begin'                                       + LineEnding +
@@ -1891,49 +1891,49 @@ const
   end;
 
 begin
-  Rejected('program P; type T = class procedure M(A: Integer; B: Byte); end; ' +
-    'procedure T.M(A: Byte; B: Integer); begin end; begin end.',
+  Rejected('program P; type T = class procedure M(A: Int32; B: Byte); end; ' +
+    'procedure T.M(A: Byte; B: Int32); begin end; begin end.',
     'declared (Integer; Byte), implemented (Byte; Integer)');
-  Rejected('program P; type T = class procedure M(var A: Integer); end; ' +
-    'procedure T.M(A: Integer); begin end; begin end.',
+  Rejected('program P; type T = class procedure M(var A: Int32); end; ' +
+    'procedure T.M(A: Int32); begin end; begin end.',
     'declared (var Integer), implemented (Integer)');
   Rejected('program P; type T = class procedure M(const S: string); end; ' +
     'procedure T.M(S: string); begin end; begin end.',
     'declared (const string), implemented (string)');
-  Rejected('program P; type T = class procedure M(A: Integer); end; ' +
+  Rejected('program P; type T = class procedure M(A: Int32); end; ' +
     'procedure T.M; begin end; begin end.',
     'declared (Integer), implemented ()');
-  Rejected('program P; type T = class function M: Integer; end; ' +
+  Rejected('program P; type T = class function M: Int32; end; ' +
     'function T.M: string; begin end; begin end.',
-    'declared (): Integer, implemented (): string');
-  Rejected('program P; type T = class function M: Integer; end; ' +
+    'declared (): Int32, implemented (): string');
+  Rejected('program P; type T = class function M: Int32; end; ' +
     'procedure T.M; begin end; begin end.', 'implemented ()');
-  Rejected('program P; type T = class constructor Create(A: Integer); end; ' +
+  Rejected('program P; type T = class constructor Create(A: Int32); end; ' +
     'constructor T.Create(A: Byte); begin end; begin end.',
     'declared (Integer), implemented (Byte)');
-  Rejected('program P; type R = record procedure M(A: Integer); end; ' +
+  Rejected('program P; type R = record procedure M(A: Int32); end; ' +
     'procedure R.M(A: Byte); begin end; begin end.',
     'declared (Integer), implemented (Byte)');
-  Rejected('program P; procedure Foo(X: Integer); forward; ' +
+  Rejected('program P; procedure Foo(X: Int32); forward; ' +
     'procedure Foo(X: Byte); begin end; begin Foo(1) end.',
     'declared (Integer), implemented (Byte)');
-  Rejected('program P; type T<X> = class procedure M(A: X; B: Integer); end; ' +
+  Rejected('program P; type T<X> = class procedure M(A: X; B: Int32); end; ' +
     'procedure T<X>.M(A: X; B: Byte); begin end; begin end.',
-    'declared (X; Integer), implemented (X; Byte)');
-  Rejected('program P; type T = class function Pick<X>(A: X; B: Integer): X; ' +
+    'declared (X; Int32), implemented (X; Byte)');
+  Rejected('program P; type T = class function Pick<X>(A: X; B: Int32): X; ' +
     'end; function T.Pick<X>(A: X; B: Byte): X; begin Result := A end; ' +
-    'begin end.', 'declared (X; Integer): X, implemented (X; Byte): X');
+    'begin end.', 'declared (X; Int32): X, implemented (X; Byte): X');
   Accepted('program P; type TI = Integer; T = class ' +
-    'procedure M(A: Integer; const S: string); function F: Integer; end; ' +
-    'procedure T.M(X: Integer; const Y: string); begin end; ' +
+    'procedure M(A: Int32; const S: string); function F: Int32; end; ' +
+    'procedure T.M(X: Int32; const Y: string); begin end; ' +
     'function T.F: TI; begin Result := 1 end; ' +
-    'procedure Foo(X: Integer); forward; ' +
-    'procedure Foo(Y: Integer); begin end; begin Foo(1) end.');
+    'procedure Foo(X: Int32); forward; ' +
+    'procedure Foo(Y: Int32); begin end; begin Foo(1) end.');
   { each overload's body links to its own declaration
     (BUG-20261022-generic-type-method-overloads) }
   Accepted('program P; type T<X> = class ' +
-    'procedure M(A: X; B: Integer); overload; procedure M(A: X); ' +
-    'overload; end; procedure T<X>.M(A: X; B: Integer); begin end; ' +
+    'procedure M(A: X; B: Int32); overload; procedure M(A: X); ' +
+    'overload; end; procedure T<X>.M(A: X; B: Int32); begin end; ' +
     'procedure T<X>.M(A: X); begin end; var V: T<Byte>; begin end.');
 end;
 

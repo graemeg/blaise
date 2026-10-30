@@ -196,7 +196,7 @@ begin
   { Stream-terminated mode: TotalRecords stays 0 so per-unit .opdf sections
     concatenate at link time (the reader reads to section EOF, skipping any
     further 'OPDF' magic headers).  pdr ignores the count entirely. }
-  IR := GenOPDF('program P; var X: Integer; begin end.');
+  IR := GenOPDF('program P; var X: Int; begin end.');
   AssertTrue('TotalRecords is the stream-terminated zero',
     Contains(IR, '.4byte 0                        # TotalRecords (0 = stream-terminated)'));
 end;
@@ -205,7 +205,7 @@ procedure TOPDFTests.TestOPDF_Primitive_Integer;
 var
   IR: string;
 begin
-  IR := GenOPDF('program P; var X: Integer; begin end.');
+  IR := GenOPDF('program P; var X: Int32; begin end.');
   AssertTrue('recPrimitive Integer comment', Contains(IR, '# recPrimitive: Integer'));
   AssertTrue('Integer name emitted', Contains(IR, '.ascii "Integer"'));
 end;
@@ -250,7 +250,7 @@ var
   IR: string;
   P:  Int;
 begin
-  IR := GenOPDF('program P; var D: Double; begin D := 1.5 end.');
+  IR := GenOPDF('program P; var D: Float64; begin D := 1.5 end.');
   AssertTrue('recPrimitive Double comment', Contains(IR, '# recPrimitive: Double'));
   AssertTrue('Double name emitted', Contains(IR, '.ascii "Double"'));
   P := Pos('# recPrimitive: Double', IR);
@@ -268,7 +268,7 @@ var
   IR: string;
   P:  Int;
 begin
-  IR := GenOPDF('program P; var S: Single; begin S := 1.5 end.');
+  IR := GenOPDF('program P; var S: Float32; begin S := 1.5 end.');
   AssertTrue('recPrimitive Single comment', Contains(IR, '# recPrimitive: Single'));
   P := Pos('# recPrimitive: Single', IR);
   AssertTrue('Single recPrimitive present', P >= 0);

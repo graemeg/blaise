@@ -181,7 +181,7 @@ var
   Prog: TProgram;
   Decl: TVarDecl;
 begin
-  Prog := Analyse('program P; var x: Integer; begin end.');
+  Prog := Analyse('program P; var x: Int; begin end.');
   try
     AssertEquals('1 decl', 1, Prog.Block.Decls.Count);
     Decl := TVarDecl(Prog.Block.Decls.Items[0]);
@@ -195,7 +195,7 @@ procedure TSemanticTests.TestVarDecl_Type_Integer;
 var
   Prog: TProgram;
 begin
-  Prog := Analyse('program P; var n: Integer; begin end.');
+  Prog := Analyse('program P; var n: Int32; begin end.');
   try
     AssertEquals('Integer kind',
       Ord(tyInteger),
@@ -224,7 +224,7 @@ var
   Prog: TProgram;
   Decl: TVarDecl;
 begin
-  Prog := Analyse('program P; var x, y: Integer; begin end.');
+  Prog := Analyse('program P; var x, y: Int32; begin end.');
   try
     Decl := TVarDecl(Prog.Block.Decls.Items[0]);
     AssertNotNull('ResolvedType', Decl.ResolvedType);
@@ -242,13 +242,13 @@ end;
 procedure TSemanticTests.TestVarDecl_Duplicate_RaisesError;
 begin
   AnalyseExpectError(
-    'program P; var x: Integer; x: string; begin end.');
+    'program P; var x: Int; x: string; begin end.');
 end;
 
 procedure TSemanticTests.TestVarDecl_DuplicatesType_RaisesError;
 begin
   AnalyseExpectError(
-    'program P; type TFoo = record X: Integer; end; var TFoo: Integer; begin end.');
+    'program P; type TFoo = record X: Int; end; var TFoo: Int; begin end.');
 end;
 
 procedure TSemanticTests.TestVarDecl_DuplicatesType_DifferentCase_RaisesError;
@@ -264,7 +264,7 @@ procedure TSemanticTests.TestVarDecl_DuplicatesInterfaceType_RaisesError;
 begin
   AnalyseExpectError(
     'program P; type IThing = interface procedure Go; end; ' +
-    'var IThing: Integer; begin end.');
+    'var IThing: Int; begin end.');
 end;
 
 procedure TSemanticTests.TestVarDecl_ShadowsBuiltinType_RaisesError;
@@ -280,8 +280,8 @@ begin
   { A type declared in an outer scope may not be shadowed by a local var —
     Blaise rejects the whole var/type name-clash class regardless of scope. }
   AnalyseExpectError(
-    'program P; type TFoo = record X: Integer; end; ' +
-    'procedure Q; var TFoo: Integer; begin end; ' +
+    'program P; type TFoo = record X: Int; end; ' +
+    'procedure Q; var TFoo: Int; begin end; ' +
     'begin Q(); end.');
 end;
 
@@ -300,7 +300,7 @@ end;
 procedure TSemanticTests.TestVarDecl_DuplicatesConst_RaisesError;
 begin
   AnalyseExpectError(
-    'program P; const b = 42; var b: Integer; begin end.');
+    'program P; const b = 42; var b: Int; begin end.');
 end;
 
 procedure TSemanticTests.TestConst_Duplicate_RaisesError;
@@ -315,7 +315,7 @@ end;
 
 procedure TSemanticTests.TestModuleName_RedeclaredAsVar_RaisesError;
 begin
-  AnalyseExpectError('program P; var P: Integer; begin end.');
+  AnalyseExpectError('program P; var P: Int; begin end.');
 end;
 
 procedure TSemanticTests.TestModuleName_RedeclaredAsConst_RaisesError;
@@ -325,7 +325,7 @@ end;
 
 procedure TSemanticTests.TestModuleName_RedeclaredAsType_RaisesError;
 begin
-  AnalyseExpectError('program P; type P = record X: Integer; end; begin end.');
+  AnalyseExpectError('program P; type P = record X: Int; end; begin end.');
 end;
 
 procedure TSemanticTests.TestModuleName_RedeclaredAsProc_RaisesError;
@@ -337,7 +337,7 @@ procedure TSemanticTests.TestModuleName_LocalShadow_OK;
 begin
   { An inner scope may shadow the module name, as in FPC/Delphi. }
   Analyse(
-    'program P; procedure Q; var P: Integer; begin P := 1; end; ' +
+    'program P; procedure Q; var P: Int; begin P := 1; end; ' +
     'begin Q(); end.'
   ).Free();
 end;
@@ -354,12 +354,12 @@ procedure TSemanticTests.TestModuleName_NotUsableAsExpression_RaisesError;
 begin
   { The module name is reserved but is not a value — using it in an
     expression resolves to nothing. }
-  AnalyseExpectError('program P; var x: Integer; begin x := P; end.');
+  AnalyseExpectError('program P; var x: Int; begin x := P; end.');
 end;
 
 procedure TSemanticTests.TestUsedUnitName_RedeclaredAsVar_RaisesError;
 begin
-  AnalyseExpectError('program P; uses foo; var foo: Integer; begin end.');
+  AnalyseExpectError('program P; uses foo; var foo: Int; begin end.');
 end;
 
 { ------------------------------------------------------------------ }
@@ -371,7 +371,7 @@ var
   Prog:   TProgram;
   Assign: TAssignment;
 begin
-  Prog := Analyse('program P; var n: Integer; begin n := 42 end.');
+  Prog := Analyse('program P; var n: Int32; begin n := 42 end.');
   try
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNull('Expr type', Assign.Expr.ResolvedType);
@@ -404,7 +404,7 @@ var
   Bin:  TBinaryExpr;
 begin
   Prog := Analyse(
-    'program P; var x, y: Integer; begin y := x + 1 end.');
+    'program P; var x, y: Int32; begin y := x + 1 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertNotNull('Left type', Bin.Left.ResolvedType);
@@ -418,7 +418,7 @@ end;
 procedure TSemanticTests.TestExpr_Ident_Undeclared_RaisesError;
 begin
   AnalyseExpectError(
-    'program P; var n: Integer; begin n := undeclared end.');
+    'program P; var n: Int; begin n := undeclared end.');
 end;
 
 procedure TSemanticTests.TestExpr_Add_TwoIntegers_TypeIsInteger;
@@ -427,7 +427,7 @@ var
   Bin:  TBinaryExpr;
 begin
   Prog := Analyse(
-    'program P; var n: Integer; begin n := 1 + 2 end.');
+    'program P; var n: Int; begin n := 1 + 2 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Add result is Int (a constant expression, D4)',
@@ -440,7 +440,7 @@ end;
 procedure TSemanticTests.TestExpr_Add_IntAndString_RaisesError;
 begin
   AnalyseExpectError(
-    'program P; var n: Integer; s: string; begin n := n + s end.');
+    'program P; var n: Int; s: string; begin n := n + s end.');
 end;
 
 procedure TSemanticTests.TestExpr_Sub_TypeIsInteger;
@@ -449,7 +449,7 @@ var
   Bin:  TBinaryExpr;
 begin
   Prog := Analyse(
-    'program P; var n: Integer; begin n := 10 - 3 end.');
+    'program P; var n: Int; begin n := 10 - 3 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Sub is Int (a constant expression, D4)',
@@ -465,7 +465,7 @@ var
   Bin:  TBinaryExpr;
 begin
   Prog := Analyse(
-    'program P; var n: Integer; begin n := 3 * 4 end.');
+    'program P; var n: Int; begin n := 3 * 4 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Mul is Int (a constant expression, D4)',
@@ -481,7 +481,7 @@ var
   Bin:  TBinaryExpr;
 begin
   Prog := Analyse(
-    'program P; var n: Integer; begin n := 8 div 2 end.');
+    'program P; var n: Int; begin n := 8 div 2 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
     AssertEquals('Div is Int (a constant expression, D4)',
@@ -497,7 +497,7 @@ end;
 
 procedure TSemanticTests.TestAssign_IntToInt_OK;
 begin
-  Analyse('program P; var n: Integer; begin n := 5 end.').Free();
+  Analyse('program P; var n: Int; begin n := 5 end.').Free();
 end;
 
 procedure TSemanticTests.TestAssign_StringToString_OK;
@@ -515,7 +515,7 @@ end;
 procedure TSemanticTests.TestAssign_StringToInt_RaisesError;
 begin
   AnalyseExpectError(
-    'program P; var n: Integer; begin n := ''hello'' end.');
+    'program P; var n: Int; begin n := ''hello'' end.');
 end;
 
 procedure TSemanticTests.TestAssign_UndeclaredVar_RaisesError;
@@ -615,8 +615,8 @@ begin
   { Writing an element of a VAR open-array parameter is allowed. }
   Analyse(
     'program P; ' +
-    'procedure Z(var a: array of Integer); begin a[0] := 9 end; ' +
-    'var x: array[0..1] of Integer; begin x[0]:=1; x[1]:=2; Z(x) end.').Free();
+    'procedure Z(var a: array of Int); begin a[0] := 9 end; ' +
+    'var x: array[0..1] of Int; begin x[0]:=1; x[1]:=2; Z(x) end.').Free();
 end;
 
 procedure TSemanticTests.TestConstOpenArray_ElementWrite_RaisesError;
@@ -624,8 +624,8 @@ begin
   { Writing an element of a CONST open-array parameter is rejected. }
   AnalyseExpectError(
     'program P; ' +
-    'procedure B(const a: array of Integer); begin a[0] := 9 end; ' +
-    'var x: array[0..1] of Integer; begin x[0]:=1; x[1]:=2; B(x) end.');
+    'procedure B(const a: array of Int); begin a[0] := 9 end; ' +
+    'var x: array[0..1] of Int; begin x[0]:=1; x[1]:=2; B(x) end.');
 end;
 
 { Write / WriteLn field widths (semantic lowering to Format). }
@@ -675,7 +675,7 @@ var
   Prog: TProgram;
   F: TFuncCallExpr;
 begin
-  Prog := Analyse('program P; var X: Double; begin WriteLn(X:8:2) end.');
+  Prog := Analyse('program P; var X: Float64; begin WriteLn(X:8:2) end.');
   try
     F := TFuncCallExpr(TProcCall(Prog.Block.Stmts[0]).Args.Items[0]);
     AssertEquals('lowered to Format', 'Format', F.Name);
@@ -691,21 +691,21 @@ procedure TSemanticTests.TestSemantic_WriteFieldWidth_DecimalsOnInteger_Rejected
 begin
   AssertTrue('decimals only for a real',
     Pos('only allowed for a real', SemanticError(
-      'program P; var I: Integer; begin WriteLn(I:5:2) end.')) >= 0);
+      'program P; var I: Int; begin WriteLn(I:5:2) end.')) >= 0);
 end;
 
 procedure TSemanticTests.TestSemantic_WriteFieldWidth_NonIntegerWidth_Rejected;
 begin
   AssertTrue('width must be an integer',
     Pos('field width must be an integer', SemanticError(
-      'program P; var D: Double; begin WriteLn(D:''x'') end.')) >= 0);
+      'program P; var D: Float64; begin WriteLn(D:''x'') end.')) >= 0);
 end;
 
 procedure TSemanticTests.TestSemantic_WriteFieldWidth_UnsupportedType_Rejected;
 begin
   AssertTrue('a record has no field-width form',
     Pos('not supported for a value', SemanticError(
-      'program P; type TR = record A: Integer; end; var R: TR; ' +
+      'program P; type TR = record A: Int; end; var R: TR; ' +
       'begin WriteLn(R:5) end.')) >= 0);
 end;
 
@@ -919,15 +919,15 @@ end;
 
 procedure TSemanticTests.TestSemantic_OrdinalCastOfFloat_Rejected;
 const
-  Pre = 'program P; type TC = (cA, cB); var I: Integer; B: Byte; ' +
-    'D: Double; S: Single; E: TC; Ok: Boolean; begin ';
+  Pre = 'program P; type TC = (cA, cB); var I: Int; B: Byte; ' +
+    'D: Float64; S: Float32; E: TC; Ok: Boolean; begin ';
 begin
   AssertTrue('a float variable',
     Pos('Illegal type conversion from ''Double'' to ''Integer''',
-      SemanticError(Pre + 'I := Integer(D) end.')) >= 0);
+      SemanticError(Pre + 'I := Int32(D) end.')) >= 0);
   AssertTrue('a float expression',
     Pos('use Trunc or Round',
-      SemanticError(Pre + 'I := Integer(I / 2) end.')) >= 0);
+      SemanticError(Pre + 'I := Int32(I / 2) end.')) >= 0);
   AssertTrue('a float literal',
     Pos('Illegal type conversion', SemanticError(Pre + 'B := Byte(2.5) end.')) >= 0);
   AssertTrue('a Single into Int64',
@@ -938,25 +938,25 @@ begin
   AssertTrue('a Boolean target',
     Pos('Illegal type conversion', SemanticError(Pre + 'Ok := Boolean(D) end.')) >= 0);
   AssertEquals('ordinal casts and float conversions still compile', '',
-    SemanticError(Pre + 'I := Integer(E) + Byte(I) + Ord(Ok); ' +
-      'D := Double(I); S := Single(D); I := Trunc(D) + Round(S) end.'));
+    SemanticError(Pre + 'I := Int32(E) + Byte(I) + Ord(Ok); ' +
+      'D := Float64(I); S := Float32(D); I := Trunc(D) + Round(S) end.'));
 end;
 
 procedure TSemanticTests.TestSemantic_OrdOfFloat_Rejected;
 begin
   AssertTrue('a float variable',
     Pos('Ord expects an ordinal value, not ''Double''', SemanticError(
-      'program P; var D: Double; begin WriteLn(Ord(D)) end.')) >= 0);
+      'program P; var D: Float64; begin WriteLn(Ord(D)) end.')) >= 0);
   AssertTrue('a float expression',
     Pos('Ord expects an ordinal value', SemanticError(
-      'program P; var I: Integer; begin WriteLn(Ord(I / 2)) end.')) >= 0);
+      'program P; var I: Int; begin WriteLn(Ord(I / 2)) end.')) >= 0);
 end;
 
 procedure TSemanticTests.TestSemantic_FloatWhereIntegerRequired_Rejected;
 const
-  Pre = 'program P; type TR = record DA: array of Integer; ' +
-    'SA: array[0..2] of Integer; end; var I, J: Integer; D: Double; ' +
-    'S: string; DA: array of Integer; Pt: Pointer; R: TR; PC: PChar; begin ';
+  Pre = 'program P; type TR = record DA: array of Int; ' +
+    'SA: array[0..2] of Int; end; var I, J: Int; D: Float64; ' +
+    'S: string; DA: array of Int; Pt: Pointer; R: TR; PC: PChar; begin ';
 
   procedure Rejected(const ABody, AMsg: string);
   var
@@ -1030,7 +1030,7 @@ begin
   AssertTrue('Exec arity', Pos('Exec requires exactly 1 argument',
     SemanticError('program P; begin Exec(''a'', ''b'') end.')) >= 0);
   AssertTrue('Ord of a float', Pos('Ord expects an ordinal value',
-    SemanticError('program P; var D: Double; begin Ord(D) end.')) >= 0);
+    SemanticError('program P; var D: Float64; begin Ord(D) end.')) >= 0);
   AssertEquals('valid statement forms still compile', '', SemanticError(
     'program P; var S: string; begin Exec(''true''); Length(S); ' +
     'Pos(''a'', S); FileExists(S); GetTempDir(); ExtractFileName(S) end.'));

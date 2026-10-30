@@ -141,7 +141,7 @@ const
   Src =
     'program P;' + LineEnding +
     'type TC = (cRed, cGreen, cBlue);' + LineEnding +
-    'var C: TC; I: Integer;' + LineEnding +
+    'var C: TC; I: Int;' + LineEnding +
     'begin' + LineEnding +
     '  C := cBlue;' + LineEnding +
     '  case C of' + LineEnding +

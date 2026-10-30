@@ -90,7 +90,7 @@ end;
 procedure TVarInitTests.TestParse_ScalarInit_AttachesInitConst;
 var P: TProgram; Decl: TVarDecl;
 begin
-  P := ParseProg('program X; var G: Integer = 42; begin end.');
+  P := ParseProg('program X; var G: Int = 42; begin end.');
   try
     Decl := TVarDecl(P.Block.Decls.Items[0]);
     AssertNotNull('InitConst attached', Decl.InitConst);
@@ -101,7 +101,7 @@ end;
 procedure TVarInitTests.TestParse_NoInit_InitConstNil;
 var P: TProgram; Decl: TVarDecl;
 begin
-  P := ParseProg('program X; var G: Integer; begin end.');
+  P := ParseProg('program X; var G: Int; begin end.');
   try
     Decl := TVarDecl(P.Block.Decls.Items[0]);
     AssertNull('no initialiser', Decl.InitConst);
@@ -113,7 +113,7 @@ var Raised: Boolean;
 begin
   Raised := False;
   try
-    ParseProg('program X; var A, B: Integer = 1; begin end.').Free();
+    ParseProg('program X; var A, B: Int = 1; begin end.').Free();
   except
     on E: EParseError do Raised := True;
   end;
@@ -129,7 +129,7 @@ var Raised: Boolean;
 begin
   Raised := False;
   try
-    AnalyseSrc('program X; var N: Integer = ''text''; begin end.');
+    AnalyseSrc('program X; var N: Int = ''text''; begin end.');
   except
     on E: ESemanticError do Raised := True;
   end;
@@ -141,7 +141,7 @@ var Raised: Boolean;
 begin
   Raised := False;
   try
-    AnalyseSrc('program X; procedure Q; var L: Integer = 5; begin end; begin end.');
+    AnalyseSrc('program X; procedure Q; var L: Int = 5; begin end; begin end.');
   except
     on E: ESemanticError do Raised := True;
   end;
@@ -155,7 +155,7 @@ begin
     not silently mis-emit. }
   Raised := False;
   try
-    AnalyseSrc('program X; type TR = record a: Integer; end; ' +
+    AnalyseSrc('program X; type TR = record a: Int; end; ' +
           'var R: TR = 0; begin end.');
   except
     on E: ESemanticError do Raised := True;
@@ -295,7 +295,7 @@ var
 begin
   Raised := False;
   try
-    AnalyseSrc('program X; var N: Integer = nil; begin end.');
+    AnalyseSrc('program X; var N: Int = nil; begin end.');
   except
     on E: ESemanticError do Raised := True;
   end;

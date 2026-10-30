@@ -397,7 +397,7 @@ begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
-    Lexer       := TLexer.Create('program P; uses StrUtils; var S, Sub: string; N: Integer; begin N := PosEx(Sub, S, 2) end.');
+    Lexer       := TLexer.Create('program P; uses StrUtils; var S, Sub: string; N: Int; begin N := PosEx(Sub, S, 2) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();
@@ -467,7 +467,7 @@ begin
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
     Lexer       := TLexer.Create(
-      'program P; uses StrUtils; var S: string; I: Integer; var Arr: array[0..2] of string; begin Arr[0] := ''a''; Arr[1] := ''b''; Arr[2] := ''c''; I := IndexStr(S, Arr) end.');
+      'program P; uses StrUtils; var S: string; I: Int; var Arr: array[0..2] of string; begin Arr[0] := ''a''; Arr[1] := ''b''; Arr[2] := ''c''; I := IndexStr(S, Arr) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();
@@ -735,7 +735,7 @@ begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
-    Lexer       := TLexer.Create('program P; uses StrUtils; var S, Sub: string; N: Integer; begin N := CountOccurrences(Sub, S) end.');
+    Lexer       := TLexer.Create('program P; uses StrUtils; var S, Sub: string; N: Int; begin N := CountOccurrences(Sub, S) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();

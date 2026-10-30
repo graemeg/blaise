@@ -281,7 +281,7 @@ var
   SA: TSemanticAnalyser;
   Sym: TSymbol;
 begin
-  L  := TLexer.Create('program Test; const Pi: Double = 3.14; begin end.');
+  L  := TLexer.Create('program Test; const Pi: Float64 = 3.14; begin end.');
   P  := TParser.Create(L);
   Pr := P.Parse();
   SA := TSemanticAnalyser.Create();

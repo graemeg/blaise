@@ -244,7 +244,7 @@ procedure TVarParamTests.TestSemantic_VarParam_NonVariable_RaisesError;
 begin
   AnalyseExpectError(
     'program Bad;' + #10 +
-    'procedure Inc(var X: Integer);' + #10 +
+    'procedure Inc(var X: Int);' + #10 +
     'begin X := X + 1 end;' + #10 +
     'begin' + #10 +
     '  Inc(42)'                                     + #10 +  { literal, not a variable }
@@ -255,7 +255,7 @@ procedure TVarParamTests.TestSemantic_VarParam_TypeMismatch_RaisesError;
 begin
   AnalyseExpectError(
     'program Bad;' + #10 +
-    'procedure SetI(var X: Integer);' + #10 +
+    'procedure SetI(var X: Int);' + #10 +
     'begin X := 1 end;' + #10 +
     'var B: Boolean;' + #10 +
     'begin' + #10 +
@@ -268,14 +268,14 @@ const
     'program Bad;' + #10 +
     'type' + #10 +
     '  TThing = class' + #10 +
-    '    procedure MStmt(var X: Integer);' + #10 +
-    '    function MExpr(var X: Integer): Integer;' + #10 +
+    '    procedure MStmt(var X: Int);' + #10 +
+    '    function MExpr(var X: Int): Int;' + #10 +
     '  end;' + #10 +
-    'procedure TThing.MStmt(var X: Integer); begin X := X + 1 end;' + #10 +
-    'function TThing.MExpr(var X: Integer): Integer;' + #10 +
+    'procedure TThing.MStmt(var X: Int); begin X := X + 1 end;' + #10 +
+    'function TThing.MExpr(var X: Int): Int;' + #10 +
     'begin X := X + 1; Result := X end;' + #10 +
-    'function GetVal: Integer; begin Result := 5 end;' + #10 +
-    'var t: TThing; r: Integer;' + #10 +
+    'function GetVal: Int; begin Result := 5 end;' + #10 +
+    'var t: TThing; r: Int;' + #10 +
     'begin' + #10 +
     '  t := TThing.Create();' + #10;
 
@@ -317,34 +317,34 @@ const
     'program Bad;' + #10 +
     'type' + #10 +
     '  TBase = class' + #10 +
-    '    procedure M(var X: Integer); virtual;' + #10 +
-    '    function F(var X: Integer): Integer; virtual;' + #10 +
+    '    procedure M(var X: Int); virtual;' + #10 +
+    '    function F(var X: Int): Int; virtual;' + #10 +
     '  end;' + #10 +
     '  TChild = class(TBase)' + #10 +
-    '    procedure M(var X: Integer); override;' + #10 +
-    '    function F(var X: Integer): Integer; override;' + #10 +
+    '    procedure M(var X: Int); override;' + #10 +
+    '    function F(var X: Int): Int; override;' + #10 +
     '  end;' + #10 +
     '  TCtor = class' + #10 +
-    '    constructor Create(var X: Integer);' + #10 +
+    '    constructor Create(var X: Int);' + #10 +
     '  end;' + #10 +
     '  TCtorClass = class of TCtor;' + #10 +
     '  TBox = class' + #10 +
     '    function Pick<T>(var A: T): T;' + #10 +
     '  end;' + #10 +
-    'procedure TBase.M(var X: Integer); begin X := X + 1 end;' + #10 +
-    'function TBase.F(var X: Integer): Integer;' + #10 +
+    'procedure TBase.M(var X: Int); begin X := X + 1 end;' + #10 +
+    'function TBase.F(var X: Int): Int;' + #10 +
     'begin X := X + 1; Result := X end;' + #10 +
-    'constructor TCtor.Create(var X: Integer); begin X := X + 1 end;' + #10 +
+    'constructor TCtor.Create(var X: Int); begin X := X + 1 end;' + #10 +
     'function TBox.Pick<T>(var A: T): T; begin Result := A end;' + #10 +
-    'function GetVal: Integer; begin Result := 5 end;' + #10 +
-    'function Bump(var X: Integer): Integer;' + #10 +
+    'function GetVal: Int; begin Result := 5 end;' + #10 +
+    'function Bump(var X: Int): Int;' + #10 +
     'begin X := X + 1; Result := X end;' + #10;
 
 procedure TVarParamTests.TestSemantic_MetaclassCtorVarParam_NonLValueStmt_RaisesError;
 begin
   AnalyseExpectError(SrcVarParamPathsHeader +
-    'procedure TChild.M(var X: Integer); begin end;' + #10 +
-    'function TChild.F(var X: Integer): Integer; begin Result := 0 end;' + #10 +
+    'procedure TChild.M(var X: Int); begin end;' + #10 +
+    'function TChild.F(var X: Int): Int; begin Result := 0 end;' + #10 +
     'var c: TCtorClass;' + #10 +
     'begin' + #10 +
     '  c := TCtor;' + #10 +
@@ -355,17 +355,17 @@ end;
 procedure TVarParamTests.TestSemantic_InheritedVarParam_NonLValueStmt_RaisesError;
 begin
   AnalyseExpectError(SrcVarParamPathsHeader +
-    'procedure TChild.M(var X: Integer);' + #10 +
+    'procedure TChild.M(var X: Int);' + #10 +
     'begin inherited M(GetVal()) end;' + #10 +
-    'function TChild.F(var X: Integer): Integer; begin Result := 0 end;' + #10 +
+    'function TChild.F(var X: Int): Int; begin Result := 0 end;' + #10 +
     'begin end.');
 end;
 
 procedure TVarParamTests.TestSemantic_InheritedVarParam_NonLValueExpr_RaisesError;
 begin
   AnalyseExpectError(SrcVarParamPathsHeader +
-    'procedure TChild.M(var X: Integer); begin end;' + #10 +
-    'function TChild.F(var X: Integer): Integer;' + #10 +
+    'procedure TChild.M(var X: Int); begin end;' + #10 +
+    'function TChild.F(var X: Int): Int;' + #10 +
     'begin Result := inherited F(GetVal()) end;' + #10 +
     'begin end.');
 end;
@@ -373,9 +373,9 @@ end;
 procedure TVarParamTests.TestSemantic_StandaloneFuncVarParam_NonLValueExpr_RaisesError;
 begin
   AnalyseExpectError(SrcVarParamPathsHeader +
-    'procedure TChild.M(var X: Integer); begin end;' + #10 +
-    'function TChild.F(var X: Integer): Integer; begin Result := 0 end;' + #10 +
-    'var r: Integer;' + #10 +
+    'procedure TChild.M(var X: Int); begin end;' + #10 +
+    'function TChild.F(var X: Int): Int; begin Result := 0 end;' + #10 +
+    'var r: Int;' + #10 +
     'begin' + #10 +
     '  r := Bump(GetVal())' + #10 +
     'end.');
@@ -384,9 +384,9 @@ end;
 procedure TVarParamTests.TestSemantic_GenericMethodVarParam_NonLValueExpr_RaisesError;
 begin
   AnalyseExpectError(SrcVarParamPathsHeader +
-    'procedure TChild.M(var X: Integer); begin end;' + #10 +
-    'function TChild.F(var X: Integer): Integer; begin Result := 0 end;' + #10 +
-    'var b: TBox; r: Integer;' + #10 +
+    'procedure TChild.M(var X: Int); begin end;' + #10 +
+    'function TChild.F(var X: Int): Int; begin Result := 0 end;' + #10 +
+    'var b: TBox; r: Int;' + #10 +
     'begin' + #10 +
     '  b := TBox.Create();' + #10 +
     '  r := b.Pick<Integer>(GetVal())' + #10 +
@@ -401,18 +401,18 @@ const
     'program Bad;' + #10 +
     'type' + #10 +
     '  IThing = interface' + #10 +
-    '    procedure M(var X: Integer);' + #10 +
-    '    function G(A: Integer; var X: Integer): Integer;' + #10 +
+    '    procedure M(var X: Int);' + #10 +
+    '    function G(A: Int; var X: Int): Int;' + #10 +
     '  end;' + #10 +
     '  TThing = class(TObject, IThing)' + #10 +
-    '    procedure M(var X: Integer);' + #10 +
-    '    function G(A: Integer; var X: Integer): Integer;' + #10 +
+    '    procedure M(var X: Int);' + #10 +
+    '    function G(A: Int; var X: Int): Int;' + #10 +
     '  end;' + #10 +
-    'procedure TThing.M(var X: Integer); begin X := X + 1 end;' + #10 +
-    'function TThing.G(A: Integer; var X: Integer): Integer;' + #10 +
+    'procedure TThing.M(var X: Int); begin X := X + 1 end;' + #10 +
+    'function TThing.G(A: Int; var X: Int): Int;' + #10 +
     'begin X := X + A; Result := X end;' + #10 +
-    'function GetVal: Integer; begin Result := 5 end;' + #10 +
-    'var i: IThing; r: Integer;' + #10 +
+    'function GetVal: Int; begin Result := 5 end;' + #10 +
+    'var i: IThing; r: Int;' + #10 +
     'begin' + #10 +
     '  i := TThing.Create();' + #10;
 
@@ -447,11 +447,11 @@ var P: TProgram;
 begin
   { A real variable must still be accepted on every newly checked path. }
   P := AnalyseSrc(SrcVarParamPathsHeader +
-    'procedure TChild.M(var X: Integer);' + #10 +
+    'procedure TChild.M(var X: Int);' + #10 +
     'begin inherited M(X) end;' + #10 +
-    'function TChild.F(var X: Integer): Integer;' + #10 +
+    'function TChild.F(var X: Int): Int;' + #10 +
     'begin Result := inherited F(X) end;' + #10 +
-    'var c: TCtorClass; t: TChild; b: TBox; r: Integer;' + #10 +
+    'var c: TCtorClass; t: TChild; b: TBox; r: Int;' + #10 +
     'begin' + #10 +
     '  r := 5;' + #10 +
     '  c := TCtor;' + #10 +
@@ -461,7 +461,7 @@ begin
     '  r := t.F(r);' + #10 +
     '  r := Bump(r);' + #10 +
     '  b := TBox.Create();' + #10 +
-    '  r := b.Pick<Integer>(r)' + #10 +
+    '  r := b.Pick<Int>(r)' + #10 +
     'end.');
   AssertTrue('legitimate var args analyse on all new paths', P <> nil);
   P.Free();
@@ -563,8 +563,8 @@ const
       L: Int64; B: Byte; I: Int32; I32: Int32; N: Int;
       K: TK; IntfK: IK; PP: TPP; G: TG<Int32>;
     ''';
-  OwnOk = 'procedure TK.Own; var X: Integer; begin Put(X) end;';
-  CallOk = 'procedure TC.Call; var X: Integer; begin inherited Put2(X) end;';
+  OwnOk = 'procedure TK.Own; var X: Int32; begin Put(X) end;';
+  CallOk = 'procedure TC.Call; var X: Int32; begin inherited Put2(X) end;';
 
   procedure Rejects(const ALabel, ABody: string);
   begin
@@ -592,7 +592,7 @@ begin
     'must have the parameter''s type', SemanticError(Head + OwnOk +
       'procedure TC.Call; var X: Int64; begin inherited Put2(X) end;' +
       Tail + 'begin end.')) > 0);
-  Rejects('generic class method', 'G := TG<Integer>.Create(); G.Put3(L)');
+  Rejects('generic class method', 'G := TG<Int32>.Create(); G.Put3(L)');
 end;
 
 initialization

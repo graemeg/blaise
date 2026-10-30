@@ -469,7 +469,7 @@ const
     'const Pi = 3.14;'                                  + #10 +
     'type'                                              + #10 +
     '  TColor = (Red, Green, Blue);'                    + #10 +
-    '  TPoint = record X, Y: Integer; end;'             + #10 +
+    '  TPoint = record X, Y: Int; end;'             + #10 +
     'function Hello(const Who: string): string;'        + #10 +
     'implementation'                                    + #10 +
     'function Hello(const Who: string): string; begin Result := Who; end;' + #10 +
@@ -512,7 +512,7 @@ const
   SRC =
     'unit TestU;'                                       + #10 +
     'interface'                                         + #10 +
-    'type TFoo = record A: Integer; end;'               + #10 +
+    'type TFoo = record A: Int; end;'               + #10 +
     'implementation'                                    + #10 +
     'end.'                                              + #10;
 var
@@ -599,9 +599,9 @@ const
   SRC =
     'unit TestU;'                                          + #10 +
     'interface'                                            + #10 +
-    'function Square(N: Integer): Integer; inline;'        + #10 +
+    'function Square(N: Int): Int; inline;'        + #10 +
     'implementation'                                       + #10 +
-    'function Square(N: Integer): Integer; begin Result := N * N; end;' + #10 +
+    'function Square(N: Int): Int; begin Result := N * N; end;' + #10 +
     'end.'                                                 + #10;
 var
   Lex:     TLexer;
@@ -651,7 +651,7 @@ const
   DEP_SRC =
     'unit DepU;'                                + #10 +
     'interface'                                 + #10 +
-    'type TWidget = record N: Integer; end;'    + #10 +
+    'type TWidget = record N: Int; end;'    + #10 +
     'implementation'                            + #10 +
     'end.'                                      + #10;
   MAIN_SRC =
@@ -692,7 +692,7 @@ const
   SRC =
     'unit TestU;'                               + #10 +
     'interface'                                 + #10 +
-    'type TItem = record N: Integer; end;'      + #10 +
+    'type TItem = record N: Int; end;'      + #10 +
     'function Make: TItem;'                     + #10 +
     'implementation'                            + #10 +
     'function Make: TItem; begin end;'          + #10 +
@@ -717,9 +717,9 @@ const
   SRC =
     'unit TestU;'                              + #10 +
     'interface'                                + #10 +
-    'function Count: Integer;'                 + #10 +
+    'function Count: Int;'                 + #10 +
     'implementation'                           + #10 +
-    'function Count: Integer; begin end;'      + #10 +
+    'function Count: Int; begin end;'      + #10 +
     'end.'                                     + #10;
 var
   Iface: TUnitInterface;
@@ -728,7 +728,7 @@ begin
   Iface := ParseAndExport(SRC);
   try
     Sig := Iface.FindRoutine('Count');
-    AssertEquals('return type name', 'Integer', Sig.ReturnType.TypeName);
+    AssertEquals('return type name', 'Int', Sig.ReturnType.TypeName);
     AssertEquals('is builtin ref',   True,      IsBuiltinRef(Sig.ReturnType));
     AssertEquals('unit name builtin','$builtin',Sig.ReturnType.UnitName);
   finally
@@ -748,7 +748,7 @@ begin
   Result.Decl := TConstDecl.Create();
   Result.Decl.Name   := AName;
   Result.Decl.IntVal := AValue;
-  Result.TypeRef := MakeBuiltinRef('Integer');
+  Result.TypeRef := MakeBuiltinRef('Int');
 end;
 
 function MakeStringConst(const AName, AValue: string): TConstEntry;
@@ -785,7 +785,7 @@ begin
     AssertEquals('value',  Int64(4096), E.Decl.IntVal);
     AssertEquals('not string', False, E.Decl.IsString);
     AssertEquals('not float',  False, E.Decl.IsFloat);
-    AssertEquals('type ref',  'Integer', E.TypeRef.TypeName);
+    AssertEquals('type ref',  'Int', E.TypeRef.TypeName);
   finally
     U.Free();
   end;
@@ -1008,9 +1008,9 @@ const
     'interface'                                         + #10 +
     'type'                                              + #10 +
     '  TPoint = record'                                 + #10 +
-    '    X: Integer;'                                   + #10 +
-    '    Y: Integer;'                                   + #10 +
-    '    Z: Integer;'                                   + #10 +
+    '    X: Int;'                                   + #10 +
+    '    Y: Int;'                                   + #10 +
+    '    Z: Int;'                                   + #10 +
     '  end;'                                            + #10 +
     'implementation'                                    + #10 +
     'end.'                                              + #10;
@@ -1047,10 +1047,10 @@ const
     'unit TestU;'                                       + #10 +
     'interface'                                         + #10 +
     'type'                                              + #10 +
-    '  TLocal = record A: Integer; end;'                + #10 +
+    '  TLocal = record A: Int; end;'                + #10 +
     '  TUses = record'                                  + #10 +
     '    L: TLocal;'                                    + #10 +
-    '    N: Integer;'                                   + #10 +
+    '    N: Int;'                                   + #10 +
     '  end;'                                            + #10 +
     'implementation'                                    + #10 +
     'end.'                                              + #10;
@@ -1078,7 +1078,7 @@ begin
     AssertEquals('f0 type name', 'TLocal',  F.TypeName);
 
     F := TFieldDecl(Rec.Fields.Items[1]);
-    AssertEquals('f1 type name', 'Integer', F.TypeName);
+    AssertEquals('f1 type name', 'Int', F.TypeName);
   finally
     Iface.Free();
   end;
@@ -1160,11 +1160,11 @@ const
     'type'                                              + #10 +
     '  TWidget = class'                                 + #10 +
     '    procedure Step;'                               + #10 +
-    '    function  Count: Integer;'                     + #10 +
+    '    function  Count: Int;'                     + #10 +
     '  end;'                                            + #10 +
     'implementation'                                    + #10 +
     'procedure TWidget.Step; begin end;'                + #10 +
-    'function  TWidget.Count: Integer; begin Result := 0; end;' + #10 +
+    'function  TWidget.Count: Int; begin Result := 0; end;' + #10 +
     'end.'                                              + #10;
 var
   Iface: TUnitInterface;
@@ -1184,7 +1184,7 @@ begin
     AssertEquals('m0 not func', False,     Step.IsFunction);
     AssertEquals('m1 name',     'Count',   Count.Name);
     AssertEquals('m1 is func',  True,      Count.IsFunction);
-    AssertEquals('m1 return',   'Integer', Count.ReturnType.TypeName);
+    AssertEquals('m1 return',   'Int', Count.ReturnType.TypeName);
   finally
     Iface.Free();
   end;
@@ -1233,7 +1233,7 @@ const
   SRC =
     'unit TestU;'                                       + #10 +
     'interface'                                         + #10 +
-    'type TWidget = class N: Integer; end;'             + #10 +
+    'type TWidget = class N: Int; end;'             + #10 +
     'implementation'                                    + #10 +
     'end.'                                              + #10;
 var
@@ -1282,9 +1282,9 @@ const
   SRC =
     'unit TestU;'                                          + #10 +
     'interface'                                            + #10 +
-    'function Square(N: Integer): Integer; inline;'        + #10 +
+    'function Square(N: Int): Int; inline;'        + #10 +
     'implementation'                                       + #10 +
-    'function Square(N: Integer): Integer; begin Result := N * N; end;' + #10 +
+    'function Square(N: Int): Int; begin Result := N * N; end;' + #10 +
     'end.'                                                 + #10;
 var
   Iface: TUnitInterface;
@@ -1421,9 +1421,9 @@ const
   SRC =
     'unit TestU;'                              + #10 +
     'interface'                                + #10 +
-    'type TPublic = record X: Integer; end;'   + #10 +
+    'type TPublic = record X: Int; end;'   + #10 +
     'implementation'                           + #10 +
-    'type TPrivate = record Y: Integer; end;'  + #10 +
+    'type TPrivate = record Y: Int; end;'  + #10 +
     'end.'                                     + #10;
 var
   Iface: TUnitInterface;
@@ -1443,9 +1443,9 @@ const
   SRC =
     'unit TestU;'                       + #10 +
     'interface'                         + #10 +
-    'function Compute(N: Integer): Integer;' + #10 +
+    'function Compute(N: Int): Int;' + #10 +
     'implementation'                    + #10 +
-    'function Compute(N: Integer): Integer; begin Result := N * 2; end;' + #10 +
+    'function Compute(N: Int): Int; begin Result := N * 2; end;' + #10 +
     'end.'                              + #10;
 var
   Iface: TUnitInterface;
@@ -1456,7 +1456,7 @@ begin
     Sig := Iface.FindRoutine('Compute');
     AssertEquals('routine present', True, Sig <> nil);
     AssertEquals('is function',     True, Sig.IsFunction);
-    AssertEquals('return type',     'Integer', Sig.ReturnType.TypeName);
+    AssertEquals('return type',     'Int', Sig.ReturnType.TypeName);
     AssertEquals('param count',     1, Sig.Params.Count);
     AssertEquals('no inline body', True,
                  Iface.FindInlineBody('Compute') = nil);
@@ -1518,7 +1518,7 @@ const
     'type'                                              + #10 +
     '  TWidget = class'                                 + #10 +
     '    procedure Step;'                               + #10 +
-    '    N: Integer;'                                   + #10 +
+    '    N: Int;'                                   + #10 +
     '  end;'                                            + #10 +
     'procedure TWidget.Step; begin end;'                + #10 +
     'end.'                                              + #10;
@@ -1545,9 +1545,9 @@ const
   SRC =
     'unit TestU;'                              + #10 +
     'interface'                                + #10 +
-    'procedure Inc(var X: Integer);'           + #10 +
+    'procedure Inc(var X: Int);'           + #10 +
     'implementation'                           + #10 +
-    'procedure Inc(var X: Integer); begin X := X + 1; end;' + #10 +
+    'procedure Inc(var X: Int); begin X := X + 1; end;' + #10 +
     'end.'                                     + #10;
 var
   Iface: TUnitInterface;
@@ -1561,7 +1561,7 @@ begin
     AssertEquals('param count', 1, Sig.Params.Count);
     P := TMethodParam(Sig.Params.Items[0]);
     AssertEquals('name',  'X',     P.ParamName);
-    AssertEquals('type',  'Integer', P.TypeName);
+    AssertEquals('type',  'Int', P.TypeName);
     AssertEquals('var',   True,    P.IsVarParam);
     AssertEquals('not const', False, P.IsConstParam);
   finally
@@ -1574,9 +1574,9 @@ const
   SRC =
     'unit TestU;'                                  + #10 +
     'interface'                                    + #10 +
-    'function Hash(const S: string): Integer;'     + #10 +
+    'function Hash(const S: string): Int;'     + #10 +
     'implementation'                               + #10 +
-    'function Hash(const S: string): Integer; begin Result := 0; end;' + #10 +
+    'function Hash(const S: string): Int; begin Result := 0; end;' + #10 +
     'end.'                                         + #10;
 var
   Iface: TUnitInterface;
@@ -1602,9 +1602,9 @@ const
   SRC =
     'unit TestU;'                                       + #10 +
     'interface'                                         + #10 +
-    'procedure Fetch(out X: Integer);'                  + #10 +
+    'procedure Fetch(out X: Int);'                  + #10 +
     'implementation'                                    + #10 +
-    'procedure Fetch(out X: Integer); begin X := 0; end;' + #10 +
+    'procedure Fetch(out X: Int); begin X := 0; end;' + #10 +
     'end.'                                              + #10;
 var
   Iface: TUnitInterface;
@@ -1618,7 +1618,7 @@ begin
     AssertEquals('param count', 1, Sig.Params.Count);
     P := TMethodParam(Sig.Params.Items[0]);
     AssertEquals('name',  'X',       P.ParamName);
-    AssertEquals('type',  'Integer', P.TypeName);
+    AssertEquals('type',  'Int', P.TypeName);
     { 'out' is a by-reference mode, so IsVarParam is also set. }
     AssertEquals('out',       True,  P.IsOutParam);
     AssertEquals('var',       True,  P.IsVarParam);
@@ -1634,10 +1634,10 @@ const
     'unit TestU;'                                + #10 +
     'interface'                                  + #10 +
     'procedure Step;'                            + #10 +
-    'function  Count: Integer;'                  + #10 +
+    'function  Count: Int;'                  + #10 +
     'implementation'                             + #10 +
     'procedure Step;            begin end;'      + #10 +
-    'function  Count: Integer;  begin Result := 0; end;' + #10 +
+    'function  Count: Int;  begin Result := 0; end;' + #10 +
     'end.'                                       + #10;
 var
   Iface: TUnitInterface;
@@ -1653,7 +1653,7 @@ begin
     AssertEquals('proc IsFunction',  False, Proc.IsFunction);
     AssertEquals('proc ret empty',   '', Proc.ReturnType.TypeName);
     AssertEquals('func IsFunction',  True, Func.IsFunction);
-    AssertEquals('func ret',         'Integer', Func.ReturnType.TypeName);
+    AssertEquals('func ret',         'Int', Func.ReturnType.TypeName);
   finally
     Iface.Free();
   end;
@@ -1688,7 +1688,7 @@ const
   SRC =
     'unit TestU;'                                       + #10 +
     'interface'                                         + #10 +
-    'function clock: Integer; external name ''clock'';' + #10 +
+    'function clock: Int; external name ''clock'';' + #10 +
     'implementation'                                    + #10 +
     'end.'                                              + #10;
 var
@@ -2162,9 +2162,9 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'procedure DoIt(N: Integer);' + #10 +
+    'procedure DoIt(N: Int32);' + #10 +
     'implementation' + #10 +
-    'procedure DoIt(N: Integer); begin end;' + #10 +
+    'procedure DoIt(N: Int32); begin end;' + #10 +
     'end.' + #10;
 var
   Iface: TUnitInterface;
@@ -2192,9 +2192,9 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'function Sum(A, B: Integer): Integer;' + #10 +
+    'function Sum(A, B: Int32): Int32;' + #10 +
     'implementation' + #10 +
-    'function Sum(A, B: Integer): Integer; begin Result := A + B; end;' + #10 +
+    'function Sum(A, B: Int32): Int32; begin Result := A + B; end;' + #10 +
     'end.' + #10;
 var
   Iface: TUnitInterface;
@@ -2221,7 +2221,7 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'type TPoint = record X, Y: Integer; end;' + #10 +
+    'type TPoint = record X, Y: Int32; end;' + #10 +
     'implementation' + #10 +
     'end.' + #10;
 var
@@ -2361,9 +2361,9 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'const N = 4;' + #10 +
-    'type TR = record A: Integer; CC: array[0..N - 1] of Byte;' + #10 +
-    '  M: array[1..N * 2] of array[0..N - 2] of Integer; end;' + #10 +
-    'var G: array[-1..N] of Word;' + #10 +
+    'type TR = record A: Int32; CC: array[0..N - 1] of Byte;' + #10 +
+    '  M: array[1..N * 2] of array[0..N - 2] of Int32; end;' + #10 +
+    'var G: array[-1..N] of UInt16;' + #10 +
     'implementation' + #10 +
     'end.' + #10;
 var
@@ -2432,7 +2432,7 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'type TFoo = class Counter: Integer; end;' + #10 +
+    'type TFoo = class Counter: Int; end;' + #10 +
     'implementation' + #10 +
     'end.' + #10;
 var
@@ -2464,8 +2464,8 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'type' + #10 +
-    '  TBase = class A: Integer; end;' + #10 +
-    '  TDerived = class(TBase) B: Integer; end;' + #10 +
+    '  TBase = class A: Int32; end;' + #10 +
+    '  TDerived = class(TBase) B: Int32; end;' + #10 +
     'implementation' + #10 +
     'end.' + #10;
 var
@@ -2797,7 +2797,7 @@ const
   MAIN_SRC =
     'program M;' + #10 +
     'uses DepU;' + #10 +
-    'var X: Integer;' + #10 +
+    'var X: Int;' + #10 +
     'begin X := K; end.' + #10;
 var
   Iface: TUnitInterface;
@@ -2828,7 +2828,7 @@ const
   DEP_SRC =
     'unit DepU;' + #10 +
     'interface' + #10 +
-    'type TFoo = class V: Integer; end;' + #10 +
+    'type TFoo = class V: Int; end;' + #10 +
     'implementation' + #10 +
     'end.' + #10;
   MAIN_SRC =
@@ -2864,7 +2864,7 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'var Counter: Integer;' + #10 +
+    'var Counter: Int32;' + #10 +
     'implementation' + #10 +
     'end.' + #10;
 var
@@ -3265,14 +3265,14 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'const K = 42;' + #10 +
-    'var Counter: Integer;' + #10 +
+    'var Counter: Int;' + #10 +
     'type' + #10 +
     '  TColor  = (Red, Green, Blue);' + #10 +
     '  TColors = set of TColor;' + #10 +
     '  TMyInt  = Integer;' + #10 +
-    'function Add(A, B: Integer): Integer;' + #10 +
+    'function Add(A, B: Int): Int;' + #10 +
     'implementation' + #10 +
-    'function Add(A, B: Integer): Integer; begin Result := A + B; end;' + #10 +
+    'function Add(A, B: Int): Int; begin Result := A + B; end;' + #10 +
     'end.' + #10;
 var
   Iface, Round: TUnitInterface;
@@ -3340,7 +3340,7 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'type TPoint = record X, Y: Integer; end;' + #10 +
+    'type TPoint = record X, Y: Int; end;' + #10 +
     'implementation end.' + #10;
 var
   Iface, Round: TUnitInterface;
@@ -3366,7 +3366,7 @@ begin
       F1 := TFieldDecl(Def.Fields.Items[1]);
       AssertEquals('X name', 'X', F0.Names.Strings[0]);
       AssertEquals('Y name', 'Y', F1.Names.Strings[0]);
-      AssertEquals('X type', 'Integer', F0.TypeName);
+      AssertEquals('X type', 'Int', F0.TypeName);
     finally
       Round.Free();
     end;
@@ -3381,13 +3381,13 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'type TVec = record' + #10 +
-    '  private FX: Integer; function GetLen: Integer;' + #10 +
+    '  private FX: Int; function GetLen: Int;' + #10 +
     '  public' + #10 +
-    '    property X: Integer read FX write FX;' + #10 +
-    '    property Len: Integer read GetLen;' + #10 +
+    '    property X: Int read FX write FX;' + #10 +
+    '    property Len: Int read GetLen;' + #10 +
     'end;' + #10 +
     'implementation' + #10 +
-    'function TVec.GetLen: Integer; begin Result := FX end;' + #10 +
+    'function TVec.GetLen: Int; begin Result := FX end;' + #10 +
     'end.' + #10;
 var
   Iface, Round: TUnitInterface;
@@ -3425,7 +3425,7 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'type TFoo = class' + #10 +
-    '  Counter: Integer;' + #10 +
+    '  Counter: Int;' + #10 +
     '  procedure Speak; virtual;' + #10 +
     'end;' + #10 +
     'implementation' + #10 +
@@ -3481,11 +3481,11 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'type TFoo = class' + #10 +
-    '  procedure Add(A: Integer); overload;' + #10 +
+    '  procedure Add(A: Int); overload;' + #10 +
     '  procedure Add(A: string); overload;' + #10 +
     'end;' + #10 +
     'implementation' + #10 +
-    'procedure TFoo.Add(A: Integer); begin end;' + #10 +
+    'procedure TFoo.Add(A: Int); begin end;' + #10 +
     'procedure TFoo.Add(A: string); begin end;' + #10 +
     'end.' + #10;
 var
@@ -3528,7 +3528,7 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'type IShape = interface' + #10 +
-    '  procedure Draw(X: Integer); overload;' + #10 +
+    '  procedure Draw(X: Int); overload;' + #10 +
     '  procedure Draw(X: string); overload;' + #10 +
     'end;' + #10 +
     'implementation end.' + #10;
@@ -3603,9 +3603,9 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'type IValued = interface' + #10 +
-    '  function GetValue(): Integer;' + #10 +
-    '  procedure SetValue(AValue: Integer);' + #10 +
-    '  property Value: Integer read GetValue write SetValue;' + #10 +
+    '  function GetValue(): Int;' + #10 +
+    '  procedure SetValue(AValue: Int);' + #10 +
+    '  property Value: Int read GetValue write SetValue;' + #10 +
     'end;' + #10 +
     'implementation end.' + #10;
 var
@@ -3626,7 +3626,7 @@ begin
       AssertEquals('1 property', 1, TInterfaceTypeDef(E.Def).Properties.Count);
       P := TPropertyDecl(TInterfaceTypeDef(E.Def).Properties.Items[0]);
       AssertEquals('property name', 'Value', P.Name);
-      AssertEquals('property type', 'Integer', P.TypeName);
+      AssertEquals('property type', 'Int', P.TypeName);
       AssertEquals('read accessor', 'GetValue', P.ReadName);
       AssertEquals('write accessor', 'SetValue', P.WriteName);
     finally
@@ -3642,7 +3642,7 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'type TCallback = procedure(N: Integer) of object;' + #10 +
+    'type TCallback = procedure(N: Int) of object;' + #10 +
     'implementation end.' + #10;
 var
   Iface, Round: TUnitInterface;
@@ -3677,7 +3677,7 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'type TOnDone = reference to function(N: Integer): Integer;' + #10 +
+    'type TOnDone = reference to function(N: Int): Int;' + #10 +
     'implementation end.' + #10;
 var
   Iface, Round: TUnitInterface;
@@ -3697,7 +3697,7 @@ begin
       AssertTrue('is a function', Def.IsFunction);
       AssertTrue('IsReference survives the round-trip', Def.IsReference);
       AssertTrue('not a method ptr', not Def.IsMethodPtr);
-      AssertEquals('return type', 'Integer', Def.ReturnTypeName);
+      AssertEquals('return type', 'Int', Def.ReturnTypeName);
       AssertEquals('1 param', 1, Def.Params.Count);
     finally
       Round.Free();
@@ -3890,7 +3890,7 @@ const
     'unit U;' + #10 +
     'interface' + #10 +
     'type TFoo = class' + #10 +
-    '  Counter: Integer;' + #10 +
+    '  Counter: Int;' + #10 +
     '  procedure Speak; virtual;' + #10 +
     'end;' + #10 +
     'implementation' + #10 +
@@ -4022,9 +4022,9 @@ const
   SRC =
     'unit U;' + #10 +
     'interface' + #10 +
-    'function Square(N: Integer): Integer; inline;' + #10 +
+    'function Square(N: Int): Int; inline;' + #10 +
     'implementation' + #10 +
-    'function Square(N: Integer): Integer; inline;' + #10 +
+    'function Square(N: Int): Int; inline;' + #10 +
     'begin Result := N * N; end;' + #10 +
     'end.' + #10;
 var
@@ -4056,15 +4056,15 @@ const
     'interface' + #10 +
     'type TReg = class' + #10 +
     '  private static var' + #10 +
-    '    FCount: Integer;' + #10 +
+    '    FCount: Int;' + #10 +
     '  public' + #10 +
-    '    static function Next: Integer;' + #10 +
-    '    static property Counter: Integer read Next;' + #10 +
+    '    static function Next: Int;' + #10 +
+    '    static property Counter: Int read Next;' + #10 +
     '  public static const' + #10 +
     '    Tag = 7;' + #10 +
     'end;' + #10 +
     'implementation' + #10 +
-    'static function TReg.Next: Integer; begin Result := FCount end;' + #10 +
+    'static function TReg.Next: Int; begin Result := FCount end;' + #10 +
     'end.' + #10;
 var
   Iface, Round: TUnitInterface;
@@ -4124,11 +4124,11 @@ const
     'interface' + #10 +
     'type TNode = class' + #10 +
     '    [Weak] FNext: TNode;' + #10 +
-    '    function Get(I: Integer): Integer;' + #10 +
-    '    property Items[I: Integer]: Integer read Get; default;' + #10 +
+    '    function Get(I: Int): Int;' + #10 +
+    '    property Items[I: Int]: Int read Get; default;' + #10 +
     'end;' + #10 +
     'implementation' + #10 +
-    'function TNode.Get(I: Integer): Integer; begin Result := I end;' + #10 +
+    'function TNode.Get(I: Int): Int; begin Result := I end;' + #10 +
     'end.' + #10;
 var
   Iface, Round: TUnitInterface;

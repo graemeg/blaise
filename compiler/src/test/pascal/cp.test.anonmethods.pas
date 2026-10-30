@@ -1293,7 +1293,7 @@ var
 begin
   AssertEquals('class local', '',
     SemanticError(Head + 'var [Unretained] O: TObject; begin end.'));
-  Msg := SemanticError(Head + 'var [Unretained] N: Integer; begin end.');
+  Msg := SemanticError(Head + 'var [Unretained] N: Int; begin end.');
   AssertTrue('non-reference type rejected: ' + Msg,
     Pos('[Unretained] can only be applied', Msg) >= 0);
   Msg := SemanticError(Head + 'var [Weak] [Unretained] O: TObject; begin end.');
@@ -1603,37 +1603,37 @@ begin
   AssertTrue('captures a local',
     Pos(Msg, SemanticError(Head +
       'procedure TC.Run(); begin end; ' +
-      'procedure Outer(); var V: Integer; ' +
+      'procedure Outer(); var V: Int32; ' +
       '  procedure Inner(); begin WriteLn(V) end; ' +
       'var P: TP; begin P := @Inner; P() end; begin end.')) >= 0);
   AssertTrue('names the captured variable',
     Pos('''V''', SemanticError(Head +
       'procedure TC.Run(); begin end; ' +
-      'procedure Outer(); var V: Integer; ' +
+      'procedure Outer(); var V: Int32; ' +
       '  procedure Inner(); begin WriteLn(V) end; ' +
       'var P: TP; begin P := @Inner end; begin end.')) >= 0);
   AssertTrue('captures a parameter, passed as an argument',
     Pos(Msg, SemanticError(Head +
       'procedure TC.Run(); begin end; ' +
       'procedure Take(P: TP); begin end; ' +
-      'procedure Outer(K: Integer); ' +
+      'procedure Outer(K: Int32); ' +
       '  procedure Inner(); begin WriteLn(K) end; ' +
       'begin Take(@Inner) end; begin end.')) >= 0);
   AssertTrue('captures Self in a method',
     Pos(Msg, SemanticError(Head +
       'procedure TC.Run(); ' +
-      '  function Inner(X: Integer): Integer; begin Result := X + F end; ' +
+      '  function Inner(X: Int32): Int32; begin Result := X + F end; ' +
       'var Fn: TF; begin Fn := @Inner end; begin end.')) >= 0);
   AssertTrue('taken inside its own body',
     Pos(Msg, SemanticError(Head +
       'procedure TC.Run(); begin end; ' +
-      'procedure Outer(); var V: Integer; ' +
+      'procedure Outer(); var V: Int32; ' +
       '  procedure Inner(); var P: TP; begin P := @Inner; WriteLn(V) end; ' +
       'begin end; begin end.')) >= 0);
   AssertTrue('captures through a sibling it calls',
     Pos(Msg, SemanticError(Head +
       'procedure TC.Run(); begin end; ' +
-      'procedure Outer(); var V: Integer; ' +
+      'procedure Outer(); var V: Int32; ' +
       '  procedure Leaf(); begin WriteLn(V) end; ' +
       '  procedure Mid(); begin Leaf() end; ' +
       'var P: TP; begin P := @Mid end; begin end.')) >= 0);
@@ -1641,7 +1641,7 @@ begin
     SemanticError(Head +
       'procedure TC.Run(); begin end; ' +
       'procedure Outer(); ' +
-      '  function Twice(X: Integer): Integer; begin Result := X * 2 end; ' +
+      '  function Twice(X: Int32): Int32; begin Result := X * 2 end; ' +
       'var Fn: TF; begin Fn := @Twice; WriteLn(Fn(4)) end; begin end.'));
 end;
 

@@ -272,7 +272,7 @@ begin
     RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TGenEnum<Integer>'));
     AssertNotNull('TGenEnum<Integer> was instantiated', RT);
     Prop := RT.FindProperty('Current');
-    AssertNotNull('Current property present on TGenEnum<Integer>', Prop);
+    AssertNotNull('Current property present on TGenEnum<Int32>', Prop);
     AssertEquals('Current property type is tyInteger',
       Ord(tyInteger), Ord(Prop.TypeDesc.Kind));
   finally
@@ -348,7 +348,7 @@ begin
     RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TListEnumerator<Integer>'));
     AssertNotNull('TListEnumerator<Integer> instantiated', RT);
     Prop := RT.FindProperty('Current');
-    AssertNotNull('Current property on TListEnumerator<Integer>', Prop);
+    AssertNotNull('Current property on TListEnumerator<Int32>', Prop);
     AssertEquals('Current type is tyInteger',
       Ord(tyInteger), Ord(Prop.TypeDesc.Kind));
   finally

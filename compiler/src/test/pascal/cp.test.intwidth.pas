@@ -62,7 +62,7 @@ var
   Prog: TProgram;
 begin
   Prog := Analyse(
-    'program P; var I, J: Integer; U, V: UInt32; B, C: Byte; K: Int8; ' +
+    'program P; var I, J: Int32; U, V: UInt32; B, C: Byte; K: Int8; ' +
     'L: Int64; Q: UInt64; R: ' + ATarget + '; ' +
     'begin I := 1; J := 2; U := 1; V := 2; B := 1; C := 2; K := 1; ' +
     'L := 1; Q := 1; R := ' + AExpr + ' end.');
@@ -163,7 +163,7 @@ end;
 
 procedure TIntWidthTests.TestAsm_IntegerShr_ZeroExtendsFirst;
 const
-  Src = 'program P; var I, N: Integer; begin I := -1; N := 1; ' +
+  Src = 'program P; var I, N: Int32; begin I := -1; N := 1; ' +
     'WriteLn(I shr N) end.';
 begin
   AssertEquals('a 32-bit shr zero-extends its operand first', '',
@@ -173,7 +173,7 @@ end;
 
 procedure TIntWidthTests.TestAsm_IntegerShl_ResultSignExtended;
 const
-  Src = 'program P; var I, N: Integer; begin I := 1; N := 31; ' +
+  Src = 'program P; var I, N: Int32; begin I := 1; N := 31; ' +
     'WriteLn(I shl N) end.';
 begin
   AssertEquals('a 32-bit shl result is re-extended from 32 bits', '',
@@ -200,7 +200,7 @@ end;
 
 procedure TIntWidthTests.TestAsm_IntegerVsInt64Compare_Extends;
 const
-  Src = 'program P; var I: Integer; L: Int64; begin I := 0; L := 7; ' +
+  Src = 'program P; var I: Int32; L: Int64; begin I := 0; L := 7; ' +
     'WriteLn(I < L) end.';
 begin
   AssertEquals('an Integer beside an Int64 is sign-extended, compared 64-bit',

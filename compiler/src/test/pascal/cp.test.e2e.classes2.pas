@@ -2955,7 +2955,7 @@ const
     'program test_self_idx_rec;' + LE +
     'type' + LE +
     '  TFrame = record' + LE +
-    '    Count: Integer;' + LE +
+    '    Count: Int;' + LE +
     '  end;' + LE +
     '  TThing = class' + LE +
     '    FStack: array of TFrame;' + LE +
@@ -2976,7 +2976,7 @@ const
     'program test_self_idx_direct;' + LE +
     'type' + LE +
     '  TThing = class' + LE +
-    '    FItems: array of Integer;' + LE +
+    '    FItems: array of Int;' + LE +
     '    procedure Go;' + LE +
     '  end;' + LE +
     'procedure TThing.Go;' + LE +

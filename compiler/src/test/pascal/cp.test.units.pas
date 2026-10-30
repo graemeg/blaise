@@ -453,9 +453,9 @@ begin
   AnalyseUnitExpectError(
     'unit Bad;' + #10 +
     'interface' + #10 +
-    'function Add(A, B: Integer): Integer;' + #10 +
+    'function Add(A, B: Int): Int;' + #10 +
     'implementation' + #10 +
-    'function Add(A: Integer): Integer;'         + #10 +  { wrong: 1 param }
+    'function Add(A: Int): Int;'         + #10 +  { wrong: 1 param }
     '''
         begin
           Result := A

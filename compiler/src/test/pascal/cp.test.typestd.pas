@@ -308,7 +308,7 @@ procedure TTypeStdTests.TestSem_MayBeNegativeInt_NeedsCastForUInt64;
   begin
     Result := SemanticError(
       'program p; type TN = (nNeg = -1, nZero); var H: UInt64; S: string; ' +
-      'I: Integer; EN: TN; begin ' + AStmt + ' end.');
+      'I: Int; EN: TN; begin ' + AStmt + ' end.');
   end;
 
 begin
@@ -447,17 +447,17 @@ begin
   GWarnNarrowing := True;
   try
     AssertTrue('Result in a function body', Pos('implicit narrowing',
-      SemanticWarnings('program p; function Back(L: Int64): Integer; ' +
+      SemanticWarnings('program p; function Back(L: Int64): Int32; ' +
         'begin Result := L end; begin end.')) >= 0);
     AssertTrue('inherited argument', Pos('implicit narrowing',
-      SemanticWarnings('program p; type TA = class procedure Put(X: Integer); ' +
-        'end; TB = class(TA) procedure Put(X: Integer); procedure Call; end; ' +
-        'procedure TA.Put(X: Integer); begin end; ' +
-        'procedure TB.Put(X: Integer); begin end; ' +
+      SemanticWarnings('program p; type TA = class procedure Put(X: Int32); ' +
+        'end; TB = class(TA) procedure Put(X: Int32); procedure Call; end; ' +
+        'procedure TA.Put(X: Int32); begin end; ' +
+        'procedure TB.Put(X: Int32); begin end; ' +
         'procedure TB.Call; var L: Int64; begin L := 1; inherited Put(L) end; ' +
         'begin end.')) >= 0);
     AssertTrue('Exit(X)', Pos('implicit narrowing',
-      SemanticWarnings('program p; function Back(L: Int64): Integer; ' +
+      SemanticWarnings('program p; function Back(L: Int64): Int32; ' +
         'begin Exit(L) end; begin end.')) >= 0);
   finally
     GWarnNarrowing := False;
@@ -472,7 +472,7 @@ begin
   try
     AssertEquals('quiet program', '', SemanticWarnings(NarrowHead +
       'begin B := 200; I := 2 * 3; I := High(Int32); L := I; N := L; ' +
-      'Take(7); I := B; I := Integer(L); Take(Integer(L)) end.'));
+      'Take(7); I := B; I := Int32(L); Take(Int32(L)) end.'));
   finally
     GWarnNarrowing := False;
   end;

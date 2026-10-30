@@ -37,7 +37,7 @@ implementation
 
 procedure TParamNarrowTests.TestAsm_IntegerParam_SignExtendedBeforeSpill;
 const
-  Src = 'program P; procedure Q(X: Integer); begin WriteLn(X) end; ' +
+  Src = 'program P; procedure Q(X: Int32); begin WriteLn(X) end; ' +
     'begin Q(1) end.';
 begin
   AssertEquals('Integer param extended from 32 bits', '',

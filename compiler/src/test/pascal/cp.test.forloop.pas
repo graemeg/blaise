@@ -390,7 +390,7 @@ begin
 end;
 
 const
-  DowntoHead = 'program P; var U: UInt32; W: Word; I, C: Integer; ' +
+  DowntoHead = 'program P; var U: UInt32; W: UInt16; I, C: Int; ' +
     'begin C := 0; ';
 
 procedure TForTests.TestSemantic_ForDownto0_UnsignedVar_Warns;

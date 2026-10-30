@@ -452,7 +452,7 @@ begin
   try
     AssertEquals('one var decl', 1, Prog.Block.Decls.Count);
     VD := TVarDecl(Prog.Block.Decls[0]);
-    AssertEquals('var type is TBox<Integer>', 'TBox<Int32>', VD.TypeName);
+    AssertEquals('var type is TBox<Int>', 'TBox<Int32>', VD.TypeName);
   finally
     Prog.Free();
   end;
@@ -466,7 +466,7 @@ begin
   Prog := ParseSrc(SrcGenericTwoParamVar);
   try
     VD := TVarDecl(Prog.Block.Decls[0]);
-    AssertEquals('var type is TPair<string,Integer>',
+    AssertEquals('var type is TPair<string,Int>',
       'TPair<string,Int32>', VD.TypeName);
   finally
     Prog.Free();
@@ -1206,7 +1206,7 @@ begin
     AssertNotNull('FData on TCell<string>',  FS);
     { The two FData fields must resolve to distinct pointer types — '^T'
       must NOT be shared across instances. }
-    AssertEquals('FData<Integer> base type',
+    AssertEquals('FData<Int> base type',
       '^Integer', FI.TypeDesc.Name);
     AssertEquals('FData<string>  base type',
       '^string',  FS.TypeDesc.Name);

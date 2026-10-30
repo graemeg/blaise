@@ -203,7 +203,7 @@ var Src: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   Src := 'program P;' + LE + ENUMHDR + LE +
-         'var s: TBigSet; e: TBig; n: Integer;' + LE +
+         'var s: TBigSet; e: TBig; n: Int;' + LE +
          'begin' + LE +
          '  s := [b05, b40, b70, b79];' + LE +
          '  n := 0;' + LE +
@@ -245,7 +245,7 @@ begin
     the field received the ADDRESS of a stack scratch buffer instead of a copy
     of the bitmap. }
   Src := 'program P;' + LE + ENUMHDR + LE +
-         'type TRec = record S: TBigSet; N: Integer; end;' + LE +
+         'type TRec = record S: TBigSet; N: Int; end;' + LE +
          'var r: TRec;' + LE +
          'begin' + LE +
          '  r.S := [];' + LE +
@@ -350,7 +350,7 @@ var Src: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   Src := 'program P;' + LE + ENUMHDR + LE +
-         'function Pick(const n: Integer; const x: TBigSet): TBigSet;' + LE +
+         'function Pick(const n: Int; const x: TBigSet): TBigSet;' + LE +
          'begin' + LE +
          '  Result := [];' + LE +
          '  if b70 in x then Include(Result, b70);' + LE +
@@ -373,7 +373,7 @@ begin
     list only, which the old receiver-only guard never inspected. }
   Src := 'program P;' + LE + ENUMHDR + LE +
          'type TH = record' + LE +
-         '  Tag: Integer;' + LE +
+         '  Tag: Int;' + LE +
          '  function Comp(const x: TBigSet): TBigSet;' + LE +
          'end;' + LE +
          'function TH.Comp(const x: TBigSet): TBigSet;' + LE +

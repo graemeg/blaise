@@ -250,13 +250,13 @@ end;
 procedure TMathTests.TestSemantic_Sqrt_Double_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Sqrt(X) end.');
+    'program P; var X, R: Float64; begin R := Sqrt(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Sqrt_Single_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Single; begin R := Sqrt(X) end.');
+    'program P; var X, R: Float32; begin R := Sqrt(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Sqrt_ReturnsDouble;
@@ -269,7 +269,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X, R: Double; begin R := Sqrt(X) end.');
+    Lexer    := TLexer.Create('program P; var X, R: Float64; begin R := Sqrt(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -284,7 +284,7 @@ end;
 
 procedure TMathTests.TestSemantic_Sqrt_IntegerArg_Accepted;
 begin
-  SemanticOKBuiltin('program P; var X: Integer; R: Double; begin R := Sqrt(X) end.');
+  SemanticOKBuiltin('program P; var X: Int; R: Float64; begin R := Sqrt(X) end.');
 end;
 
 { ------------------------------------------------------------------ }
@@ -294,7 +294,7 @@ end;
 procedure TMathTests.TestSemantic_Ceil_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X: Double; R: Integer; begin R := Ceil(X) end.');
+    'program P; var X: Float64; R: Int; begin R := Ceil(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Ceil_ReturnsInt64;
@@ -307,7 +307,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X: Double; R: Integer; begin R := Ceil(X) end.');
+    Lexer    := TLexer.Create('program P; var X: Float64; R: Int; begin R := Ceil(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -323,7 +323,7 @@ end;
 procedure TMathTests.TestSemantic_Floor_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X: Double; R: Integer; begin R := Floor(X) end.');
+    'program P; var X: Float64; R: Int; begin R := Floor(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Floor_ReturnsInt64;
@@ -336,7 +336,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X: Double; R: Integer; begin R := Floor(X) end.');
+    Lexer    := TLexer.Create('program P; var X: Float64; R: Int; begin R := Floor(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -352,7 +352,7 @@ end;
 procedure TMathTests.TestSemantic_Round_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X: Double; R: Integer; begin R := Round(X) end.');
+    'program P; var X: Float64; R: Int; begin R := Round(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Round_ReturnsInt64;
@@ -365,7 +365,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X: Double; R: Integer; begin R := Round(X) end.');
+    Lexer    := TLexer.Create('program P; var X: Float64; R: Int; begin R := Round(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -381,7 +381,7 @@ end;
 procedure TMathTests.TestSemantic_Trunc_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X: Double; R: Integer; begin R := Trunc(X) end.');
+    'program P; var X: Float64; R: Int; begin R := Trunc(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Trunc_ReturnsInt64;
@@ -394,7 +394,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X: Double; R: Integer; begin R := Trunc(X) end.');
+    Lexer    := TLexer.Create('program P; var X: Float64; R: Int; begin R := Trunc(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -409,14 +409,14 @@ end;
 
 procedure TMathTests.TestSemantic_Ceil_IntegerArg_Accepted;
 begin
-  SemanticOKBuiltin('program P; var X: Integer; R: Integer; begin R := Ceil(X) end.');
+  SemanticOKBuiltin('program P; var X: Int; R: Int; begin R := Ceil(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Trig_IntegerArg_Accepted;
 begin
-  SemanticOKBuiltin('program P; var I: Integer; D: Double; begin D := Tanh(I) end.');
-  SemanticOKBuiltin('program P; var D: Double; begin D := Sin(12) end.');
-  SemanticOKBuiltin('program P; var I: Integer; D: Double; begin D := ArcTan2(I, I) end.');
+  SemanticOKBuiltin('program P; var I: Int; D: Float64; begin D := Tanh(I) end.');
+  SemanticOKBuiltin('program P; var D: Float64; begin D := Sin(12) end.');
+  SemanticOKBuiltin('program P; var I: Int; D: Float64; begin D := ArcTan2(I, I) end.');
 end;
 
 procedure TMathTests.TestSemantic_Trig_IntegerArg_ReturnsDouble;
@@ -424,7 +424,7 @@ begin
   { The result of a trig builtin on an integer argument is Double — it must
     be assignable to a Double without error (and to a Single via implicit
     narrowing on assignment). }
-  SemanticOKBuiltin('program P; var S: Single; begin S := Sin(12) end.');
+  SemanticOKBuiltin('program P; var S: Float32; begin S := Sin(12) end.');
 end;
 
 { ------------------------------------------------------------------ }
@@ -434,7 +434,7 @@ end;
 procedure TMathTests.TestSemantic_Ln_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Ln(X) end.');
+    'program P; var X, R: Float64; begin R := Ln(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Ln_ReturnsDouble;
@@ -447,7 +447,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X, R: Double; begin R := Ln(X) end.');
+    Lexer    := TLexer.Create('program P; var X, R: Float64; begin R := Ln(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -463,13 +463,13 @@ end;
 procedure TMathTests.TestSemantic_Log2_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Log2(X) end.');
+    'program P; var X, R: Float64; begin R := Log2(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Log10_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Log10(X) end.');
+    'program P; var X, R: Float64; begin R := Log10(X) end.');
 end;
 
 { ------------------------------------------------------------------ }
@@ -479,7 +479,7 @@ end;
 procedure TMathTests.TestSemantic_Power_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var B, E, R: Double; begin R := Power(B, E) end.');
+    'program P; var B, E, R: Float64; begin R := Power(B, E) end.');
 end;
 
 procedure TMathTests.TestSemantic_Power_ReturnsDouble;
@@ -492,7 +492,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var B, E, R: Double; begin R := Power(B, E) end.');
+    Lexer    := TLexer.Create('program P; var B, E, R: Float64; begin R := Power(B, E) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -512,31 +512,31 @@ end;
 procedure TMathTests.TestSemantic_Sin_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Sin(X) end.');
+    'program P; var X, R: Float64; begin R := Sin(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Cos_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Cos(X) end.');
+    'program P; var X, R: Float64; begin R := Cos(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Tan_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Tan(X) end.');
+    'program P; var X, R: Float64; begin R := Tan(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_ArcTan_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := ArcTan(X) end.');
+    'program P; var X, R: Float64; begin R := ArcTan(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_ArcTan2_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var Y, X, R: Double; begin R := ArcTan2(Y, X) end.');
+    'program P; var Y, X, R: Float64; begin R := ArcTan2(Y, X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Sin_ReturnsDouble;
@@ -549,7 +549,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X, R: Double; begin R := Sin(X) end.');
+    Lexer    := TLexer.Create('program P; var X, R: Float64; begin R := Sin(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -572,7 +572,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X, R: Single; begin R := Sin(X) end.');
+    Lexer    := TLexer.Create('program P; var X, R: Float32; begin R := Sin(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -588,31 +588,31 @@ end;
 procedure TMathTests.TestSemantic_ArcSin_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := ArcSin(X) end.');
+    'program P; var X, R: Float64; begin R := ArcSin(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_ArcCos_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := ArcCos(X) end.');
+    'program P; var X, R: Float64; begin R := ArcCos(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Sinh_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Sinh(X) end.');
+    'program P; var X, R: Float64; begin R := Sinh(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Cosh_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Cosh(X) end.');
+    'program P; var X, R: Float64; begin R := Cosh(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Tanh_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, R: Double; begin R := Tanh(X) end.');
+    'program P; var X, R: Float64; begin R := Tanh(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_Sinh_Single_ReturnsSingle;
@@ -625,7 +625,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X, R: Single; begin R := Sinh(X) end.');
+    Lexer    := TLexer.Create('program P; var X, R: Float32; begin R := Sinh(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -645,7 +645,7 @@ end;
 procedure TMathTests.TestSemantic_IsNaN_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X: Double; B: Boolean; begin B := IsNaN(X) end.');
+    'program P; var X: Float64; B: Boolean; begin B := IsNaN(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_IsNaN_ReturnsBoolean;
@@ -658,7 +658,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X: Double; B: Boolean; begin B := IsNaN(X) end.');
+    Lexer    := TLexer.Create('program P; var X: Float64; B: Boolean; begin B := IsNaN(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -674,7 +674,7 @@ end;
 procedure TMathTests.TestSemantic_IsInfinite_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X: Double; B: Boolean; begin B := IsInfinite(X) end.');
+    'program P; var X: Float64; B: Boolean; begin B := IsInfinite(X) end.');
 end;
 
 procedure TMathTests.TestSemantic_IsInfinite_ReturnsBoolean;
@@ -687,7 +687,7 @@ var
 begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
-    Lexer    := TLexer.Create('program P; var X: Double; B: Boolean; begin B := IsInfinite(X) end.');
+    Lexer    := TLexer.Create('program P; var X: Float64; B: Boolean; begin B := IsInfinite(X) end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -765,7 +765,7 @@ begin
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
     Lexer := TLexer.Create(
-      'program P; uses Math; var A, B, R: Integer; begin R := Min(A, B) end.');
+      'program P; uses Math; var A, B, R: Int32; begin R := Min(A, B) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();
@@ -803,7 +803,7 @@ begin
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
     Lexer := TLexer.Create(
-      'program P; uses Math; var A, B, R: Double; begin R := Max(A, B) end.');
+      'program P; uses Math; var A, B, R: Float64; begin R := Max(A, B) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();
@@ -865,7 +865,7 @@ begin
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
     Lexer := TLexer.Create(
-      'program P; uses Math; var X: Double; R: Integer; begin R := Sign(X) end.');
+      'program P; uses Math; var X: Float64; R: Int; begin R := Sign(X) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();
@@ -941,7 +941,7 @@ begin
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
     Lexer := TLexer.Create(
-      'program P; uses Math; var V, Lo, Hi: Integer; B: Boolean; begin B := InRange(V, Lo, Hi) end.');
+      'program P; uses Math; var V, Lo, Hi: Int; B: Boolean; begin B := InRange(V, Lo, Hi) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();
@@ -1003,7 +1003,7 @@ begin
   Loader := nil; Units  := nil; SearchPaths := nil;
   try
     Lexer := TLexer.Create(
-      'program P; uses Math; var V, Lo, Hi, R: Integer; begin R := EnsureRange(V, Lo, Hi) end.');
+      'program P; uses Math; var V, Lo, Hi, R: Int; begin R := EnsureRange(V, Lo, Hi) end.');
     Parser      := TParser.Create(Lexer);
     Prog        := Parser.Parse();
     Semantic    := TSemanticAnalyser.Create();
@@ -1130,7 +1130,7 @@ begin
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
   try
     Lexer    := TLexer.Create(
-      'program P; var X, Y: Integer; R: Double; begin R := Y / X end.');
+      'program P; var X, Y: Int; R: Float64; begin R := Y / X end.');
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
@@ -1146,25 +1146,25 @@ end;
 procedure TMathTests.TestSemantic_RealDiv_IntegerDoubleReturnsDouble;
 begin
   SemanticOKBuiltin(
-    'program P; var X: Integer; Y, R: Double; begin R := X / Y end.');
+    'program P; var X: Int; Y, R: Float64; begin R := X / Y end.');
 end;
 
 procedure TMathTests.TestSemantic_RealDiv_AsTruncArg_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, Y: Integer; R: Integer; begin R := Trunc(Y / X) end.');
+    'program P; var X, Y: Int; R: Int; begin R := Trunc(Y / X) end.');
 end;
 
 procedure TMathTests.TestSemantic_RealDiv_AsRoundArg_OK;
 begin
   SemanticOKBuiltin(
-    'program P; var X, Y: Integer; R: Integer; begin R := Round(Y / X) end.');
+    'program P; var X, Y: Int; R: Int; begin R := Round(Y / X) end.');
 end;
 
 procedure TMathTests.TestSemantic_IntegerDiv_RejectsFloat;
 begin
   SemanticError(
-    'program P; var X, Y: Double; R: Integer; begin R := Trunc(Y div X) end.');
+    'program P; var X, Y: Float64; R: Int; begin R := Trunc(Y div X) end.');
 end;
 
 procedure TMathTests.TestCodegen_Round_TiesToEvenConversion;

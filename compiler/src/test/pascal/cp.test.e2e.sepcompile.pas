@@ -4533,13 +4533,13 @@ begin
   ProgBin  := FScratch + '/usenl';
   CacheDir := FScratch + '/units-usenl';
   WriteFile(FScratch + '/unonl.pas',
-    'unit unonl;' + #10 + 'interface' + #10 + 'function A: Integer;' + #10 +
-    'implementation' + #10 + 'function A: Integer; begin Result := 40 end;' +
+    'unit unonl;' + #10 + 'interface' + #10 + 'function A: Int;' + #10 +
+    'implementation' + #10 + 'function A: Int; begin Result := 40 end;' +
     #10 + 'end.');
   WriteFile(FScratch + '/ucrlf.pas',
-    'unit ucrlf;' + #13#10 + 'interface' + #13#10 + 'function B: Integer;' +
+    'unit ucrlf;' + #13#10 + 'interface' + #13#10 + 'function B: Int;' +
     #13#10 + 'implementation' + #13#10 +
-    'function B: Integer; begin Result := 2 end;' + #13#10 + 'end.' + #13#10);
+    'function B: Int; begin Result := 2 end;' + #13#10 + 'end.' + #13#10);
   WriteFile(ProgPas, ProgSrc);
   ForceDirectories(CacheDir);
   for Pass := 0 to 1 do

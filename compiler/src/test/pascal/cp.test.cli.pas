@@ -319,7 +319,7 @@ begin
   end;
   Src := WriteScratchSource(
     'program cli_with;' + LineEnding +
-    'type TR = record A, B: Integer; end;' + LineEnding +
+    'type TR = record A, B: Int; end;' + LineEnding +
     'var R: TR;' + LineEnding +
     'begin' + LineEnding +
     '  with R do' + LineEnding +
@@ -355,7 +355,7 @@ begin
   WriteFile(UnitDir + 'uimpl215.pas',
     'unit uimpl215;' + LineEnding +
     'interface' + LineEnding +
-    'procedure Foo(X: Integer);' + LineEnding +
+    'procedure Foo(X: Int32);' + LineEnding +
     'implementation' + LineEnding +
     'procedure Foo(X: Byte);' + LineEnding +
     'begin' + LineEnding +
@@ -642,7 +642,7 @@ const
   SrcDivByZeroCaught =
     'program P;' + LineEnding +
     'uses SysUtils;' + LineEnding +
-    'var a, b: Integer;' + LineEnding +
+    'var a, b: Int;' + LineEnding +
     'begin' + LineEnding +
     '  a := 10; b := 0;' + LineEnding +
     '  try' + LineEnding +
@@ -656,7 +656,7 @@ const
   SrcModByZeroCaught =
     'program P;' + LineEnding +
     'uses SysUtils;' + LineEnding +
-    'var a, b: Integer;' + LineEnding +
+    'var a, b: Int;' + LineEnding +
     'begin' + LineEnding +
     '  a := 10; b := 0;' + LineEnding +
     '  try' + LineEnding +
@@ -674,7 +674,7 @@ const
     were broken (no flag emitted), the link would SUCCEED. }
   SrcMissingExternalLib =
     'program P;' + LineEnding +
-    'function f(X: Integer): Integer;' +
+    'function f(X: Int): Int;' +
     ' external ''nosuchlib_blaise_xyz'' name ''nope'';' + LineEnding +
     'begin' + LineEnding +
     '  WriteLn(''unreached'')' + LineEnding +
@@ -710,7 +710,7 @@ begin
     requirement was lost for cached/separately-compiled units and the
     binary died at run time with "undefined symbol: pow". }
   SrcPath := WriteScratchSource(
-    'program p; var d: Double; begin d := Sqrt(2.0); WriteLn(d > 1.0); end.');
+    'program p; var d: Float64; begin d := Sqrt(2.0); WriteLn(d > 1.0); end.');
   BinPath := FScratch + 'cli_libm_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath,
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
@@ -779,7 +779,7 @@ begin
     so, naming the library. }
   SrcPath := WriteScratchSource(
     'program p; ' +
-    'function sf(x: Single): Single; cdecl; external ''m'' name ''sinf''; ' +
+    'function sf(x: Float32): Float32; cdecl; external ''m'' name ''sinf''; ' +
     'begin WriteLn(sf(0.0) = 0.0); end.');
   BinPath := FScratch + 'cli_lmauto_lib_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
@@ -812,7 +812,7 @@ begin
     getrlimit — stays freestanding and produces no note.) }
   SrcPath := WriteScratchSource(
     'program p; ' +
-    'function tty(fd: Integer): Integer; cdecl; external name ''isatty''; ' +
+    'function tty(fd: Int): Int; cdecl; external name ''isatty''; ' +
     'begin tty(0); WriteLn(1); end.');
   BinPath := FScratch + 'cli_lmauto_bare_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
@@ -839,7 +839,7 @@ begin
     cannot load shared libraries.  Hard error naming the libs. }
   SrcPath := WriteScratchSource(
     'program p; ' +
-    'function sf(x: Single): Single; cdecl; external ''m'' name ''sinf''; ' +
+    'function sf(x: Float32): Float32; cdecl; external ''m'' name ''sinf''; ' +
     'begin WriteLn(sf(0.0) = 0.0); end.');
   BinPath := FScratch + 'cli_lmstatic_lib_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--static',
@@ -863,7 +863,7 @@ begin
     symbols instead of dying mid-link with a bare undefined reference. }
   SrcPath := WriteScratchSource(
     'program p; ' +
-    'function tty(fd: Integer): Integer; cdecl; external name ''isatty''; ' +
+    'function tty(fd: Int): Int; cdecl; external name ''isatty''; ' +
     'begin tty(0); WriteLn(1); end.');
   BinPath := FScratch + 'cli_lmstatic_sym_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--static',
@@ -907,7 +907,7 @@ begin
     from a real call through the PLT into libm. }
   SrcPath := WriteScratchSource(
     'program p; ' +
-    'function sf(x: Single): Single; cdecl; external ''m'' name ''sinf''; ' +
+    'function sf(x: Float32): Float32; cdecl; external ''m'' name ''sinf''; ' +
     'begin WriteLn(sf(0.0) = 0.0); end.');
   BinPath := FScratch + 'cli_lmauto_run_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
@@ -984,7 +984,7 @@ begin
   { The program prints the count and then the verdict, so a failure message
     carries the bogus number rather than just 'FALSE'. }
   SrcPath := WriteScratchSource(
-    'program p; uses runtime.thread; var N: Integer; ' +
+    'program p; uses runtime.thread; var N: Int; ' +
     'begin N := GetCPUCount(); WriteLn(N); ' +
     'WriteLn((N >= 1) and (N <= 4096)); end.');
 
@@ -1064,7 +1064,7 @@ begin
     it (ncurses needs a tty); we only inspect the emitted DT_NEEDED. }
   SrcPath := WriteScratchSource(
     'program p;' + LineEnding +
-    'function ext_probe(): Integer; external ''' + LibName +
+    'function ext_probe(): Int; external ''' + LibName +
       ''' name ''' + LibName + ''';' + LineEnding +
     'begin WriteLn(0); end.');
   BinPath := FScratch + 'cli_lnkscript_' + IntToStr(FCounter);
@@ -1122,9 +1122,9 @@ begin
   WriteFile(UnitPath,
     'unit clidemo_unit;' + LineEnding +
     'interface' + LineEnding +
-    'function Answer: Integer;' + LineEnding +
+    'function Answer: Int;' + LineEnding +
     'implementation' + LineEnding +
-    'function Answer: Integer;' + LineEnding +
+    'function Answer: Int;' + LineEnding +
     'begin' + LineEnding +
     '  Result := 42' + LineEnding +
     'end;' + LineEnding +

@@ -162,7 +162,7 @@ begin
   try
     TD := TTypeDecl(Prog.Block.TypeDecls.Items[0]);
     AD := TTypeAliasDef(TD.Def);
-    AssertEquals('type name encoded as array of Integer',
+    AssertEquals('type name encoded as array of Int',
       'array of Int32', AD.TypeName);
   finally Prog.Free(); end;
 end;
@@ -476,7 +476,7 @@ var Raised: Boolean;
 begin
   Raised := False;
   try
-    AnalyseSrc('program Prg; var A: array[0..2] of Integer; ' +
+    AnalyseSrc('program Prg; var A: array[0..2] of Int; ' +
       'begin A := nil end.').Free();
   except
     on E: ESemanticError do Raised := True;

@@ -389,7 +389,7 @@ var
 begin
   Prog := AnalyseSrc(Src);
   try
-    AssertTrue('PInteger and ^Integer are one type',
+    AssertTrue('PInteger and ^Int are one type',
       TVarDecl(Prog.Block.Decls[0]).ResolvedType =
       TVarDecl(Prog.Block.Decls[1]).ResolvedType);
     AssertTrue('PCardinal and PUInt32 are one type',
@@ -578,13 +578,13 @@ end;
 const
   SrcPointerFromInt =
     'program Prg;' +
-    'var N: Integer; P: Pointer;' +
+    'var N: Int; P: Pointer;' +
     'begin N := 42; P := Pointer(N) end.';
 
   SrcPtrUIntFromPtr =
     'program Prg;' +
     'var P: Pointer; U: UInt64;' +
-    'begin P := nil; U := PtrUInt(P) end.';
+    'begin P := nil; U := UInt(P) end.';
 
 procedure TPointerTests.TestSemantic_Pointer_FromInt_ReturnsPointerType;
 var
@@ -871,7 +871,7 @@ end;
 procedure TPointerTests.TestSemantic_Move_DynArray_Rejected;
 begin
   MoveRejectsManaged(Self,
-    'type TInts = array of Integer;' + #10 + 'var A, B: TInts;',
+    'type TInts = array of Int32;' + #10 + 'var A, B: TInts;',
     'A, B, 8', 'array of Integer');
 end;
 
@@ -881,7 +881,7 @@ begin
   MoveRejectsManaged(Self,
     'type' + #10 +
     '  TInner = record Name: string; end;' + #10 +
-    '  TOuter = record Id: Integer; Inner: TInner; end;' + #10 +
+    '  TOuter = record Id: Int; Inner: TInner; end;' + #10 +
     'var A: array[0..31] of Byte; B: TOuter;',
     'A, B, SizeOf(TOuter)', 'TOuter');
 end;

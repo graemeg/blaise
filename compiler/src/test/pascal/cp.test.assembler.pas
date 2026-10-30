@@ -1249,7 +1249,7 @@ var
 begin
   if not CompileAndRun(
     'program test_for;' + LineEnding +
-    'var I: Integer;' + LineEnding +
+    'var I: Int;' + LineEnding +
     'begin' + LineEnding +
     '  for I := 1 to 5 do' + LineEnding +
     '    Write(I);' + LineEnding +
@@ -1271,7 +1271,7 @@ var
 begin
   if not CompileAndRun(
     'program test_func;' + LineEnding +
-    'function Add(A, B: Integer): Integer;' + LineEnding +
+    'function Add(A, B: Int): Int;' + LineEnding +
     'begin' + LineEnding +
     '  Result := A + B' + LineEnding +
     'end;' + LineEnding +
@@ -1294,7 +1294,7 @@ var
 begin
   if not CompileAndRun(
     'program test_if;' + LineEnding +
-    'var X: Integer;' + LineEnding +
+    'var X: Int;' + LineEnding +
     'begin' + LineEnding +
     '  X := 5;' + LineEnding +
     '  if X > 3 then' + LineEnding +
@@ -1318,7 +1318,7 @@ var
 begin
   if not CompileAndRun(
     'program test_while;' + LineEnding +
-    'var N: Integer;' + LineEnding +
+    'var N: Int;' + LineEnding +
     'begin' + LineEnding +
     '  N := 1;' + LineEnding +
     '  while N <= 3 do' + LineEnding +
@@ -1367,7 +1367,7 @@ var
 begin
   if not CompileAndRun(
     'program test_neg;' + LineEnding +
-    'var X: Integer;' + LineEnding +
+    'var X: Int;' + LineEnding +
     'begin' + LineEnding +
     '  X := -42;' + LineEnding +
     '  WriteLn(X)' + LineEnding +
@@ -1389,7 +1389,7 @@ begin
   if not CompileAndRun(
     'program test_promo_widths;' + LineEnding +
     'function Mix(B: Byte): Int64;' + LineEnding +
-    'var W: SmallInt;' + LineEnding +
+    'var W: Int16;' + LineEnding +
     'begin' + LineEnding +
     '  B := B + 200;' + LineEnding +
     '  W := -3;' + LineEnding +
@@ -1416,7 +1416,7 @@ var
 begin
   if not CompileAndRun(
     'program test_vars;' + LineEnding +
-    'var A, B, C: Integer;' + LineEnding +
+    'var A, B, C: Int;' + LineEnding +
     'begin' + LineEnding +
     '  A := 10;' + LineEnding +
     '  B := 20;' + LineEnding +
@@ -1439,11 +1439,11 @@ var
 begin
   if not CompileAndRun(
     'program test_nested;' + LineEnding +
-    'function Twice(X: Integer): Integer;' + LineEnding +
+    'function Twice(X: Int): Int;' + LineEnding +
     'begin' + LineEnding +
     '  Result := X * 2' + LineEnding +
     'end;' + LineEnding +
-    'function AddOne(X: Integer): Integer;' + LineEnding +
+    'function AddOne(X: Int): Int;' + LineEnding +
     'begin' + LineEnding +
     '  Result := X + 1' + LineEnding +
     'end;' + LineEnding +
@@ -1500,7 +1500,7 @@ begin
     spills) — previously unparseable in the internal assembler. }
   if not CompileAndRun(
     'program test_float;' + LineEnding +
-    'var A, B: Double;' + LineEnding +
+    'var A, B: Float64;' + LineEnding +
     'begin' + LineEnding +
     '  A := 1.5;' + LineEnding +
     '  B := A * 2.0;' + LineEnding +
@@ -1647,7 +1647,7 @@ begin
     assembles the verbatim block, and Pascal calls it normally. }
   if not CompileAndRun(
     'program test_asmret;' + LineEnding +
-    'function GetFortyTwo: Integer; assembler; nostackframe;' + LineEnding +
+    'function GetFortyTwo: Int; assembler; nostackframe;' + LineEnding +
     'asm' + LineEnding +
     '    movl $42, %eax' + LineEnding +
     '    ret' + LineEnding +
@@ -1679,7 +1679,7 @@ begin
     a nostackframe asm function reads its parameters from the arg registers. }
   if not CompileAndRun(
     'program test_asmadd;' + LineEnding +
-    'function AddTwo(A, B: Integer): Integer; assembler; nostackframe;' + LineEnding +
+    'function AddTwo(A, B: Int): Int; assembler; nostackframe;' + LineEnding +
     'asm' + LineEnding +
     '    movl %edi, %eax' + LineEnding +
     '    addl %esi, %eax' + LineEnding +

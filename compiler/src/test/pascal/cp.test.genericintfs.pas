@@ -326,7 +326,7 @@ procedure TGenericIntfTests.TestSemantic_GenericIntf_InstantiatesOnVarDecl;
 var
   Prog: TProgram;
 begin
-  { 'var C: IEqualityComparer<Integer>' should trigger instantiation }
+  { 'var C: IEqualityComparer<Int>' should trigger instantiation }
   Prog := AnalyseSrc(SrcEqualityComparer);
   Prog.Free();
 end;

@@ -190,7 +190,7 @@ end;
 procedure TMoneyIRTests.TestSemantic_CurrencyScale_ReturnsInteger_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Money; var I: Integer; ' +
+    'program P; uses Numerics.Money; var I: Int; ' +
     'begin I := CurrencyScale(''KWD'') end.');
 end;
 
@@ -238,7 +238,7 @@ end;
 procedure TMoneyIRTests.TestSemantic_Compare_ReturnsInteger_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Money; var A, B: TMoney; I: Integer; ' +
+    'program P; uses Numerics.Money; var A, B: TMoney; I: Int; ' +
     'begin A := MoneyFromInt(1, ''USD''); B := MoneyFromInt(2, ''USD''); ' +
     'I := A.Compare(B) end.');
 end;
@@ -261,7 +261,7 @@ end;
 procedure TMoneyIRTests.TestSemantic_Sign_ReturnsInteger_OK;
 begin
   SemanticOK(
-    'program P; uses Numerics.Money; var A: TMoney; I: Integer; ' +
+    'program P; uses Numerics.Money; var A: TMoney; I: Int; ' +
     'begin A := MoneyFromInt(1, ''USD''); I := A.Sign() end.');
 end;
 
@@ -323,7 +323,7 @@ end;
 procedure TMoneyIRTests.TestSemantic_AssignMoneyToInt_Error;
 begin
   AnalyseExpectError(
-    'program P; uses Numerics.Money; var M: TMoney; I: Integer; ' +
+    'program P; uses Numerics.Money; var M: TMoney; I: Int; ' +
     'begin M := MoneyFromInt(1, ''USD''); I := M end.');
 end;
 

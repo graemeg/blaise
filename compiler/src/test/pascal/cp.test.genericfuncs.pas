@@ -532,8 +532,8 @@ var
 begin
   Prog := AnalyseSrc(
     'program X; function Twice<T>(a: T): T; begin Result := a + a end; ' +
-    'var I: Integer; S: string; ' +
-    'begin I := Twice<Integer>(4); I := Twice<Integer>(I); ' +
+    'var I: Int; S: string; ' +
+    'begin I := Twice<Int>(4); I := Twice<Int>(I); ' +
     'S := Twice<string>(''a''); S := Twice<string>(S) end.');
   try
     AssertEquals('one instance per type argument list', 2,
