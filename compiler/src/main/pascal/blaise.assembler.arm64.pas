@@ -110,11 +110,25 @@ type
     FL: TA64Line;
     FA: array of TA64Op;
     FNOps: Integer;
+    { Branch relaxation.  FLineIdx is the line being encoded; FLong holds the
+      conditional branches whose target is beyond their reach, encoded as
+      the inverted branch over a b.  Pass 1 repeats until it marks none;
+      FPrevOff keeps the previous pass's label offsets so a forward target
+      can be measured, and FRelaxed records a new mark in this pass. }
+    FLineIdx: Integer;
+    FLong: TDictionary<Integer, Boolean>;
+    FPrevOff: TDictionary<string, Integer>;
+    FRelaxed: Boolean;
+    { the smallest reach among this pass's branches to a target not yet
+      placed (0 = none): pass 1 repeats only if the text outgrows it }
+    FUnplacedReach: Integer;
     procedure EmitW(AVal: Integer);
     procedure LineError(const AMsg: string);
     function LabelDifference(const AExpr: string): Int64;
     function BranchDelta(const ASym: string; AKind: TContainerRelocKind;
       out AIsLocal: Boolean): Integer;
+    function IsFarBranch(const ASym: string; AReach: Integer): Boolean;
+    procedure EmitFarTail(const ASym: string);
     procedure SymReloc(const ASym: string; ARef: TSymRef);
     procedure NeedOps(AN: Integer);
     procedure HandleDirective;
@@ -904,6 +918,51 @@ function TArm64Assembler.BranchDelta(const ASym: string;
     end;
   end;
 
+{ True when the conditional branch on this line takes the long form: its
+  target lies outside [-AReach, AReach - 4] bytes.  Pass 1 measures a backward
+  target from this pass's labels and a forward one from the previous pass's,
+  and marks the line once it is out of reach; marks only grow, so the passes
+  converge.  Pass 2 encodes the marks, and reports a short branch still out of
+  reach rather than wrapping its offset. }
+function TArm64Assembler.IsFarBranch(const ASym: string;
+  AReach: Integer): Boolean;
+  var
+    Target: Integer;
+    Known:  Boolean;
+  begin
+    Result := FLong.ContainsKey(FLineIdx);
+    if Result then Exit;
+    Known := FLabelOff.TryGetValue(ASym, Target);
+    if (not Known) and (FPassNo = 1) then
+      Known := FPrevOff.TryGetValue(ASym, Target);
+    if not Known then
+    begin
+      if (FUnplacedReach = 0) or (AReach < FUnplacedReach) then
+        FUnplacedReach := AReach;
+      Exit;
+    end;
+    if (Target - FCurOff < -AReach) or (Target - FCurOff > AReach - 4) then
+    begin
+      if FPassNo = 2 then
+        LineError('branch target out of range: ' + ASym);
+      FLong.Add(FLineIdx, True);
+      FRelaxed := True;
+      Result := True;
+    end;
+  end;
+
+{ The second word of a long conditional branch: b ASym, from the word after
+  the inverted branch. }
+procedure TArm64Assembler.EmitFarTail(const ASym: string);
+  var
+    Delta:   Integer;
+    IsLocal: Boolean;
+  begin
+    FCurOff := FCurOff + 4;
+    Delta := BranchDelta(ASym, crkNone, IsLocal);
+    EmitW(Integer($14000000) or ((Delta div 4) and $3FFFFFF));
+  end;
+
   { Emit a symbol reloc for the current instruction word (pass 2). }
 procedure TArm64Assembler.SymReloc(const ASym: string; ARef: TSymRef);
   var
@@ -1161,6 +1220,13 @@ procedure TArm64Assembler.EncodeInstr;
         placeholder; pass 2 has the full label table and errors for real }
       if (not IsLocal) and (FPassNo = 2) then
         LineError('b.<cond> target must be a local label');
+      { beyond +-1 MiB: b.<inverse> over the next word, then b target }
+      if IsFarBranch(FA[0].Sym, $100000) then
+      begin
+        EmitW(Integer($54000000) or (2 shl 5) or CondInvert(CondCode(FL.Cond)));
+        EmitFarTail(FA[0].Sym);
+        Exit;
+      end;
       EmitW(Integer($54000000) or (((Delta div 4) and $7FFFF) shl 5)
         or CondCode(FL.Cond));
       Exit;
@@ -1174,6 +1240,13 @@ procedure TArm64Assembler.EncodeInstr;
         LineError('cbz/cbnz target must be a local label');
       Wd := Integer($34000000) or (SfBit(FA[0].Is64) shl 31);
       if FL.Mnemonic = 'cbnz' then Wd := Wd or $01000000;
+      { beyond +-1 MiB: the opposite test over the next word, then b target }
+      if IsFarBranch(FA[1].Sym, $100000) then
+      begin
+        EmitW((Wd xor $01000000) or (2 shl 5) or FA[0].Reg);
+        EmitFarTail(FA[1].Sym);
+        Exit;
+      end;
       EmitW(Wd or (((Delta div 4) and $7FFFF) shl 5) or FA[0].Reg);
       Exit;
     end;
@@ -1187,9 +1260,15 @@ procedure TArm64Assembler.EncodeInstr;
       Wd := Integer($36000000);
       if FL.Mnemonic = 'tbnz' then Wd := Wd or $01000000;
       Wd := Wd or ((Integer(FA[1].Imm) and $20) shl 26)   { b5 -> bit 31 }
-        or ((Integer(FA[1].Imm) and $1F) shl 19)
-        or (((Delta div 4) and $3FFF) shl 5) or FA[0].Reg;
-      EmitW(Wd);
+        or ((Integer(FA[1].Imm) and $1F) shl 19) or FA[0].Reg;
+      { beyond +-32 KiB: the opposite test over the next word, then b target }
+      if IsFarBranch(FA[2].Sym, $8000) then
+      begin
+        EmitW((Wd xor $01000000) or (2 shl 5));
+        EmitFarTail(FA[2].Sym);
+        Exit;
+      end;
+      EmitW(Wd or (((Delta div 4) and $3FFF) shl 5));
       Exit;
     end;
 
@@ -1646,6 +1725,8 @@ begin
   FLabelOff := TDictionary<string, Integer>.Create();
   FGlobals := TDictionary<string, Boolean>.Create();
   FWeaks := TDictionary<string, Boolean>.Create();
+  FLong := TDictionary<Integer, Boolean>.Create();
+  FPrevOff := TDictionary<string, Integer>.Create();
   FW := TMachOObjectWriter.Create();
   try
     SplitLines(AAsmText, Lines);
@@ -1653,9 +1734,12 @@ begin
     for I := 0 to Lines.Count - 1 do
       Parsed[I] := ParseLine(Lines.Get(I), I + 1);
 
-    for PassIdx := 1 to 2 do
+    PassIdx := 1;
+    while PassIdx <= 2 do
     begin
       FPassNo := PassIdx;
+      FRelaxed := False;
+      FUnplacedReach := 0;
       if FPassNo = 2 then
       begin
         FW.Free();
@@ -1688,6 +1772,7 @@ begin
       for I := 0 to Length(Parsed) - 1 do
       begin
         FL := Parsed[I];
+        FLineIdx := I;
         case FL.Kind of
           alBlank: ;
           alLabel:
@@ -1727,6 +1812,21 @@ begin
           end;
         end;
       end;
+      { Pass 1 again when it relaxed a branch (the code after it moved), or
+        when a branch to a target not yet placed might be out of reach: the
+        next pass measures it from this pass's labels. }
+      if (FPassNo = 1) and (FRelaxed or ((FUnplacedReach > 0) and
+         (FW.CurrentOffset(cskText) > FUnplacedReach - 4))) then
+      begin
+        FPrevOff.Free();
+        FPrevOff := FLabelOff;
+        FLabelOff := TDictionary<string, Integer>.Create();
+        FLabelSec.Clear();
+        FW.Free();
+        FW := TMachOObjectWriter.Create();
+      end
+      else
+        PassIdx := PassIdx + 1;
     end;
 
     { the .bif payload is data, not assembled text, so it is appended straight
@@ -1740,6 +1840,8 @@ begin
     SetLength(FA, 0);
     FWeaks.Free();
     FGlobals.Free();
+    FLong.Free();
+    FPrevOff.Free();
     FLabelSec.Free();
     FLabelOff.Free();
     Lines.Free();

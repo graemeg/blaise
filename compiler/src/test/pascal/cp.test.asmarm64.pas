@@ -46,6 +46,10 @@ type
     procedure TestLoadStore_UnscaledAutoDowngrade;
     procedure TestFloatOps;
     procedure TestLocalBranches_ResolveToDeltas;
+    { A conditional branch whose target is beyond its reach (b.cond / cbz
+      +-1 MiB, tbz +-32 KiB) is relaxed to the inverted branch over a b,
+      instead of encoding a wrapped offset. }
+    procedure TestFarConditionalBranches_Relaxed;
     procedure TestBlUndefined_EmitsBranch26;
     procedure TestAdrpAddPair_EmitsPageRelocs;
     procedure TestGotAndTlvRelocs;
@@ -313,6 +317,40 @@ begin
       Integer($B4FFFFC0), WordAt(T, 2));
     AssertEquals('b.eq back by three words',
       Integer($54FFFFA0), WordAt(T, 3));
+    AssertEquals('no relocations for local branches', 0, T.Relocs.Count);
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TArm64AsmTests.TestFarConditionalBranches_Relaxed;
+var
+  F: TMachOFile;
+  T: TMoSection;
+begin
+  { mid is 40,024 bytes in (beyond tbz's reach), far 1,140,028 (beyond
+    b.cond's and cbz's); the last branch reaches back past 1 MiB. }
+  T := TextWords(
+    'b.eq far' + LineEnding +
+    'cbz x1, far' + LineEnding +
+    'tbnz w2, #3, mid' + LineEnding +
+    '.zero 40000' + LineEnding +
+    'mid:' + LineEnding +
+    'nop' + LineEnding +
+    '.zero 1100000' + LineEnding +
+    'far:' + LineEnding +
+    'ret' + LineEnding +
+    'cbnz x3, mid' + LineEnding, F);
+  try
+    AssertEquals('b.eq far -> b.ne +8', Int32($54000041), WordAt(T, 0));
+    AssertEquals('  then b far', Int32($1404594E), WordAt(T, 1));
+    AssertEquals('cbz x1 far -> cbnz x1 +8', Int32($B5000041), WordAt(T, 2));
+    AssertEquals('  then b far', Int32($1404594C), WordAt(T, 3));
+    AssertEquals('tbnz w2 #3 mid -> tbz w2 #3 +8', Int32($36180042), WordAt(T, 4));
+    AssertEquals('  then b mid', Int32($14002711), WordAt(T, 5));
+    AssertEquals('backward cbnz x3 mid -> cbz x3 +8', Int32($B4000043),
+      WordAt(T, 285008));
+    AssertEquals('  then b mid', Int32($17FBCDC5), WordAt(T, 285009));
     AssertEquals('no relocations for local branches', 0, T.Relocs.Count);
   finally
     F.Free();
