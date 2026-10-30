@@ -29,7 +29,7 @@ var
 begin
   Base := FiberStackAcquire(FiberDefaultStackSize, Total);
   AssertTrue('base not nil', Base <> nil);
-  AssertTrue('base page-aligned', (PtrUInt(Base) and 4095) = 0);
+  AssertTrue('base page-aligned', (UInt(Base) and 4095) = 0);
   AssertEquals('total = usable + guard page',
     Int64(FiberDefaultStackSize + FiberPageSize), Total);
   FiberStackReturn(Base, Total);
@@ -115,9 +115,9 @@ begin
   AssertTrue('fiber has a stack', F^.StackBase <> nil);
   AssertTrue('fresh fiber not done', not FiberIsDone(F));
   AssertTrue('context SP inside the stack',
-    (PtrUInt(F^.Ctx.SP) > PtrUInt(F^.StackBase)) and
-    (PtrUInt(F^.Ctx.SP) < PtrUInt(F^.StackBase) + PtrUInt(F^.StackTotal)));
-  AssertTrue('context SP 16-byte aligned', (PtrUInt(F^.Ctx.SP) and 15) = 0);
+    (UInt(F^.Ctx.SP) > UInt(F^.StackBase)) and
+    (UInt(F^.Ctx.SP) < UInt(F^.StackBase) + UInt(F^.StackTotal)));
+  AssertTrue('context SP 16-byte aligned', (UInt(F^.Ctx.SP) and 15) = 0);
   FiberFree(F);
   Result := '';
 end;

@@ -28,9 +28,9 @@ program test_blaise_strtod;
 uses
   punit;
 
-function _StrToDouble(S: Pointer): Double; external name '_StrToDouble';
+function _StrToDouble(S: Pointer): Float64; external name '_StrToDouble';
 
-function DB(V: Double): Int64;
+function DB(V: Float64): Int64;
 var
   P: ^Int64;
 begin
@@ -41,7 +41,7 @@ end;
 function Test_Vectors: string;
 var
   Fails: Integer;
-  R: Double;
+  R: Float64;
 begin
   Fails := 0;
   R := _StrToDouble(PChar('9.61796693925975554329e-01'));
@@ -272,7 +272,7 @@ end;
 
 function Test_Specials: string;
 var
-  R: Double;
+  R: Float64;
 begin
   R := _StrToDouble(PChar('inf'));
   AssertEquals('inf', Int64(9218868437227405312), DB(R));

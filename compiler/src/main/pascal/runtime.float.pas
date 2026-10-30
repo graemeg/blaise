@@ -28,9 +28,9 @@ unit runtime.float;
 
 interface
 
-function _DoubleToStr(V: Double): Pointer;
-function _SingleToStr(V: Single): Pointer;
-function _StrToDouble(S: Pointer): Double;
+function _DoubleToStr(V: Float64): Pointer;
+function _SingleToStr(V: Float32): Pointer;
+function _StrToDouble(S: Pointer): Float64;
 function _AbsInt(N: Integer): Integer;
 function _AbsInt64(N: Int64): Int64;
 
@@ -39,7 +39,7 @@ function _AbsInt64(N: Int64): Int64;
     Prec : number of digits after the point (f/e) or significant digits (g);
            -1 selects the conversion's default precision.
   Returns a freshly-allocated Blaise string (refcount = 1). }
-function _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
+function _FormatFloatSpec(V: Float64; Spec: Integer; Prec: Integer): Pointer;
 
 implementation
 
@@ -97,7 +97,7 @@ end;
 
 { --- IEEE-754 binary64 bit manipulation via pointer aliasing --- }
 
-function DoubleBits(V: Double): Int64;
+function DoubleBits(V: Float64): Int64;
 var
   P: ^Int64;
 begin
@@ -105,9 +105,9 @@ begin
   Result := P^;
 end;
 
-function BitsToDouble(Bits: Int64): Double;
+function BitsToDouble(Bits: Int64): Float64;
 var
-  P: ^Double;
+  P: ^Float64;
 begin
   P := Pointer(@Bits);
   Result := P^;
@@ -324,7 +324,7 @@ const
   DBL_EXP_SPECIAL = 2047;
   GRISU_ALPHA = -61;
 
-procedure DoubleToDigits(V: Double; Digits: PChar;
+procedure DoubleToDigits(V: Float64; Digits: PChar;
   out NDigits: Integer; out DecExp: Integer; out Negative: Boolean);
 var
   Bits: Int64;
@@ -434,7 +434,7 @@ end;
 
 { --- Format digits into %.15g / %.7g style output --- }
 
-function FormatFloat(V: Double; MaxSigDigits: Integer): Pointer;
+function FormatFloat(V: Float64; MaxSigDigits: Integer): Pointer;
 var
   Bits: Int64;
   BExp: Integer;
@@ -810,7 +810,7 @@ end;
   rejecting the second with 'duplicate label'.  Keeping the names distinct is
   what lets any older binary, including the bootstrap seed, still build this
   unit; the rolling-bootstrap chain depends on it. }
-function FormatFloatSpecCore(V: Double; Spec: Integer; Prec: Integer): Pointer;
+function FormatFloatSpecCore(V: Float64; Spec: Integer; Prec: Integer): Pointer;
 var
   Bits: Int64;
   BExp: Integer;
@@ -1050,19 +1050,19 @@ begin
   _BlaiseFreeMem(Digits);
 end;
 
-function _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
+function _FormatFloatSpec(V: Float64; Spec: Integer; Prec: Integer): Pointer;
 begin
   Result := FormatFloatSpecCore(V, Spec, Prec);
 end;
 
-function _DoubleToStr(V: Double): Pointer;
+function _DoubleToStr(V: Float64): Pointer;
 begin
   Result := FormatFloat(V, 15);
 end;
 
-function _SingleToStr(V: Single): Pointer;
+function _SingleToStr(V: Float32): Pointer;
 var
-  D: Double;
+  D: Float64;
 begin
   D := V;
   Result := FormatFloat(D, 7);
@@ -1070,10 +1070,10 @@ end;
 
 { --- String to Double (pure Pascal) --- }
 
-function Pow10Dbl(E: Integer): Double;
+function Pow10Dbl(E: Integer): Float64;
 var
-  R: Double;
-  Base: Double;
+  R: Float64;
+  Base: Float64;
   N: Integer;
 begin
   if E = 0 then
@@ -1258,7 +1258,7 @@ end;
   value (leading quotient bit = 2^E2).  Handles normal, subnormal,
   overflow and the rounding carry uniformly. }
 function StdCompose(Q: Int64; Sticky: Boolean; E2: Integer;
-                    Neg: Boolean): Double;
+                    Neg: Boolean): Float64;
 var
   Mant, BitsOut: Int64;
   Guard: Int64;
@@ -1291,7 +1291,7 @@ begin
   Result := BitsToDouble(BitsOut);
 end;
 
-function _StrToDouble(S: Pointer): Double;
+function _StrToDouble(S: Pointer): Float64;
 var
   P: PChar;
   Neg: Boolean;

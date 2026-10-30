@@ -84,14 +84,14 @@ type
     procedure WriteString(const AName, AValue: string); overload;
     procedure WriteInt(const AName: string; AValue: Int64); overload;
     procedure WriteBool(const AName: string; AValue: Boolean); overload;
-    procedure WriteFloat(const AName: string; AValue: Double); overload;
+    procedure WriteFloat(const AName: string; AValue: Float64); overload;
     procedure WriteNull(const AName: string);
 
     { ---- array elements: value only, no name ---- }
     procedure WriteStringValue(const AValue: string);
     procedure WriteIntValue(AValue: Int64);
     procedure WriteBoolValue(AValue: Boolean);
-    procedure WriteFloatValue(AValue: Double);
+    procedure WriteFloatValue(AValue: Float64);
     procedure WriteNullValue;
 
     { ---- structure / escape hatch ---- }
@@ -295,7 +295,7 @@ end;
 { NOTE: float formatting uses '%g', which is a reasonable general default but
   can use exponent form and does not guarantee shortest round-trip output.
   JSON has no integer/float distinction, so prefer WriteInt for whole numbers. }
-procedure TJSONWriter.WriteFloatValue(AValue: Double);
+procedure TJSONWriter.WriteFloatValue(AValue: Float64);
 begin
   PreValue();
   FSB.Append(Format('%g', [AValue]));
@@ -333,7 +333,7 @@ begin
   WriteBoolValue(AValue);
 end;
 
-procedure TJSONWriter.WriteFloat(const AName: string; AValue: Double);
+procedure TJSONWriter.WriteFloat(const AName: string; AValue: Float64);
 begin
   WriteKey(AName);
   WriteFloatValue(AValue);

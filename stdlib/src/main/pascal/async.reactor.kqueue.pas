@@ -180,7 +180,7 @@ begin
   PFflags := PUInt32(@Ev[12]);
   PFflags^ := AFflags;
   PUdata := PInt64(@Ev[24]);
-  PUdata^ := Int64(PtrUInt(AToken));
+  PUdata^ := Int64(UInt(AToken));
   Result := c_kevent(Self.FKq, @Ev[0], 1, nil, 0, nil);
 end;
 
@@ -270,13 +270,13 @@ begin
   OutN := 0;
   for I := 0 to N - 1 do
   begin
-    PEv := PByte(PtrUInt(Self.FEventBuf) + PtrUInt(I * KEVENT_SIZE));
-    PFiltFlags := PUInt32(PByte(PtrUInt(PEv) + 8));
-    PUdata := PInt64(PByte(PtrUInt(PEv) + 24));
+    PEv := PByte(UInt(Self.FEventBuf) + UInt(I * KEVENT_SIZE));
+    PFiltFlags := PUInt32(PByte(UInt(PEv) + 8));
+    PUdata := PInt64(PByte(UInt(PEv) + 24));
     FiltFlags := PFiltFlags^;
     Filt := FiltFlags and $FFFF;
     Flags := FiltFlags shr 16;
-    Token := Pointer(PtrUInt(PUdata^));
+    Token := Pointer(UInt(PUdata^));
     if (Filt = FILT_USER_U16) or (Token = nil) then
       Continue;                     { the wake event: EV_CLEAR already reset it }
     if Filt = FILT_READ_U16 then

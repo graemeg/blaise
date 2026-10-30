@@ -256,17 +256,17 @@ end;
 function Test_Alignment: string;
 var
   P: Pointer;
-  Addr: PtrUInt;
+  Addr: UInt;
 begin
   P := _BlaiseGetMem(7);
   AssertNotNull('alloc for alignment test', P);
-  Addr := PtrUInt(P);
+  Addr := UInt(P);
   AssertEquals('8-byte aligned', 0, Integer(Addr and 7));
   _BlaiseFreeMem(P);
 
   P := _BlaiseGetMem(1);
   AssertNotNull('alloc for alignment test (1 byte)', P);
-  Addr := PtrUInt(P);
+  Addr := UInt(P);
   AssertEquals('8-byte aligned (1 byte)', 0, Integer(Addr and 7));
   _BlaiseFreeMem(P);
 
@@ -498,7 +498,7 @@ begin
   _BlaiseFreeMem(A);
   B := _BlaiseGetMem(65536);
   AssertNotNull('second large', B);
-  AssertEquals('cache returns same block', PtrUInt(A), PtrUInt(B));
+  AssertEquals('cache returns same block', UInt(A), UInt(B));
   _BlaiseFreeMem(B);
   Result := '';
 end;
@@ -625,7 +625,7 @@ var
   Classes: array[0..7] of Integer;
   I: Integer;
   P: Pointer;
-  Addr: PtrUInt;
+  Addr: UInt;
 begin
   Classes[0] := 16; Classes[1] := 32; Classes[2] := 64; Classes[3] := 128;
   Classes[4] := 256; Classes[5] := 512; Classes[6] := 1024; Classes[7] := 2048;
@@ -633,14 +633,14 @@ begin
   begin
     P := _BlaiseGetMem(Classes[I]);
     AssertNotNull('class ' + IntToStr(Classes[I]), P);
-    Addr := PtrUInt(P);
+    Addr := UInt(P);
     AssertEquals('class ' + IntToStr(Classes[I]) + ' aligned',
                  0, Integer(Addr and 7));
     _BlaiseFreeMem(P);
   end;
   P := _BlaiseGetMem(65536);
   AssertNotNull('large alloc', P);
-  AssertEquals('large aligned', 0, Integer(PtrUInt(P) and 7));
+  AssertEquals('large aligned', 0, Integer(UInt(P) and 7));
   _BlaiseFreeMem(P);
   Result := '';
 end;
@@ -662,13 +662,13 @@ var
 begin
   P := _BlaiseGetMem(64);
   AssertNotNull('small alloc', P);
-  FlagsP := Pointer(PtrUInt(P) - 12);
+  FlagsP := Pointer(UInt(P) - 12);
   AssertEquals('small block Flags (FLAG_SMALL) at Ptr-12', 0, FlagsP^);
   _BlaiseFreeMem(P);
 
   P := _BlaiseGetMem(8192);
   AssertNotNull('large alloc', P);
-  FlagsP := Pointer(PtrUInt(P) - 12);
+  FlagsP := Pointer(UInt(P) - 12);
   AssertEquals('large block Flags (FLAG_LARGE) at Ptr-12', 1, FlagsP^);
   _BlaiseFreeMem(P);
   Result := '';
@@ -686,11 +686,11 @@ var
 begin
   P := _BlaiseGetMem(48);
   AssertNotNull('small alloc', P);
-  ArenaP := Pointer(PtrUInt(P) - 8);
+  ArenaP := Pointer(UInt(P) - 8);
   Arena := ArenaP^;
   AssertNotNull('back-pointer non-nil', Arena);
-  AssertTrue('block above arena base', PtrUInt(P) > PtrUInt(Arena));
-  AssertTrue('block inside arena', PtrUInt(P) < PtrUInt(Arena) + 65536);
+  AssertTrue('block above arena base', UInt(P) > UInt(Arena));
+  AssertTrue('block inside arena', UInt(P) < UInt(Arena) + 65536);
   _BlaiseFreeMem(P);
   Result := '';
 end;
@@ -708,12 +708,12 @@ begin
   _BlaiseFreeMem(A);
   B := _BlaiseGetMem(32);
   AssertNotNull('recycled alloc', B);
-  AssertEquals('freelist recycled the block', PtrUInt(A), PtrUInt(B));
-  ArenaP := Pointer(PtrUInt(B) - 8);
+  AssertEquals('freelist recycled the block', UInt(A), UInt(B));
+  ArenaP := Pointer(UInt(B) - 8);
   Arena := ArenaP^;
   AssertNotNull('recycled back-pointer non-nil', Arena);
-  AssertTrue('recycled block above arena base', PtrUInt(B) > PtrUInt(Arena));
-  AssertTrue('recycled block inside arena', PtrUInt(B) < PtrUInt(Arena) + 65536);
+  AssertTrue('recycled block above arena base', UInt(B) > UInt(Arena));
+  AssertTrue('recycled block inside arena', UInt(B) < UInt(Arena) + 65536);
   _BlaiseFreeMem(B);
   Result := '';
 end;
@@ -735,12 +735,12 @@ var
 begin
   P := _BlaiseGetMem(8192);
   AssertNotNull('large alloc', P);
-  TidP := Pointer(PtrUInt(P) - 8);
+  TidP := Pointer(UInt(P) - 8);
   AssertTrue('fresh large block has a non-zero owner tid', TidP^ <> 0);
 
   Q := _BlaiseGetMem(8192);
   AssertNotNull('second large alloc', Q);
-  TidQ := Pointer(PtrUInt(Q) - 8);
+  TidQ := Pointer(UInt(Q) - 8);
   AssertTrue('second block has a non-zero owner tid', TidQ^ <> 0);
   AssertEquals('same thread stamps the same owner tid', TidP^, TidQ^);
 
@@ -761,8 +761,8 @@ begin
   _BlaiseFreeMem(A);
   B := _BlaiseGetMem(16384);
   AssertNotNull('cache-reuse large', B);
-  AssertEquals('cache returned the same block', PtrUInt(A), PtrUInt(B));
-  TidP := Pointer(PtrUInt(B) - 8);
+  AssertEquals('cache returned the same block', UInt(A), UInt(B));
+  TidP := Pointer(UInt(B) - 8);
   AssertTrue('cache-reused block has a non-zero owner tid', TidP^ <> 0);
   _BlaiseFreeMem(B);
   Result := '';
@@ -778,7 +778,7 @@ begin
   AssertNotNull('alloc 4096', P);
   P := _BlaiseReallocMem(P, 65536);
   AssertNotNull('realloc to 65536', P);
-  TidP := Pointer(PtrUInt(P) - 8);
+  TidP := Pointer(UInt(P) - 8);
   AssertTrue('realloc-grown block has a non-zero owner tid', TidP^ <> 0);
   _BlaiseFreeMem(P);
   Result := '';
@@ -795,7 +795,7 @@ begin
   _BlaiseFreeMem(A);
   B := _BlaiseGetMem(32768);
   AssertEquals('local free cached and reused the block',
-               PtrUInt(A), PtrUInt(B));
+               UInt(A), UInt(B));
   _BlaiseFreeMem(B);
   Result := '';
 end;
@@ -824,11 +824,11 @@ var
 begin
   P := _BlaiseGetMem(Sz);
   AssertNotNull('alloc', P);
-  ArenaP := Pointer(PtrUInt(P) - 8);
+  ArenaP := Pointer(UInt(P) - 8);
   Arena := ArenaP^;
   AssertNotNull('arena back-pointer', Arena);
 
-  OwnerTidP := Pointer(PtrUInt(Arena) + 24);
+  OwnerTidP := Pointer(UInt(Arena) + 24);
   AssertTrue('arena has a non-zero owner tid', OwnerTidP^ <> 0);
 
   { Forge the remote free: node in the block's user bytes, planted on
@@ -836,9 +836,9 @@ begin
     in for the producer's CAS.) }
   NodeNextP := Pointer(P);
   NodeNextP^ := nil;
-  NodeClassP := Pointer(PtrUInt(P) + 8);
+  NodeClassP := Pointer(UInt(P) + 8);
   NodeClassP^ := 7;
-  RemoteHeadP := Pointer(PtrUInt(Arena) + 32);
+  RemoteHeadP := Pointer(UInt(Arena) + 32);
   AssertNull('remote queue empty before forge', RemoteHeadP^);
   RemoteHeadP^ := P;
 

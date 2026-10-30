@@ -286,7 +286,7 @@ type
       decimals exactly, so use this only at the boundary with floating-point
       APIs, never for further exact arithmetic.
       @returns the closest Double. }
-    function ToDouble: Double;
+    function ToDouble: Float64;
 
     { Truncates toward zero to a 64-bit integer (drops any fraction).
       @returns the integer part.
@@ -348,7 +348,7 @@ function DecFromStr(const S: string): TDecimal;
   double-constructor trap.
   @param V the Double value.
   @returns the shortest exact decimal equal to V's printed form. }
-function DecFromFloat(V: Double): TDecimal;
+function DecFromFloat(V: Float64): TDecimal;
 
 { Builds a TDecimal from the Double's binary value to high precision, exposing
   the representation error (DecFromFloatExact(0.1) carries the 0.100000...005...
@@ -356,7 +356,7 @@ function DecFromFloat(V: Double): TDecimal;
   so the dangerous path is opt-in rather than the default.
   @param V the Double value.
   @returns the high-precision decimal of V's actual binary value. }
-function DecFromFloatExact(V: Double): TDecimal;
+function DecFromFloatExact(V: Float64): TDecimal;
 
 { ------------------------------------------------------------------ }
 { Rounding                                                            }
@@ -1544,7 +1544,7 @@ begin
   Result := MakeFromMagDigits(MagToDigits(Mag), IsNeg(Self), NewScale)
 end;
 
-function TDecimal.ToDouble: Double;
+function TDecimal.ToDouble: Float64;
 begin
   Result := StrToDouble(Self.ToString())
 end;
@@ -1580,14 +1580,14 @@ begin
   Result.FInflated := False
 end;
 
-function DecFromFloat(V: Double): TDecimal;
+function DecFromFloat(V: Float64): TDecimal;
 begin
   { Shortest decimal: DoubleToStr is the Grisu shortest-round-trip formatter, so
     0.1 comes back as '0.1', not the binary tail. }
   Result := DecFromStr(DoubleToStr(V))
 end;
 
-function DecFromFloatExact(V: Double): TDecimal;
+function DecFromFloatExact(V: Float64): TDecimal;
 var
   S: string;
 begin

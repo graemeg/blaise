@@ -132,9 +132,9 @@ const
     'eq','ne','cs','cc','mi','pl','vs','vc',
     'hi','ls','ge','lt','gt','le','al','nv');
 
-function _StrToDouble(S: Pointer): Double; external name '_StrToDouble';
+function _StrToDouble(S: Pointer): Float64; external name '_StrToDouble';
 
-function DoubleBits(V: Double): Int64;
+function DoubleBits(V: Float64): Int64;
 var
   P: ^Int64;
 begin
@@ -142,7 +142,7 @@ begin
   Result := P^;
 end;
 
-function SingleBits(V: Single): Integer;
+function SingleBits(V: Float32): Integer;
 var
   P: ^Integer;
 begin
@@ -1034,7 +1034,7 @@ procedure TArm64Assembler.HandleDirective;
     if FL.Mnemonic = '.float' then
     begin
       FW.AppendDWord(FSection,
-        SingleBits(Single(_StrToDouble(PChar(TrimS(FL.Args))))));
+        SingleBits(Float32(_StrToDouble(PChar(TrimS(FL.Args))))));
       Exit;
     end;
     if (FL.Mnemonic = '.ascii') or (FL.Mnemonic = '.asciz') then

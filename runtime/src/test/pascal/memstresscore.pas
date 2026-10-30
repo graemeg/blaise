@@ -102,7 +102,7 @@ var
 begin
   IP := Pointer(P);
   IP^ := Sz;
-  IP := Pointer(PtrUInt(P) + 4);
+  IP := Pointer(UInt(P) + 4);
   IP^ := Seed;
   Limit := Sz;
   if Limit > 256 then Limit := 256;
@@ -119,7 +119,7 @@ var
 begin
   IP := Pointer(P);
   Sz := IP^;
-  IP := Pointer(PtrUInt(P) + 4);
+  IP := Pointer(UInt(P) + 4);
   Seed := IP^;
   { A corrupt size field is itself an integrity failure — and must be
     range-checked before it is used as a read bound. }

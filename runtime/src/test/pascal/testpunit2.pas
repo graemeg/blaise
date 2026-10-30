@@ -124,7 +124,7 @@ end;
 
 function DoTest15 : string;
 var
-  O1, O2 : Cardinal;
+  O1, O2 : UInt32;
 begin
   O1 := 1;
   O2 := 2;
@@ -267,7 +267,7 @@ end;
 
 function DoTest30 : string;
 var
-  A, B : Double;
+  A, B : Float64;
 begin
   A := 1.2;
   B := 3.4;
@@ -276,7 +276,7 @@ end;
 
 function DoTest31 : string;
 var
-  A, B : Double;
+  A, B : Float64;
 begin
   A := 1.2;
   B := 1.2 + (DefaultDoubleDelta / 2);
@@ -285,7 +285,7 @@ end;
 
 function DoTest32 : string;
 var
-  A, B : Double;
+  A, B : Float64;
 begin
   A := 1.2;
   B := 3.4;

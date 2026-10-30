@@ -1831,12 +1831,12 @@ end;
 
 procedure TEnumTypeDesc.AddMember(const AMember: string; AOrdinal: Integer);
 begin
-  Members.AddObject(AMember, TObject(Pointer(PtrUInt(AOrdinal))));
+  Members.AddObject(AMember, TObject(Pointer(UInt(AOrdinal))));
 end;
 
 function TEnumTypeDesc.OrdinalAt(AIndex: Integer): Integer;
 begin
-  Result := Integer(PtrUInt(Pointer(Members.Objects[AIndex])));
+  Result := Integer(UInt(Pointer(Members.Objects[AIndex])));
 end;
 
 function TEnumTypeDesc.OrdinalOf(const AMember: string): Integer;

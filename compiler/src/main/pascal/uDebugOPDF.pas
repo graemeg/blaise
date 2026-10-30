@@ -52,8 +52,8 @@ type
     function  DisplayName(const ASymbol: string): string;
     function  GlobalVarSym(const AVarName: string; AType: TTypeDesc;
       AIsClassVar: Boolean): string;
-    function  FNV1a32(const S: string): Cardinal;
-    function  GetOrAllocTypeID(const AName: string): Cardinal;
+    function  FNV1a32(const S: string): UInt32;
+    function  GetOrAllocTypeID(const AName: string): UInt32;
     function  HasBeenEmitted(const AName: string): Boolean;
     procedure MarkEmitted(const AName: string);
     procedure L(const AText: string);
@@ -283,7 +283,7 @@ begin
   FOutput.Add(AText);
 end;
 
-function TOPDFEmitter.FNV1a32(const S: string): Cardinal;
+function TOPDFEmitter.FNV1a32(const S: string): UInt32;
 const
   FNV_PRIME  = $01000193;
   FNV_OFFSET = $811C9DC5;
@@ -293,23 +293,23 @@ begin
   Result := FNV_OFFSET;
   for B in S do
   begin
-    Result := Result xor Cardinal(B);
+    Result := Result xor UInt32(B);
     Result := Result * FNV_PRIME;
   end;
   if Result = 0 then
     Result := 1;
 end;
 
-function TOPDFEmitter.GetOrAllocTypeID(const AName: string): Cardinal;
+function TOPDFEmitter.GetOrAllocTypeID(const AName: string): UInt32;
 var
   Idx: Int;
 begin
   if FTypeNames.Find(AName, Idx) then
-    Result := Cardinal(PtrUInt(FTypeNames.Objects[Idx]))
+    Result := UInt32(UInt(FTypeNames.Objects[Idx]))
   else
   begin
     Result := FNV1a32(AName);
-    FTypeNames.AddObject(AName, TObject(PtrUInt(Result)));
+    FTypeNames.AddObject(AName, TObject(UInt(Result)));
   end;
 end;
 
@@ -631,7 +631,7 @@ end;
 procedure TOPDFEmitter.EmitClass(AType: TRecordTypeDesc);
 var
   CName, ParentName: string;
-  ParentID: Cardinal;
+  ParentID: UInt32;
   RecSize, I: Integer;
   F: TFieldInfo;
 begin
@@ -954,7 +954,7 @@ end;
 procedure TOPDFEmitter.EmitPointer(AType: TPointerTypeDesc);
 var
   CName: string;
-  TargetID: Cardinal;
+  TargetID: UInt32;
   RecSize: Integer;
 begin
   CName := CanonicalName(AType);
@@ -1002,7 +1002,7 @@ end;
 procedure TOPDFEmitter.EmitArray(AType: TTypeDesc);
 var
   CName, ElemName: string;
-  ElemID: Cardinal;
+  ElemID: UInt32;
   SA: TStaticArrayTypeDesc;
   IsDyn, RecSize: Integer;
 begin
@@ -1069,7 +1069,7 @@ end;
 procedure TOPDFEmitter.EmitSet(AType: TSetTypeDesc);
 var
   CName: string;
-  BaseID: Cardinal;
+  BaseID: UInt32;
   SzB, RecSize: Integer;
 begin
   CName := AType.Name;
@@ -1096,7 +1096,7 @@ end;
 procedure TOPDFEmitter.EmitInterface(AType: TInterfaceTypeDesc);
 var
   CName: string;
-  ParentID: Cardinal;
+  ParentID: UInt32;
   I, MethodRecSize, RecSize: Integer;
   MName: string;
 begin
@@ -1142,7 +1142,7 @@ procedure TOPDFEmitter.EmitProperties(AClass: TRecordTypeDesc);
 var
   I: Integer;
   PI: TPropertyInfo;
-  PropTypeID, ClassTypeID: Cardinal;
+  PropTypeID, ClassTypeID: UInt32;
   ReadType, WriteType: Integer;
   RecSize: Integer;
   RF: TFieldInfo;
@@ -1243,7 +1243,7 @@ procedure TOPDFEmitter.EmitConstantsFromList(AList: TObjectList);
 var
   I: Integer;
   C: TConstDecl;
-  TypeID: Cardinal;
+  TypeID: UInt32;
   RecSize: Integer;
 begin
   for I := 0 to AList.Count - 1 do
@@ -1744,7 +1744,7 @@ begin
   begin
     Key := IntToStr(AStmt.Line);
     if ALines.IndexOf(Key) < 0 then
-      ALines.AddObject(Key, TObject(PtrUInt(AStmt.Col)));
+      ALines.AddObject(Key, TObject(UInt(AStmt.Col)));
   end;
   if AStmt is TCompoundStmt then
   begin
@@ -1797,7 +1797,7 @@ begin
     for I := 0 to Lines.Count - 1 do
     begin
       LineNum := StrToInt(Lines.Strings[I]);
-      ColNum := Integer(PtrUInt(Lines.Objects[I]));
+      ColNum := Integer(UInt(Lines.Objects[I]));
       L('');
       L('    # recLineInfo: line ' + Lines.Strings[I] + ' in ' + AFuncName);
       EmitRecHdr(REC_LINEINFO, RecSize);

@@ -116,7 +116,7 @@ end;
 
 function WeakHash(Ptr: Pointer): Integer;
 begin
-  Result := Integer((PtrUInt(Ptr) shr 4) and PtrUInt(WEAK_BUCKETS - 1));
+  Result := Integer((UInt(Ptr) shr 4) and UInt(WEAK_BUCKETS - 1));
 end;
 
 function WeakFindOrCreate(ATarget: Pointer): PWeakEntry;

@@ -177,7 +177,7 @@ end;
 
 function TPlatformLayoutLinuxX86_64.DirentRecLen(Ent: Pointer): Integer;
 var
-  P: ^Word;
+  P: ^UInt16;
 begin
   { d_reclen is an unsigned 16-bit field — read it as a Word so a record
     longer than 32767 bytes (not reachable in practice, but free to be

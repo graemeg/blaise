@@ -75,28 +75,28 @@ unit runtime.math;
 
 interface
 
-function _BlaiseSin(X: Double): Double;
-function _BlaiseCos(X: Double): Double;
-function _BlaiseTan(X: Double): Double;
-function _BlaiseArcSin(X: Double): Double;
-function _BlaiseArcCos(X: Double): Double;
-function _BlaiseArcTan(X: Double): Double;
-function _BlaiseArcTan2(Y, X: Double): Double;
-function _BlaiseExp(X: Double): Double;
-function _BlaiseExpm1(X: Double): Double;
-function _BlaiseLn(X: Double): Double;
-function _BlaiseLog2(X: Double): Double;
-function _BlaiseLog10(X: Double): Double;
-function _BlaisePow(X, Y: Double): Double;
-function _BlaiseSinh(X: Double): Double;
-function _BlaiseCosh(X: Double): Double;
-function _BlaiseTanh(X: Double): Double;
-function _BlaiseSqrtD(X: Double): Double;
-function _BlaiseFloorD(X: Double): Double;
-function _BlaiseCeilD(X: Double): Double;
-function _BlaiseRoundD(X: Double): Double;
-function _BlaiseFabs(X: Double): Double;
-function _BlaiseScalbn(X: Double; N: Integer): Double;
+function _BlaiseSin(X: Float64): Float64;
+function _BlaiseCos(X: Float64): Float64;
+function _BlaiseTan(X: Float64): Float64;
+function _BlaiseArcSin(X: Float64): Float64;
+function _BlaiseArcCos(X: Float64): Float64;
+function _BlaiseArcTan(X: Float64): Float64;
+function _BlaiseArcTan2(Y, X: Float64): Float64;
+function _BlaiseExp(X: Float64): Float64;
+function _BlaiseExpm1(X: Float64): Float64;
+function _BlaiseLn(X: Float64): Float64;
+function _BlaiseLog2(X: Float64): Float64;
+function _BlaiseLog10(X: Float64): Float64;
+function _BlaisePow(X, Y: Float64): Float64;
+function _BlaiseSinh(X: Float64): Float64;
+function _BlaiseCosh(X: Float64): Float64;
+function _BlaiseTanh(X: Float64): Float64;
+function _BlaiseSqrtD(X: Float64): Float64;
+function _BlaiseFloorD(X: Float64): Float64;
+function _BlaiseCeilD(X: Float64): Float64;
+function _BlaiseRoundD(X: Float64): Float64;
+function _BlaiseFabs(X: Float64): Float64;
+function _BlaiseScalbn(X: Float64; N: Integer): Float64;
 
 implementation
 
@@ -104,7 +104,7 @@ implementation
 { IEEE-754 binary64 word access (fdlibm GET/SET_*_WORD equivalents)    }
 { ------------------------------------------------------------------ }
 
-function DoubleBits(V: Double): Int64;
+function DoubleBits(V: Float64): Int64;
 var
   P: ^Int64;
 begin
@@ -112,22 +112,22 @@ begin
   Result := P^;
 end;
 
-function BitsToDouble(Bits: Int64): Double;
+function BitsToDouble(Bits: Int64): Float64;
 var
-  P: ^Double;
+  P: ^Float64;
 begin
   P := Pointer(@Bits);
   Result := P^;
 end;
 
 { High 32 bits as an unsigned value in 0..$FFFFFFFF. }
-function HiU(V: Double): Int64;
+function HiU(V: Float64): Int64;
 begin
   Result := (DoubleBits(V) shr 32) and $FFFFFFFF;
 end;
 
 { High 32 bits sign-extended (C's signed int32 high word). }
-function HiS(V: Double): Int64;
+function HiS(V: Float64): Int64;
 begin
   Result := HiU(V);
   if Result >= $80000000 then
@@ -135,7 +135,7 @@ begin
 end;
 
 { Low 32 bits as an unsigned value. }
-function LoU(V: Double): Int64;
+function LoU(V: Float64): Int64;
 begin
   Result := DoubleBits(V) and $FFFFFFFF;
 end;
@@ -147,24 +147,24 @@ begin
 end;
 
 { INSERT_WORDS: build a double from 32-bit high and low halves. }
-function ComposeD(Hi, Lo: Int64): Double;
+function ComposeD(Hi, Lo: Int64): Float64;
 begin
   Result := BitsToDouble(((Hi and $FFFFFFFF) shl 32) or (Lo and $FFFFFFFF));
 end;
 
 { SET_HIGH_WORD: replace the high 32 bits, keep the low ones. }
-procedure SetHiW(var V: Double; Hi: Int64);
+procedure SetHiW(var V: Float64; Hi: Int64);
 begin
   V := BitsToDouble(((Hi and $FFFFFFFF) shl 32) or (DoubleBits(V) and $FFFFFFFF));
 end;
 
 { SET_LOW_WORD: replace the low 32 bits, keep the high ones. }
-procedure SetLoW(var V: Double; Lo: Int64);
+procedure SetLoW(var V: Float64; Lo: Int64);
 begin
   V := BitsToDouble((DoubleBits(V) and (not $FFFFFFFF)) or (Lo and $FFFFFFFF));
 end;
 
-function IsNaND(V: Double): Boolean;
+function IsNaND(V: Float64): Boolean;
 var
   B: Int64;
 begin
@@ -176,14 +176,14 @@ end;
 { fabs / scalbn                                                        }
 { ------------------------------------------------------------------ }
 
-function _BlaiseFabs(X: Double): Double;
+function _BlaiseFabs(X: Float64): Float64;
 begin
   Result := BitsToDouble(DoubleBits(X) and $7FFFFFFFFFFFFFFF);
 end;
 
-function _BlaiseScalbn(X: Double; N: Integer): Double;
+function _BlaiseScalbn(X: Float64; N: Integer): Float64;
 var
-  Y: Double;
+  Y: Float64;
 begin
   Y := X;
   if N > 1023 then
@@ -221,11 +221,11 @@ const
   { 1/DBL_EPSILON = 2^52; adding then subtracting it rounds to integer }
   TOINT_D = 4503599627370496.0;
 
-function _BlaiseFloorD(X: Double): Double;
+function _BlaiseFloorD(X: Float64): Float64;
 var
   B: Int64;
   E: Integer;
-  Y: Double;
+  Y: Float64;
 begin
   B := DoubleBits(X);
   E := ((B shr 52) and $7FF);
@@ -247,11 +247,11 @@ begin
   Result := X + Y;
 end;
 
-function _BlaiseCeilD(X: Double): Double;
+function _BlaiseCeilD(X: Float64): Float64;
 var
   B: Int64;
   E: Integer;
-  Y: Double;
+  Y: Float64;
 begin
   B := DoubleBits(X);
   E := ((B shr 52) and $7FF);
@@ -276,11 +276,11 @@ end;
 { Round half away from zero -- C99 round().  The Round BUILTIN rounds half
   to even (banker's, as Delphi and FPC do) with one conversion instruction;
   this port is what an explicit half-away routine would use. }
-function _BlaiseRoundD(X: Double): Double;
+function _BlaiseRoundD(X: Float64): Float64;
 var
   B: Int64;
   E: Integer;
-  Y: Double;
+  Y: Float64;
 begin
   B := DoubleBits(X);
   E := ((B shr 52) and $7FF);
@@ -307,12 +307,12 @@ end;
 { sqrt (musl sqrt.c -- fdlibm bit-by-bit, correctly rounded)           }
 { ------------------------------------------------------------------ }
 
-function _BlaiseSqrtD(X: Double): Double;
+function _BlaiseSqrtD(X: Float64): Float64;
 var
-  Z: Double;
+  Z: Float64;
   Ix0, S0, Q, M, T, I: Int64;   { C int32 range by construction }
   R, T1, S1, Ix1, Q1: Int64;    { C uint32: masked after carrying ops }
-  Tiny: Double;
+  Tiny: Float64;
 begin
   Tiny := 1.0e-300;
   Ix0 := HiS(X);
@@ -455,9 +455,9 @@ const
   EXP_P4 = -1.65339022054652515390e-06;    { 0xBEBBBD41, 0xC5D26BF1 }
   EXP_P5 =  4.13813679705723846039e-08;    { 0x3E663769, 0x72BEA4D0 }
 
-function _BlaiseExp(X: Double): Double;
+function _BlaiseExp(X: Float64): Float64;
 var
-  Hi, Lo, C, XX, Y: Double;
+  Hi, Lo, C, XX, Y: Float64;
   K: Integer;
   Sign: Integer;
   Hx: Int64;
@@ -525,9 +525,9 @@ const
   EM1_Q4 =  4.00821782732936239552e-06;      { 3ED0CFCA 86E65239 }
   EM1_Q5 = -2.01099218183624371326e-07;      { BE8AFDB7 6E09C32D }
 
-function _BlaiseExpm1(X: Double): Double;
+function _BlaiseExpm1(X: Float64): Float64;
 var
-  Y, Hi, Lo, C, T, E, Hxs, Hfx, R1, Twopk: Double;
+  Y, Hi, Lo, C, T, E, Hxs, Hfx, R1, Twopk: Float64;
   K, Sign: Integer;
   Hx: Int64;
 begin
@@ -638,13 +638,13 @@ const
 { Shared head of the three logarithms: filters specials, reduces x into
   [sqrt(2)/2, sqrt(2)] and computes f, hfsq, s, R and k.  Returns True
   when the caller must return ASpecial immediately. }
-function LogReduce(var X: Double; var K: Integer;
-                   var F, Hfsq, S, R: Double;
-                   var ASpecial: Double): Boolean;
+function LogReduce(var X: Float64; var K: Integer;
+                   var F, Hfsq, S, R: Float64;
+                   var ASpecial: Float64): Boolean;
 var
   Bits: Int64;
   Hx: Int64;
-  Z, W, T1, T2: Double;
+  Z, W, T1, T2: Float64;
 begin
   Bits := DoubleBits(X);
   Hx := (Bits shr 32) and $FFFFFFFF;
@@ -695,13 +695,13 @@ begin
   Result := False;
 end;
 
-function _BlaiseLn(X: Double): Double;
+function _BlaiseLn(X: Float64): Float64;
 const
   Ln2Hi = 6.93147180369123816490e-01;  { 3fe62e42 fee00000 }
   Ln2Lo = 1.90821492927058770002e-10;  { 3dea39ef 35793c76 }
 var
   K: Integer;
-  F, Hfsq, S, R, Dk, Special: Double;
+  F, Hfsq, S, R, Dk, Special: Float64;
 begin
   if LogReduce(X, K, F, Hfsq, S, R, Special) then
     Exit(Special);
@@ -709,14 +709,14 @@ begin
   Result := S * (Hfsq + R) + Dk * Ln2Lo - Hfsq + F + Dk * Ln2Hi;
 end;
 
-function _BlaiseLog2(X: Double): Double;
+function _BlaiseLog2(X: Float64): Float64;
 const
   IvLn2Hi = 1.44269504072144627571e+00;  { 0x3ff71547, 0x65200000 }
   IvLn2Lo = 1.67517131648865118353e-10;  { 0x3de705fc, 0x2eefa200 }
 var
   K: Integer;
-  F, Hfsq, S, R, Special: Double;
-  Hi, Lo, ValHi, ValLo, W, Y: Double;
+  F, Hfsq, S, R, Special: Float64;
+  Hi, Lo, ValHi, ValLo, W, Y: Float64;
 begin
   if LogReduce(X, K, F, Hfsq, S, R, Special) then
     Exit(Special);
@@ -738,7 +738,7 @@ begin
   Result := ValLo + ValHi;
 end;
 
-function _BlaiseLog10(X: Double): Double;
+function _BlaiseLog10(X: Float64): Float64;
 const
   IvLn10Hi = 4.34294481878168880939e-01;   { 0x3fdbcb7b, 0x15200000 }
   IvLn10Lo = 2.50829467116452752298e-11;   { 0x3dbb9438, 0xca9aadd5 }
@@ -746,8 +746,8 @@ const
   Log102Lo = 3.69423907715893078616e-13;   { 0x3D59FEF3, 0x11F12B36 }
 var
   K: Integer;
-  F, Hfsq, S, R, Special: Double;
-  Hi, Lo, ValHi, ValLo, Dk, W, Y: Double;
+  F, Hfsq, S, R, Special: Float64;
+  Hi, Lo, ValHi, ValLo, Dk, W, Y: Float64;
 begin
   if LogReduce(X, K, F, Hfsq, S, R, Special) then
     Exit(Special);
@@ -790,7 +790,7 @@ const
     $4D7327, $310606, $1556CA, $73A8C9, $60E27B, $C08C6B);
 
   { pi/2 cut into 24-bit chunks }
-  PIO2S: array[0..7] of Double = (
+  PIO2S: array[0..7] of Float64 = (
     1.57079625129699707031e+00,  { 0x3FF921FB, 0x40000000 }
     7.54978941586159635335e-08,  { 0x3E74442D, 0x00000000 }
     5.39030252995776476554e-15,  { 0x3CF84698, 0x80000000 }
@@ -808,15 +808,15 @@ const
   24-bit chunks (ANx of them, passed as three plain doubles because the
   AArch64 backend does not lower var static-array parameters yet), AE0
   is the scaled exponent of AX0. }
-function RemPio2Large(AX0, AX1, AX2: Double; var Y0, Y1: Double;
+function RemPio2Large(AX0, AX1, AX2: Float64; var Y0, Y1: Float64;
                       AE0, ANx: Integer): Integer;
 const
   JK = 4;   { init_jk[1]: double precision }
 var
   Jz, Jx, Jv, Jp, Carry, N, I, J, K, M, Q0, Ih: Integer;
-  Z, Fw: Double;
-  AX: array[0..2] of Double;
-  F, Fq, Q: array[0..19] of Double;
+  Z, Fw: Float64;
+  AX: array[0..2] of Float64;
+  F, Fq, Q: array[0..19] of Float64;
   Iq: array[0..19] of Integer;
   NeedRecompute: Boolean;
 begin
@@ -1036,9 +1036,9 @@ const
 { The medium-size path: n = rint(x/(pi/2)) and a 2-3 round compensated
   subtraction.  Factored out because the C original reaches it by goto
   from the small-multiple fast paths on cancellation-risky inputs. }
-function RemPio2Medium(X: Double; Ix: Int64; var Y0, Y1: Double): Integer;
+function RemPio2Medium(X: Float64; Ix: Int64; var Y0, Y1: Float64): Integer;
 var
-  Fn, R, W, T: Double;
+  Fn, R, W, T: Float64;
   N, Ex, Ey: Integer;
 begin
   { rint(x/(pi/2)); assumes round-to-nearest }
@@ -1074,12 +1074,12 @@ end;
 
 { Reduce x mod pi/2: result in Y0+Y1, returns n (quadrant count).
   Caller must handle |x| ~<= pi/4 itself. }
-function RemPio2(X: Double; var Y0, Y1: Double): Integer;
+function RemPio2(X: Float64; var Y0, Y1: Float64): Integer;
 var
   Ix: Int64;
   Sign: Integer;
-  Z, W: Double;
-  Tx: array[0..2] of Double;
+  Z, W: Float64;
+  Tx: array[0..2] of Float64;
   N, I: Integer;
   Bits: Int64;
 begin
@@ -1222,9 +1222,9 @@ const
   KS_S6 =  1.58969099521155010221e-10;  { 0x3DE5D93A, 0x5ACFD57C }
 
 { kernel sin on ~[-pi/4, pi/4]; y is the tail of x, iy=0 means y is 0 }
-function KernSin(X, Y: Double; Iy: Integer): Double;
+function KernSin(X, Y: Float64; Iy: Integer): Float64;
 var
-  Z, R, V, W: Double;
+  Z, R, V, W: Float64;
 begin
   Z := X * X;
   W := Z * Z;
@@ -1245,9 +1245,9 @@ const
   KC_C6 = -1.13596475577881948265e-11;  { 0xBDA8FAE9, 0xBE8838D4 }
 
 { kernel cos on [-pi/4, pi/4]; y is the tail of x }
-function KernCos(X, Y: Double): Double;
+function KernCos(X, Y: Float64): Float64;
 var
-  Hz, Z, R, W: Double;
+  Hz, Z, R, W: Float64;
 begin
   Z := X * X;
   W := Z * Z;
@@ -1275,10 +1275,10 @@ const
   KT_PIO4LO = 3.06161699786838301793e-17; { 3C81A626, 33145C07 }
 
 { kernel tan on ~[-pi/4, pi/4]; returns tan when Odd=0, -1/tan when Odd=1 }
-function KernTan(X, Y: Double; Odd: Integer): Double;
+function KernTan(X, Y: Float64; Odd: Integer): Float64;
 var
-  Z, R, V, W, S, A: Double;
-  W0, A0: Double;
+  Z, R, V, W, S, A: Float64;
+  W0, A0: Float64;
   Hx: Int64;
   Big, Sign: Integer;
 begin
@@ -1330,9 +1330,9 @@ end;
 { sin / cos / tan drivers (musl sin.c, cos.c, tan.c)                   }
 { ------------------------------------------------------------------ }
 
-function _BlaiseSin(X: Double): Double;
+function _BlaiseSin(X: Float64): Float64;
 var
-  Y0, Y1: Double;
+  Y0, Y1: Float64;
   Ix: Int64;
   N: Integer;
 begin
@@ -1364,9 +1364,9 @@ begin
   end;
 end;
 
-function _BlaiseCos(X: Double): Double;
+function _BlaiseCos(X: Float64): Float64;
 var
-  Y0, Y1: Double;
+  Y0, Y1: Float64;
   Ix: Int64;
   N: Integer;
 begin
@@ -1397,9 +1397,9 @@ begin
   end;
 end;
 
-function _BlaiseTan(X: Double): Double;
+function _BlaiseTan(X: Float64): Float64;
 var
-  Y0, Y1: Double;
+  Y0, Y1: Float64;
   Ix: Int64;
   N: Integer;
 begin
@@ -1443,18 +1443,18 @@ const
   AS_QS4 =  7.70381505559019352791e-02;    { 0x3FB3B8C5, 0xB12E9282 }
 
 { rational approximation of (asin(x)-x)/x^3, shared by asin and acos }
-function ArcR(Z: Double): Double;
+function ArcR(Z: Float64): Float64;
 var
-  P, Q: Double;
+  P, Q: Float64;
 begin
   P := Z * (AS_PS0 + Z * (AS_PS1 + Z * (AS_PS2 + Z * (AS_PS3 + Z * (AS_PS4 + Z * AS_PS5)))));
   Q := 1.0 + Z * (AS_QS1 + Z * (AS_QS2 + Z * (AS_QS3 + Z * AS_QS4)));
   Result := P / Q;
 end;
 
-function _BlaiseArcSin(X: Double): Double;
+function _BlaiseArcSin(X: Float64): Float64;
 var
-  Z, R, S, F, C: Double;
+  Z, R, S, F, C: Float64;
   Hx, Ix, Lx: Int64;
 begin
   Hx := HiU(X);
@@ -1495,9 +1495,9 @@ begin
   Result := X;
 end;
 
-function _BlaiseArcCos(X: Double): Double;
+function _BlaiseArcCos(X: Float64): Float64;
 var
-  Z, W, S, C, Df: Double;
+  Z, W, S, C, Df: Float64;
   Hx, Ix, Lx: Int64;
 begin
   Hx := HiU(X);
@@ -1546,17 +1546,17 @@ end;
 { ------------------------------------------------------------------ }
 
 const
-  AT_HI: array[0..3] of Double = (
+  AT_HI: array[0..3] of Float64 = (
     4.63647609000806093515e-01,  { atan(0.5)hi 0x3FDDAC67, 0x0561BB4F }
     7.85398163397448278999e-01,  { atan(1.0)hi 0x3FE921FB, 0x54442D18 }
     9.82793723247329054082e-01,  { atan(1.5)hi 0x3FEF730B, 0xD281F69B }
     1.57079632679489655800e+00); { atan(inf)hi 0x3FF921FB, 0x54442D18 }
-  AT_LO: array[0..3] of Double = (
+  AT_LO: array[0..3] of Float64 = (
     2.26987774529616870924e-17,  { atan(0.5)lo 0x3C7A2B7F, 0x222F65E2 }
     3.06161699786838301793e-17,  { atan(1.0)lo 0x3C81A626, 0x33145C07 }
     1.39033110312309984516e-17,  { atan(1.5)lo 0x3C700788, 0x7AF0CBBD }
     6.12323399573676603587e-17); { atan(inf)lo 0x3C91A626, 0x33145C07 }
-  AT_T: array[0..10] of Double = (
+  AT_T: array[0..10] of Float64 = (
     3.33333333333329318027e-01,  { 0x3FD55555, 0x5555550D }
    -1.99999999998764832476e-01,  { 0xBFC99999, 0x9998EBC4 }
     1.42857142725034663711e-01,  { 0x3FC24924, 0x920083FF }
@@ -1569,9 +1569,9 @@ const
    -3.65315727442169155270e-02,  { 0xBFA2B444, 0x2C6A6C2F }
     1.62858201153657823623e-02); { 0x3F90AD3A, 0xE322DA11 }
 
-function _BlaiseArcTan(X: Double): Double;
+function _BlaiseArcTan(X: Float64): Float64;
 var
-  W, S1, S2, Z: Double;
+  W, S1, S2, Z: Float64;
   Ix, Sign: Int64;
   Id: Integer;
 begin
@@ -1645,12 +1645,12 @@ begin
   Result := Z;
 end;
 
-function _BlaiseArcTan2(Y, X: Double): Double;
+function _BlaiseArcTan2(Y, X: Float64): Float64;
 const
   A2_PI = 3.1415926535897931160e+00;     { 0x400921FB, 0x54442D18 }
   A2_PILO = 1.2246467991473531772e-16;   { 0x3CA1A626, 0x33145C07 }
 var
-  Z: Double;
+  Z: Float64;
   M, Lx, Ly, Ix, Iy: Int64;
 begin
   if IsNaND(X) or IsNaND(Y) then
@@ -1734,20 +1734,20 @@ end;
 { ------------------------------------------------------------------ }
 
 { exp(x)/2 for x >= log(DBL_MAX): exp(x - k*ln2) * 2^(k-1) with k=2043 }
-function Expo2(X: Double): Double;
+function Expo2(X: Float64): Float64;
 const
   KLN2 = 1.41609968988396826717e+03;  { 0x1.62066151add8bp+10 }
 var
-  Scale: Double;
+  Scale: Float64;
 begin
   { 2^((k-1)/2) squared = 2^(k-1); k odd, scale*scale overflows alone }
   Scale := ComposeD(($3FF + 2043 div 2) shl 20, 0);
   Result := _BlaiseExp(X - KLN2) * Scale * Scale;
 end;
 
-function _BlaiseSinh(X: Double): Double;
+function _BlaiseSinh(X: Float64): Float64;
 var
-  H, T, AbsX: Double;
+  H, T, AbsX: Float64;
   W: Int64;
   Neg: Boolean;
 begin
@@ -1775,9 +1775,9 @@ begin
   Result := 2 * H * Expo2(AbsX);
 end;
 
-function _BlaiseCosh(X: Double): Double;
+function _BlaiseCosh(X: Float64): Float64;
 var
-  T: Double;
+  T: Float64;
   W: Int64;
 begin
   X := _BlaiseFabs(X);
@@ -1803,9 +1803,9 @@ begin
   Result := Expo2(X);
 end;
 
-function _BlaiseTanh(X: Double): Double;
+function _BlaiseTanh(X: Float64): Float64;
 var
-  T, AbsX: Double;
+  T, AbsX: Float64;
   W: Int64;
   Neg: Boolean;
 begin
@@ -1873,15 +1873,15 @@ const
   PW_IVLN2H = 1.44269502162933349609e+00;{ 0x3FF71547, 0x60000000 }
   PW_IVLN2L = 1.92596299112661746887e-08;{ 0x3E54AE0B, 0xF85DDF44 }
 
-function _BlaisePow(X, Y: Double): Double;
+function _BlaisePow(X, Y: Float64): Float64;
 var
-  Z, Ax, Zh, Zl, Ph, Pl: Double;
-  Y1, T1, T2, R, S, T, U, V, W: Double;
-  Ss, S2, Sh, Sl, Th, Tl: Double;
+  Z, Ax, Zh, Zl, Ph, Pl: Float64;
+  Y1, T1, T2, R, S, T, U, V, W: Float64;
+  Ss, S2, Sh, Sl, Th, Tl: Float64;
   I, J, K, Yisint, N: Int64;    { C int32 -- ranges asserted per site }
   Hx, Hy, Ix, Iy: Int64;        { signed high words }
   Lx, Ly: Int64;                { unsigned low words }
-  Bp, DpH, DpL: Double;
+  Bp, DpH, DpL: Float64;
 begin
   Hx := HiS(X);
   Lx := LoU(X);

@@ -61,7 +61,7 @@ type
     places it in its slot, and calls through this type.  Consequences:
     at most 5 parameters, and no Double/Single params (those travel in
     xmm registers, which this trick cannot fill). }
-  TCaseMethod = procedure(A1, A2, A3, A4, A5: PtrUInt) of object;
+  TCaseMethod = procedure(A1, A2, A3, A4, A5: UInt) of object;
 
   { TAssertProc — a parameterless closure passed to AssertRaises.  Real
     closures (capture, exceptions propagating through the call) landed with
@@ -138,8 +138,8 @@ type
       are equal or differ by at most ADelta.  A NaN on either side fails (a
       plain Abs(E - A) > Delta test lets it through), and an infinity
       matches only itself.  Single arguments widen to Double. }
-    procedure AssertEquals(AMsg: string; AExpected, AActual, ADelta: Double); overload;
-    procedure AssertEquals(AExpected, AActual, ADelta: Double); overload;
+    procedure AssertEquals(AMsg: string; AExpected, AActual, ADelta: Float64); overload;
+    procedure AssertEquals(AExpected, AActual, ADelta: Float64); overload;
 
     procedure AssertNotEquals(AMsg: string; AExpected, AActual: Integer); overload;
     procedure AssertNotEquals(AExpected, AActual: Integer); overload;
@@ -390,7 +390,7 @@ begin
 end;
 
 procedure TAssert.AssertEquals(AMsg: string; AExpected, AActual,
-  ADelta: Double);
+  ADelta: Float64);
 begin
   if AExpected = AActual then
     Exit;
@@ -399,7 +399,7 @@ begin
       DoubleToStr(AActual) + '  Delta: ' + DoubleToStr(ADelta));
 end;
 
-procedure TAssert.AssertEquals(AExpected, AActual, ADelta: Double);
+procedure TAssert.AssertEquals(AExpected, AActual, ADelta: Float64);
 begin
   Self.AssertEquals('', AExpected, AActual, ADelta);
 end;
@@ -774,7 +774,7 @@ var
   Code:    Pointer;
   Run:     TRunMethod;
   CaseRun: TCaseMethod;
-  Slots:   array[0..4] of PtrUInt;
+  Slots:   array[0..4] of UInt;
   Toks:    array[0..4] of string;
   N, I:    Integer;
 begin
@@ -803,9 +803,9 @@ begin
   begin
     Toks[I] := CaseArgAt(Self.FCaseArgs, I);
     if Self.FCaseSig[I] = 'i' then
-      Slots[I] := PtrUInt(StrToInt(Toks[I]))
+      Slots[I] := UInt(StrToInt(Toks[I]))
     else if Self.FCaseSig[I] = 'I' then
-      Slots[I] := PtrUInt(StrToInt64(Toks[I]))
+      Slots[I] := UInt(StrToInt64(Toks[I]))
     else if Self.FCaseSig[I] = 'b' then
     begin
       if SameText(Toks[I], 'True') or (Toks[I] = '1') then
@@ -814,7 +814,7 @@ begin
         Slots[I] := 0;
     end
     else if Self.FCaseSig[I] = 's' then
-      Slots[I] := PtrUInt(PChar(Toks[I]))
+      Slots[I] := UInt(PChar(Toks[I]))
     else
       Self.Fail('[TestCase] cannot dispatch parameter ' + IntToStr(I) +
         ' of method ''' + Self.FName + ''' (kind ''' +

@@ -138,7 +138,7 @@ procedure SetupTLS;
 var
   PhdrAddr, PhEnt, PhNum: Int64;
   EhEPhOff: PInt64;
-  EhEPhEnt, EhEPhNum: ^Word;
+  EhEPhEnt, EhEPhNum: ^UInt16;
   I: Int64;
   Ph: PChar;
   TlsVaddr, TlsFileSz, TlsMemSz, TlsAlign: Int64;

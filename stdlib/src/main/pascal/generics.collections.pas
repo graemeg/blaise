@@ -302,7 +302,7 @@ function GCHashOf(AValue: Integer): Integer; overload;
 function GCHashOf(AValue: Int64): Integer; overload;
 function GCHashOf(AValue: Pointer): Integer; overload;
 function GCHashOf(AValue: Boolean): Integer; overload;
-function GCHashOf(AValue: Double): Integer; overload;
+function GCHashOf(AValue: Float64): Integer; overload;
 
 const
   { Below this size a linear scan beats building a hash table.  Interface
@@ -353,7 +353,7 @@ end;
 type
   PGCDoubleBits = ^Int64;
 
-function GCHashOf(AValue: Double): Integer; overload;
+function GCHashOf(AValue: Float64): Integer; overload;
 begin
   { The containers compare keys with '=', under which +0.0 and -0.0 are
     equal although their bits differ, so both hash as zero.  Any other value

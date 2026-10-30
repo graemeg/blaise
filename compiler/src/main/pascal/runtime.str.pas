@@ -55,7 +55,7 @@ procedure _StringRelease(Ptr: Pointer);                external name '_StringRel
 procedure _DynArrayRelease(Ptr: Pointer);              external name '_DynArrayRelease';
 
 { blaise_float binding — used by Format()'s %f/%e/%g handling. }
-function  _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
+function  _FormatFloatSpec(V: Float64; Spec: Integer; Prec: Integer): Pointer;
   external name '_FormatFloatSpec';
 
 { ------------------------------------------------------------------ }
@@ -1044,8 +1044,8 @@ var
   Buf: PChar;
   N:   Int64;
   FStr: Pointer;
-  V:    Double;
-  VP:   ^Double;
+  V:    Float64;
+  VP:   ^Float64;
 begin
   OutFree := True;
   if Tag = 2 then

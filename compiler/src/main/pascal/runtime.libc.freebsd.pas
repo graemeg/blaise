@@ -264,7 +264,7 @@ begin
   Size := (Size + Int64(PAGE_SIZE - 1)) and Int64($FFFFFFFFFFFFF000);
   Result := mmap(nil, Size, PROT_READ or PROT_WRITE,
                  MAP_PRIVATE or MAP_ANON_OS, -1, 0);
-  if (Result = nil) or (PtrUInt(Result) = PtrUInt(Int64(-1))) then
+  if (Result = nil) or (UInt(Result) = UInt(Int64(-1))) then
     Result := nil;
 end;
 

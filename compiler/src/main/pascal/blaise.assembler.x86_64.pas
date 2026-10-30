@@ -67,9 +67,9 @@ implementation
 
 { ---- Float helpers ----------------------------------------------------- }
 
-function _StrToDouble(S: Pointer): Double; external name '_StrToDouble';
+function _StrToDouble(S: Pointer): Float64; external name '_StrToDouble';
 
-function DoubleBits(V: Double): Int64;
+function DoubleBits(V: Float64): Int64;
 var
   P: ^Int64;
 begin
@@ -77,7 +77,7 @@ begin
   Result := P^;
 end;
 
-function SingleBits(V: Single): Integer;
+function SingleBits(V: Float32): Integer;
 var
   P: ^Integer;
 begin
@@ -2937,8 +2937,8 @@ var
   C: Integer;
   SymName: string;
   TypeStr: string;
-  DVal: Double;
-  FVal: Single;
+  DVal: Float64;
+  FVal: Float32;
   DataOp: TOperand;
   OpEnd: Integer;
   Count, Size, FillVal, J: Integer;
@@ -3155,7 +3155,7 @@ begin
   if Dir = '.float' then
   begin
     DVal := _StrToDouble(PChar(Args));
-    FVal := Single(DVal);
+    FVal := Float32(DVal);
     AWriter.AppendDWord(ASection, SingleBits(FVal));
     Exit;
   end;

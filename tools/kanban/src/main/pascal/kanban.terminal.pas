@@ -124,10 +124,10 @@ type
   PTermios = ^TTermios;
 
   TWinSize = record
-    Row:    Word;
-    Col:    Word;
-    XPixel: Word;
-    YPixel: Word;
+    Row:    UInt16;
+    Col:    UInt16;
+    XPixel: UInt16;
+    YPixel: UInt16;
   end;
   PWinSize = ^TWinSize;
 

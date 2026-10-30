@@ -2431,12 +2431,12 @@ end;
 
 procedure TEnumTypeDef.AddMember(const AName: string; AValue: Integer);
 begin
-  Members.AddObject(AName, TObject(Pointer(PtrUInt(AValue))));
+  Members.AddObject(AName, TObject(Pointer(UInt(AValue))));
 end;
 
 function TEnumTypeDef.OrdinalAt(AIndex: Integer): Integer;
 begin
-  Result := Integer(PtrUInt(Pointer(Members.Objects[AIndex])));
+  Result := Integer(UInt(Pointer(Members.Objects[AIndex])));
 end;
 
 { TCaseBranch }

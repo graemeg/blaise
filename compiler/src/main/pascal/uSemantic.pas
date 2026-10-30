@@ -1451,15 +1451,15 @@ end;
   folded float constants — passes locally, fails in CI).  Routing both directions
   through the RTL also drops the last libc dependency in this path, so a --static
   (libc-free) build of the compiler links without strtod. }
-function _StrToDouble(S: Pointer): Double; external name '_StrToDouble';
-function _DoubleToStr(V: Double): string; external name '_DoubleToStr';
+function _StrToDouble(S: Pointer): Float64; external name '_StrToDouble';
+function _DoubleToStr(V: Float64): string; external name '_DoubleToStr';
 
-function RawDoubleToStr(V: Double): string;
+function RawDoubleToStr(V: Float64): string;
 begin
   Result := _DoubleToStr(V);
 end;
 
-function RawStrToDouble(const S: string): Double;
+function RawStrToDouble(const S: string): Float64;
 begin
   Result := _StrToDouble(PChar(S));
 end;
@@ -8105,7 +8105,7 @@ function TSemanticAnalyser.EvalConstFloatExpr(AExpr: TASTExpr;
 var
   Bin:   TBinaryExpr;
   IdSym: TSymbol;
-  L, R:  Double;
+  L, R:  Float64;
   LStr:  string;
   RStr:  string;
 begin

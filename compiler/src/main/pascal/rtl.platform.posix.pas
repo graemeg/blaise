@@ -75,8 +75,8 @@ type
     procedure SysWriteInt(Fd: Integer; N: Integer); override;
     procedure SysWriteInt64(Fd: Integer; N: Int64); override;
     procedure SysWriteUInt64(Fd: Integer; N: UInt64); override;
-    procedure SysWriteDouble(Fd: Integer; V: Double); override;
-    procedure SysWriteSingle(Fd: Integer; V: Single); override;
+    procedure SysWriteDouble(Fd: Integer; V: Float64); override;
+    procedure SysWriteSingle(Fd: Integer; V: Float32); override;
     procedure SysWriteBool(Fd: Integer; B: Boolean); override;
     procedure SysWriteNewline(Fd: Integer); override;
 
@@ -162,8 +162,8 @@ procedure _BlaisePlatformInit;                    external name '_BlaisePlatform
 function  _IntToStr(N: Integer): Pointer;   external name '_IntToStr';
 function  _Int64ToStr(N: Int64): Pointer;   external name '_Int64ToStr';
 function  _UInt64ToStr(N: UInt64): Pointer; external name '_UInt64ToStr';
-function  _DoubleToStr(V: Double): Pointer; external name '_DoubleToStr';
-function  _SingleToStr(V: Single): Pointer; external name '_SingleToStr';
+function  _DoubleToStr(V: Float64): Pointer; external name '_DoubleToStr';
+function  _SingleToStr(V: Float32): Pointer; external name '_SingleToStr';
 procedure _StringAddRef(Ptr: Pointer);      external name '_StringAddRef';
 procedure _StringRelease(Ptr: Pointer);     external name '_StringRelease';
 
@@ -275,8 +275,8 @@ procedure _SysWritePChar(Fd: Integer; P: PChar);
 procedure _SysWriteInt(Fd: Integer; N: Integer);
 procedure _SysWriteInt64(Fd: Integer; N: Int64);
 procedure _SysWriteUInt64(Fd: Integer; N: UInt64);
-procedure _SysWriteDouble(Fd: Integer; V: Double);
-procedure _SysWriteSingle(Fd: Integer; V: Single);
+procedure _SysWriteDouble(Fd: Integer; V: Float64);
+procedure _SysWriteSingle(Fd: Integer; V: Float32);
 procedure _SysWriteBool(Fd: Integer; B: Boolean);
 procedure _SysWriteNewline(Fd: Integer);
 
@@ -966,7 +966,7 @@ begin
   _StringRelease(S);
 end;
 
-procedure TRtlPlatformPosix.SysWriteDouble(Fd: Integer; V: Double);
+procedure TRtlPlatformPosix.SysWriteDouble(Fd: Integer; V: Float64);
 var
   S: Pointer;
   Len: Int64;
@@ -978,7 +978,7 @@ begin
   _StringRelease(S);
 end;
 
-procedure TRtlPlatformPosix.SysWriteSingle(Fd: Integer; V: Single);
+procedure TRtlPlatformPosix.SysWriteSingle(Fd: Integer; V: Float32);
 var
   S: Pointer;
   Len: Int64;
@@ -1508,12 +1508,12 @@ begin
   GRtlPlatform.SysWriteUInt64(Fd, N);
 end;
 
-procedure _SysWriteDouble(Fd: Integer; V: Double);
+procedure _SysWriteDouble(Fd: Integer; V: Float64);
 begin
   GRtlPlatform.SysWriteDouble(Fd, V);
 end;
 
-procedure _SysWriteSingle(Fd: Integer; V: Single);
+procedure _SysWriteSingle(Fd: Integer; V: Float32);
 begin
   GRtlPlatform.SysWriteSingle(Fd, V);
 end;

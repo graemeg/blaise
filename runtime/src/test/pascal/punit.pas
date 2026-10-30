@@ -62,7 +62,7 @@ var
   GrowFactor       : Integer;
   DefaultSuiteName : string;
   RequirePassed    : Boolean;
-  DefaultDoubleDelta : Double;
+  DefaultDoubleDelta : Float64;
 
 { -----------------------------------------------------------------------
   Core data types
@@ -298,11 +298,11 @@ function AssertEquals(AMessage : string; const AExpected, AActual : string) : Bo
 function AssertEquals(AMessage : string; const AExpected, AActual : Boolean) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : Byte) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : Integer) : Boolean; overload;
-function AssertEquals(AMessage : string; const AExpected, AActual : Cardinal) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual : UInt32) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : Int64) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : UInt64) : Boolean; overload;
-function AssertEquals(AMessage : string; const AExpected, AActual : Double) : Boolean; overload;
-function AssertEquals(AMessage : string; const AExpected, AActual, ADelta : Double) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual : Float64) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual, ADelta : Float64) : Boolean; overload;
 
 function AssertNull(AMessage : string; const AValue : Pointer) : Boolean;
 function AssertNotNull(AMessage : string; const AValue : Pointer) : Boolean;
@@ -435,7 +435,7 @@ function BlockGet(Block : Pointer; I : Integer) : Pointer;
 var
   Slot : PPointer;
 begin
-  Slot := PPointer(PtrUInt(Block) + PtrUInt(I) * PtrSize);
+  Slot := PPointer(UInt(Block) + UInt(I) * PtrSize);
   Result := Slot^;
 end;
 
@@ -444,7 +444,7 @@ procedure BlockSet(Block : Pointer; I : Integer; Value : Pointer);
 var
   Slot : PPointer;
 begin
-  Slot := PPointer(PtrUInt(Block) + PtrUInt(I) * PtrSize);
+  Slot := PPointer(UInt(Block) + UInt(I) * PtrSize);
   Slot^ := Value;
 end;
 
@@ -1283,7 +1283,7 @@ begin
     AExpected = AActual);
 end;
 
-function AssertEquals(AMessage : string; const AExpected, AActual : Cardinal) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual : UInt32) : Boolean; overload;
 begin
   Result := AssertTrue(
     AMessage + '. ' + ExpectMessage(IntToStr(AExpected), IntToStr(AActual)),
@@ -1304,9 +1304,9 @@ begin
     AExpected = AActual);
 end;
 
-function AssertEquals(AMessage : string; const AExpected, AActual, ADelta : Double) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual, ADelta : Float64) : Boolean; overload;
 var
-  Effective : Double;
+  Effective : Float64;
 begin
   Effective := ADelta;
   if Effective = 0 then
@@ -1316,7 +1316,7 @@ begin
     Abs(AExpected - AActual) < Effective);
 end;
 
-function AssertEquals(AMessage : string; const AExpected, AActual : Double) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual : Float64) : Boolean; overload;
 begin
   Result := AssertEquals(AMessage, AExpected, AActual, 0.0);
 end;
@@ -1335,7 +1335,7 @@ function PointerToHex(P : Pointer) : string;
 const
   HexChars = '0123456789ABCDEF';
 var
-  V : PtrUInt;
+  V : UInt;
   S : string;
   I : Integer;
 begin
@@ -1344,7 +1344,7 @@ begin
     Result := 'nil';
     Exit;
     end;
-  V := PtrUInt(P);
+  V := UInt(P);
   S := '';
   for I := 1 to 16 do
     begin

@@ -117,7 +117,7 @@ begin
   AssertTrue('socketpair', MakePair(A, B));
   R := NewReactor();
   RdOnly := [ioRead];
-  R.Add(A, RdOnly, Pointer(PtrUInt(1)));
+  R.Add(A, RdOnly, Pointer(UInt(1)));
   AssertEquals('one fd registered', 1, R.FdCount());
   N := R.Wait(0, Ready);          { poll: nothing written yet }
   AssertEquals('empty poll before any write', 0, N);
@@ -139,7 +139,7 @@ begin
   AssertTrue('socketpair', MakePair(A, B));
   R := NewReactor();
   RdOnly := [ioRead];
-  Tok := Pointer(PtrUInt($ABCD));
+  Tok := Pointer(UInt($ABCD));
   R.Add(A, RdOnly, Tok);
   Byte1 := 88;
   AssertEquals('wrote one byte', Int64(1), c_write_fd(B, @Byte1, 1));
@@ -165,11 +165,11 @@ begin
   R := NewReactor();
   RdOnly := [ioRead];
   WrOnly := [ioWrite];
-  R.Add(A, RdOnly, Pointer(PtrUInt(7)));
+  R.Add(A, RdOnly, Pointer(UInt(7)));
   { With no data pending, a read-interest poll is empty. }
   AssertEquals('read-interest poll empty', 0, R.Wait(0, Ready));
   { A fresh socketpair endpoint is immediately writable. }
-  R.Modify(A, WrOnly, Pointer(PtrUInt(7)));
+  R.Modify(A, WrOnly, Pointer(UInt(7)));
   N := R.Wait(200, Ready);
   AssertEquals('writable after modify', 1, N);
   Evs := Ready[0].Events;
@@ -190,7 +190,7 @@ begin
   AssertTrue('socketpair', MakePair(A, B));
   R := NewReactor();
   RdOnly := [ioRead];
-  R.Add(A, RdOnly, Pointer(PtrUInt(3)));
+  R.Add(A, RdOnly, Pointer(UInt(3)));
   AssertEquals('registered', 1, R.FdCount());
   R.Remove(A);
   AssertEquals('count back to zero', 0, R.FdCount());
@@ -236,13 +236,13 @@ begin
   AssertTrue('socketpair', MakePair(A, B));
   R := NewReactor();
   RdOnly := [ioRead];
-  R.Add(A, RdOnly, Pointer(PtrUInt($55)));
+  R.Add(A, RdOnly, Pointer(UInt($55)));
   Byte1 := 7;
   c_write_fd(B, @Byte1, 1);
   R.Wake();
   N := R.Wait(200, Ready);
   AssertEquals('exactly one token (wake not surfaced)', 1, N);
-  AssertTrue('the real token', Ready[0].Token = Pointer(PtrUInt($55)));
+  AssertTrue('the real token', Ready[0].Token = Pointer(UInt($55)));
   Evs := Ready[0].Events;
   AssertTrue('read ready', ioRead in Evs);
   R.Free();

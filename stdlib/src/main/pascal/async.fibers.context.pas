@@ -374,7 +374,7 @@ begin
   F^.Done := False;
 
   Top := Base + Total;
-  Top := Pointer(PtrUInt(Top) and PtrUInt($FFFFFFFFFFFFFFF0));
+  Top := Pointer(UInt(Top) and UInt($FFFFFFFFFFFFFFF0));
   Tramp := @FiberTrampoline;
 {$IFDEF CPUARM64}
   { Synthetic first frame: one zeroed 160-byte save block (FiberSwapAsm's

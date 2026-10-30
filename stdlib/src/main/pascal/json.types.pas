@@ -57,7 +57,7 @@ type
     function GetCount: Integer; virtual;             { 0 for scalars }
     function GetAsString: string; virtual;
     function GetAsInt64: Int64; virtual;
-    function GetAsFloat: Double; virtual;
+    function GetAsFloat: Float64; virtual;
     function GetAsBoolean: Boolean; virtual;
     { Drive AWriter to emit this node and its descendants. }
     procedure WriteTo(AWriter: TJSONWriter); virtual; abstract;
@@ -71,7 +71,7 @@ type
     property Count: Integer read GetCount;
     property AsString: string read GetAsString;
     property AsInt64: Int64 read GetAsInt64;
-    property AsFloat: Double read GetAsFloat;
+    property AsFloat: Float64 read GetAsFloat;
     property AsBoolean: Boolean read GetAsBoolean;
   end;
 
@@ -101,7 +101,7 @@ type
     function GetJSONType: TJSONType; override;
     function GetAsString: string; override;
     function GetAsInt64: Int64; override;
-    function GetAsFloat: Double; override;
+    function GetAsFloat: Float64; override;
     function GetAsBoolean: Boolean; override;
     procedure WriteTo(AWriter: TJSONWriter); override;
   public
@@ -115,18 +115,18 @@ type
   TJSONNumber = class(TJSONData)
   protected
     FInt:   Int64;
-    FFloat: Double;
+    FFloat: Float64;
     FIsInt: Boolean;
     FText:  string;
     function GetJSONType: TJSONType; override;
     function GetAsString: string; override;
     function GetAsInt64: Int64; override;
-    function GetAsFloat: Double; override;
+    function GetAsFloat: Float64; override;
     function GetAsBoolean: Boolean; override;
     procedure WriteTo(AWriter: TJSONWriter); override;
   public
     constructor CreateInt(AValue: Int64);
-    constructor CreateFloat(AValue: Double);
+    constructor CreateFloat(AValue: Float64);
     { Construct from a raw, already-validated JSON number lexeme (reader path). }
     constructor CreateText(const AText: string; AIsInt: Boolean);
     property IsInteger: Boolean read FIsInt;
@@ -144,7 +144,7 @@ type
     function Add(const AValue: string): Integer; overload;     { wraps TJSONString }
     function Add(AValue: Int64): Integer; overload;
     function Add(AValue: Boolean): Integer; overload;
-    function Add(AValue: Double): Integer; overload;
+    function Add(AValue: Float64): Integer; overload;
     function AddNull: Integer;
     { Detach the element at AIndex and return it; the caller then owns it. }
     function Extract(AIndex: Integer): TJSONData;
@@ -170,7 +170,7 @@ type
     function Add(const AName: string; const AValue: string): Integer; overload;
     function Add(const AName: string; AValue: Int64): Integer; overload;
     function Add(const AName: string; AValue: Boolean): Integer; overload;
-    function Add(const AName: string; AValue: Double): Integer; overload;
+    function Add(const AName: string; AValue: Float64): Integer; overload;
     function AddNull(const AName: string): Integer;
     function Find(const AName: string): TJSONData;     { nil if absent }
     function Contains(const AName: string): Boolean;
@@ -203,10 +203,10 @@ implementation
 { Parse a JSON number lexeme into a Double.  The lexeme is assumed already
   validated (shape -?int(.frac)?([eE][+-]?digits)?); robust enough for
   config-sized inputs. }
-function StrToFloatJSON(const S: string): Double;
+function StrToFloatJSON(const S: string): Float64;
 var
   I, Len, ExpSign, ExpVal, K: Integer;
-  Sign, Acc, Scale: Double;
+  Sign, Acc, Scale: Float64;
 begin
   Len := Length(S);
   I := 0;
@@ -274,7 +274,7 @@ begin
   Result := 0;
 end;
 
-function TJSONData.GetAsFloat: Double;
+function TJSONData.GetAsFloat: Float64;
 begin
   Result := 0.0;
 end;
@@ -394,7 +394,7 @@ begin
   Result := StrToInt64(FValue);
 end;
 
-function TJSONString.GetAsFloat: Double;
+function TJSONString.GetAsFloat: Float64;
 begin
   Result := StrToFloatJSON(FValue);
 end;
@@ -421,7 +421,7 @@ begin
   FText := IntToStr(AValue);
 end;
 
-constructor TJSONNumber.CreateFloat(AValue: Double);
+constructor TJSONNumber.CreateFloat(AValue: Float64);
 begin
   FFloat := AValue;
   FInt := Trunc(AValue);
@@ -460,7 +460,7 @@ begin
   Result := FInt;
 end;
 
-function TJSONNumber.GetAsFloat: Double;
+function TJSONNumber.GetAsFloat: Float64;
 begin
   Result := FFloat;
 end;
@@ -517,7 +517,7 @@ begin
   Result := Add(TJSONBoolean.Create(AValue));
 end;
 
-function TJSONArray.Add(AValue: Double): Integer;
+function TJSONArray.Add(AValue: Float64): Integer;
 begin
   Result := Add(TJSONNumber.CreateFloat(AValue));
 end;
@@ -637,7 +637,7 @@ begin
   Result := Add(AName, TJSONBoolean.Create(AValue));
 end;
 
-function TJSONObject.Add(const AName: string; AValue: Double): Integer;
+function TJSONObject.Add(const AName: string; AValue: Float64): Integer;
 begin
   Result := Add(AName, TJSONNumber.CreateFloat(AValue));
 end;

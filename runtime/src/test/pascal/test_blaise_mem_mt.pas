@@ -253,7 +253,7 @@ begin
   GLargeProbeOk := 0;
   if Q <> nil then
     GLargeProbeOk := 1;
-  MappedP := Pointer(PtrUInt(Q) - 24);
+  MappedP := Pointer(UInt(Q) - 24);
   GLargeProbeMapped := MappedP^;
   _BlaiseFreeMem(Q);                       { local free — cached here }
 end;

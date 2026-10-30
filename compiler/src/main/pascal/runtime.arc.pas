@@ -218,9 +218,9 @@ var
 
 function LTHash(P: Pointer): Integer;
 var
-  V: PtrUInt;
+  V: UInt;
 begin
-  V := PtrUInt(P);
+  V := UInt(P);
   V := V xor (V shr 13);
   V := V xor (V shr 7);
   Result := Integer(V and (LT_BUCKETS - 1));
@@ -417,7 +417,7 @@ end;
 procedure _LeakTrackerEnable;
 var
   TableSize: Integer;
-  Sentinel: PtrUInt;
+  Sentinel: UInt;
 begin
   if GLTEnabled then Exit;
   GLTEnabled := True;

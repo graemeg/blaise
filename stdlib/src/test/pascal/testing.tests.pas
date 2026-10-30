@@ -147,8 +147,8 @@ end;
 
 procedure TFrameworkTests.TestFloatAssertEquals_WithinDelta;
 var
-  S: Single;
-  Inf, Zero: Double;
+  S: Float32;
+  Inf, Zero: Float64;
 begin
   AssertEquals('exact', 0.5, 0.5, 0.0);
   AssertEquals('within', 0.1 + 0.2, 0.3, 1e-9);
@@ -164,7 +164,7 @@ procedure TFrameworkTests.TestFloatAssertEquals_FailsOutsideDeltaAndOnNaN;
 var
   Msg: string;
   Raised: Boolean;
-  NaN, Zero: Double;
+  NaN, Zero: Float64;
 begin
   Raised := False;
   try

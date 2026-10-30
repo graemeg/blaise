@@ -194,7 +194,7 @@ end;
 
 function TPlatformLayoutDarwinArm64.DirentRecLen(Ent: Pointer): Integer;
 var
-  P: ^Word;
+  P: ^UInt16;
 begin
   P := Pointer(PChar(Ent) + DIRENT_OFF_RECLEN);
   Result := P^;

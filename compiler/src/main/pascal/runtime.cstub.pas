@@ -63,7 +63,7 @@ var
 begin
   D := PChar(Dst);
   S := PChar(Src);
-  if PtrUInt(Dst) <= PtrUInt(Src) then
+  if UInt(Dst) <= UInt(Src) then
   begin
     I := 0;
     while I < N do

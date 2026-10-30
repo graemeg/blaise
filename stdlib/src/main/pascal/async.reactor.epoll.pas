@@ -194,7 +194,7 @@ begin
   PMask := PUInt32(@Ev[0]);
   PMask^ := Mask;
   PData := PInt64(@Ev[4]);
-  PData^ := Int64(PtrUInt(AToken));
+  PData^ := Int64(UInt(AToken));
   Rc := c_epoll_ctl(Self.FEpFd, AOp, AFd, @Ev[0]);
   if (Rc <> 0) and (AOp <> EPOLL_CTL_DEL) then
     raise Exception.Create('epoll_ctl failed');
@@ -256,11 +256,11 @@ begin
   OutN := 0;
   for I := 0 to N - 1 do
   begin
-    PEv := PByte(PtrUInt(Self.FEventBuf) + PtrUInt(I * EPOLL_EVENT_SIZE));
+    PEv := PByte(UInt(Self.FEventBuf) + UInt(I * EPOLL_EVENT_SIZE));
     PMask := PUInt32(PEv);
-    PData := PInt64(PByte(PtrUInt(PEv) + 4));
+    PData := PInt64(PByte(UInt(PEv) + 4));
     Mask := PMask^;
-    Token := Pointer(PtrUInt(PData^));
+    Token := Pointer(UInt(PData^));
     if Token = nil then
     begin
       { The wake eventfd: drain the counter so it does not re-deliver, and do

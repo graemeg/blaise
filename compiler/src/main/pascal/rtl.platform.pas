@@ -80,8 +80,8 @@ type
     procedure SysWriteInt(Fd: Integer; N: Integer); virtual; abstract;
     procedure SysWriteInt64(Fd: Integer; N: Int64); virtual; abstract;
     procedure SysWriteUInt64(Fd: Integer; N: UInt64); virtual; abstract;
-    procedure SysWriteDouble(Fd: Integer; V: Double); virtual; abstract;
-    procedure SysWriteSingle(Fd: Integer; V: Single); virtual; abstract;
+    procedure SysWriteDouble(Fd: Integer; V: Float64); virtual; abstract;
+    procedure SysWriteSingle(Fd: Integer; V: Float32); virtual; abstract;
     procedure SysWriteBool(Fd: Integer; B: Boolean); virtual; abstract;
     procedure SysWriteNewline(Fd: Integer); virtual; abstract;
 

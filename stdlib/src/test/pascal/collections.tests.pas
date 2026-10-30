@@ -1312,11 +1312,11 @@ end;
 
 procedure TCollectionsTests.TestDict_DoubleKeys_HashedLookup;
 var
-  D: TDictionary<Double, Integer>;
+  D: TDictionary<Float64, Integer>;
   I: Integer;
-  Z: Double;
+  Z: Float64;
 begin
-  D := TDictionary<Double, Integer>.Create();
+  D := TDictionary<Float64, Integer>.Create();
   for I := 0 to 99 do
     D.Add(I * 0.5, I);
   AssertEquals('count', 100, D.Count);
@@ -1329,9 +1329,9 @@ end;
 
 procedure TCollectionsTests.TestDict_SingleKeys;
 var
-  D: TDictionary<Single, string>;
+  D: TDictionary<Float32, string>;
 begin
-  D := TDictionary<Single, string>.Create();
+  D := TDictionary<Float32, string>.Create();
   D.Add(1.5, 'a');
   D.Add(2.25, 'b');
   AssertEquals('first', 'a', D[1.5]);
@@ -1340,11 +1340,11 @@ end;
 
 procedure TCollectionsTests.TestSet_DoubleZeroSignsAreOneMember;
 var
-  S: TSet<Double>;
+  S: TSet<Float64>;
   I: Integer;
-  Z: Double;
+  Z: Float64;
 begin
-  S := TSet<Double>.Create();
+  S := TSet<Float64>.Create();
   for I := 1 to 20 do
     S.Include(I * 1.25);   { past the hash threshold }
   Z := 0.0;

@@ -198,7 +198,7 @@ const
     0, 0, 0, 0, 0, 0,
     0, 0);
 
-function DoubleBits(V: Double): Int64;
+function DoubleBits(V: Float64): Int64;
 var
   P: ^Int64;
 begin
@@ -206,9 +206,9 @@ begin
   Result := P^;
 end;
 
-function BitsToDouble(Bits: Int64): Double;
+function BitsToDouble(Bits: Int64): Float64;
 var
-  P: ^Double;
+  P: ^Float64;
 begin
   P := Pointer(@Bits);
   Result := P^;
@@ -247,7 +247,7 @@ begin
     Result := OB - OA;
 end;
 
-function EvalVector(FnCode: Integer; A, B: Double): Double;
+function EvalVector(FnCode: Integer; A, B: Float64): Float64;
 begin
   case FnCode of
     1: Result := _BlaiseSin(A);
@@ -280,7 +280,7 @@ end;
 function RunVectors(AFnCode: Integer; const AName: string): string;
 var
   I: Integer;
-  R: Double;
+  R: Float64;
   RB, D: Int64;
   Fails: Integer;
 begin
@@ -432,7 +432,7 @@ end;
 function Test_SqrtExact: string;
 var
   I: Integer;
-  V: Double;
+  V: Float64;
 begin
   { sqrt of perfect squares must be exact }
   for I := 1 to 100 do

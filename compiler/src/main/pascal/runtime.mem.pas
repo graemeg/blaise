@@ -353,7 +353,7 @@ end;
   (libc-free) build, and is CPU/OS-invariant. }
 function MyTid: Int64;
 begin
-  Result := Int64(PtrUInt(@TidAnchor));
+  Result := Int64(UInt(@TidAnchor));
 end;
 
 { Producer side: push a foreign-freed block onto its owning arena's MPSC
@@ -471,7 +471,7 @@ begin
     Nxt := A^.RemoteList;
     if A^.OwnerTid = 0 then
     begin
-      if _AtomicCASPtr(@A^.OwnerTid, nil, Pointer(PtrUInt(Tid))) then
+      if _AtomicCASPtr(@A^.OwnerTid, nil, Pointer(UInt(Tid))) then
       begin
         GAbandonedCount := GAbandonedCount - 1;
         { Claim and count the remote queue (the adopter is now the
@@ -676,7 +676,7 @@ end;
 
 function MapFailed(P: Pointer): Boolean;
 begin
-  Result := (P = nil) or (PtrUInt(P) = PtrUInt(MAP_FAILED_VAL));
+  Result := (P = nil) or (UInt(P) = UInt(MAP_FAILED_VAL));
 end;
 
 function PageRound(Size: Int64): Int64;
@@ -771,13 +771,13 @@ begin
   A := ArenaHead;
   if (A <> nil) and (A^.Offset + Needed <= A^.Capacity) then
   begin
-    Hdr := Pointer(PtrUInt(A^.Base) + PtrUInt(A^.Offset));
+    Hdr := Pointer(UInt(A^.Base) + UInt(A^.Offset));
     Hdr^.AllocSize := Size;
     Hdr^.Flags := FLAG_SMALL;
     Hdr^.Arena := A;
     A^.Offset := A^.Offset + Needed;
     _AtomicAddInt64(@A^.LiveCount, 1);
-    Exit(Pointer(PtrUInt(Hdr) + HEADER_SIZE));
+    Exit(Pointer(UInt(Hdr) + HEADER_SIZE));
   end;
 
   { Head arena exhausted (cold path).  Drain every owned arena's remote
@@ -795,7 +795,7 @@ begin
   if Node <> nil then
   begin
     FreeLists[Idx] := Node^.Next;
-    Hdr := PBlockHeader(Pointer(PtrUInt(Node) - HEADER_SIZE));
+    Hdr := PBlockHeader(Pointer(UInt(Node) - HEADER_SIZE));
     Hdr^.AllocSize := Size;
 {$IFDEF BLAISE_MEMDEBUG}
     Hdr^.Flags := FLAG_SMALL;   { block is live again — clear the freed marker }
@@ -810,13 +810,13 @@ begin
   begin
     Exit(nil);
   end;
-  Hdr := Pointer(PtrUInt(A^.Base) + PtrUInt(A^.Offset));
+  Hdr := Pointer(UInt(A^.Base) + UInt(A^.Offset));
   Hdr^.AllocSize := Size;
   Hdr^.Flags := FLAG_SMALL;
   Hdr^.Arena := A;
   A^.Offset := A^.Offset + Needed;
   _AtomicAddInt64(@A^.LiveCount, 1);
-  Result := Pointer(PtrUInt(Hdr) + HEADER_SIZE);
+  Result := Pointer(UInt(Hdr) + HEADER_SIZE);
 end;
 
 function SmallGetMem(Size: Integer): Pointer;
@@ -842,7 +842,7 @@ begin
   if Node <> nil then
   begin
     FreeLists[Idx] := Node^.Next;
-    Hdr := PBlockHeader(Pointer(PtrUInt(Node) - HEADER_SIZE));
+    Hdr := PBlockHeader(Pointer(UInt(Node) - HEADER_SIZE));
     Hdr^.AllocSize := Size;
 {$IFDEF BLAISE_MEMDEBUG}
     Hdr^.Flags := FLAG_SMALL;   { block is live again — clear the freed marker }
@@ -865,7 +865,7 @@ var
   QPtr: Pointer;
 {$ENDIF}
 begin
-  Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+  Hdr := PBlockHeader(Pointer(UInt(Ptr) - HEADER_SIZE));
 {$IFDEF BLAISE_MEMDEBUG}
   if Hdr^.Flags = FREED_MARK then
   begin
@@ -887,7 +887,7 @@ begin
   if QIdx >= QUARANTINE_N then QIdx := 0;
   if QPtr = nil then Exit;            { ring not yet full — defer this free }
   Ptr := QPtr;                        { free the evicted (oldest) block instead }
-  Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+  Hdr := PBlockHeader(Pointer(UInt(Ptr) - HEADER_SIZE));
 {$ENDIF}
   Idx := SizeClassIndex(Hdr^.AllocSize);
   Arena := Hdr^.Arena;
@@ -947,7 +947,7 @@ begin
       Hdr^.AllocSize := Size;
       Hdr^.Flags := FLAG_LARGE;
       Hdr^.OwnerTid := MyTid();
-      Exit(Pointer(PtrUInt(Hdr) + LARGE_HEADER));
+      Exit(Pointer(UInt(Hdr) + LARGE_HEADER));
     end;
     { Cached block too small — free it and fall through to a fresh mmap. }
     _libc_munmap(Pointer(Node), CachedSize);
@@ -964,7 +964,7 @@ begin
   Hdr^.AllocSize := Size;
   Hdr^.Flags := FLAG_LARGE;
   Hdr^.OwnerTid := MyTid();
-  Result := Pointer(PtrUInt(Base) + LARGE_HEADER);
+  Result := Pointer(UInt(Base) + LARGE_HEADER);
 end;
 
 procedure LargeFreeMem(Ptr: Pointer);
@@ -972,7 +972,7 @@ var
   Hdr: PLargeHeader;
   Node: PLargeFreeNode;
 begin
-  Hdr := PLargeHeader(Pointer(PtrUInt(Ptr) - LARGE_HEADER));
+  Hdr := PLargeHeader(Pointer(UInt(Ptr) - LARGE_HEADER));
   { Foreign free: a large block is its own private mapping, so any
     thread can munmap it directly — the design's option 2 (§The
     large-block remote path).  Only a LOCAL free may cache the block;
@@ -999,7 +999,7 @@ function IsLarge(Ptr: Pointer): Boolean;
 var
   Hdr: PBlockHeader;
 begin
-  Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+  Hdr := PBlockHeader(Pointer(UInt(Ptr) - HEADER_SIZE));
   Result := Hdr^.Flags = FLAG_LARGE;
 end;
 
@@ -1008,10 +1008,10 @@ var
   SmallHdr: PBlockHeader;
   LargeHdr: PLargeHeader;
 begin
-  SmallHdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+  SmallHdr := PBlockHeader(Pointer(UInt(Ptr) - HEADER_SIZE));
   if SmallHdr^.Flags = FLAG_LARGE then
   begin
-    LargeHdr := PLargeHeader(Pointer(PtrUInt(Ptr) - LARGE_HEADER));
+    LargeHdr := PLargeHeader(Pointer(UInt(Ptr) - LARGE_HEADER));
     Result := LargeHdr^.AllocSize;
   end
   else
@@ -1058,7 +1058,7 @@ var
   Hdr: PBlockHeader;
   A: PArena;
 begin
-  Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+  Hdr := PBlockHeader(Pointer(UInt(Ptr) - HEADER_SIZE));
   A := Hdr^.Arena;
   Result := A^.LiveCount;
 end;
@@ -1131,14 +1131,14 @@ begin
   begin
     if RoundUpToClass(NewSize) = RoundUpToClass(OldSize) then
     begin
-      Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+      Hdr := PBlockHeader(Pointer(UInt(Ptr) - HEADER_SIZE));
       Hdr^.AllocSize := NewSize;
       Exit(Ptr);
     end;
   end;
   if IsLarge(Ptr) and (NewSize > LARGE_THRESHOLD) then
   begin
-    LHdr := PLargeHeader(Pointer(PtrUInt(Ptr) - LARGE_HEADER));
+    LHdr := PLargeHeader(Pointer(UInt(Ptr) - LARGE_HEADER));
     OldMapped := LHdr^.TotalMapped;
     NewMapped := PageRound(Int64(LARGE_HEADER) + Int64(NewSize));
     if NewMapped = OldMapped then
