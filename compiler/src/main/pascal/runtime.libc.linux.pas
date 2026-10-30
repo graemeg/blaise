@@ -34,15 +34,15 @@ function getenv(Name: PChar): PChar;
 function time(T: Pointer): Int64;
 
 { waitpid via wait4 with a NULL rusage. }
-function waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer;
+function waitpid(Pid: Int; Status: Pointer; Options: Int): Int;
 
 { execvp: search $PATH for File when it has no '/', then execve.  Argv is the
   NULL-terminated argument vector; the current `environ` is passed as envp. }
-function execvp(File_: PChar; Argv: Pointer): Integer;
+function execvp(File_: PChar; Argv: Pointer): Int;
 
 { sysconf for the few names the RTL queries - currently only the online CPU
   count (_SC_NPROCESSORS_ONLN = 84), via sched_getaffinity + popcount. }
-function sysconf(Name: Integer): Int64;
+function sysconf(Name: Int): Int64;
 
 implementation
 
@@ -117,12 +117,12 @@ begin
   Result := sys_time(T);
 end;
 
-function waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer;
+function waitpid(Pid: Int; Status: Pointer; Options: Int): Int;
 begin
   Result := wait4(Pid, Status, Options, nil);
 end;
 
-function execvp(File_: PChar; Argv: Pointer): Integer;
+function execvp(File_: PChar; Argv: Pointer): Int;
 var
   PathEnv: PChar;
   PathKey: array[0..4] of Byte;
@@ -197,7 +197,7 @@ end;
 function PopCountMask(Mask: PChar; NBytes: Int64): Int64;
 var
   I, J, Cnt: Int64;
-  B: Integer;
+  B: Int;
 begin
   Cnt := 0;
   I := 0;
@@ -215,10 +215,10 @@ begin
   Result := Cnt;
 end;
 
-function sysconf(Name: Integer): Int64;
+function sysconf(Name: Int): Int64;
 var
   Mask: array[0..127] of Byte;   { 1024 CPUs worth of affinity bits }
-  Rc: Integer;
+  Rc: Int;
 begin
   if Name = _SC_NPROCESSORS_ONLN then
   begin

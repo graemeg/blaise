@@ -28,7 +28,7 @@ function Interrupted(N: Int64): Boolean;
 function FdExhausted(N: Int64): Boolean;
 
 { The current thread's errno value. }
-function GetOsErrno: Integer;
+function GetOsErrno: Int;
 
 implementation
 
@@ -39,11 +39,11 @@ const
   ENFILE = 23;   { system-wide fd limit reached }
 
 type
-  PInteger = ^Integer;
+  PInteger = ^Int32;
 
 function __error: Pointer; external name '__error';
 
-function GetOsErrno: Integer;
+function GetOsErrno: Int;
 var
   P: PInteger;
 begin

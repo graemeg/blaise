@@ -26,8 +26,8 @@ interface
   this unit does not export a type name that collides with the same alias in
   other RTL units when they are compiled together (e.g. blaise_arc's PInteger).
   The body reads/writes through %rdi regardless of the Pascal pointer type. }
-function _AtomicAddInt32(Ptr: Pointer; Delta: Integer): Integer;
-function _AtomicSubInt32(Ptr: Pointer; Delta: Integer): Integer;
+function _AtomicAddInt32(Ptr: Pointer; Delta: Int32): Int32;
+function _AtomicSubInt32(Ptr: Pointer; Delta: Int32): Int32;
 
 { Pointer-width primitives for the migration-safe allocator's remote-free
   queue (docs/concurrent-allocator-design.adoc, §"The new atomic primitives").
@@ -56,7 +56,7 @@ implementation
   casal are full acquire+release barriers, matching x86's locked forms. }
 
 { return *Ptr (old); *Ptr += Delta — atomically. }
-function _AtomicAddInt32(Ptr: Pointer; Delta: Integer): Integer;
+function _AtomicAddInt32(Ptr: Pointer; Delta: Int32): Int32;
   assembler; nostackframe;
 asm
     ldaddal w1, w2, [x0]
@@ -65,7 +65,7 @@ asm
 end;
 
 { return *Ptr (old); *Ptr -= Delta — atomically (ldaddal of the negation). }
-function _AtomicSubInt32(Ptr: Pointer; Delta: Integer): Integer;
+function _AtomicSubInt32(Ptr: Pointer; Delta: Int32): Int32;
   assembler; nostackframe;
 asm
     neg w1, w1
@@ -106,7 +106,7 @@ asm
 end;
 {$ELSE}
 { return *Ptr (old); *Ptr += Delta — atomically. }
-function _AtomicAddInt32(Ptr: Pointer; Delta: Integer): Integer;
+function _AtomicAddInt32(Ptr: Pointer; Delta: Int32): Int32;
   assembler; nostackframe;
 asm
     movl %esi, %eax
@@ -115,7 +115,7 @@ asm
 end;
 
 { return *Ptr (old); *Ptr -= Delta — atomically (xadd of the negated delta). }
-function _AtomicSubInt32(Ptr: Pointer; Delta: Integer): Integer;
+function _AtomicSubInt32(Ptr: Pointer; Delta: Int32): Int32;
   assembler; nostackframe;
 asm
     negl %esi

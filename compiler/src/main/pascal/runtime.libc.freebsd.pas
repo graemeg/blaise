@@ -45,15 +45,15 @@ function getenv(Name: PChar): PChar;
 function time(T: Pointer): Int64;
 
 { waitpid via wait4 with a NULL rusage. }
-function waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer;
+function waitpid(Pid: Int; Status: Pointer; Options: Int): Int;
 
 { execvp: execve the name with the current `environ` as envp.  No $PATH search
   yet (matches the Linux sibling — the RTL only execs explicit paths). }
-function execvp(File_: PChar; Argv: Pointer): Integer;
+function execvp(File_: PChar; Argv: Pointer): Int;
 
 { sysconf for the few names the RTL queries - currently only the online CPU
   count (_SC_NPROCESSORS_ONLN = 58 on FreeBSD), via sysctl(hw.ncpu). }
-function sysconf(Name: Integer): Int64;
+function sysconf(Name: Int): Int64;
 
 { setenv: insert or replace "Name=Value" in `environ`.  When the key exists a
   new entry string replaces the slot in place (Overwrite=0 leaves it alone);
@@ -62,12 +62,12 @@ function sysconf(Name: Integer): Int64;
   and arrays are mmap-ed and never freed — setenv traffic is test-harness
   scale, not allocator scale.  Children see changes because execvp/execve pass
   the current `environ`. }
-function setenv(Name, Value: PChar; Overwrite: Integer): Integer;
+function setenv(Name, Value: PChar; Overwrite: Int): Int;
 
 { unsetenv: remove every "Name=..." entry by shifting the tail of the pointer
   array down one slot (the array — original stack envp or our mmap-ed copy —
   is writable either way). }
-function unsetenv(Name: PChar): Integer;
+function unsetenv(Name: PChar): Int;
 
 { pthread_self: the calling thread's opaque id.  Freestanding FreeBSD has no
   pthread library; the kernel thread id from thr_self(2) serves the same
@@ -163,7 +163,7 @@ end;
 function time(T: Pointer): Int64;
 var
   Ts: array[0..1] of Int64;   { struct timespec: tv_sec (Int64), tv_nsec (long) }
-  Rc: Integer;
+  Rc: Int;
   Out_: PInt64;
 begin
   Rc := clock_gettime(CLOCK_REALTIME, @Ts[0]);
@@ -178,12 +178,12 @@ begin
   end;
 end;
 
-function waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer;
+function waitpid(Pid: Int; Status: Pointer; Options: Int): Int;
 begin
   Result := wait4(Pid, Status, Options, nil);
 end;
 
-function execvp(File_: PChar; Argv: Pointer): Integer;
+function execvp(File_: PChar; Argv: Pointer): Int;
 var
   PathEnv: PChar;
   PathKey: array[0..4] of Byte;
@@ -296,7 +296,7 @@ begin
   end;
 end;
 
-function setenv(Name, Value: PChar; Overwrite: Integer): Integer;
+function setenv(Name, Value: PChar; Overwrite: Int): Int;
 var
   NLen, VLen, Idx, Cnt, I: Int64;
   Entry: PChar;
@@ -369,7 +369,7 @@ begin
   Result := 0;
 end;
 
-function unsetenv(Name: PChar): Integer;
+function unsetenv(Name: PChar): Int;
 var
   NLen, I, J: Int64;
   S: PPointer;
@@ -398,12 +398,12 @@ begin
   end;
 end;
 
-function sysconf(Name: Integer): Int64;
+function sysconf(Name: Int): Int64;
 var
-  Mib: array[0..1] of Integer;   { the two-element MIB: CTL_HW, HW_NCPU }
-  NCpu: Integer;
+  Mib: array[0..1] of Int32;   { the two-element MIB: CTL_HW, HW_NCPU }
+  NCpu: Int;
   OldLen: Int64;                 { size_t }
-  Rc: Integer;
+  Rc: Int;
 begin
   if Name = _SC_NPROCESSORS_ONLN then
   begin

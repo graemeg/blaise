@@ -31,7 +31,7 @@ interface
 function _DoubleToStr(V: Float64): Pointer;
 function _SingleToStr(V: Float32): Pointer;
 function _StrToDouble(S: Pointer): Float64;
-function _AbsInt(N: Integer): Integer;
+function _AbsInt(N: Int32): Int32;
 function _AbsInt64(N: Int64): Int64;
 
 { Render V according to a printf-style float conversion for Format().
@@ -39,7 +39,7 @@ function _AbsInt64(N: Int64): Int64;
     Prec : number of digits after the point (f/e) or significant digits (g);
            -1 selects the conversion's default precision.
   Returns a freshly-allocated Blaise string (refcount = 1). }
-function _FormatFloatSpec(V: Float64; Spec: Integer; Prec: Integer): Pointer;
+function _FormatFloatSpec(V: Float64; Spec: Int32; Prec: Int32): Pointer;
 
 implementation
 
@@ -75,7 +75,7 @@ function BlaiseAllocStr(Src: PChar; Len: Int64): Pointer;
 var
   Cap: Int64;
   Base: Pointer;
-  RC: ^Integer;
+  RC: ^Int32;
   LN, CP: PStrLen;
   Data: PChar;
 begin
@@ -145,9 +145,9 @@ begin
 end;
 
 { Count leading zeros of a 64-bit value (treated as unsigned). }
-function CLZ64(X: Int64): Integer;
+function CLZ64(X: Int64): Int;
 var
-  N: Integer;
+  N: Int;
 begin
   if X = 0 then
   begin
@@ -168,7 +168,7 @@ end;
 type
   TDIY = record
     F: Int64;
-    E: Integer;
+    E: Int32;
   end;
 
 function DIYMul(X, Y: TDIY): TDIY;
@@ -193,11 +193,11 @@ const
 
 var
   Pow10F: array[0..86] of Int64;
-  Pow10E: array[0..86] of Integer;
-  Pow10E10: array[0..86] of Integer;
-  Pow10CacheReady: Integer;
+  Pow10E: array[0..86] of Int32;
+  Pow10E10: array[0..86] of Int32;
+  Pow10CacheReady: Int;
 
-procedure SetP(I: Integer; AF: Int64; AE: Integer; AE10: Integer);
+procedure SetP(I: Int; AF: Int64; AE: Int; AE10: Int);
 begin
   Pow10F[I] := AF;
   Pow10E[I] := AE;
@@ -304,9 +304,9 @@ begin
   end;
 end;
 
-function FindCachedPow10(TargetE10: Integer): Integer;
+function FindCachedPow10(TargetE10: Int): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   I := (TargetE10 - POW10_MIN) div POW10_STEP;
   if I < 0 then I := 0;
@@ -325,23 +325,23 @@ const
   GRISU_ALPHA = -61;
 
 procedure DoubleToDigits(V: Float64; Digits: PChar;
-  out NDigits: Integer; out DecExp: Integer; out Negative: Boolean);
+  out NDigits: Int; out DecExp: Int; out Negative: Boolean);
 var
   Bits: Int64;
-  BExp: Integer;
+  BExp: Int;
   Frac: Int64;
   W, CMK, Scaled: TDIY;
   One: TDIY;
   Integ, FracPart: Int64;
   FMask: Int64;
-  K, Idx, N, Pos: Integer;
+  K, Idx, N, Pos: Int;
   D, Z: Int64;
 begin
   EnsurePow10();
 
   Bits := DoubleBits(V);
   Negative := (Bits shr 63) <> 0;
-  BExp := Integer((Bits shr 52) and $7FF);
+  BExp := Int32((Bits shr 52) and $7FF);
   Frac := Bits and $000FFFFFFFFFFFFF;
 
   { Normalise: subnormals have BExp=0, normals have implicit bit }
@@ -405,7 +405,7 @@ begin
     while K >= 0 do
     begin
       Z := D div 10;
-      Digits[Pos + K] := Integer(D - Z * 10) + 48;
+      Digits[Pos + K] := Int32(D - Z * 10) + 48;
       D := Z;
       K := K - 1;
     end;
@@ -419,7 +419,7 @@ begin
   begin
     FracPart := FracPart * 10;
     D := FracPart shr (-One.E);
-    Digits[Pos] := Integer(D) + 48;
+    Digits[Pos] := Int32(D) + 48;
     FracPart := FracPart and FMask;
     Pos := Pos + 1;
   end;
@@ -434,18 +434,18 @@ end;
 
 { --- Format digits into %.15g / %.7g style output --- }
 
-function FormatFloat(V: Float64; MaxSigDigits: Integer): Pointer;
+function FormatFloat(V: Float64; MaxSigDigits: Int): Pointer;
 var
   Bits: Int64;
-  BExp: Integer;
+  BExp: Int;
   Frac: Int64;
   Negative: Boolean;
   Digits: PChar;
   Buf: PChar;
-  NDigits, DecExp, Pos, I: Integer;
+  NDigits, DecExp, Pos, I: Int;
 begin
   Bits := DoubleBits(V);
-  BExp := Integer((Bits shr 52) and $7FF);
+  BExp := Int32((Bits shr 52) and $7FF);
   Frac := Bits and $000FFFFFFFFFFFFF;
   Negative := (Bits shr 63) <> 0;
 
@@ -656,10 +656,10 @@ end;
   digit.  Adjusts NDigits and DecExp in place.  Keep <= 0 collapses the
   value to zero (NDigits := 1, Digits[0] := '0').  On all-nines carry the
   result becomes a single leading '1' with DecExp incremented. }
-procedure RoundDigits(Digits: PChar; var NDigits: Integer;
-  var DecExp: Integer; Keep: Integer);
+procedure RoundDigits(Digits: PChar; var NDigits: Int;
+  var DecExp: Int; Keep: Int);
 var
-  I: Integer;
+  I: Int;
 begin
   if Keep >= NDigits then
     Exit;
@@ -706,10 +706,10 @@ end;
 
 { Write the absolute integer N (>= 0) as decimal digits into Buf at Pos,
   zero-padded to at least MinW characters.  Returns the new Pos. }
-function PutPaddedInt(Buf: PChar; Pos, N, MinW: Integer): Integer;
+function PutPaddedInt(Buf: PChar; Pos, N, MinW: Int): Int;
 var
   Tmp: array[0..15] of Byte;
-  TmpLen, I: Integer;
+  TmpLen, I: Int;
 begin
   TmpLen := 0;
   if N = 0 then
@@ -742,10 +742,10 @@ end;
 { Render in fixed notation: Digits/NDigits/DecExp already rounded to Prec
   fraction digits.  Emits sign, integer part, '.', and Prec fraction digits.
   Returns characters written (Buf has room: header callers size it). }
-function RenderFixed(Buf: PChar; Pos: Integer; Digits: PChar;
-  NDigits, DecExp, Prec: Integer; Negative: Boolean): Integer;
+function RenderFixed(Buf: PChar; Pos: Int; Digits: PChar;
+  NDigits, DecExp, Prec: Int; Negative: Boolean): Int;
 var
-  I, FracEmitted, SrcIdx: Integer;
+  I, FracEmitted, SrcIdx: Int;
 begin
   if Negative then
   begin
@@ -810,21 +810,21 @@ end;
   rejecting the second with 'duplicate label'.  Keeping the names distinct is
   what lets any older binary, including the bootstrap seed, still build this
   unit; the rolling-bootstrap chain depends on it. }
-function FormatFloatSpecCore(V: Float64; Spec: Integer; Prec: Integer): Pointer;
+function FormatFloatSpecCore(V: Float64; Spec: Int; Prec: Int): Pointer;
 var
   Bits: Int64;
-  BExp: Integer;
+  BExp: Int;
   Frac: Int64;
   Negative: Boolean;
   Digits: PChar;
   Buf: PChar;
-  NDigits, DecExp, Pos, I, ExpVal: Integer;
+  NDigits, DecExp, Pos, I, ExpVal: Int;
   IsZero: Boolean;
   UpperExp: Boolean;
-  ExpChar: Integer;
+  ExpChar: Int;
 begin
   Bits := DoubleBits(V);
-  BExp := Integer((Bits shr 52) and $7FF);
+  BExp := Int32((Bits shr 52) and $7FF);
   Frac := Bits and $000FFFFFFFFFFFFF;
   Negative := (Bits shr 63) <> 0;
   IsZero := (BExp = 0) and (Frac = 0);
@@ -1050,7 +1050,7 @@ begin
   _BlaiseFreeMem(Digits);
 end;
 
-function _FormatFloatSpec(V: Float64; Spec: Integer; Prec: Integer): Pointer;
+function _FormatFloatSpec(V: Float64; Spec: Int32; Prec: Int32): Pointer;
 begin
   Result := FormatFloatSpecCore(V, Spec, Prec);
 end;
@@ -1070,11 +1070,11 @@ end;
 
 { --- String to Double (pure Pascal) --- }
 
-function Pow10Dbl(E: Integer): Float64;
+function Pow10Dbl(E: Int): Float64;
 var
   R: Float64;
   Base: Float64;
-  N: Integer;
+  N: Int;
 begin
   if E = 0 then
   begin
@@ -1130,13 +1130,13 @@ const
 type
   TStdBig = record
     L: array[0..159] of Int64;      { STD_LIMBS entries }  { each holds 0..$FFFFFFFF }
-    N: Integer;                           { limbs in use; 0 = zero  }
+    N: Int32;                           { limbs in use; 0 = zero  }
   end;
 
 { A := A * 10 + D }
-procedure StdBigMul10Add(var A: TStdBig; D: Integer);
+procedure StdBigMul10Add(var A: TStdBig; D: Int);
 var
-  I: Integer;
+  I: Int;
   Carry, T: Int64;
 begin
   Carry := D;
@@ -1153,10 +1153,10 @@ begin
   end;
 end;
 
-function StdBigBitLen(var A: TStdBig): Integer;
+function StdBigBitLen(var A: TStdBig): Int;
 var
   Top: Int64;
-  Bits: Integer;
+  Bits: Int;
 begin
   if A.N = 0 then
     Exit(0);
@@ -1171,9 +1171,9 @@ begin
 end;
 
 { A := A shl K (K >= 0) }
-procedure StdBigShl(var A: TStdBig; K: Integer);
+procedure StdBigShl(var A: TStdBig; K: Int);
 var
-  Words, Bits, I: Integer;
+  Words, Bits, I: Int;
   Lo, Hi: Int64;
 begin
   if (K = 0) or (A.N = 0) then
@@ -1205,9 +1205,9 @@ begin
 end;
 
 { -1 / 0 / +1 for A < B / A = B / A > B }
-function StdBigCmp(var A, B: TStdBig): Integer;
+function StdBigCmp(var A, B: TStdBig): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   if A.N <> B.N then
   begin
@@ -1230,7 +1230,7 @@ end;
 { A := A - B; requires A >= B }
 procedure StdBigSub(var A: TStdBig; var B: TStdBig);
 var
-  I: Integer;
+  I: Int;
   Borrow, T: Int64;
 begin
   Borrow := 0;
@@ -1257,7 +1257,7 @@ end;
   is the guard, plus a sticky flag.  E2 is the binary exponent of the
   value (leading quotient bit = 2^E2).  Handles normal, subnormal,
   overflow and the rounding carry uniformly. }
-function StdCompose(Q: Int64; Sticky: Boolean; E2: Integer;
+function StdCompose(Q: Int64; Sticky: Boolean; E2: Int;
                     Neg: Boolean): Float64;
 var
   Mant, BitsOut: Int64;
@@ -1295,18 +1295,18 @@ function _StrToDouble(S: Pointer): Float64;
 var
   P: PChar;
   Neg: Boolean;
-  I, C: Integer;
+  I, C: Int;
   Mantissa: Int64;
-  Digits: array[0..779] of Integer;  { STD_MAXDIG entries }
-  NSig: Integer;
+  Digits: array[0..779] of Int32;  { STD_MAXDIG entries }
+  NSig: Int;
   StickyTail: Boolean;
-  Exp10: Integer;
+  Exp10: Int;
   SeenDot: Boolean;
   ExpNeg: Boolean;
-  ExpVal: Integer;
-  TopMag: Integer;
+  ExpVal: Int;
+  TopMag: Int;
   Num, Den: TStdBig;
-  E2, NBits, K, Cmp: Integer;
+  E2, NBits, K, Cmp: Int;
   Q: Int64;
   Sticky: Boolean;
 begin
@@ -1533,7 +1533,7 @@ end;
 
 { --- Abs for integer types --- }
 
-function _AbsInt(N: Integer): Integer;
+function _AbsInt(N: Int32): Int32;
 begin
   if N < 0 then
     Result := -N

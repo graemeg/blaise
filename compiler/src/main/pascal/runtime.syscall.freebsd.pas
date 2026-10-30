@@ -48,73 +48,73 @@ unit runtime.syscall.freebsd;
 interface
 
 { File descriptors. }
-function open(Path: PChar; Flags: Integer; Mode: Integer): Integer;
-function close(Fd: Integer): Integer;
-function read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function open(Path: PChar; Flags: Int32; Mode: Int32): Int32;
+function close(Fd: Int32): Int32;
+function read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
 { `write` collides with the Write/WriteLn builtin as a Pascal identifier, so the
   Pascal name is _sys_write; the asm body additionally emits a bare `write`
   label (.globl) so the linker symbol matches rtl.platform.posix's
   `external name 'write'`.  Every other leaf's name is a valid Pascal identifier
   and needs no alias. }
-function _sys_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
-function lseek(Fd: Integer; Offset: Int64; Whence: Integer): Int64;
+function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
+function lseek(Fd: Int32; Offset: Int64; Whence: Int32): Int64;
 
 { Filesystem. }
-function fstat(Fd: Integer; Buf: Pointer): Integer;
+function fstat(Fd: Int32; Buf: Pointer): Int32;
 { FreeBSD's ino64 ABI has NO plain `stat` syscall — it is expressed as
   fstatat(AT_FDCWD, path, buf, 0).  This wrapper sets up that call so the bare
   `stat` symbol posix imports still resolves. }
-function stat(Path: PChar; Buf: Pointer): Integer;
+function stat(Path: PChar; Buf: Pointer): Int32;
 { lstat likewise: fstatat(AT_FDCWD, path, buf, AT_SYMLINK_NOFOLLOW). }
-function lstat(Path: PChar; Buf: Pointer): Integer;
-function mkdir(Path: PChar; Mode: Integer): Integer;
-function rmdir(Path: PChar): Integer;
-function unlink(Path: PChar): Integer;
-function rename(OldPath, NewPath: PChar): Integer;
-function chdir(Path: PChar): Integer;
-function chmod(Path: PChar; Mode: Integer): Integer;
+function lstat(Path: PChar; Buf: Pointer): Int32;
+function mkdir(Path: PChar; Mode: Int32): Int32;
+function rmdir(Path: PChar): Int32;
+function unlink(Path: PChar): Int32;
+function rename(OldPath, NewPath: PChar): Int32;
+function chdir(Path: PChar): Int32;
+function chmod(Path: PChar; Mode: Int32): Int32;
 { getdirentries(fd, buf, nbytes, basep) — read directory entries from a fd
   opened on a directory.  Here it is the native SYS_getdirentries (554, the
   ino64 variant matching SYS_fstatat above).  Returns bytes written (0 at end
   of directory), -errno on error.  FreeBSD's `struct dirent` differs from
   Linux's — TPlatformLayout supplies the offsets. }
-function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+function getdirentries(Fd: Int32; Buf: Pointer; Count: Int64;
                        Basep: Pointer): Int64;
 
 { Process. }
-function getpid: Integer;
-function dup2(OldFd, NewFd: Integer): Integer;
+function getpid: Int32;
+function dup2(OldFd, NewFd: Int32): Int32;
 { FreeBSD deprecated the 2-arg pipe(2) (legacy 42); this calls pipe2(fds, 0). }
-function pipe(Fds: Pointer): Integer;
+function pipe(Fds: Pointer): Int32;
 { fcntl(fd, cmd, arg) — raw; note FreeBSD's O_NONBLOCK is 0x4 (not Linux's
   0x800): callers must pass FreeBSD flag values, this leaf does not translate. }
-function fcntl(Fd, Cmd, Arg: Integer): Integer;
+function fcntl(Fd, Cmd, Arg: Int32): Int32;
 { ioctl(fd, request, arg) — the universal device-control syscall.  Terminal
   control (tcgetattr/tcsetattr are ioctl wrappers), network interfaces, and
   many other subsystems use it.  SYS_ioctl = 54. }
-function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+function ioctl(Fd: Int32; Request: Int64; Arg: Pointer): Int32;
 { getrlimit/setrlimit(resource, rlim) — process resource limits.  The fiber
   tests size their fd budget with these (RLIMIT_NOFILE; note the FreeBSD
   resource NUMBER is 8 where Linux uses 7 — callers translate).  struct
   rlimit is two 64-bit words on both OSes.  SYS 194/195. }
-function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
-function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function getrlimit(Resource: Int32; Rlim: Pointer): Int32;
+function setrlimit(Resource: Int32; Rlim: Pointer): Int32;
 { socketpair(domain, type, protocol, sv) — connected fd pair; the reactor and
   fiber I/O tests build their AF_UNIX plumbing with it.  SYS 135. }
-function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
+function socketpair(Domain, Typ, Protocol: Int32; Sv: Pointer): Int32;
 { thr_self(&id) — the kernel thread id, written through the pointer.  The
   pthread_self shim in runtime.libc.freebsd builds on it.  SYS 432. }
-function thr_self(Id: Pointer): Integer;
+function thr_self(Id: Pointer): Int32;
 
 { Event notification — the readiness reactor's kernel surface.  The libc
   profile binds the same names in libc; these leaves give the --static
   profile the design's link-time swap (async-networking-design.adoc,
   "Freestanding (static) builds"). }
-function kqueue: Integer;
+function kqueue: Int32;
 { kevent(kq, changelist, nchanges, eventlist, nevents, timeout) — the
   FreeBSD-12+ kevent (64-byte struct kevent with ext[4]). }
-function kevent(Kq: Integer; Changes: Pointer; NChanges: Integer;
-                Events: Pointer; NEvents: Integer; Timeout: Pointer): Integer;
+function kevent(Kq: Int32; Changes: Pointer; NChanges: Int32;
+                Events: Pointer; NEvents: Int32; Timeout: Pointer): Int32;
 
 { Sockets — Net.Sockets binds these flat C names; in the libc profile libc
   provides them, here the --static profile gets raw leaves (same link-time
@@ -123,22 +123,22 @@ function kevent(Kq: Integer; Changes: Pointer; NChanges: Integer;
   sendto(...,nil,0), so those two leaves zero the address arguments before
   entering the kernel.  htons/ntohs are not syscalls at all — plain 16-bit
   byte swaps exported under their libc names. }
-function socket(Domain, Typ, Protocol: Integer): Integer;
-function bind(Fd: Integer; Addr: Pointer; AddrLen: Integer): Integer;
-function listen(Fd, Backlog: Integer): Integer;
-function accept(Fd: Integer; Addr: Pointer; AddrLen: Pointer): Integer;
+function socket(Domain, Typ, Protocol: Int32): Int32;
+function bind(Fd: Int32; Addr: Pointer; AddrLen: Int32): Int32;
+function listen(Fd, Backlog: Int32): Int32;
+function accept(Fd: Int32; Addr: Pointer; AddrLen: Pointer): Int32;
 { accept4(2) — accept with flags (SOCK_NONBLOCK etc.); FreeBSD SYS 541. }
-function accept4(Fd: Integer; Addr: Pointer; AddrLen: Pointer;
-                 Flags: Integer): Integer;
-function connect(Fd: Integer; Addr: Pointer; AddrLen: Integer): Integer;
-function setsockopt(Fd, Level, OptName: Integer; OptVal: Pointer;
-                    OptLen: Integer): Integer;
-function getsockopt(Fd, Level, OptName: Integer; OptVal: Pointer;
-                    OptLen: Pointer): Integer;
-function getsockname(Fd: Integer; Addr: Pointer; AddrLen: Pointer): Integer;
-function shutdown(Fd, How: Integer): Integer;
-function recv(Fd: Integer; Buf: Pointer; Len: Int64; Flags: Integer): Int64;
-function send(Fd: Integer; Buf: Pointer; Len: Int64; Flags: Integer): Int64;
+function accept4(Fd: Int32; Addr: Pointer; AddrLen: Pointer;
+                 Flags: Int32): Int32;
+function connect(Fd: Int32; Addr: Pointer; AddrLen: Int32): Int32;
+function setsockopt(Fd, Level, OptName: Int32; OptVal: Pointer;
+                    OptLen: Int32): Int32;
+function getsockopt(Fd, Level, OptName: Int32; OptVal: Pointer;
+                    OptLen: Pointer): Int32;
+function getsockname(Fd: Int32; Addr: Pointer; AddrLen: Pointer): Int32;
+function shutdown(Fd, How: Int32): Int32;
+function recv(Fd: Int32; Buf: Pointer; Len: Int64; Flags: Int32): Int64;
+function send(Fd: Int32; Buf: Pointer; Len: Int64; Flags: Int32): Int64;
 function htons(HostShort: UInt16): UInt16;
 function ntohs(NetShort: UInt16): UInt16;
 
@@ -146,14 +146,14 @@ function ntohs(NetShort: UInt16): UInt16;
   over sigaction(2) (SYS_sigaction = 416), so the leaf builds the struct and
   returns the previous handler.  Net.Sockets binds this name for its
   process-wide SIGPIPE ignore. }
-function signal(SigNum: Integer; Handler: Pointer): Pointer;
+function signal(SigNum: Int; Handler: Pointer): Pointer;
 
 { Memory. }
-function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
+function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
              Offset: Int64): Pointer;
-function munmap(Addr: Pointer; Length: Int64): Integer;
+function munmap(Addr: Pointer; Length: Int64): Int32;
 { mprotect(addr, len, prot) — guard pages for fiber stacks (async design L0). }
-function mprotect(Addr: Pointer; Length: Int64; Prot: Integer): Integer;
+function mprotect(Addr: Pointer; Length: Int64; Prot: Int32): Int32;
 
 { mremap(old, oldsz, newsz, flags): FreeBSD has NO in-place remap syscall, so
   this is a stub that always reports failure (MAP_FAILED = -1).  runtime.mem's
@@ -163,22 +163,22 @@ function mprotect(Addr: Pointer; Length: Int64; Prot: Integer): Integer;
   `mremap` symbol as a failing stub therefore gives the allocator its no-mremap
   grow fallback with no allocator changes.  Signature matches the Linux leaf so
   runtime.mem's `external name 'mremap'` binds on both targets. }
-function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Integer;
+function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Int;
                NewAddr: Pointer): Pointer;
 
 { Time. }
-function nanosleep(Req, Rem: Pointer): Integer;
-function clock_gettime(ClockId: Integer; Ts: Pointer): Integer;
+function nanosleep(Req, Rem: Pointer): Int32;
+function clock_gettime(ClockId: Int32; Ts: Pointer): Int32;
 
 { Process control + raw primitives the higher-level wrappers build on. }
-function fork: Integer;
-function execve(Path: PChar; Argv, Envp: Pointer): Integer;
-function wait4(Pid: Integer; Status: Pointer; Options: Integer;
-               Rusage: Pointer): Integer;
-function kill(Pid, Sig: Integer): Integer;
+function fork: Int32;
+function execve(Path: PChar; Argv, Envp: Pointer): Int32;
+function wait4(Pid: Int32; Status: Pointer; Options: Int32;
+               Rusage: Pointer): Int32;
+function kill(Pid, Sig: Int32): Int32;
 { getrandom(buf, count, flags): fill buf with count random bytes; returns the
   count written or -errno.  Used by mkstemp's random suffix. }
-function getrandom(Buf: Pointer; Count: Int64; Flags: Integer): Int64;
+function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
 { Raw __getcwd(2): fills Buf (up to Size); returns 0 on success or -errno.  The
   wrapper in the posix layer adapts that to libc's buffer-pointer contract. }
 function sys_getcwd(Buf: PChar; Size: Int64): Int64;
@@ -187,8 +187,8 @@ function sys_getcwd(Buf: PChar; Size: Int64): Int64;
   freestanding sysconf (runtime.libc.freebsd) reads hw.ncpu through it since
   FreeBSD has no sched_getaffinity.  6-arg syscall (arg4 %rcx -> %r10); returns
   0 on success or -errno (CF-translated). }
-function sysctl(Name: Pointer; NameLen: Integer; OldP: Pointer;
-                OldLenP: Pointer; NewP: Pointer; NewLen: Int64): Integer;
+function sysctl(Name: Pointer; NameLen: Int32; OldP: Pointer;
+                OldLenP: Pointer; NewP: Pointer; NewLen: Int64): Int32;
 
 { Threads + TLS (Step 4c) — the FreeBSD primitives runtime.thread.static.freebsd
   and runtime.start.static.freebsd build on.  These have no Linux equivalents
@@ -197,18 +197,18 @@ function sysctl(Name: Pointer; NameLen: Integer; OldP: Pointer;
 { sysarch(op, parms) — SYS 165.  The FreeBSD way to set the %fs base for TLS:
   op = AMD64_SET_FSBASE (129), parms = a POINTER to the base value (NOT the value
   itself).  Returns 0 on success or -errno (CF-translated). }
-function sysarch(Op: Integer; Parms: Pointer): Integer;
+function sysarch(Op: Int32; Parms: Pointer): Int32;
 
 { _umtx_op(obj, op, val, uaddr, uaddr2) — SYS 454.  The FreeBSD futex analogue.
   op = UMTX_OP_WAIT_UINT_PRIVATE (15) blocks while obj^ = val (returns at once if
   obj^ <> val, like futex); op = UMTX_OP_WAKE_PRIVATE (16) wakes up to val waiters
   on obj.  5-arg syscall: arg4 (uaddr) arrives in %rcx -> moved to %r10. }
-function _umtx_op(Obj: Pointer; Op, Val: Integer; Uaddr, Uaddr2: Pointer): Integer;
+function _umtx_op(Obj: Pointer; Op, Val: Int32; Uaddr, Uaddr2: Pointer): Int32;
 
 { thr_new(param, param_size) — SYS 455.  Creates a new thread from a filled-in
   `struct thr_param` (param_size = sizeof = 104 on amd64).  The FreeBSD analogue
   of clone(2).  Returns 0 on success or -errno. }
-function thr_new(Param: Pointer; ParamSize: Integer): Integer;
+function thr_new(Param: Pointer; ParamSize: Int32): Int32;
 
 { thr_exit(state) — SYS 431.  Terminates JUST the calling thread (NOT the whole
   process — that is exit(2)/SYS_exit).  If state is non-nil the kernel writes 1
@@ -219,7 +219,7 @@ procedure thr_exit(State: Pointer);
 { _exit(2) — SYS_exit = 1.  Terminates the process; never returns.  The
   unit-level routine name `_exit` already emits the unmangled `_exit` symbol that
   satisfies posix's `external name '_exit'`. }
-procedure _exit(Code: Integer);
+procedure _exit(Code: Int32);
 
 { The current process environment (envp), captured by _start.  rtl.platform.posix
   / getenv walk this NULL-terminated array.  Defined here (as on Linux) so the
@@ -291,7 +291,7 @@ const
 { The asm bodies use literal immediates (the assembler needs a literal, not a
   symbol); the const block above documents the number-to-name mapping. }
 
-function open(Path: PChar; Flags: Integer; Mode: Integer): Integer;
+function open(Path: PChar; Flags: Int32; Mode: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $5, %rax            { SYS_open }
@@ -302,7 +302,7 @@ asm
     ret
 end;
 
-function close(Fd: Integer): Integer;
+function close(Fd: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $6, %rax            { SYS_close }
@@ -313,7 +313,7 @@ asm
     ret
 end;
 
-function read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   assembler; nostackframe;
 asm
     movq $3, %rax            { SYS_read }
@@ -326,7 +326,7 @@ end;
 
 { write CAN fail; posix's write-loop expects a negative return on error, so it
   gets CF-translation too. }
-function _sys_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   assembler; nostackframe;
 asm
 .globl write
@@ -339,7 +339,7 @@ write:
     ret
 end;
 
-function lseek(Fd: Integer; Offset: Int64; Whence: Integer): Int64;
+function lseek(Fd: Int32; Offset: Int64; Whence: Int32): Int64;
   assembler; nostackframe;
 asm
     movq $478, %rax          { SYS_lseek (ino64) }
@@ -350,7 +350,7 @@ asm
     ret
 end;
 
-function fstat(Fd: Integer; Buf: Pointer): Integer;
+function fstat(Fd: Int32; Buf: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $551, %rax          { SYS_fstat (ino64) }
@@ -366,7 +366,7 @@ end;
   path(%rsi)=Path, buf(%rdx)=Buf, flag(%r10)=0.  arg4 goes straight to %r10
   (the syscall's 4th kernel register); no %rcx move is needed since we build
   the arguments here rather than receive four C args. }
-function stat(Path: PChar; Buf: Pointer): Integer;
+function stat(Path: PChar; Buf: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rsi, %rdx          { buf   -> arg3 }
@@ -383,7 +383,7 @@ end;
 
 { lstat(path, buf) -> fstatat(AT_FDCWD, path, buf, AT_SYMLINK_NOFOLLOW); the
   same shuffle as stat above, with flag $200 so a link is not followed. }
-function lstat(Path: PChar; Buf: Pointer): Integer;
+function lstat(Path: PChar; Buf: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rsi, %rdx          { buf   -> arg3 }
@@ -398,7 +398,7 @@ asm
     ret
 end;
 
-function mkdir(Path: PChar; Mode: Integer): Integer;
+function mkdir(Path: PChar; Mode: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $136, %rax          { SYS_mkdir }
@@ -409,7 +409,7 @@ asm
     ret
 end;
 
-function chmod(Path: PChar; Mode: Integer): Integer;
+function chmod(Path: PChar; Mode: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $15, %rax           { SYS_chmod }
@@ -420,7 +420,7 @@ asm
     ret
 end;
 
-function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+function getdirentries(Fd: Int32; Buf: Pointer; Count: Int64;
                        Basep: Pointer): Int64;
   assembler; nostackframe;
 asm
@@ -433,7 +433,7 @@ asm
     ret
 end;
 
-function rmdir(Path: PChar): Integer;
+function rmdir(Path: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $137, %rax          { SYS_rmdir }
@@ -444,7 +444,7 @@ asm
     ret
 end;
 
-function unlink(Path: PChar): Integer;
+function unlink(Path: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $10, %rax           { SYS_unlink }
@@ -455,7 +455,7 @@ asm
     ret
 end;
 
-function rename(OldPath, NewPath: PChar): Integer;
+function rename(OldPath, NewPath: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $128, %rax          { SYS_rename }
@@ -466,7 +466,7 @@ asm
     ret
 end;
 
-function chdir(Path: PChar): Integer;
+function chdir(Path: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $12, %rax           { SYS_chdir }
@@ -477,7 +477,7 @@ asm
     ret
 end;
 
-function getpid: Integer;
+function getpid: Int32;
   assembler; nostackframe;
 asm
     movq $20, %rax           { SYS_getpid }
@@ -485,7 +485,7 @@ asm
     ret                      { getpid never fails; no CF translation }
 end;
 
-function dup2(OldFd, NewFd: Integer): Integer;
+function dup2(OldFd, NewFd: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $90, %rax           { SYS_dup2 }
@@ -497,7 +497,7 @@ asm
 end;
 
 { pipe(fds) -> pipe2(fds, 0).  Incoming: %rdi=Fds; add flags=0 in %rsi. }
-function pipe(Fds: Pointer): Integer;
+function pipe(Fds: Pointer): Int32;
   assembler; nostackframe;
 asm
     xorq %rsi, %rsi          { flags = 0 }
@@ -520,7 +520,7 @@ end;
   OS-agnostic (it uses one canonical, Linux-shaped flag set; the per-OS leaf
   reconciles it). 0x1000 already set (e.g. from runtime.start.static.freebsd)
   passes through untouched. }
-function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
+function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
              Offset: Int64): Pointer;
   assembler; nostackframe;
 asm
@@ -538,7 +538,7 @@ asm
     ret
 end;
 
-function munmap(Addr: Pointer; Length: Int64): Integer;
+function munmap(Addr: Pointer; Length: Int64): Int32;
   assembler; nostackframe;
 asm
     movq $73, %rax           { SYS_munmap }
@@ -549,7 +549,7 @@ asm
     ret
 end;
 
-function mprotect(Addr: Pointer; Length: Int64; Prot: Integer): Integer;
+function mprotect(Addr: Pointer; Length: Int64; Prot: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $74, %rax           { SYS_mprotect }
@@ -560,7 +560,7 @@ asm
     ret
 end;
 
-function fcntl(Fd, Cmd, Arg: Integer): Integer;
+function fcntl(Fd, Cmd, Arg: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $92, %rax           { SYS_fcntl }
@@ -571,7 +571,7 @@ asm
     ret
 end;
 
-function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+function ioctl(Fd: Int32; Request: Int64; Arg: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $54, %rax           { SYS_ioctl }
@@ -582,7 +582,7 @@ asm
     ret
 end;
 
-function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function getrlimit(Resource: Int32; Rlim: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $194, %rax          { SYS_getrlimit }
@@ -593,7 +593,7 @@ asm
     ret
 end;
 
-function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function setrlimit(Resource: Int32; Rlim: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $195, %rax          { SYS_setrlimit }
@@ -605,7 +605,7 @@ asm
 end;
 
 { 4-arg syscall: arg4 arrives in %rcx (C ABI) but the kernel wants %r10. }
-function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
+function socketpair(Domain, Typ, Protocol: Int32; Sv: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -617,7 +617,7 @@ asm
     ret
 end;
 
-function thr_self(Id: Pointer): Integer;
+function thr_self(Id: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $432, %rax          { SYS_thr_self }
@@ -628,7 +628,7 @@ asm
     ret
 end;
 
-function kqueue: Integer;
+function kqueue: Int32;
   assembler; nostackframe;
 asm
     movq $362, %rax          { SYS_kqueue }
@@ -640,8 +640,8 @@ asm
 end;
 
 { kevent has 6 args; arg4 (Events) arrives in %rcx -> move to %r10. }
-function kevent(Kq: Integer; Changes: Pointer; NChanges: Integer;
-                Events: Pointer; NEvents: Integer; Timeout: Pointer): Integer;
+function kevent(Kq: Int32; Changes: Pointer; NChanges: Int32;
+                Events: Pointer; NEvents: Int32; Timeout: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -656,7 +656,7 @@ end;
 { --- sockets (interface note above: the --static profile's Net.Sockets
       surface; recv/send are recvfrom/sendto with nil addresses) --- }
 
-function socket(Domain, Typ, Protocol: Integer): Integer;
+function socket(Domain, Typ, Protocol: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $97, %rax           { SYS_socket }
@@ -667,7 +667,7 @@ asm
     ret
 end;
 
-function bind(Fd: Integer; Addr: Pointer; AddrLen: Integer): Integer;
+function bind(Fd: Int32; Addr: Pointer; AddrLen: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $104, %rax          { SYS_bind }
@@ -678,7 +678,7 @@ asm
     ret
 end;
 
-function listen(Fd, Backlog: Integer): Integer;
+function listen(Fd, Backlog: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $106, %rax          { SYS_listen }
@@ -689,7 +689,7 @@ asm
     ret
 end;
 
-function accept(Fd: Integer; Addr: Pointer; AddrLen: Pointer): Integer;
+function accept(Fd: Int32; Addr: Pointer; AddrLen: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $30, %rax           { SYS_accept }
@@ -701,8 +701,8 @@ asm
 end;
 
 { accept4 has 4 args; arg4 (Flags) arrives in %rcx -> move to %r10. }
-function accept4(Fd: Integer; Addr: Pointer; AddrLen: Pointer;
-                 Flags: Integer): Integer;
+function accept4(Fd: Int32; Addr: Pointer; AddrLen: Pointer;
+                 Flags: Int32): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -714,7 +714,7 @@ asm
     ret
 end;
 
-function connect(Fd: Integer; Addr: Pointer; AddrLen: Integer): Integer;
+function connect(Fd: Int32; Addr: Pointer; AddrLen: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $98, %rax           { SYS_connect }
@@ -727,8 +727,8 @@ end;
 
 { setsockopt has 5 args, all in registers already (rdi rsi rdx rcx r8);
   arg4 (OptVal) arrives in %rcx -> move to %r10. }
-function setsockopt(Fd, Level, OptName: Integer; OptVal: Pointer;
-                    OptLen: Integer): Integer;
+function setsockopt(Fd, Level, OptName: Int32; OptVal: Pointer;
+                    OptLen: Int32): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -741,8 +741,8 @@ asm
 end;
 
 { getsockopt has 5 args; arg4 (OptVal) arrives in %rcx -> move to %r10. }
-function getsockopt(Fd, Level, OptName: Integer; OptVal: Pointer;
-                    OptLen: Pointer): Integer;
+function getsockopt(Fd, Level, OptName: Int32; OptVal: Pointer;
+                    OptLen: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -754,7 +754,7 @@ asm
     ret
 end;
 
-function getsockname(Fd: Integer; Addr: Pointer; AddrLen: Pointer): Integer;
+function getsockname(Fd: Int32; Addr: Pointer; AddrLen: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $32, %rax           { SYS_getsockname }
@@ -765,7 +765,7 @@ asm
     ret
 end;
 
-function shutdown(Fd, How: Integer): Integer;
+function shutdown(Fd, How: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $134, %rax          { SYS_shutdown }
@@ -778,7 +778,7 @@ end;
 
 { recv(fd,buf,len,flags) = recvfrom(fd,buf,len,flags,nil,nil): arg4 (Flags)
   arrives in %rcx -> %r10, then zero the from-address pair (%r8/%r9). }
-function recv(Fd: Integer; Buf: Pointer; Len: Int64; Flags: Integer): Int64;
+function recv(Fd: Int32; Buf: Pointer; Len: Int64; Flags: Int32): Int64;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -793,7 +793,7 @@ asm
 end;
 
 { send(fd,buf,len,flags) = sendto(fd,buf,len,flags,nil,0). }
-function send(Fd: Integer; Buf: Pointer; Len: Int64; Flags: Integer): Int64;
+function send(Fd: Int32; Buf: Pointer; Len: Int64; Flags: Int32): Int64;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -818,7 +818,7 @@ begin
 end;
 
 { Raw sigaction(2): sigaction(sig, act, oact). }
-function _sys_sigaction(Sig: Integer; Act, OAct: Pointer): Integer;
+function _sys_sigaction(Sig: Int32; Act, OAct: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $416, %rax          { SYS_sigaction }
@@ -835,11 +835,11 @@ end;
 type
   PPointer = ^Pointer;
 
-function signal(SigNum: Integer; Handler: Pointer): Pointer;
+function signal(SigNum: Int; Handler: Pointer): Pointer;
 var
   Act: array[0..31] of Byte;
   OAct: array[0..31] of Byte;
-  I: Integer;
+  I: Int;
   P: PPointer;
 begin
   for I := 0 to 31 do
@@ -857,13 +857,13 @@ end;
 
 { mremap: no FreeBSD in-place-remap syscall.  Always return MAP_FAILED (-1) so
   the allocator takes its alloc-new-copy-free fallback (see the interface note). }
-function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Integer;
+function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Int;
                NewAddr: Pointer): Pointer;
 begin
   Result := Pointer(-1);
 end;
 
-function nanosleep(Req, Rem: Pointer): Integer;
+function nanosleep(Req, Rem: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $240, %rax          { SYS_nanosleep }
@@ -874,7 +874,7 @@ asm
     ret
 end;
 
-function clock_gettime(ClockId: Integer; Ts: Pointer): Integer;
+function clock_gettime(ClockId: Int32; Ts: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $232, %rax          { SYS_clock_gettime }
@@ -893,7 +893,7 @@ end;
   (child path)` check runs the PARENT branch in the child — so a spawned
   subprocess never execve's its target and the parent reaps exit 127.  Mirror
   libc: if %edx != 0, this is the child -> return 0. }
-function fork: Integer;
+function fork: Int32;
   assembler; nostackframe;
 asm
     movq $2, %rax            { SYS_fork }
@@ -909,7 +909,7 @@ asm
     ret
 end;
 
-function execve(Path: PChar; Argv, Envp: Pointer): Integer;
+function execve(Path: PChar; Argv, Envp: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $59, %rax           { SYS_execve }
@@ -921,8 +921,8 @@ asm
 end;
 
 { wait4 has 4 args; arg4 (Rusage) arrives in %rcx -> move to %r10. }
-function wait4(Pid: Integer; Status: Pointer; Options: Integer;
-               Rusage: Pointer): Integer;
+function wait4(Pid: Int32; Status: Pointer; Options: Int32;
+               Rusage: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -934,7 +934,7 @@ asm
     ret
 end;
 
-function kill(Pid, Sig: Integer): Integer;
+function kill(Pid, Sig: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $37, %rax           { SYS_kill }
@@ -945,7 +945,7 @@ asm
     ret
 end;
 
-function getrandom(Buf: Pointer; Count: Int64; Flags: Integer): Int64;
+function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
   assembler; nostackframe;
 asm
     movq $563, %rax          { SYS_getrandom }
@@ -969,8 +969,8 @@ end;
 
 { __sysctl(name, namelen, oldp, oldlenp, newp, newlen) — 6 args; SYS 202.  arg4
   (oldlenp) arrives in %rcx and must move to %r10 (syscall clobbers %rcx). }
-function sysctl(Name: Pointer; NameLen: Integer; OldP: Pointer;
-                OldLenP: Pointer; NewP: Pointer; NewLen: Int64): Integer;
+function sysctl(Name: Pointer; NameLen: Int32; OldP: Pointer;
+                OldLenP: Pointer; NewP: Pointer; NewLen: Int64): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -984,7 +984,7 @@ end;
 
 { sysarch(op, parms) — 2 args, both in %rdi/%rsi already; SYS 165.  Used with
   AMD64_SET_FSBASE to set the %fs base to the thread pointer. }
-function sysarch(Op: Integer; Parms: Pointer): Integer;
+function sysarch(Op: Int32; Parms: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $165, %rax          { SYS_sysarch }
@@ -997,7 +997,7 @@ end;
 
 { _umtx_op(obj, op, val, uaddr, uaddr2) — 5 args; arg4 (uaddr) arrives in %rcx
   (C ABI) but the kernel wants it in %r10.  Move it before the syscall.  SYS 454. }
-function _umtx_op(Obj: Pointer; Op, Val: Integer; Uaddr, Uaddr2: Pointer): Integer;
+function _umtx_op(Obj: Pointer; Op, Val: Int32; Uaddr, Uaddr2: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -1010,7 +1010,7 @@ asm
 end;
 
 { thr_new(param, param_size) — 2 args, both in %rdi/%rsi already; SYS 455. }
-function thr_new(Param: Pointer; ParamSize: Integer): Integer;
+function thr_new(Param: Pointer; ParamSize: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $455, %rax          { SYS_thr_new }
@@ -1032,7 +1032,7 @@ end;
 
 { _exit(code) — SYS_exit = 1.  Terminates the process; never returns, so no
   CF translation is needed. }
-procedure _exit(Code: Integer); assembler; nostackframe;
+procedure _exit(Code: Int32); assembler; nostackframe;
 asm
     movq $1, %rax            { SYS_exit }
     syscall

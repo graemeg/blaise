@@ -26,12 +26,12 @@ uses
 
 { __cxa_atexit(func, arg, dso_handle): register func(arg) to run at exit, LIFO.
   Returns 0 on success.  dso_handle is ignored (single program, no DSO unload). }
-function __cxa_atexit(Func, Arg, DsoHandle: Pointer): Integer;
+function __cxa_atexit(Func, Arg, DsoHandle: Pointer): Int32;
 
 { exit(code): run the registered handlers (LIFO), then exit_group(code).  This
   is the bare `exit` main's epilogue calls; it is a reserved word in Pascal, so
   the Pascal proc is _libc2_exit and the asm/Pascal body publishes `exit`. }
-procedure _RunAtExitAndExit(Code: Integer);
+procedure _RunAtExitAndExit(Code: Int32);
 
 { abort(): raise SIGABRT to self; if the signal is caught/ignored, force-exit
   with status 134 (128 + SIGABRT). }
@@ -44,17 +44,17 @@ function timegm(Tm: Pointer): Int64;
 
 { mkstemp(template): template ends with "XXXXXX"; replace with random chars and
   open O_CREAT|O_EXCL|O_RDWR mode 0600.  Returns the fd or -1. }
-function mkstemp(Template: PChar): Integer;
+function mkstemp(Template: PChar): Int;
 
 { system(cmd): fork, child execve "/bin/sh -c <cmd>", parent wait4; returns the
   child's raw wait status (the RTL extracts the exit code). }
-function system(Cmd: PChar): Integer;
+function system(Cmd: PChar): Int;
 
 implementation
 
 type
   PInt64  = ^Int64;
-  PInteger = ^Integer;
+  PInteger = ^Int32;
 
 const
   SIGABRT  = 6;
@@ -74,9 +74,9 @@ const
 var
   GAtExitFns:  array[0..MAX_ATEXIT - 1] of Pointer;
   GAtExitArgs: array[0..MAX_ATEXIT - 1] of Pointer;
-  GAtExitCount: Integer;
+  GAtExitCount: Int;
 
-function __cxa_atexit(Func, Arg, DsoHandle: Pointer): Integer;
+function __cxa_atexit(Func, Arg, DsoHandle: Pointer): Int32;
 begin
   if GAtExitCount >= MAX_ATEXIT then
   begin
@@ -99,9 +99,9 @@ asm
     jmp  *%r11
 end;
 
-procedure _RunAtExitAndExit(Code: Integer);
+procedure _RunAtExitAndExit(Code: Int32);
 var
-  I: Integer;
+  I: Int;
 begin
   { LIFO. }
   I := GAtExitCount - 1;
@@ -116,7 +116,7 @@ end;
 
 { Publish the bare `exit` symbol as a tail-call into _RunAtExitAndExit (Code is
   already in %edi). }
-procedure _libc2_exit(Code: Integer); assembler; nostackframe;
+procedure _libc2_exit(Code: Int32); assembler; nostackframe;
 asm
 .globl exit
 exit:
@@ -177,17 +177,17 @@ begin
   end;
   CivilFromDays(Days, Y, M, D);
 
-  P := PInteger(Pointer(PChar(Tm) + TM_SEC));   P^ := Integer(Secs mod 60);
-  P := PInteger(Pointer(PChar(Tm) + TM_MIN));   P^ := Integer((Secs div 60) mod 60);
-  P := PInteger(Pointer(PChar(Tm) + TM_HOUR));  P^ := Integer(Secs div 3600);
-  P := PInteger(Pointer(PChar(Tm) + TM_MDAY));  P^ := Integer(D);
-  P := PInteger(Pointer(PChar(Tm) + TM_MON));   P^ := Integer(M - 1);     { 0-based }
-  P := PInteger(Pointer(PChar(Tm) + TM_YEAR));  P^ := Integer(Y - 1900);  { years since 1900 }
+  P := PInteger(Pointer(PChar(Tm) + TM_SEC));   P^ := Int32(Secs mod 60);
+  P := PInteger(Pointer(PChar(Tm) + TM_MIN));   P^ := Int32((Secs div 60) mod 60);
+  P := PInteger(Pointer(PChar(Tm) + TM_HOUR));  P^ := Int32(Secs div 3600);
+  P := PInteger(Pointer(PChar(Tm) + TM_MDAY));  P^ := Int32(D);
+  P := PInteger(Pointer(PChar(Tm) + TM_MON));   P^ := Int32(M - 1);     { 0-based }
+  P := PInteger(Pointer(PChar(Tm) + TM_YEAR));  P^ := Int32(Y - 1900);  { years since 1900 }
   { WDay: 1970-01-01 was a Thursday (4). }
   P := PInteger(Pointer(PChar(Tm) + TM_WDAY));
-  P^ := Integer(((Days mod 7) + 4 + 7) mod 7);
+  P^ := Int32(((Days mod 7) + 4 + 7) mod 7);
   P := PInteger(Pointer(PChar(Tm) + TM_YDAY));
-  P^ := Integer(Days - DaysFromCivil(Y, 1, 1));
+  P^ := Int32(Days - DaysFromCivil(Y, 1, 1));
   P := PInteger(Pointer(PChar(Tm) + TM_ISDST)); P^ := 0;
 end;
 
@@ -219,14 +219,14 @@ end;
 
 { --- mkstemp --- }
 
-function mkstemp(Template: PChar): Integer;
+function mkstemp(Template: PChar): Int;
 const
   ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 var
-  Len, I, Tries, Got: Integer;
+  Len, I, Tries, Got: Int;
   N: Int64;
   RandBuf: array[0..5] of Byte;
-  Fd: Integer;
+  Fd: Int;
 begin
   Len := 0;
   while (Template[Len] and $FF) <> 0 do Len := Len + 1;
@@ -241,7 +241,7 @@ begin
     begin
       N := getrandom(@RandBuf[Got], 6 - Got, 0);
       if N <= 0 then Continue;   { EINTR / transient: retry }
-      Got := Got + Integer(N);
+      Got := Got + Int32(N);
     end;
     for I := 0 to 5 do
       Template[Len - 6 + I] := Ord(ALPHABET[(RandBuf[I] mod 62)]);
@@ -254,9 +254,9 @@ end;
 
 { --- system --- }
 
-function system(Cmd: PChar): Integer;
+function system(Cmd: PChar): Int;
 var
-  Pid, Status: Integer;
+  Pid, Status: Int;
   Argv: array[0..3] of Pointer;
   ShPath, DashC: array[0..15] of Byte;
 begin

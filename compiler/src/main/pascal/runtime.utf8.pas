@@ -25,7 +25,7 @@ unit runtime.utf8;
 
 interface
 
-function _Utf8CountCodePoints(Data: Pointer; Len: Integer): Integer;
+function _Utf8CountCodePoints(Data: Pointer; Len: Int): Int;
 
 implementation
 
@@ -34,10 +34,10 @@ implementation
   continuation bytes (top two bits <> 10).  The x86-64 body below is a
   SIMD-optimised version of exactly this loop; a NEON port can follow
   once the macOS bring-up settles. }
-function _Utf8CountCodePoints(Data: Pointer; Len: Integer): Integer;
+function _Utf8CountCodePoints(Data: Pointer; Len: Int): Int;
 var
   P: ^Byte;
-  I, N: Integer;
+  I, N: Int;
 begin
   N := 0;
   for I := 0 to Len - 1 do
@@ -49,7 +49,7 @@ begin
   Result := N;
 end;
 {$ELSE}
-function _Utf8CountCodePoints(Data: Pointer; Len: Integer): Integer;
+function _Utf8CountCodePoints(Data: Pointer; Len: Int): Int;
   assembler; nostackframe;
 asm
     testl %esi, %esi

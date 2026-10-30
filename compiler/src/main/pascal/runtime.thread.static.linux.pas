@@ -41,15 +41,15 @@ uses
   runtime.start.static.linux;   { BuildThreadTLS - the per-thread TLS template }
 
 { Mutex - the buffer's first Integer is the futex word. }
-function pthread_mutex_init(Mutex, Attr: Pointer): Integer;
-function pthread_mutex_lock(Mutex: Pointer): Integer;
-function pthread_mutex_unlock(Mutex: Pointer): Integer;
-function pthread_mutex_destroy(Mutex: Pointer): Integer;
+function pthread_mutex_init(Mutex, Attr: Pointer): Int;
+function pthread_mutex_lock(Mutex: Pointer): Int;
+function pthread_mutex_unlock(Mutex: Pointer): Int;
+function pthread_mutex_destroy(Mutex: Pointer): Int;
 
 { Thread create / join.  *Thread receives an opaque handle (a control-block
   pointer); pthread_join consumes it. }
-function pthread_create(Thread, Attr, StartRoutine, Arg: Pointer): Integer;
-function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
+function pthread_create(Thread, Attr, StartRoutine, Arg: Pointer): Int;
+function pthread_join(Thread: Int64; RetVal: Pointer): Int;
 
 { C++-ABI thread-exit registration -- the name the platform layout unit's
   _BlaiseThreadAtExit imports (runtime.mem's thread-exit hook: managed
@@ -63,7 +63,7 @@ function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
   This replaced a no-op pthread_key_create / pthread_setspecific pair that
   accepted a destructor and never ran it, so a static worker's arenas were
   never swept and its managed threadvars never released. }
-function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
+function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Int32;
 
 { Run, newest first, and clear the calling thread's exit callbacks. }
 procedure _StaticThreadExitRun;
@@ -74,7 +74,7 @@ procedure _StaticThreadExitRun;
 implementation
 
 type
-  PInteger = ^Integer;
+  PInteger = ^Int32;
   PInt64   = ^Int64;
 
 const
@@ -113,8 +113,8 @@ const
 type
   PThreadCB = ^TThreadCB;
   TThreadCB = record
-    TidWord:  Integer;
-    Pad:      Integer;
+    TidWord:  Int32;
+    Pad:      Int32;
     MapBase:  Pointer;
     MapSize:  Int64;
   end;
@@ -125,7 +125,7 @@ type
 
 { Atomic compare-and-swap on an Integer: if Ptr^ = Expected set it to NewVal;
   returns the value that was in Ptr^ before the attempt. }
-function CAS(Ptr: Pointer; Expected, NewVal: Integer): Integer;
+function CAS(Ptr: Pointer; Expected, NewVal: Int32): Int32;
   assembler; nostackframe;
 asm
     movl %esi, %eax        { %eax = Expected (cmpxchg compares against %eax) }
@@ -134,7 +134,7 @@ asm
 end;
 
 { Atomic exchange: store NewVal into Ptr^, return the previous value. }
-function Xchg(Ptr: Pointer; NewVal: Integer): Integer;
+function Xchg(Ptr: Pointer; NewVal: Int32): Int32;
   assembler; nostackframe;
 asm
     movl %esi, %eax
@@ -142,7 +142,7 @@ asm
     ret
 end;
 
-function pthread_mutex_init(Mutex, Attr: Pointer): Integer;
+function pthread_mutex_init(Mutex, Attr: Pointer): Int;
 var
   P: PInteger;
 begin
@@ -151,9 +151,9 @@ begin
   Result := 0;
 end;
 
-function pthread_mutex_lock(Mutex: Pointer): Integer;
+function pthread_mutex_lock(Mutex: Pointer): Int;
 var
-  C: Integer;
+  C: Int;
 begin
   { Fast path: uncontended acquire. }
   C := CAS(Mutex, MX_UNLOCKED, MX_LOCKED);
@@ -171,7 +171,7 @@ begin
   Result := 0;
 end;
 
-function pthread_mutex_unlock(Mutex: Pointer): Integer;
+function pthread_mutex_unlock(Mutex: Pointer): Int;
 begin
   { If there were waiters (state 2), wake one after releasing. }
   if Xchg(Mutex, MX_UNLOCKED) = MX_CONTENDED then
@@ -179,7 +179,7 @@ begin
   Result := 0;
 end;
 
-function pthread_mutex_destroy(Mutex: Pointer): Integer;
+function pthread_mutex_destroy(Mutex: Pointer): Int;
 begin
   Result := 0;
 end;
@@ -235,7 +235,7 @@ asm
     ret
 end;
 
-function pthread_create(Thread, Attr, StartRoutine, Arg: Pointer): Integer;
+function pthread_create(Thread, Attr, StartRoutine, Arg: Pointer): Int;
 var
   Region: Pointer;
   CB: PThreadCB;
@@ -281,10 +281,10 @@ begin
   Result := 0;
 end;
 
-function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
+function pthread_join(Thread: Int64; RetVal: Pointer): Int;
 var
   CB: PThreadCB;
-  Tid: Integer;
+  Tid: Int;
 begin
   CB := PThreadCB(Pointer(Thread));
   { The kernel clears TidWord (CLONE_CHILD_CLEARTID) and futex-wakes it when the
@@ -311,9 +311,9 @@ type
 threadvar
   ThreadExitFn: array[0..7] of Pointer;
   ThreadExitArg: array[0..7] of Pointer;
-  ThreadExitCount: Integer;
+  ThreadExitCount: Int;
 
-function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
+function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Int32;
 begin
   if ThreadExitCount >= MAX_THREAD_EXIT then
   begin

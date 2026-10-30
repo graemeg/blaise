@@ -35,27 +35,27 @@ unit runtime.syscall.linux;
 interface
 
 { File descriptors. }
-function open(Path: PChar; Flags: Integer; Mode: Integer): Integer;
-function close(Fd: Integer): Integer;
-function read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function open(Path: PChar; Flags: Int32; Mode: Int32): Int32;
+function close(Fd: Int32): Int32;
+function read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
 { `write` collides with the Write/WriteLn builtin as a Pascal identifier, so the
   Pascal name is _sys_write; the asm body additionally emits a bare `write`
   label (.globl) so the linker symbol matches rtl.platform.posix's
   `external name 'write'`.  Every other leaf's name is a valid Pascal identifier
   and needs no alias. }
-function _sys_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
-function lseek(Fd: Integer; Offset: Int64; Whence: Integer): Int64;
+function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
+function lseek(Fd: Int32; Offset: Int64; Whence: Int32): Int64;
 
 { Filesystem. }
-function fstat(Fd: Integer; Buf: Pointer): Integer;
-function stat(Path: PChar; Buf: Pointer): Integer;
-function lstat(Path: PChar; Buf: Pointer): Integer;
-function mkdir(Path: PChar; Mode: Integer): Integer;
-function rmdir(Path: PChar): Integer;
-function unlink(Path: PChar): Integer;
-function rename(OldPath, NewPath: PChar): Integer;
-function chdir(Path: PChar): Integer;
-function chmod(Path: PChar; Mode: Integer): Integer;
+function fstat(Fd: Int32; Buf: Pointer): Int32;
+function stat(Path: PChar; Buf: Pointer): Int32;
+function lstat(Path: PChar; Buf: Pointer): Int32;
+function mkdir(Path: PChar; Mode: Int32): Int32;
+function rmdir(Path: PChar): Int32;
+function unlink(Path: PChar): Int32;
+function rename(OldPath, NewPath: PChar): Int32;
+function chdir(Path: PChar): Int32;
+function chmod(Path: PChar; Mode: Int32): Int32;
 { getdirentries(fd, buf, nbytes, basep) — read directory entries from a fd
   opened on a directory.  Packs variable-length dirent records into Buf and
   returns the number of BYTES written (0 at end of directory, -errno on
@@ -67,75 +67,75 @@ function chmod(Path: PChar; Mode: Integer): Integer;
   on both the libc and the freestanding-static paths.  Linux has no
   getdirentries SYSCALL, so this leaf implements it over SYS_getdents64 (217)
   and simply ignores basep — the walker never seeks. }
-function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+function getdirentries(Fd: Int32; Buf: Pointer; Count: Int64;
                        Basep: Pointer): Int64;
 
 { Process. }
-function getpid: Integer;
-function dup2(OldFd, NewFd: Integer): Integer;
-function pipe(Fds: Pointer): Integer;
+function getpid: Int32;
+function dup2(OldFd, NewFd: Int32): Int32;
+function pipe(Fds: Pointer): Int32;
 { fcntl(fd, cmd, arg) — needed to flip O_NONBLOCK on fds (the fiber I/O layer
   and the errno-classification tests; docs/async-networking-design.adoc P3). }
-function fcntl(Fd, Cmd, Arg: Integer): Integer;
+function fcntl(Fd, Cmd, Arg: Int32): Int32;
 { ioctl(fd, request, arg) — the universal device-control syscall.  Terminal
   control (tcgetattr/tcsetattr are ioctl wrappers), network interfaces, and
   many other subsystems use it.  SYS_ioctl = 16. }
-function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+function ioctl(Fd: Int32; Request: Int64; Arg: Pointer): Int32;
 { getrlimit/setrlimit(resource, rlim) — process resource limits.  The fiber
   tests size their fd budget with these (RLIMIT_NOFILE = 7 on Linux, 8 on
   FreeBSD — callers translate).  struct rlimit is two 64-bit words.
   SYS 97/160.  On the dynamic path libc binds the same names; these leaves
   give --static and freestanding builds the same surface. }
-function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
-function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function getrlimit(Resource: Int32; Rlim: Pointer): Int32;
+function setrlimit(Resource: Int32; Rlim: Pointer): Int32;
 { socketpair(domain, type, protocol, sv) — connected fd pair; the reactor and
   fiber I/O tests build their AF_UNIX plumbing with it.  SYS 53.  On the
   dynamic path libc binds the same name. }
-function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
+function socketpair(Domain, Typ, Protocol: Int32; Sv: Pointer): Int32;
 
 { epoll + eventfd: the async reactor's readiness poller and its self-wake fd.
   Bound in async.reactor.epoll via `external name`; on the dynamic path libc
   provides them, so these definitions exist only for the --static leaf.  The
   reactor treats the epoll_event struct as an opaque Pointer, so no record is
   needed here (see async.reactor.epoll for the packed uint32/uint64 layout). }
-function epoll_create1(Flags: Integer): Integer;
-function epoll_ctl(EpFd, Op, Fd: Integer; Event: Pointer): Integer;
-function epoll_wait(EpFd: Integer; Events: Pointer; MaxEvents, Timeout: Integer): Integer;
+function epoll_create1(Flags: Int32): Int32;
+function epoll_ctl(EpFd, Op, Fd: Int32; Event: Pointer): Int32;
+function epoll_wait(EpFd: Int32; Events: Pointer; MaxEvents, Timeout: Int32): Int32;
 { eventfd(2) with a flags arg maps to the eventfd2 syscall (the reactor passes
   EFD_CLOEXEC|EFD_NONBLOCK). }
-function eventfd(InitVal, Flags: Integer): Integer;
+function eventfd(InitVal, Flags: Int32): Int32;
 
 { Memory. }
-function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
+function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
              Offset: Int64): Pointer;
-function munmap(Addr: Pointer; Length: Int64): Integer;
+function munmap(Addr: Pointer; Length: Int64): Int32;
 { mprotect(addr, len, prot) — guard pages for fiber stacks (async design L0). }
-function mprotect(Addr: Pointer; Length: Int64; Prot: Integer): Integer;
+function mprotect(Addr: Pointer; Length: Int64; Prot: Int32): Int32;
 { mremap(old, oldsz, newsz, flags, newaddr) - 5 args; raw syscall. }
-function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Integer;
+function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Int32;
                NewAddr: Pointer): Pointer;
 
 { Time. }
-function nanosleep(Req, Rem: Pointer): Integer;
-function clock_gettime(ClockId: Integer; Ts: Pointer): Integer;
+function nanosleep(Req, Rem: Pointer): Int32;
+function clock_gettime(ClockId: Int32; Ts: Pointer): Int32;
 
 { Process control + raw primitives the higher-level wrappers (runtime.libc.linux)
   build on.  These are the bare syscalls; the libc-shaped versions (execvp with
   PATH search, waitpid, system,  ) live in the wrapper unit. }
-function fork: Integer;
-function execve(Path: PChar; Argv, Envp: Pointer): Integer;
-function wait4(Pid: Integer; Status: Pointer; Options: Integer;
-               Rusage: Pointer): Integer;
-function sched_getaffinity(Pid: Integer; CpuSetSize: Int64;
-                           Mask: Pointer): Integer;
+function fork: Int32;
+function execve(Path: PChar; Argv, Envp: Pointer): Int32;
+function wait4(Pid: Int32; Status: Pointer; Options: Int32;
+               Rusage: Pointer): Int32;
+function sched_getaffinity(Pid: Int32; CpuSetSize: Int64;
+                           Mask: Pointer): Int32;
 { futex(2): the kernel primitive the threads leaf builds mutexes and join on.
   6-arg syscall; arg4 (Timeout) arrives in %rcx -> moved to %r10.  Returns 0 or
   a count on success, -errno on error.  Op = FUTEX_WAIT(0) / FUTEX_WAKE(1). }
-function futex(Uaddr: Pointer; Op, Val: Integer; Timeout: Pointer;
-               Uaddr2: Pointer; Val3: Integer): Integer;
-function getrandom(Buf: Pointer; Count: Int64; Flags: Integer): Int64;
-function arch_prctl(Code: Integer; Addr: Pointer): Integer;
-function kill(Pid, Sig: Integer): Integer;
+function futex(Uaddr: Pointer; Op, Val: Int32; Timeout: Pointer;
+               Uaddr2: Pointer; Val3: Int32): Int32;
+function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
+function arch_prctl(Code: Int32; Addr: Pointer): Int32;
+function kill(Pid, Sig: Int32): Int32;
 { Raw time(2): returns seconds since the epoch; if T is non-nil it is also
   written there.  The kernel syscall handles the out-param itself. }
 function sys_time(T: Pointer): Int64;
@@ -147,7 +147,7 @@ function sys_getcwd(Buf: PChar; Size: Int64): Int64;
 { _exit(2) - exit_group, terminates all threads, runs NO atexit handlers.
   The bare `exit` (which DOES run atexit handlers, called by main's epilogue) is
   defined by runtime.libc2.linux alongside the registry, not here. }
-procedure _exit(Code: Integer);
+procedure _exit(Code: Int32);
 
 { The process environment vector (NULL-terminated array of "KEY=VALUE" PChars),
   captured by the freestanding _start from the initial stack.  Lives in this
@@ -202,7 +202,7 @@ const
   This leaf is x86-64-only today (every body is `movq $N,%rax; syscall`); the
   arm64 numbers are recorded for a future aarch64 static leaf. }
 
-function open(Path: PChar; Flags: Integer; Mode: Integer): Integer;
+function open(Path: PChar; Flags: Int32; Mode: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $2, %rax        { SYS_open }
@@ -210,7 +210,7 @@ asm
     ret
 end;
 
-function close(Fd: Integer): Integer;
+function close(Fd: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $3, %rax        { SYS_close }
@@ -218,7 +218,7 @@ asm
     ret
 end;
 
-function read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   assembler; nostackframe;
 asm
     movq $0, %rax        { SYS_read }
@@ -226,7 +226,7 @@ asm
     ret
 end;
 
-function _sys_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   assembler; nostackframe;
 asm
 .globl write
@@ -236,7 +236,7 @@ write:
     ret
 end;
 
-function lseek(Fd: Integer; Offset: Int64; Whence: Integer): Int64;
+function lseek(Fd: Int32; Offset: Int64; Whence: Int32): Int64;
   assembler; nostackframe;
 asm
     movq $8, %rax        { SYS_lseek }
@@ -244,7 +244,7 @@ asm
     ret
 end;
 
-function fstat(Fd: Integer; Buf: Pointer): Integer;
+function fstat(Fd: Int32; Buf: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $5, %rax        { SYS_fstat }
@@ -252,7 +252,7 @@ asm
     ret
 end;
 
-function stat(Path: PChar; Buf: Pointer): Integer;
+function stat(Path: PChar; Buf: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $4, %rax        { SYS_stat }
@@ -260,7 +260,7 @@ asm
     ret
 end;
 
-function lstat(Path: PChar; Buf: Pointer): Integer;
+function lstat(Path: PChar; Buf: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $6, %rax        { SYS_lstat }
@@ -268,7 +268,7 @@ asm
     ret
 end;
 
-function mkdir(Path: PChar; Mode: Integer): Integer;
+function mkdir(Path: PChar; Mode: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $83, %rax       { SYS_mkdir }
@@ -276,7 +276,7 @@ asm
     ret
 end;
 
-function chmod(Path: PChar; Mode: Integer): Integer;
+function chmod(Path: PChar; Mode: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $90, %rax       { SYS_chmod }
@@ -286,7 +286,7 @@ end;
 
 { Basep (arg4, %rcx) is deliberately unused: SYS_getdents64 takes only three
   arguments, and the directory walker never needs the seek offset. }
-function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+function getdirentries(Fd: Int32; Buf: Pointer; Count: Int64;
                        Basep: Pointer): Int64;
   assembler; nostackframe;
 asm
@@ -295,7 +295,7 @@ asm
     ret
 end;
 
-function rmdir(Path: PChar): Integer;
+function rmdir(Path: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $84, %rax       { SYS_rmdir }
@@ -303,7 +303,7 @@ asm
     ret
 end;
 
-function unlink(Path: PChar): Integer;
+function unlink(Path: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $87, %rax       { SYS_unlink }
@@ -311,7 +311,7 @@ asm
     ret
 end;
 
-function rename(OldPath, NewPath: PChar): Integer;
+function rename(OldPath, NewPath: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $82, %rax       { SYS_rename }
@@ -319,7 +319,7 @@ asm
     ret
 end;
 
-function chdir(Path: PChar): Integer;
+function chdir(Path: PChar): Int32;
   assembler; nostackframe;
 asm
     movq $80, %rax       { SYS_chdir }
@@ -327,7 +327,7 @@ asm
     ret
 end;
 
-function getpid: Integer;
+function getpid: Int32;
   assembler; nostackframe;
 asm
     movq $39, %rax       { SYS_getpid }
@@ -335,7 +335,7 @@ asm
     ret
 end;
 
-function dup2(OldFd, NewFd: Integer): Integer;
+function dup2(OldFd, NewFd: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $33, %rax       { SYS_dup2 }
@@ -343,7 +343,7 @@ asm
     ret
 end;
 
-function pipe(Fds: Pointer): Integer;
+function pipe(Fds: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $22, %rax       { SYS_pipe }
@@ -351,7 +351,7 @@ asm
     ret
 end;
 
-function fcntl(Fd, Cmd, Arg: Integer): Integer;
+function fcntl(Fd, Cmd, Arg: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $72, %rax       { SYS_fcntl }
@@ -359,7 +359,7 @@ asm
     ret
 end;
 
-function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+function ioctl(Fd: Int32; Request: Int64; Arg: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $16, %rax       { SYS_ioctl }
@@ -367,7 +367,7 @@ asm
     ret
 end;
 
-function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function getrlimit(Resource: Int32; Rlim: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $97, %rax       { SYS_getrlimit }
@@ -375,7 +375,7 @@ asm
     ret
 end;
 
-function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function setrlimit(Resource: Int32; Rlim: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $160, %rax      { SYS_setrlimit }
@@ -384,7 +384,7 @@ asm
 end;
 
 { 4-arg syscall: arg4 arrives in %rcx (C ABI) but the kernel wants %r10. }
-function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
+function socketpair(Domain, Typ, Protocol: Int32; Sv: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -395,7 +395,7 @@ end;
 
 { mmap has 6 args; arg4 (Flags) arrives in %rcx (C ABI) but the kernel wants it
   in %r10.  Move it before the syscall. }
-function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
+function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
              Offset: Int64): Pointer;
   assembler; nostackframe;
 asm
@@ -405,7 +405,7 @@ asm
     ret
 end;
 
-function munmap(Addr: Pointer; Length: Int64): Integer;
+function munmap(Addr: Pointer; Length: Int64): Int32;
   assembler; nostackframe;
 asm
     movq $11, %rax       { SYS_munmap }
@@ -413,7 +413,7 @@ asm
     ret
 end;
 
-function mprotect(Addr: Pointer; Length: Int64; Prot: Integer): Integer;
+function mprotect(Addr: Pointer; Length: Int64; Prot: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $10, %rax       { SYS_mprotect }
@@ -421,7 +421,7 @@ asm
     ret
 end;
 
-function nanosleep(Req, Rem: Pointer): Integer;
+function nanosleep(Req, Rem: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $35, %rax       { SYS_nanosleep }
@@ -429,7 +429,7 @@ asm
     ret
 end;
 
-function clock_gettime(ClockId: Integer; Ts: Pointer): Integer;
+function clock_gettime(ClockId: Int32; Ts: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $228, %rax      { SYS_clock_gettime }
@@ -438,7 +438,7 @@ asm
 end;
 
 { mremap has 5 args; arg4 (Flags) arrives in %rcx -> move to %r10. }
-function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Integer;
+function mremap(OldAddr: Pointer; OldSize, NewSize: Int64; Flags: Int32;
                NewAddr: Pointer): Pointer;
   assembler; nostackframe;
 asm
@@ -448,7 +448,7 @@ asm
     ret
 end;
 
-function fork: Integer;
+function fork: Int32;
   assembler; nostackframe;
 asm
     movq $57, %rax       { SYS_fork }
@@ -456,7 +456,7 @@ asm
     ret
 end;
 
-function execve(Path: PChar; Argv, Envp: Pointer): Integer;
+function execve(Path: PChar; Argv, Envp: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $59, %rax       { SYS_execve }
@@ -465,8 +465,8 @@ asm
 end;
 
 { wait4 has 4 args; arg4 (Rusage) arrives in %rcx -> move to %r10. }
-function wait4(Pid: Integer; Status: Pointer; Options: Integer;
-               Rusage: Pointer): Integer;
+function wait4(Pid: Int32; Status: Pointer; Options: Int32;
+               Rusage: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -475,7 +475,7 @@ asm
     ret
 end;
 
-function epoll_create1(Flags: Integer): Integer;
+function epoll_create1(Flags: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $291, %rax      { SYS_epoll_create1 }
@@ -484,7 +484,7 @@ asm
 end;
 
 { epoll_ctl has 4 args; arg4 (Event) arrives in %rcx -> move to %r10. }
-function epoll_ctl(EpFd, Op, Fd: Integer; Event: Pointer): Integer;
+function epoll_ctl(EpFd, Op, Fd: Int32; Event: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -494,7 +494,7 @@ asm
 end;
 
 { epoll_wait has 4 args; arg4 (Timeout) arrives in %rcx -> move to %r10. }
-function epoll_wait(EpFd: Integer; Events: Pointer; MaxEvents, Timeout: Integer): Integer;
+function epoll_wait(EpFd: Int32; Events: Pointer; MaxEvents, Timeout: Int32): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -505,7 +505,7 @@ end;
 
 { eventfd(count, flags) with a flags arg is the eventfd2 syscall (2 args in
   %rdi/%rsi, no %r10 move needed). }
-function eventfd(InitVal, Flags: Integer): Integer;
+function eventfd(InitVal, Flags: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $290, %rax      { SYS_eventfd2 }
@@ -513,8 +513,8 @@ asm
     ret
 end;
 
-function sched_getaffinity(Pid: Integer; CpuSetSize: Int64;
-                           Mask: Pointer): Integer;
+function sched_getaffinity(Pid: Int32; CpuSetSize: Int64;
+                           Mask: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $204, %rax      { SYS_sched_getaffinity }
@@ -523,8 +523,8 @@ asm
 end;
 
 { futex has 6 args; arg4 (Timeout) arrives in %rcx -> move to %r10. }
-function futex(Uaddr: Pointer; Op, Val: Integer; Timeout: Pointer;
-               Uaddr2: Pointer; Val3: Integer): Integer;
+function futex(Uaddr: Pointer; Op, Val: Int32; Timeout: Pointer;
+               Uaddr2: Pointer; Val3: Int32): Int32;
   assembler; nostackframe;
 asm
     movq %rcx, %r10
@@ -533,7 +533,7 @@ asm
     ret
 end;
 
-function getrandom(Buf: Pointer; Count: Int64; Flags: Integer): Int64;
+function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
   assembler; nostackframe;
 asm
     movq $318, %rax      { SYS_getrandom }
@@ -541,7 +541,7 @@ asm
     ret
 end;
 
-function arch_prctl(Code: Integer; Addr: Pointer): Integer;
+function arch_prctl(Code: Int32; Addr: Pointer): Int32;
   assembler; nostackframe;
 asm
     movq $158, %rax      { SYS_arch_prctl }
@@ -549,7 +549,7 @@ asm
     ret
 end;
 
-function kill(Pid, Sig: Integer): Integer;
+function kill(Pid, Sig: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $62, %rax       { SYS_kill }
@@ -575,7 +575,7 @@ end;
 
 { _exit(2): terminate immediately via exit_group, running no atexit handlers.
   Code arrives in %edi; exit_group reads its status from %rdi. }
-procedure _exit(Code: Integer);
+procedure _exit(Code: Int32);
   assembler; nostackframe;
 asm
     movq $231, %rax      { SYS_exit_group }

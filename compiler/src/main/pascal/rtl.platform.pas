@@ -47,7 +47,7 @@ type
       socket, device).  With AFollowLinks a link reports its target's kind
       (stat); without it the link itself (lstat), so 3 is only seen then.
       Unlike FileExists it never opens the path -- opening a FIFO blocks. }
-    function PathKind(const APath: string; AFollowLinks: Boolean): Integer; virtual; abstract;
+    function PathKind(const APath: string; AFollowLinks: Boolean): Int32; virtual; abstract;
     function ForceDirectories(const APath: string): Boolean; virtual; abstract;
     function RemoveDir(const APath: string): Boolean; virtual; abstract;
     function GetCurrentDir: string; virtual; abstract;
@@ -65,55 +65,55 @@ type
     { OS utilities }
     function GetTempDir: string; virtual; abstract;
     function GetTempFileName(const ADir, APrefix: string): string; virtual; abstract;
-    function GetProcessID: Integer; virtual; abstract;
+    function GetProcessID: Int32; virtual; abstract;
     function GetEnvVar(const AName: string): string; virtual; abstract;
-    procedure Sleep(AMilliseconds: Integer); virtual; abstract;
-    procedure Halt(AExitCode: Integer); virtual; abstract;
+    procedure Sleep(AMilliseconds: Int32); virtual; abstract;
+    procedure Halt(AExitCode: Int32); virtual; abstract;
 
     { Process }
-    function Exec(const ACmd: string): Integer; virtual; abstract;
-    function ParamCount: Integer; virtual; abstract;
-    function ParamStr(AIndex: Integer): string; virtual; abstract;
+    function Exec(const ACmd: string): Int32; virtual; abstract;
+    function ParamCount: Int32; virtual; abstract;
+    function ParamStr(AIndex: Int32): string; virtual; abstract;
 
     { Console I/O — used by compiler-emitted WriteLn/Write }
-    procedure SysWriteStr(Fd: Integer; S: Pointer); virtual; abstract;
-    procedure SysWriteInt(Fd: Integer; N: Integer); virtual; abstract;
-    procedure SysWriteInt64(Fd: Integer; N: Int64); virtual; abstract;
-    procedure SysWriteUInt64(Fd: Integer; N: UInt64); virtual; abstract;
-    procedure SysWriteDouble(Fd: Integer; V: Float64); virtual; abstract;
-    procedure SysWriteSingle(Fd: Integer; V: Float32); virtual; abstract;
-    procedure SysWriteBool(Fd: Integer; B: Boolean); virtual; abstract;
-    procedure SysWriteNewline(Fd: Integer); virtual; abstract;
+    procedure SysWriteStr(Fd: Int32; S: Pointer); virtual; abstract;
+    procedure SysWriteInt(Fd: Int32; N: Int32); virtual; abstract;
+    procedure SysWriteInt64(Fd: Int32; N: Int64); virtual; abstract;
+    procedure SysWriteUInt64(Fd: Int32; N: UInt64); virtual; abstract;
+    procedure SysWriteDouble(Fd: Int32; V: Float64); virtual; abstract;
+    procedure SysWriteSingle(Fd: Int32; V: Float32); virtual; abstract;
+    procedure SysWriteBool(Fd: Int32; B: Boolean); virtual; abstract;
+    procedure SysWriteNewline(Fd: Int32); virtual; abstract;
 
     { File-descriptor primitives — used by streams }
-    function FdOpenRead(Path: Pointer): Integer; virtual; abstract;
-    function FdOpenWrite(Path: Pointer): Integer; virtual; abstract;
-    function FdOpenAppend(Path: Pointer): Integer; virtual; abstract;
-    function FdRead(Fd: Integer; Buf: Pointer; Count: Integer): Integer; virtual; abstract;
-    function FdWrite(Fd: Integer; Buf: Pointer; Count: Integer): Integer; virtual; abstract;
-    function FdSeek(Fd: Integer; Offset: Int64; Origin: Integer): Int64; virtual; abstract;
-    function FdSize(Fd: Integer): Int64; virtual; abstract;
-    procedure FdClose(Fd: Integer); virtual; abstract;
+    function FdOpenRead(Path: Pointer): Int32; virtual; abstract;
+    function FdOpenWrite(Path: Pointer): Int32; virtual; abstract;
+    function FdOpenAppend(Path: Pointer): Int32; virtual; abstract;
+    function FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int; virtual; abstract;
+    function FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int; virtual; abstract;
+    function FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64; virtual; abstract;
+    function FdSize(Fd: Int32): Int64; virtual; abstract;
+    procedure FdClose(Fd: Int32); virtual; abstract;
 
     { Date/Time }
     function TimeNow: Int64; virtual; abstract;
-    function TimeLocalOffsetSecs: Integer; virtual; abstract;
+    function TimeLocalOffsetSecs: Int32; virtual; abstract;
     procedure TimeSplit(Nanos: Int64;
-      out Year, Month, Day, Hour, Min, Sec, NSec: Integer); virtual; abstract;
+      out Year, Month, Day, Hour, Min, Sec, NSec: Int32); virtual; abstract;
     function TimeJoin(Year, Month, Day,
-      Hour, Min, Sec, NSec: Integer): Int64; virtual; abstract;
-    function TimeIsLeapYear(Year: Integer): Integer; virtual; abstract;
-    function TimeDaysInMonth(Year, Month: Integer): Integer; virtual; abstract;
+      Hour, Min, Sec, NSec: Int32): Int64; virtual; abstract;
+    function TimeIsLeapYear(Year: Int32): Int32; virtual; abstract;
+    function TimeDaysInMonth(Year, Month: Int32): Int32; virtual; abstract;
 
     { Process management — fork/exec/pipe }
     function ProcessCreate: Pointer; virtual; abstract;
     procedure ProcessSetExe(Proc: Pointer; ExeStr: Pointer); virtual; abstract;
     procedure ProcessAddArg(Proc: Pointer; ArgStr: Pointer); virtual; abstract;
     procedure ProcessExecute(Proc: Pointer); virtual; abstract;
-    function ProcessRunning(Proc: Pointer): Integer; virtual; abstract;
+    function ProcessRunning(Proc: Pointer): Int32; virtual; abstract;
     function ProcessReadOutput(Proc: Pointer): Pointer; virtual; abstract;
     procedure ProcessWaitOnExit(Proc: Pointer); virtual; abstract;
-    function ProcessExitCode(Proc: Pointer): Integer; virtual; abstract;
+    function ProcessExitCode(Proc: Pointer): Int32; virtual; abstract;
     procedure ProcessFree(Proc: Pointer); virtual; abstract;
   end;
 
@@ -141,27 +141,27 @@ type
   TPlatformLayout = class
   public
     { ---- open() / file flags ---- }
-    function O_RDONLY: Integer; virtual; abstract;
-    function O_WRONLY: Integer; virtual; abstract;
-    function O_RDWR:   Integer; virtual; abstract;
-    function O_CREAT:  Integer; virtual; abstract;
-    function O_TRUNC:  Integer; virtual; abstract;
-    function O_APPEND: Integer; virtual; abstract;
+    function O_RDONLY: Int32; virtual; abstract;
+    function O_WRONLY: Int32; virtual; abstract;
+    function O_RDWR:   Int32; virtual; abstract;
+    function O_CREAT:  Int32; virtual; abstract;
+    function O_TRUNC:  Int32; virtual; abstract;
+    function O_APPEND: Int32; virtual; abstract;
 
     { ---- stat mode bits ---- }
-    function S_IFMT:  Integer; virtual; abstract;
-    function S_IFDIR: Integer; virtual; abstract;
-    function S_IFREG: Integer; virtual; abstract;
-    function S_IFLNK: Integer; virtual; abstract;
+    function S_IFMT:  Int32; virtual; abstract;
+    function S_IFDIR: Int32; virtual; abstract;
+    function S_IFREG: Int32; virtual; abstract;
+    function S_IFLNK: Int32; virtual; abstract;
 
     { ---- lseek whence ---- }
-    function SEEK_SET: Integer; virtual; abstract;
-    function SEEK_CUR: Integer; virtual; abstract;
-    function SEEK_END: Integer; virtual; abstract;
+    function SEEK_SET: Int32; virtual; abstract;
+    function SEEK_CUR: Int32; virtual; abstract;
+    function SEEK_END: Int32; virtual; abstract;
 
     { ---- clock_gettime / waitpid ---- }
-    function CLOCK_REALTIME: Integer; virtual; abstract;
-    function WNOHANG:        Integer; virtual; abstract;
+    function CLOCK_REALTIME: Int32; virtual; abstract;
+    function WNOHANG:        Int32; virtual; abstract;
 
     { ---- sysconf(3) names ---- }
     { The online-processor count.  Linux numbers it 84, FreeBSD and Darwin 58 —
@@ -170,14 +170,14 @@ type
       passing the wrong name yields a plausible-looking Int64 rather than -1,
       and GetCPUCount silently reports 200112 CPUs to whoever sizes a thread
       pool from it. }
-    function SC_NPROCESSORS_ONLN: Integer; virtual; abstract;
+    function SC_NPROCESSORS_ONLN: Int32; virtual; abstract;
 
     { ---- struct stat: opaque buffer sized for the target, fields pulled at
       the target's offsets ---- }
-    function StatBufSize: Integer; virtual; abstract;
+    function StatBufSize: Int32; virtual; abstract;
     function StatSize(Buf: Pointer):  Int64; virtual; abstract;
     function StatMtime(Buf: Pointer): Int64; virtual; abstract;
-    function StatMode(Buf: Pointer):  Integer; virtual; abstract;
+    function StatMode(Buf: Pointer):  Int32; virtual; abstract;
 
     { ---- struct dirent: variable-length records packed back-to-back in the
       getdents64 buffer.  Ent points at one record; the walker advances by
@@ -188,7 +188,7 @@ type
     { Byte length of the whole record — the stride to the next entry.  A zero
       or negative value means a malformed record; callers must stop rather
       than loop forever. }
-    function DirentRecLen(Ent: Pointer): Integer; virtual; abstract;
+    function DirentRecLen(Ent: Pointer): Int32; virtual; abstract;
     { Pointer to the entry's NUL-terminated name. }
     function DirentName(Ent: Pointer): Pointer; virtual; abstract;
   end;

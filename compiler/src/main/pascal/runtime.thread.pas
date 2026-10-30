@@ -19,9 +19,9 @@ uses
 
 { Thread creation / join }
 function pthread_create(Thread: Pointer; Attr: Pointer;
-  StartRoutine: Pointer; Arg: Pointer): Integer;
+  StartRoutine: Pointer; Arg: Pointer): Int32;
   external 'pthread' name 'pthread_create';
-function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
+function pthread_join(Thread: Int64; RetVal: Pointer): Int32;
   external 'pthread' name 'pthread_join';
 
 { Mutex — callers allocate a 64-byte buffer (array[0..7] of Int64)
@@ -29,23 +29,23 @@ function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
   (x86_64 and aarch64) but 64 on macOS, so the buffer is sized for the
   largest supported target; the former 48-byte contract let
   pthread_mutex_init overrun into the next field or global on macOS. }
-function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Integer;
+function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Int32;
   external 'pthread' name 'pthread_mutex_init';
-function pthread_mutex_lock(Mutex: Pointer): Integer;
+function pthread_mutex_lock(Mutex: Pointer): Int32;
   external 'pthread' name 'pthread_mutex_lock';
-function pthread_mutex_unlock(Mutex: Pointer): Integer;
+function pthread_mutex_unlock(Mutex: Pointer): Int32;
   external 'pthread' name 'pthread_mutex_unlock';
-function pthread_mutex_destroy(Mutex: Pointer): Integer;
+function pthread_mutex_destroy(Mutex: Pointer): Int32;
   external 'pthread' name 'pthread_mutex_destroy';
 
 { sysconf(_SC_NPROCESSORS_ONLN) — returns number of online CPUs. }
-function sysconf(Name: Integer): Int64; external name 'sysconf';
+function sysconf(Name: Int32): Int64; external name 'sysconf';
 
-function GetCPUCount: Integer;
+function GetCPUCount: Int;
 
 implementation
 
-function GetCPUCount: Integer;
+function GetCPUCount: Int;
 var N: Int64;
 begin
   { The name is numbered per OS (Linux 84, FreeBSD/Darwin 58), so it comes from
@@ -55,7 +55,7 @@ begin
     callers apply. }
   N := sysconf(GPlatformLayout.SC_NPROCESSORS_ONLN());
   if N > 0 then
-    Result := Integer(N)
+    Result := Int32(N)
   else
     Result := 1
 end;

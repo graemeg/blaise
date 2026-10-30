@@ -42,7 +42,7 @@ type
     its declared constructor arguments and returns it. }
   TAttrThunk = function: Pointer;
   PPointer = ^Pointer;
-  PInteger = ^Integer;
+  PInteger = ^Int32;
 
 procedure _StringAddRef(Ptr: Pointer);
 procedure _StringRelease(Ptr: Pointer);
@@ -53,12 +53,12 @@ procedure _DynArrayRelease(Ptr: Pointer);
   array's header records it (see _DynArraySetLengthM in runtime.str) and
   _DynArrayRelease runs it when the last reference goes.  The backends emit
   their own hook for a record / static-array element with managed fields. }
-procedure _DynElemsString(Data: Pointer; Count: Int64; ARetain: Integer);
-procedure _DynElemsClass(Data: Pointer; Count: Int64; ARetain: Integer);
-procedure _DynElemsDynArray(Data: Pointer; Count: Int64; ARetain: Integer);
-procedure _DynElemsIntf(Data: Pointer; Count: Int64; ARetain: Integer);
-procedure _DynElemsRefEnv(Data: Pointer; Count: Int64; ARetain: Integer);
-function  _StringEquals(S1, S2: Pointer): Integer;
+procedure _DynElemsString(Data: Pointer; Count: Int64; ARetain: Int32);
+procedure _DynElemsClass(Data: Pointer; Count: Int64; ARetain: Int32);
+procedure _DynElemsDynArray(Data: Pointer; Count: Int64; ARetain: Int32);
+procedure _DynElemsIntf(Data: Pointer; Count: Int64; ARetain: Int32);
+procedure _DynElemsRefEnv(Data: Pointer; Count: Int64; ARetain: Int32);
+function  _StringEquals(S1, S2: Pointer): Int32;
 function  _StringConcat(S1, S2: Pointer): Pointer;
 procedure TObject_Destroy(Self: Pointer);
 function  TObject_ToString(Self: Pointer): Pointer;
@@ -79,8 +79,8 @@ function  _HasClassAttribute(AClassTI, AAttrTI: Pointer): Boolean;
 function  _GetClassAttribute(AClassTI, AAttrTI: Pointer): Pointer;
 function  _HasMethodAttribute(AClassTI, AName, AAttrTI: Pointer): Boolean;
 function  _GetMethodAttribute(AClassTI, AName, AAttrTI: Pointer): Pointer;
-function  _MethodAttributeCount(AClassTI, AName: Pointer): Integer;
-function  _GetMethodAttributeAt(AClassTI, AName: Pointer; AIndex: Integer): Pointer;
+function  _MethodAttributeCount(AClassTI, AName: Pointer): Int32;
+function  _GetMethodAttributeAt(AClassTI, AName: Pointer; AIndex: Int32): Pointer;
 procedure _AbstractMethodError;
 procedure _LeakTrackerEnable;
 procedure _LeakTrackerRegister(UserPtr: Pointer; ClassName: Pointer;
@@ -104,7 +104,7 @@ function  _LeakTrackerIsEnabled: Boolean;
   load time.  __cxa_atexit is a genuine dynamic libc export and resolves on
   every link path.  Its third argument is the DSO handle; nil registers the
   handler against the main program.  The handler is passed one (ignored) arg. }
-function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Integer;
+function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Int32;
   external name '__cxa_atexit';
 
 implementation
@@ -140,18 +140,18 @@ const
   MAX_STR_LEN = Int64(1) shl 48;
 
 procedure _libc_memcpy(Dst, Src: Pointer; N: Int64);       external name 'memcpy';
-function  _libc_memcmp(P1, P2: Pointer; N: Int64): Integer; external name 'memcmp';
-procedure _libc_memset(Dst: Pointer; Val: Integer; N: Int64); external name 'memset';
-function  _libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64; external name 'write';
+function  _libc_memcmp(P1, P2: Pointer; N: Int64): Int32; external name 'memcmp';
+procedure _libc_memset(Dst: Pointer; Val: Int32; N: Int64); external name 'memset';
+function  _libc_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64; external name 'write';
 procedure _libc_abort; external name 'abort';
 
 function  _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer);          external name '_BlaiseFreeMem';
 procedure _WeakZeroSlots(Target: Pointer);       external name '_WeakZeroSlots';
 
-function  _AtomicAddInt32(Ptr: PInteger; Delta: Integer): Integer;
+function  _AtomicAddInt32(Ptr: PInteger; Delta: Int32): Int32;
             external name '_AtomicAddInt32';
-function  _AtomicSubInt32(Ptr: PInteger; Delta: Integer): Integer;
+function  _AtomicSubInt32(Ptr: PInteger; Delta: Int32): Int32;
             external name '_AtomicSubInt32';
 
 procedure MemCopy(Dst, Src: Pointer; N: Int64);
@@ -160,7 +160,7 @@ begin
     _libc_memcpy(Dst, Src, N);
 end;
 
-function MemCompare(P1, P2: Pointer; N: Int64): Integer;
+function MemCompare(P1, P2: Pointer; N: Int64): Int;
 begin
   if N = 0 then
     Result := 0
@@ -172,7 +172,7 @@ end;
 { Diagnostic helpers                                                   }
 { ------------------------------------------------------------------ }
 
-procedure DiagAbort(Msg: Pointer; Len: Integer);
+procedure DiagAbort(Msg: Pointer; Len: Int);
 var
   NL: Byte;
 begin
@@ -211,24 +211,24 @@ const
 var
   GLTEnabled:   Boolean;
   GLTTable:     PChar;    { raw bucket array, LT_BUCKETS * LT_BUCKET_SZ bytes }
-  GLTCount:     Integer;
+  GLTCount:     Int;
   GLTTombstone: Pointer;  { sentinel for deleted slots, set to Pointer(1) at init }
   GLTTagString:  Pointer; { sentinel classname tag for leaked strings, Pointer(2) }
   GLTTagDynArray: Pointer; { sentinel classname tag for leaked dyn-arrays, Pointer(3) }
 
-function LTHash(P: Pointer): Integer;
+function LTHash(P: Pointer): Int;
 var
   V: UInt;
 begin
   V := UInt(P);
   V := V xor (V shr 13);
   V := V xor (V shr 7);
-  Result := Integer(V and (LT_BUCKETS - 1));
+  Result := Int32(V and (LT_BUCKETS - 1));
 end;
 
 procedure LTInsert(Key, ClassName, UnitName: Pointer; Line: Int64);
 var
-  Idx, Step: Integer;
+  Idx, Step: Int;
   Slot: ^Pointer;
   LineSlot: ^Int64;
 begin
@@ -256,7 +256,7 @@ end;
 
 procedure LTDelete(Key: Pointer);
 var
-  Idx, Step: Integer;
+  Idx, Step: Int;
   Slot: ^Pointer;
 begin
   Idx := LTHash(Key);
@@ -276,7 +276,7 @@ begin
   end;
 end;
 
-procedure WriteStr(Msg: Pointer; Len: Integer);
+procedure WriteStr(Msg: Pointer; Len: Int);
 begin
   _libc_write(STDERR_FD, Msg, Int64(Len));
 end;
@@ -289,11 +289,11 @@ begin
   _libc_write(STDERR_FD, @NL, 1);
 end;
 
-procedure WriteInt(V: Integer);
+procedure WriteInt(V: Int);
 var
   Buf: array[0..19] of Byte;
-  Pos: Integer;
-  N: Integer;
+  Pos: Int;
+  N: Int;
 begin
   if V = 0 then
   begin
@@ -312,7 +312,7 @@ begin
   _libc_write(STDERR_FD, @Buf[Pos + 1], Int64(19 - Pos));
 end;
 
-procedure WriteSignedInt(V: Integer);
+procedure WriteSignedInt(V: Int);
 var
   Neg: Byte;
 begin
@@ -342,7 +342,7 @@ end;
 
 procedure _LeakTrackerReport;
 var
-  I: Integer;
+  I: Int;
   Slot: ^Pointer;
   NamePtr: ^Pointer;
   ClassName: Pointer;
@@ -350,8 +350,8 @@ var
   UnitName: Pointer;
   LineSlot: ^Int64;
   Line: Int64;
-  RCSlot: ^Integer;
-  RC: Integer;
+  RCSlot: ^Int32;
+  RC: Int;
 begin
   if not GLTEnabled then Exit;
   if GLTCount = 0 then Exit;
@@ -399,7 +399,7 @@ begin
         WriteStr(' at ', 4);
         WriteStrSlot(UnitName);
         WriteStr(':', 1);
-        WriteInt(Integer(Line));
+        WriteInt(Int32(Line));
       end;
       WriteNL();
     end;
@@ -416,7 +416,7 @@ end;
 
 procedure _LeakTrackerEnable;
 var
-  TableSize: Integer;
+  TableSize: Int;
   Sentinel: UInt;
 begin
   if GLTEnabled then Exit;
@@ -462,11 +462,11 @@ end;
 
 function _ClassAlloc(Size: Int64; Cleanup: Pointer): Pointer;
 var
-  Total: Integer;
+  Total: Int;
   Base: PChar;
   CleanupSlot: PPointer;
 begin
-  Total := Integer(Size) + CLASS_HDR;
+  Total := Int32(Size) + CLASS_HDR;
   Base := PChar(_BlaiseGetMem(Total));
   if Base = nil then begin Result := nil; Exit end;
   _libc_memset(Pointer(Base), 0, Int64(Total));
@@ -478,7 +478,7 @@ end;
 procedure _ClassRelease(UserPtr: Pointer);
 var
   Base: PChar;
-  OldRC: Integer;
+  OldRC: Int;
   CleanupSlot: PPointer;
   Cleanup: TFieldCleanupProc;
 begin
@@ -507,7 +507,7 @@ end;
 procedure _StringAddRef(Ptr: Pointer);
 var
   RC: PInteger;
-  OldRC: Integer;
+  OldRC: Int;
 begin
   if Ptr = nil then Exit;
   RC := PInteger(Ptr + STR_RC_OFS);
@@ -521,7 +521,7 @@ procedure _StringRelease(Ptr: Pointer);
 var
   RC: PInteger;
   LN, CP: PStrLen;
-  OldRC: Integer;
+  OldRC: Int;
 begin
   if Ptr = nil then Exit;
   RC := PInteger(Ptr + STR_RC_OFS);
@@ -551,12 +551,12 @@ end;
   Blocks are built by _DynArraySetLengthM in runtime.str. }
 
 type
-  TDynElemHook = procedure(Data: Pointer; Count: Int64; ARetain: Integer);
+  TDynElemHook = procedure(Data: Pointer; Count: Int64; ARetain: Int32);
 
 procedure _DynArrayAddRef(Ptr: Pointer);
 var
   RC: PInteger;
-  OldRC: Integer;
+  OldRC: Int;
 begin
   if Ptr = nil then Exit;
   RC := PInteger(Ptr + DA_RC_OFS);
@@ -569,7 +569,7 @@ end;
 procedure _DynArrayRelease(Ptr: Pointer);
 var
   RC:     PInteger;
-  OldRC:  Integer;
+  OldRC:  Int;
   HookP:  ^Pointer;
   LenP:   PDaLen;
   Hook:   TDynElemHook;
@@ -593,7 +593,7 @@ begin
   end;
 end;
 
-procedure _DynElemsString(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsString(Data: Pointer; Count: Int64; ARetain: Int32);
 var
   I: Int64;
   P: ^Pointer;
@@ -606,7 +606,7 @@ begin
   end;
 end;
 
-procedure _DynElemsClass(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsClass(Data: Pointer; Count: Int64; ARetain: Int32);
 var
   I: Int64;
   P: ^Pointer;
@@ -619,7 +619,7 @@ begin
   end;
 end;
 
-procedure _DynElemsDynArray(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsDynArray(Data: Pointer; Count: Int64; ARetain: Int32);
 var
   I: Int64;
   P: ^Pointer;
@@ -632,7 +632,7 @@ begin
   end;
 end;
 
-procedure _DynElemsIntf(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsIntf(Data: Pointer; Count: Int64; ARetain: Int32);
 var
   I: Int64;
   P: ^Pointer;
@@ -647,7 +647,7 @@ begin
   end;
 end;
 
-procedure _DynElemsRefEnv(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsRefEnv(Data: Pointer; Count: Int64; ARetain: Int32);
 var
   I: Int64;
   P: ^Pointer;
@@ -662,7 +662,7 @@ begin
   end;
 end;
 
-function _StringEquals(S1, S2: Pointer): Integer;
+function _StringEquals(S1, S2: Pointer): Int32;
 var
   Len1, Len2: Int64;
   LN:         PStrLen;
@@ -707,7 +707,7 @@ var
   Len1, Len2, Total: Int64;
   LN:                PStrLen;
   Base:              Pointer;
-  RC:                ^Integer;
+  RC:                ^Int32;
   LenF, CapF:        PStrLen;
   Dst:               PChar;
 begin
@@ -793,7 +793,7 @@ var
   Entry:   ^Pointer;
   EntName: Pointer;
   EntAddr: Pointer;
-  I:       Integer;
+  I:       Int;
 begin
   Result := nil;
   if (Self = nil) or (Name = nil) then Exit;
@@ -810,7 +810,7 @@ begin
     begin
       Count := Methods;
       Entry := Methods + 8;  { skip 8-byte count }
-      for I := 0 to Integer(Count^) - 1 do
+      for I := 0 to Int32(Count^) - 1 do
       begin
         EntName := Entry^;
         Entry   := Pointer(Entry) + 8;
@@ -926,7 +926,7 @@ var
   Attrs:   Pointer;
   Count:   ^Int64;
   Entry:   ^Pointer;
-  I:       Integer;
+  I:       Int;
 begin
   Result := False;
   if (AClassTI = nil) or (AAttrTI = nil) then Exit;
@@ -939,7 +939,7 @@ begin
     begin
       Count := Attrs;        { first l-slot = count }
       Entry := Attrs + 8;    { entries start after 8-byte count }
-      for I := 0 to Integer(Count^) - 1 do
+      for I := 0 to Int32(Count^) - 1 do
       begin
         if Entry^ = AAttrTI then
         begin
@@ -967,7 +967,7 @@ var
   Entry:   ^Pointer;
   Thunk:   ^Pointer;
   Make:    TAttrThunk;
-  I:       Integer;
+  I:       Int;
 begin
   Result := nil;
   if (AClassTI = nil) or (AAttrTI = nil) then Exit;
@@ -980,7 +980,7 @@ begin
     begin
       Count := Attrs;
       Entry := Attrs + 8;
-      for I := 0 to Integer(Count^) - 1 do
+      for I := 0 to Int32(Count^) - 1 do
       begin
         if Entry^ = AAttrTI then
         begin
@@ -1004,14 +1004,14 @@ end;
   string.  The parent chain is walked so attributes on inherited published
   methods remain visible on derived classes. }
 
-function _MethodAttributeCount(AClassTI, AName: Pointer): Integer;
+function _MethodAttributeCount(AClassTI, AName: Pointer): Int32;
 var
   Current: Pointer;
   Slot:    ^Pointer;
   Attrs:   Pointer;
   Count:   ^Int64;
   Entry:   ^Pointer;
-  I:       Integer;
+  I:       Int;
 begin
   Result := 0;
   if (AClassTI = nil) or (AName = nil) then Exit;
@@ -1024,7 +1024,7 @@ begin
     begin
       Count := Attrs;
       Entry := Attrs + 8;
-      for I := 0 to Integer(Count^) - 1 do
+      for I := 0 to Int32(Count^) - 1 do
       begin
         if _StringEquals(Entry^, AName) <> 0 then
           Result := Result + 1;
@@ -1044,7 +1044,7 @@ var
   Count:   ^Int64;
   Entry:   ^Pointer;
   AttrPtr: ^Pointer;
-  I:       Integer;
+  I:       Int;
 begin
   Result := False;
   if (AClassTI = nil) or (AName = nil) or (AAttrTI = nil) then Exit;
@@ -1057,7 +1057,7 @@ begin
     begin
       Count := Attrs;
       Entry := Attrs + 8;
-      for I := 0 to Integer(Count^) - 1 do
+      for I := 0 to Int32(Count^) - 1 do
       begin
         AttrPtr := Pointer(Entry) + 8;
         if (AttrPtr^ = AAttrTI) and (_StringEquals(Entry^, AName) <> 0) then
@@ -1082,7 +1082,7 @@ var
   AttrPtr: ^Pointer;
   Thunk:   ^Pointer;
   Make:    TAttrThunk;
-  I:       Integer;
+  I:       Int;
 begin
   Result := nil;
   if (AClassTI = nil) or (AName = nil) or (AAttrTI = nil) then Exit;
@@ -1095,7 +1095,7 @@ begin
     begin
       Count := Attrs;
       Entry := Attrs + 8;
-      for I := 0 to Integer(Count^) - 1 do
+      for I := 0 to Int32(Count^) - 1 do
       begin
         AttrPtr := Pointer(Entry) + 8;
         if (AttrPtr^ = AAttrTI) and (_StringEquals(Entry^, AName) <> 0) then
@@ -1116,7 +1116,7 @@ end;
   method, counting across the parent chain in declaration order (own class
   first).  Pairs with _MethodAttributeCount for enumeration.  Returns nil
   when AIndex is out of range. }
-function _GetMethodAttributeAt(AClassTI, AName: Pointer; AIndex: Integer): Pointer;
+function _GetMethodAttributeAt(AClassTI, AName: Pointer; AIndex: Int32): Pointer;
 var
   Current: Pointer;
   Slot:    ^Pointer;
@@ -1125,8 +1125,8 @@ var
   Entry:   ^Pointer;
   Thunk:   ^Pointer;
   Make:    TAttrThunk;
-  I:       Integer;
-  Seen:    Integer;
+  I:       Int;
+  Seen:    Int;
 begin
   Result := nil;
   if (AClassTI = nil) or (AName = nil) or (AIndex < 0) then Exit;
@@ -1140,7 +1140,7 @@ begin
     begin
       Count := Attrs;
       Entry := Attrs + 8;
-      for I := 0 to Integer(Count^) - 1 do
+      for I := 0 to Int32(Count^) - 1 do
       begin
         if _StringEquals(Entry^, AName) <> 0 then
         begin

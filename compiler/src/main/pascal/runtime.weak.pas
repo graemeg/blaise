@@ -77,11 +77,11 @@ type
 
 function _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer); external name '_BlaiseFreeMem';
-function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Integer;
+function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Int32;
   external name 'pthread_mutex_init';
-function pthread_mutex_lock(Mutex: Pointer): Integer;
+function pthread_mutex_lock(Mutex: Pointer): Int32;
   external name 'pthread_mutex_lock';
-function pthread_mutex_unlock(Mutex: Pointer): Integer;
+function pthread_mutex_unlock(Mutex: Pointer): Int32;
   external name 'pthread_mutex_unlock';
 
 var
@@ -114,14 +114,14 @@ begin
   EnsureWeakMutex();
 end;
 
-function WeakHash(Ptr: Pointer): Integer;
+function WeakHash(Ptr: Pointer): Int;
 begin
-  Result := Integer((UInt(Ptr) shr 4) and UInt(WEAK_BUCKETS - 1));
+  Result := Int32((UInt(Ptr) shr 4) and UInt(WEAK_BUCKETS - 1));
 end;
 
 function WeakFindOrCreate(ATarget: Pointer): PWeakEntry;
 var
-  H: Integer;
+  H: Int;
   E: PWeakEntry;
 begin
   H := WeakHash(ATarget);
@@ -150,7 +150,7 @@ procedure WeakUnregister(ASlot: Pointer);
 var
   PP: ^Pointer;
   CurTarget: Pointer;
-  H: Integer;
+  H: Int;
   E: PWeakEntry;
   Prev: PWeakSlot;
   Cur: PWeakSlot;
@@ -237,7 +237,7 @@ end;
 
 procedure _WeakZeroSlots(Target: Pointer);
 var
-  H: Integer;
+  H: Int;
   Prev: PWeakEntry;
   E: PWeakEntry;
   Dead: PWeakEntry;

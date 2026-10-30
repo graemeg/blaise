@@ -363,9 +363,9 @@ type
 function _FdOpenRead(Path: Pointer): Integer; external name '_FdOpenRead';
 function _FdOpenWrite(Path: Pointer): Integer; external name '_FdOpenWrite';
 function _FdOpenAppend(Path: Pointer): Integer; external name '_FdOpenAppend';
-function _FdRead(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
+function _FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int;
   external name '_FdRead';
-function _FdWrite(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
+function _FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int;
   external name '_FdWrite';
 function _FdSeek(Fd: Integer; Offset: Int64; Origin: Integer): Int64;
   external name '_FdSeek';

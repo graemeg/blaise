@@ -142,7 +142,7 @@ var
   I: Int64;
   Ph: PChar;
   TlsVaddr, TlsFileSz, TlsMemSz, TlsAlign: Int64;
-  PType: ^Integer;
+  PType: ^Int32;
   Block, Tp: Pointer;
   BlockSize: Int64;
   J: Int64;
@@ -261,7 +261,7 @@ end;
 { Call the program's `main(argc, argv)` (emitted by the backend) and return its
   result.  The asm thunk tail-jumps to the bare `main` symbol; argc/argv are
   already in %edi/%rsi (SysV), exactly what main expects. }
-function MainTrampoline(Argc: Integer; Argv: Pointer): Integer;
+function MainTrampoline(Argc: Int32; Argv: Pointer): Int32;
   assembler; nostackframe;
 asm
     jmp main
@@ -283,7 +283,7 @@ procedure _BlaiseStartC(SP: Pointer);
 var
   Argc: Int64;
   Argv, Envp: Pointer;
-  Ret: Integer;
+  Ret: Int;
 begin
   Argc := PInt64(SP)^;
   { Skip a kernel alignment pad word below argc, if present. }
@@ -304,7 +304,7 @@ begin
     needs no kernel auxv. }
   SetupTLS();
 
-  Ret := MainTrampoline(Integer(Argc), Argv);
+  Ret := MainTrampoline(Int32(Argc), Argv);
   _exit(Ret);
 end;
 

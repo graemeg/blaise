@@ -46,7 +46,7 @@ function FdExhausted(N: Int64): Boolean;
 
 { The current thread's errno value.  Returns 0 in the static profile (raw
   syscalls carry the errno in their negative return instead). }
-function GetOsErrno: Integer;
+function GetOsErrno: Int;
 
 implementation
 
@@ -57,11 +57,11 @@ const
   ENFILE = 23;   { system-wide fd limit reached }
 
 type
-  PInteger = ^Integer;
+  PInteger = ^Int32;
 
 function __errno_location: Pointer; external name '__errno_location';
 
-function GetOsErrno: Integer;
+function GetOsErrno: Int;
 var
   P: PInteger;
 begin

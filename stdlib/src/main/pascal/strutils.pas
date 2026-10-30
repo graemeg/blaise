@@ -252,7 +252,7 @@ implementation
 { External SIMD helpers (runtime assembly)                             }
 { ------------------------------------------------------------------ }
 
-function _Utf8CountCodePoints(Data: Pointer; Len: Integer): Integer; external name '_Utf8CountCodePoints';
+function _Utf8CountCodePoints(Data: Pointer; Len: Int): Int; external name '_Utf8CountCodePoints';
 
 { ------------------------------------------------------------------ }
 { Internal helpers                                                     }

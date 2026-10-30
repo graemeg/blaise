@@ -29,8 +29,8 @@ interface
 
 function memcpy(Dst, Src: Pointer; N: Int64): Pointer;
 function memmove(Dst, Src: Pointer; N: Int64): Pointer;
-function memset(Dst: Pointer; C: Integer; N: Int64): Pointer;
-function memcmp(A, B: Pointer; N: Int64): Integer;
+function memset(Dst: Pointer; C: Int; N: Int64): Pointer;
+function memcmp(A, B: Pointer; N: Int64): Int;
 function strlen(S: PChar): Int64;
 
 implementation
@@ -84,11 +84,11 @@ begin
   Result := Dst;
 end;
 
-function memset(Dst: Pointer; C: Integer; N: Int64): Pointer;
+function memset(Dst: Pointer; C: Int; N: Int64): Pointer;
 var
   D: PChar;
   I: Int64;
-  B: Integer;
+  B: Int;
 begin
   D := PChar(Dst);
   B := C and $FF;
@@ -101,11 +101,11 @@ begin
   Result := Dst;
 end;
 
-function memcmp(A, B: Pointer; N: Int64): Integer;
+function memcmp(A, B: Pointer; N: Int64): Int;
 var
   PA, PB: PChar;
   I: Int64;
-  CA, CB: Integer;
+  CA, CB: Int;
 begin
   PA := PChar(A);
   PB := PChar(B);

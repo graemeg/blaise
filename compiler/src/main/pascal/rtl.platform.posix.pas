@@ -50,7 +50,7 @@ type
 
     { Directory operations }
     function DirectoryExists(const APath: string): Boolean; override;
-    function PathKind(const APath: string; AFollowLinks: Boolean): Integer; override;
+    function PathKind(const APath: string; AFollowLinks: Boolean): Int32; override;
     function ForceDirectories(const APath: string): Boolean; override;
     function RemoveDir(const APath: string): Boolean; override;
     function GetCurrentDir: string; override;
@@ -60,55 +60,55 @@ type
     { OS utilities }
     function GetTempDir: string; override;
     function GetTempFileName(const ADir, APrefix: string): string; override;
-    function GetProcessID: Integer; override;
+    function GetProcessID: Int32; override;
     function GetEnvVar(const AName: string): string; override;
-    procedure Sleep(AMilliseconds: Integer); override;
-    procedure Halt(AExitCode: Integer); override;
+    procedure Sleep(AMilliseconds: Int32); override;
+    procedure Halt(AExitCode: Int32); override;
 
     { Process }
-    function Exec(const ACmd: string): Integer; override;
-    function ParamCount: Integer; override;
-    function ParamStr(AIndex: Integer): string; override;
+    function Exec(const ACmd: string): Int32; override;
+    function ParamCount: Int32; override;
+    function ParamStr(AIndex: Int32): string; override;
 
     { Console I/O }
-    procedure SysWriteStr(Fd: Integer; S: Pointer); override;
-    procedure SysWriteInt(Fd: Integer; N: Integer); override;
-    procedure SysWriteInt64(Fd: Integer; N: Int64); override;
-    procedure SysWriteUInt64(Fd: Integer; N: UInt64); override;
-    procedure SysWriteDouble(Fd: Integer; V: Float64); override;
-    procedure SysWriteSingle(Fd: Integer; V: Float32); override;
-    procedure SysWriteBool(Fd: Integer; B: Boolean); override;
-    procedure SysWriteNewline(Fd: Integer); override;
+    procedure SysWriteStr(Fd: Int32; S: Pointer); override;
+    procedure SysWriteInt(Fd: Int32; N: Int32); override;
+    procedure SysWriteInt64(Fd: Int32; N: Int64); override;
+    procedure SysWriteUInt64(Fd: Int32; N: UInt64); override;
+    procedure SysWriteDouble(Fd: Int32; V: Float64); override;
+    procedure SysWriteSingle(Fd: Int32; V: Float32); override;
+    procedure SysWriteBool(Fd: Int32; B: Boolean); override;
+    procedure SysWriteNewline(Fd: Int32); override;
 
     { File-descriptor primitives }
-    function FdOpenRead(Path: Pointer): Integer; override;
-    function FdOpenWrite(Path: Pointer): Integer; override;
-    function FdOpenAppend(Path: Pointer): Integer; override;
-    function FdRead(Fd: Integer; Buf: Pointer; Count: Integer): Integer; override;
-    function FdWrite(Fd: Integer; Buf: Pointer; Count: Integer): Integer; override;
-    function FdSeek(Fd: Integer; Offset: Int64; Origin: Integer): Int64; override;
-    function FdSize(Fd: Integer): Int64; override;
-    procedure FdClose(Fd: Integer); override;
+    function FdOpenRead(Path: Pointer): Int32; override;
+    function FdOpenWrite(Path: Pointer): Int32; override;
+    function FdOpenAppend(Path: Pointer): Int32; override;
+    function FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int; override;
+    function FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int; override;
+    function FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64; override;
+    function FdSize(Fd: Int32): Int64; override;
+    procedure FdClose(Fd: Int32); override;
 
     { Date/Time }
     function TimeNow: Int64; override;
-    function TimeLocalOffsetSecs: Integer; override;
+    function TimeLocalOffsetSecs: Int32; override;
     procedure TimeSplit(Nanos: Int64;
-      out Year, Month, Day, Hour, Min, Sec, NSec: Integer); override;
+      out Year, Month, Day, Hour, Min, Sec, NSec: Int32); override;
     function TimeJoin(Year, Month, Day,
-      Hour, Min, Sec, NSec: Integer): Int64; override;
-    function TimeIsLeapYear(Year: Integer): Integer; override;
-    function TimeDaysInMonth(Year, Month: Integer): Integer; override;
+      Hour, Min, Sec, NSec: Int32): Int64; override;
+    function TimeIsLeapYear(Year: Int32): Int32; override;
+    function TimeDaysInMonth(Year, Month: Int32): Int32; override;
 
     { Process management }
     function ProcessCreate: Pointer; override;
     procedure ProcessSetExe(Proc: Pointer; ExeStr: Pointer); override;
     procedure ProcessAddArg(Proc: Pointer; ArgStr: Pointer); override;
     procedure ProcessExecute(Proc: Pointer); override;
-    function ProcessRunning(Proc: Pointer): Integer; override;
+    function ProcessRunning(Proc: Pointer): Int32; override;
     function ProcessReadOutput(Proc: Pointer): Pointer; override;
     procedure ProcessWaitOnExit(Proc: Pointer); override;
-    function ProcessExitCode(Proc: Pointer): Integer; override;
+    function ProcessExitCode(Proc: Pointer): Int32; override;
     procedure ProcessFree(Proc: Pointer); override;
   end;
 
@@ -131,15 +131,15 @@ type
   end;
 
   TTm = record
-    Sec:     Integer;
-    Min:     Integer;
-    Hour:    Integer;
-    MDay:    Integer;
-    Mon:     Integer;
-    Year:    Integer;
-    WDay:    Integer;
-    YDay:    Integer;
-    IsDST:   Integer;
+    Sec:     Int32;
+    Min:     Int32;
+    Hour:    Int32;
+    MDay:    Int32;
+    Mon:     Int32;
+    Year:    Int32;
+    WDay:    Int32;
+    YDay:    Int32;
+    IsDST:   Int32;
     GmtOff:  Int64;
     Zone:    Pointer;
   end;
@@ -159,7 +159,7 @@ procedure _BlaiseFreeMem(Ptr: Pointer);          external name '_BlaiseFreeMem';
 procedure _BlaisePlatformInit;                    external name '_BlaisePlatformInit';
 
 { String ARC }
-function  _IntToStr(N: Integer): Pointer;   external name '_IntToStr';
+function  _IntToStr(N: Int32): Pointer;   external name '_IntToStr';
 function  _Int64ToStr(N: Int64): Pointer;   external name '_Int64ToStr';
 function  _UInt64ToStr(N: UInt64): Pointer; external name '_UInt64ToStr';
 function  _DoubleToStr(V: Float64): Pointer; external name '_DoubleToStr';
@@ -175,19 +175,19 @@ procedure _StringRelease(Ptr: Pointer);     external name '_StringRelease';
   stack — files were created with mode 0111 on the M1
   (SMOKE_MAC_VARIADIC_ABI_HANDOVER.md).  On Linux x86-64 the register
   assignment happens to coincide, which is why this only bit on macOS. }
-function  libc_open(Path: PChar; Flags: Integer): Integer; varargs;       external name 'open';
-function  libc_open2(Path: PChar; Flags: Integer): Integer;                 external name 'open';
-function  libc_read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;        external name 'read';
-function  libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64;       external name 'write';
-function  libc_lseek(Fd: Integer; Offset: Int64; Whence: Integer): Int64;   external name 'lseek';
-function  libc_close(Fd: Integer): Integer;                                  external name 'close';
-function  libc_fstat(Fd: Integer; Buf: Pointer): Integer;                   external name 'fstat';
-function  libc_stat(Path: PChar; Buf: Pointer): Integer;                    external name 'stat';
-function  libc_lstat(Path: PChar; Buf: Pointer): Integer;                   external name 'lstat';
-function  libc_mkdir(Path: PChar; Mode: Integer): Integer;                   external name 'mkdir';
-function  libc_rmdir(Path: PChar): Integer;                                  external name 'rmdir';
-function  libc_unlink(Path: PChar): Integer;                                 external name 'unlink';
-function  libc_rename(OldPath, NewPath: PChar): Integer;                     external name 'rename';
+function  libc_open(Path: PChar; Flags: Int32): Int32; varargs;       external name 'open';
+function  libc_open2(Path: PChar; Flags: Int32): Int32;                 external name 'open';
+function  libc_read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;        external name 'read';
+function  libc_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;       external name 'write';
+function  libc_lseek(Fd: Int32; Offset: Int64; Whence: Int32): Int64;   external name 'lseek';
+function  libc_close(Fd: Int32): Int32;                                  external name 'close';
+function  libc_fstat(Fd: Int32; Buf: Pointer): Int32;                   external name 'fstat';
+function  libc_stat(Path: PChar; Buf: Pointer): Int32;                    external name 'stat';
+function  libc_lstat(Path: PChar; Buf: Pointer): Int32;                   external name 'lstat';
+function  libc_mkdir(Path: PChar; Mode: Int32): Int32;                   external name 'mkdir';
+function  libc_rmdir(Path: PChar): Int32;                                  external name 'rmdir';
+function  libc_unlink(Path: PChar): Int32;                                 external name 'unlink';
+function  libc_rename(OldPath, NewPath: PChar): Int32;                     external name 'rename';
 function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       external name 'getcwd';
 { getdirentries(3) is the one directory-reading spelling libc provides on all
   three POSIX targets (glibc >= 2.2.5, FreeBSD, macOS); the freestanding
@@ -201,35 +201,35 @@ function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       ext
   first character.  __getdirentries64 (libsystem_kernel, same arguments)
   returns the layout the unit expects. }
 {$IFDEF DARWIN}
-function  libc_getdirentries(Fd: Integer; Buf: Pointer; NBytes: Int64;
+function  libc_getdirentries(Fd: Int32; Buf: Pointer; NBytes: Int64;
                              Basep: Pointer): Int64;                          external name '__getdirentries64';
 {$ELSE}
-function  libc_getdirentries(Fd: Integer; Buf: Pointer; NBytes: Int64;
+function  libc_getdirentries(Fd: Int32; Buf: Pointer; NBytes: Int64;
                              Basep: Pointer): Int64;                          external name 'getdirentries';
 {$ENDIF}
-function  libc_chdir(Path: PChar): Integer;                                  external name 'chdir';
+function  libc_chdir(Path: PChar): Int32;                                  external name 'chdir';
 function  libc_getenv(Name: PChar): PChar;                                   external name 'getenv';
-function  libc_mkstemp(Template: PChar): Integer;                            external name 'mkstemp';
-function  libc_nanosleep(Req: Pointer; Rem: Pointer): Integer;               external name 'nanosleep';
-function  libc_getpid: Integer;                                               external name 'getpid';
-function  libc_system(Cmd: PChar): Integer;                                  external name 'system';
-procedure libc_exit(Code: Integer);                                          external name 'exit';
+function  libc_mkstemp(Template: PChar): Int32;                            external name 'mkstemp';
+function  libc_nanosleep(Req: Pointer; Rem: Pointer): Int32;               external name 'nanosleep';
+function  libc_getpid: Int32;                                               external name 'getpid';
+function  libc_system(Cmd: PChar): Int32;                                  external name 'system';
+procedure libc_exit(Code: Int32);                                          external name 'exit';
 function  libc_strlen(S: PChar): Int64;                                      external name 'strlen';
 
 { POSIX libc — date/time }
-function  libc_clock_gettime(ClockId: Integer; Ts: Pointer): Integer; external name 'clock_gettime';
+function  libc_clock_gettime(ClockId: Int32; Ts: Pointer): Int32; external name 'clock_gettime';
 function  libc_time(T: Pointer): Int64;                                external name 'time';
 function  libc_localtime_r(T: Pointer; Tm: PTm): PTm;                 external name 'localtime_r';
 function  libc_gmtime_r(T: Pointer; Tm: PTm): PTm;                    external name 'gmtime_r';
 function  libc_timegm(Tm: PTm): Int64;                                 external name 'timegm';
 
 { POSIX libc — process management }
-function  libc_fork: Integer;                              external name 'fork';
-function  libc_execvp(File_: PChar; Argv: Pointer): Integer; external name 'execvp';
-procedure libc__exit(Code: Integer);                       external name '_exit';
-function  libc_waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer; external name 'waitpid';
-function  libc_pipe(Fds: Pointer): Integer;                external name 'pipe';
-function  libc_dup2(OldFd, NewFd: Integer): Integer;       external name 'dup2';
+function  libc_fork: Int32;                              external name 'fork';
+function  libc_execvp(File_: PChar; Argv: Pointer): Int32; external name 'execvp';
+procedure libc__exit(Code: Int32);                       external name '_exit';
+function  libc_waitpid(Pid: Int32; Status: Pointer; Options: Int32): Int32; external name 'waitpid';
+function  libc_pipe(Fds: Pointer): Int32;                external name 'pipe';
+function  libc_dup2(OldFd, NewFd: Int32): Int32;       external name 'dup2';
 
 { ------------------------------------------------------------------ }
 { Underscore ABI stubs                                                 }
@@ -237,77 +237,77 @@ function  libc_dup2(OldFd, NewFd: Integer): Integer;       external name 'dup2';
 
 { argc/argv — _SetArgs is called before GRtlPlatform is initialised,
   so it stores directly into module globals rather than delegating. }
-procedure _SetArgs(Argc: Integer; Argv: Pointer);
-function  _ParamCount: Integer;
-function  _ParamStr(Index: Integer): Pointer;
+procedure _SetArgs(Argc: Int32; Argv: Pointer);
+function  _ParamCount: Int32;
+function  _ParamStr(Index: Int32): Pointer;
 
 { File operations }
-function  _FileExists(const Path: string): Integer;
+function  _FileExists(const Path: string): Int32;
 procedure _DeleteFile(const Path: string);
-function  _RenameFile(const OldPath, NewPath: string): Integer;
+function  _RenameFile(const OldPath, NewPath: string): Int32;
 function  _ReadFile(const Path: string): Pointer;
 procedure _WriteFile(const Path, Content: string);
 procedure _AppendFile(const Path, Content: string);
 function  _FileAge(const Path: string): Int64;
 
 { Directory operations }
-function  _DirectoryExists(const Path: string): Integer;
+function  _DirectoryExists(const Path: string): Int32;
 { Not a compiler builtin: stdlib's IO.Files imports it via `external name`. }
-function  _PathKind(const Path: string; FollowLinks: Integer): Integer;
-function  _ForceDirectories(const Path: string): Integer;
+function  _PathKind(const Path: string; FollowLinks: Int32): Int32;
+function  _ForceDirectories(const Path: string): Int32;
 procedure _RemoveDir(const Path: string);
 function  _GetCurrentDir: Pointer;
-function  _SetCurrentDir(const Path: string): Integer;
+function  _SetCurrentDir(const Path: string): Int32;
 function  _ListDir(const Path: string): Pointer;
 
 { OS utilities }
 function  _GetTempDir: Pointer;
 function  _GetTempFileName(const Dir, Prefix: string): Pointer;
-function  _GetProcessID: Integer;
+function  _GetProcessID: Int32;
 function  _GetEnvVar(const Name: string): Pointer;
-procedure _Sleep(Ms: Integer);
-procedure _Halt(Code: Integer);
-function  _Exec(const Cmd: string): Integer;
+procedure _Sleep(Ms: Int32);
+procedure _Halt(Code: Int32);
+function  _Exec(const Cmd: string): Int32;
 
 { Console I/O }
-procedure _SysWriteStr(Fd: Integer; S: Pointer);
-procedure _SysWritePChar(Fd: Integer; P: PChar);
-procedure _SysWriteInt(Fd: Integer; N: Integer);
-procedure _SysWriteInt64(Fd: Integer; N: Int64);
-procedure _SysWriteUInt64(Fd: Integer; N: UInt64);
-procedure _SysWriteDouble(Fd: Integer; V: Float64);
-procedure _SysWriteSingle(Fd: Integer; V: Float32);
-procedure _SysWriteBool(Fd: Integer; B: Boolean);
-procedure _SysWriteNewline(Fd: Integer);
+procedure _SysWriteStr(Fd: Int32; S: Pointer);
+procedure _SysWritePChar(Fd: Int32; P: PChar);
+procedure _SysWriteInt(Fd: Int32; N: Int32);
+procedure _SysWriteInt64(Fd: Int32; N: Int64);
+procedure _SysWriteUInt64(Fd: Int32; N: UInt64);
+procedure _SysWriteDouble(Fd: Int32; V: Float64);
+procedure _SysWriteSingle(Fd: Int32; V: Float32);
+procedure _SysWriteBool(Fd: Int32; B: Boolean);
+procedure _SysWriteNewline(Fd: Int32);
 
 { File-descriptor primitives }
-function  _FdOpenRead(Path: Pointer): Integer;
-function  _FdOpenWrite(Path: Pointer): Integer;
-function  _FdOpenAppend(Path: Pointer): Integer;
-function  _FdRead(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
-function  _FdWrite(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
-function  _FdSeek(Fd: Integer; Offset: Int64; Origin: Integer): Int64;
-function  _FdSize(Fd: Integer): Int64;
-procedure _FdClose(Fd: Integer);
+function  _FdOpenRead(Path: Pointer): Int32;
+function  _FdOpenWrite(Path: Pointer): Int32;
+function  _FdOpenAppend(Path: Pointer): Int32;
+function  _FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int;
+function  _FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int;
+function  _FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64;
+function  _FdSize(Fd: Int32): Int64;
+procedure _FdClose(Fd: Int32);
 
 { Date/Time }
 function  _TimeNow: Int64;
-function  _TimeLocalOffsetSecs: Integer;
+function  _TimeLocalOffsetSecs: Int32;
 procedure _TimeSplit(Nanos: Int64;
-  out Year, Month, Day, Hour, Min, Sec, NSec: Integer);
-function  _TimeJoin(Year, Month, Day, Hour, Min, Sec, NSec: Integer): Int64;
-function  _TimeIsLeapYear(Year: Integer): Integer;
-function  _TimeDaysInMonth(Year, Month: Integer): Integer;
+  out Year, Month, Day, Hour, Min, Sec, NSec: Int32);
+function  _TimeJoin(Year, Month, Day, Hour, Min, Sec, NSec: Int32): Int64;
+function  _TimeIsLeapYear(Year: Int32): Int32;
+function  _TimeDaysInMonth(Year, Month: Int32): Int32;
 
 { Process management }
 function  _ProcessCreate: Pointer;
 procedure _ProcessSetExe(Proc: Pointer; ExeStr: Pointer);
 procedure _ProcessAddArg(Proc: Pointer; ArgStr: Pointer);
 procedure _ProcessExecute(Proc: Pointer);
-function  _ProcessRunning(Proc: Pointer): Integer;
+function  _ProcessRunning(Proc: Pointer): Int32;
 function  _ProcessReadOutput(Proc: Pointer): Pointer;
 procedure _ProcessWaitOnExit(Proc: Pointer);
-function  _ProcessExitCode(Proc: Pointer): Integer;
+function  _ProcessExitCode(Proc: Pointer): Int32;
 procedure _ProcessFree(Proc: Pointer);
 
 implementation
@@ -353,7 +353,7 @@ const
 function StrAlloc(Len: Int64): Pointer;
 var
   Base:       PChar;
-  RC:         ^Integer;
+  RC:         ^Int32;
   LN, CP:     PStrLen;
   NulPtr:     PChar;
 begin
@@ -387,7 +387,7 @@ end;
   content, and it leaked P.  The result is the caller's one reference. }
 function StrAdopt(P: Pointer): string;
 var
-  RC: ^Integer;
+  RC: ^Int32;
   Slot: ^Pointer;
 begin
   Result := '';
@@ -414,19 +414,19 @@ end;
 
 function StrDup(S: PChar): PChar;
 var
-  Len: Integer;
+  Len: Int;
   Buf: PChar;
-  I:   Integer;
+  I:   Int;
 begin
   if S = nil then begin Result := nil; Exit end;
-  Len := Integer(libc_strlen(S));
+  Len := Int32(libc_strlen(S));
   Buf := _BlaiseGetMem(Len + 1);
   if Buf = nil then begin Result := nil; Exit end;
   for I := 0 to Len do Buf[I] := S[I];
   Result := Buf;
 end;
 
-procedure WriteAllToFd(Fd: Integer; Data: PChar; Len: Int64);
+procedure WriteAllToFd(Fd: Int; Data: PChar; Len: Int64);
 var
   P: PChar;
   Rem: Int64;
@@ -448,10 +448,10 @@ end;
 { ------------------------------------------------------------------ }
 
 var
-  GArgC: Integer;
+  GArgC: Int;
   GArgV: TPCharArray;
 
-function ArgvGet(Arr: TPCharArray; Index: Integer): PChar;
+function ArgvGet(Arr: TPCharArray; Index: Int): PChar;
 var
   Slot: TPCharArray;
 begin
@@ -459,7 +459,7 @@ begin
   Result := Slot^;
 end;
 
-procedure ArgvSet(Arr: TPCharArray; Index: Integer; Val: Pointer);
+procedure ArgvSet(Arr: TPCharArray; Index: Int; Val: Pointer);
 var
   Slot: TPCharArray;
 begin
@@ -475,12 +475,12 @@ type
   TBlaiseProcess = record
     Exe:      PChar;
     Argv:     TPCharArray;
-    ArgC:     Integer;
-    ArgVCap:  Integer;
-    Pid:      Integer;
-    PipeFd:   Integer;
-    ExitCode: Integer;
-    Waited:   Integer;
+    ArgC:     Int32;
+    ArgVCap:  Int32;
+    Pid:      Int32;
+    PipeFd:   Int32;
+    ExitCode: Int32;
+    Waited:   Int32;
   end;
   PBlaiseProcess = ^TBlaiseProcess;
 
@@ -490,7 +490,7 @@ type
 
 function TRtlPlatformPosix.FileExists(const APath: string): Boolean;
 var
-  Fd: Integer;
+  Fd: Int;
 begin
   Fd := libc_open2(StrData(Pointer(APath)), GPlatformLayout.O_RDONLY());
   if Fd < 0 then begin Result := False; Exit end;
@@ -510,7 +510,7 @@ end;
 
 function TRtlPlatformPosix.ReadFile(const APath: string): string;
 var
-  Fd:   Integer;
+  Fd:   Int;
   St:   TStatBuf;
   Sz:   Int64;
   R:    PChar;
@@ -541,7 +541,7 @@ end;
 
 procedure TRtlPlatformPosix.WriteFile(const APath, AContent: string);
 var
-  Fd:  Integer;
+  Fd:  Int;
   Len: Int64;
 begin
   Fd := libc_open(StrData(Pointer(APath)), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_TRUNC(), 420);
@@ -554,7 +554,7 @@ end;
 
 procedure TRtlPlatformPosix.AppendFile(const APath, AContent: string);
 var
-  Fd:  Integer;
+  Fd:  Int;
   Len: Int64;
 begin
   Fd := libc_open(StrData(Pointer(APath)), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_APPEND(), 420);
@@ -585,11 +585,11 @@ begin
   Result := (GPlatformLayout.StatMode(@St) and GPlatformLayout.S_IFMT()) = GPlatformLayout.S_IFDIR();
 end;
 
-function TRtlPlatformPosix.PathKind(const APath: string; AFollowLinks: Boolean): Integer;
+function TRtlPlatformPosix.PathKind(const APath: string; AFollowLinks: Boolean): Int32;
 var
   St:   TStatBuf;
-  Rc:   Integer;
-  Mode: Integer;
+  Rc:   Int;
+  Mode: Int;
 begin
   if AFollowLinks then
     Rc := libc_stat(StrData(Pointer(APath)), @St)
@@ -612,14 +612,14 @@ var
   P:     PChar;
   Buf:   array[0..4095] of Byte;
   BufP:  PChar;
-  Len:   Integer;
-  I:     Integer;
+  Len:   Int;
+  I:     Int;
   Saved: Byte;
   St:    TStatBuf;
 begin
   P := StrData(Pointer(APath));
   if (P = nil) or (P[0] = #0) then begin Result := False; Exit end;
-  Len := Integer(libc_strlen(P));
+  Len := Int32(libc_strlen(P));
   if Len >= 4096 then begin Result := False; Exit end;
   BufP := PChar(@Buf[0]);
   for I := 0 to Len do BufP[I] := P[I];
@@ -657,14 +657,14 @@ function TRtlPlatformPosix.GetCurrentDir: string;
 var
   Buf:       array[0..4095] of Byte;
   CWD:       PChar;
-  Len:       Integer;
-  NeedSlash: Integer;
+  Len:       Int;
+  NeedSlash: Int;
   R:         PChar;
-  I:         Integer;
+  I:         Int;
 begin
   CWD := libc_getcwd(PChar(@Buf[0]), 4096);
   if CWD = nil then begin Result := ''; Exit end;
-  Len := Integer(libc_strlen(CWD));
+  Len := Int32(libc_strlen(CWD));
   if (Len > 0) and (CWD[Len - 1] <> '/') then NeedSlash := 1 else NeedSlash := 0;
   R := StrAlloc(Len + NeedSlash);
   if R = nil then begin Result := ''; Exit end;
@@ -683,19 +683,19 @@ const
   BufSize = 32768;
 var
   Buf:      array[0..BufSize - 1] of Byte;
-  Fd:       Integer;
+  Fd:       Int;
   Got:      Int64;
   Pos:      Int64;
   Ent:      Pointer;
-  RecLen:   Integer;
+  RecLen:   Int;
   Nm:       PChar;
-  NmLen:    Integer;
-  Total:    Integer;
-  Count:    Integer;
+  NmLen:    Int;
+  Total:    Int;
+  Count:    Int;
   R:        PChar;
-  W:        Integer;
-  I:        Integer;
-  Pass:     Integer;
+  W:        Int;
+  I:        Int;
+  Pass:     Int;
   Skip:     Boolean;
   { glibc's getdirentries(3) writes through basep unconditionally, so it must
     point at real storage — passing nil segfaults inside libc.  (The
@@ -740,7 +740,7 @@ begin
           than spin forever on a malformed buffer. }
         if RecLen <= 0 then Break;
         Nm    := PChar(GPlatformLayout.DirentName(Ent));
-        NmLen := Integer(libc_strlen(Nm));
+        NmLen := Int32(libc_strlen(Nm));
         { Skip '.' and '..'. }
         Skip := ((NmLen = 1) and (Nm[0] = '.'))
              or ((NmLen = 2) and (Nm[0] = '.') and (Nm[1] = '.'));
@@ -787,14 +787,14 @@ end;
 function TRtlPlatformPosix.GetTempDir: string;
 var
   Tmp:       PChar;
-  Len:       Integer;
-  NeedSlash: Integer;
+  Len:       Int;
+  NeedSlash: Int;
   R:         PChar;
-  I:         Integer;
+  I:         Int;
 begin
   Tmp := libc_getenv(StrData('TMPDIR'));
   if (Tmp = nil) or (Tmp[0] = #0) then Tmp := StrData('/tmp');
-  Len := Integer(libc_strlen(Tmp));
+  Len := Int32(libc_strlen(Tmp));
   if (Len > 0) and (Tmp[Len - 1] <> '/') then NeedSlash := 1 else NeedSlash := 0;
   R := StrAlloc(Len + NeedSlash);
   if R = nil then begin Result := ''; Exit end;
@@ -807,26 +807,26 @@ function TRtlPlatformPosix.GetTempFileName(const ADir, APrefix: string): string;
 var
   DStr:      PChar;
   PStr:      PChar;
-  DLen:      Integer;
-  PLen:      Integer;
-  NeedSlash: Integer;
-  TmplLen:   Integer;
+  DLen:      Int;
+  PLen:      Int;
+  NeedSlash: Int;
+  TmplLen:   Int;
   Tmpl:      PChar;
   Tmp:       PChar;
-  TmpLen:    Integer;
-  Fd:        Integer;
-  I:         Integer;
+  TmpLen:    Int;
+  Fd:        Int;
+  I:         Int;
 begin
   DStr := StrData(Pointer(ADir));
   PStr := StrData(Pointer(APrefix));
-  if DStr = nil then DLen := 0 else DLen := Integer(libc_strlen(DStr));
-  if PStr = nil then PLen := 0 else PLen := Integer(libc_strlen(PStr));
+  if DStr = nil then DLen := 0 else DLen := Int32(libc_strlen(DStr));
+  if PStr = nil then PLen := 0 else PLen := Int32(libc_strlen(PStr));
 
   if DLen = 0 then
   begin
     Tmp := libc_getenv(StrData('TMPDIR'));
     if (Tmp = nil) or (Tmp[0] = #0) then Tmp := StrData('/tmp');
-    TmpLen := Integer(libc_strlen(Tmp));
+    TmpLen := Int32(libc_strlen(Tmp));
     NeedSlash := 0;
     if (TmpLen > 0) and (Tmp[TmpLen - 1] <> '/') then NeedSlash := 1;
     TmplLen := TmpLen + NeedSlash + PLen + 6;
@@ -857,7 +857,7 @@ begin
   _BlaiseFreeMem(Tmpl);
 end;
 
-function TRtlPlatformPosix.GetProcessID: Integer;
+function TRtlPlatformPosix.GetProcessID: Int32;
 begin
   Result := libc_getpid();
 end;
@@ -871,7 +871,7 @@ begin
   Result := StrAdopt(StrFromCStr(Val));
 end;
 
-procedure TRtlPlatformPosix.Sleep(AMilliseconds: Integer);
+procedure TRtlPlatformPosix.Sleep(AMilliseconds: Int32);
 var
   Ts: TTimeSpec;
 begin
@@ -880,17 +880,17 @@ begin
   libc_nanosleep(@Ts, nil);
 end;
 
-procedure TRtlPlatformPosix.Halt(AExitCode: Integer);
+procedure TRtlPlatformPosix.Halt(AExitCode: Int32);
 begin
   libc_exit(AExitCode);
 end;
 
-function TRtlPlatformPosix.Exec(const ACmd: string): Integer;
+function TRtlPlatformPosix.Exec(const ACmd: string): Int32;
 begin
   Result := libc_system(StrData(Pointer(ACmd)));
 end;
 
-function TRtlPlatformPosix.ParamCount: Integer;
+function TRtlPlatformPosix.ParamCount: Int32;
 begin
   if GArgC > 0 then
     Result := GArgC - 1
@@ -898,7 +898,7 @@ begin
     Result := 0;
 end;
 
-function TRtlPlatformPosix.ParamStr(AIndex: Integer): string;
+function TRtlPlatformPosix.ParamStr(AIndex: Int32): string;
 var
   Slot: TPCharArray;
 begin
@@ -912,7 +912,7 @@ end;
 { TRtlPlatformPosix — Console I/O                                     }
 { ================================================================== }
 
-procedure TRtlPlatformPosix.SysWriteStr(Fd: Integer; S: Pointer);
+procedure TRtlPlatformPosix.SysWriteStr(Fd: Int32; S: Pointer);
 var
   Len: Int64;
 begin
@@ -922,7 +922,7 @@ begin
   WriteAllToFd(Fd, PChar(S), Len);
 end;
 
-procedure TRtlPlatformPosix.SysWriteNewline(Fd: Integer);
+procedure TRtlPlatformPosix.SysWriteNewline(Fd: Int32);
 var
   NL: array[0..0] of Byte;
 begin
@@ -930,7 +930,7 @@ begin
   WriteAllToFd(Fd, PChar(@NL[0]), 1);
 end;
 
-procedure TRtlPlatformPosix.SysWriteInt(Fd: Integer; N: Integer);
+procedure TRtlPlatformPosix.SysWriteInt(Fd: Int32; N: Int32);
 var
   S: Pointer;
   Len: Int64;
@@ -942,7 +942,7 @@ begin
   _StringRelease(S);
 end;
 
-procedure TRtlPlatformPosix.SysWriteInt64(Fd: Integer; N: Int64);
+procedure TRtlPlatformPosix.SysWriteInt64(Fd: Int32; N: Int64);
 var
   S: Pointer;
   Len: Int64;
@@ -954,7 +954,7 @@ begin
   _StringRelease(S);
 end;
 
-procedure TRtlPlatformPosix.SysWriteUInt64(Fd: Integer; N: UInt64);
+procedure TRtlPlatformPosix.SysWriteUInt64(Fd: Int32; N: UInt64);
 var
   S: Pointer;
   Len: Int64;
@@ -966,7 +966,7 @@ begin
   _StringRelease(S);
 end;
 
-procedure TRtlPlatformPosix.SysWriteDouble(Fd: Integer; V: Float64);
+procedure TRtlPlatformPosix.SysWriteDouble(Fd: Int32; V: Float64);
 var
   S: Pointer;
   Len: Int64;
@@ -978,7 +978,7 @@ begin
   _StringRelease(S);
 end;
 
-procedure TRtlPlatformPosix.SysWriteSingle(Fd: Integer; V: Float32);
+procedure TRtlPlatformPosix.SysWriteSingle(Fd: Int32; V: Float32);
 var
   S: Pointer;
   Len: Int64;
@@ -990,7 +990,7 @@ begin
   _StringRelease(S);
 end;
 
-procedure TRtlPlatformPosix.SysWriteBool(Fd: Integer; B: Boolean);
+procedure TRtlPlatformPosix.SysWriteBool(Fd: Int32; B: Boolean);
 var
   Buf: array[0..4] of Byte;
 begin
@@ -1010,36 +1010,36 @@ end;
 { TRtlPlatformPosix — File-descriptor primitives                      }
 { ================================================================== }
 
-function TRtlPlatformPosix.FdOpenRead(Path: Pointer): Integer;
+function TRtlPlatformPosix.FdOpenRead(Path: Pointer): Int32;
 begin
   Result := libc_open2(StrData(Path), GPlatformLayout.O_RDONLY());
 end;
 
-function TRtlPlatformPosix.FdOpenWrite(Path: Pointer): Integer;
+function TRtlPlatformPosix.FdOpenWrite(Path: Pointer): Int32;
 begin
   Result := libc_open(StrData(Path), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_TRUNC(), 420);
 end;
 
-function TRtlPlatformPosix.FdOpenAppend(Path: Pointer): Integer;
+function TRtlPlatformPosix.FdOpenAppend(Path: Pointer): Int32;
 begin
   Result := libc_open(StrData(Path), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_APPEND(), 420);
 end;
 
-function TRtlPlatformPosix.FdRead(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
+function TRtlPlatformPosix.FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int;
 begin
   if (Fd < 0) or (Count <= 0) then begin Result := 0; Exit end;
-  Result := Integer(libc_read(Fd, Buf, Int64(Count)));
+  Result := libc_read(Fd, Buf, Count);
 end;
 
-function TRtlPlatformPosix.FdWrite(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
+function TRtlPlatformPosix.FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int;
 begin
   if (Fd < 0) or (Count <= 0) then begin Result := 0; Exit end;
-  Result := Integer(libc_write(Fd, Buf, Int64(Count)));
+  Result := libc_write(Fd, Buf, Count);
 end;
 
-function TRtlPlatformPosix.FdSeek(Fd: Integer; Offset: Int64; Origin: Integer): Int64;
+function TRtlPlatformPosix.FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64;
 var
-  Whence: Integer;
+  Whence: Int;
 begin
   case Origin of
     1: Whence := GPlatformLayout.SEEK_CUR();
@@ -1050,7 +1050,7 @@ begin
   Result := libc_lseek(Fd, Offset, Whence);
 end;
 
-function TRtlPlatformPosix.FdSize(Fd: Integer): Int64;
+function TRtlPlatformPosix.FdSize(Fd: Int32): Int64;
 var
   St: TStatBuf;
 begin
@@ -1058,7 +1058,7 @@ begin
   Result := GPlatformLayout.StatSize(@St);
 end;
 
-procedure TRtlPlatformPosix.FdClose(Fd: Integer);
+procedure TRtlPlatformPosix.FdClose(Fd: Int32);
 begin
   if Fd >= 0 then libc_close(Fd);
 end;
@@ -1075,30 +1075,30 @@ begin
   Result := Ts.Sec * NS_PER_SEC + Ts.NSec;
 end;
 
-function TRtlPlatformPosix.TimeLocalOffsetSecs: Integer;
+function TRtlPlatformPosix.TimeLocalOffsetSecs: Int32;
 var
   T:  Int64;
   Lt: TTm;
 begin
   T := libc_time(nil);
   libc_localtime_r(@T, @Lt);
-  Result := Integer(Lt.GmtOff);
+  Result := Int32(Lt.GmtOff);
 end;
 
 procedure TRtlPlatformPosix.TimeSplit(Nanos: Int64;
-  out Year, Month, Day, Hour, Min, Sec, NSec: Integer);
+  out Year, Month, Day, Hour, Min, Sec, NSec: Int32);
 var
   WholeSec: Int64;
-  NanoPart: Integer;
+  NanoPart: Int;
   T:        Int64;
   Tm:       TTm;
 begin
   WholeSec := Nanos div NS_PER_SEC;
-  NanoPart := Integer(Nanos mod NS_PER_SEC);
+  NanoPart := Int32(Nanos mod NS_PER_SEC);
   if NanoPart < 0 then
   begin
     Dec(WholeSec);
-    Inc(NanoPart, Integer(NS_PER_SEC));
+    Inc(NanoPart, Int32(NS_PER_SEC));
   end;
   T := WholeSec;
   libc_gmtime_r(@T, @Tm);
@@ -1112,11 +1112,11 @@ begin
 end;
 
 function TRtlPlatformPosix.TimeJoin(Year, Month, Day,
-  Hour, Min, Sec, NSec: Integer): Int64;
+  Hour, Min, Sec, NSec: Int32): Int64;
 var
   Tm:    TTm;
   Epoch: Int64;
-  I:     Integer;
+  I:     Int;
   TB:    PChar;
 begin
   TB := PChar(@Tm);
@@ -1131,7 +1131,7 @@ begin
   Result := Epoch * NS_PER_SEC + Int64(NSec);
 end;
 
-function TRtlPlatformPosix.TimeIsLeapYear(Year: Integer): Integer;
+function TRtlPlatformPosix.TimeIsLeapYear(Year: Int32): Int32;
 begin
   if ((Year mod 4 = 0) and ((Year mod 100 <> 0) or (Year mod 400 = 0))) then
     Result := 1
@@ -1139,9 +1139,9 @@ begin
     Result := 0;
 end;
 
-function TRtlPlatformPosix.TimeDaysInMonth(Year, Month: Integer): Integer;
+function TRtlPlatformPosix.TimeDaysInMonth(Year, Month: Int32): Int32;
 const
-  Days: array[1..12] of Integer = (31,28,31,30,31,30,31,31,30,31,30,31);
+  Days: array[1..12] of Int32 = (31,28,31,30,31,30,31,31,30,31,30,31);
 begin
   if (Month = 2) and (Self.TimeIsLeapYear(Year) = 1) then
     Result := 29
@@ -1157,7 +1157,7 @@ function TRtlPlatformPosix.ProcessCreate: Pointer;
 var
   P:    PBlaiseProcess;
   PB:   PChar;
-  I:    Integer;
+  I:    Int;
 begin
   P := _BlaiseGetMem(SizeOf(TBlaiseProcess));
   if P = nil then begin Result := nil; Exit end;
@@ -1180,9 +1180,9 @@ end;
 procedure TRtlPlatformPosix.ProcessAddArg(Proc: Pointer; ArgStr: Pointer);
 var
   P:       PBlaiseProcess;
-  NewCap:  Integer;
+  NewCap:  Int;
   NewArgv: TPCharArray;
-  I:       Integer;
+  I:       Int;
 begin
   P := Proc;
   if P^.ArgC + 2 >= P^.ArgVCap then
@@ -1203,11 +1203,11 @@ end;
 procedure TRtlPlatformPosix.ProcessExecute(Proc: Pointer);
 var
   P:     PBlaiseProcess;
-  Fds:   array[0..1] of Integer;
-  Total: Integer;
+  Fds:   array[0..1] of Int32;
+  Total: Int;
   Argv:  TPCharArray;
-  I:     Integer;
-  Pid:   Integer;
+  I:     Int;
+  Pid:   Int;
 begin
   P := Proc;
   Fds[0] := -1;
@@ -1249,11 +1249,11 @@ begin
   P^.Waited := 0;
 end;
 
-function TRtlPlatformPosix.ProcessRunning(Proc: Pointer): Integer;
+function TRtlPlatformPosix.ProcessRunning(Proc: Pointer): Int32;
 var
   P:      PBlaiseProcess;
-  Status: Integer;
-  R:      Integer;
+  Status: Int;
+  R:      Int;
 begin
   P := Proc;
   if (P^.Waited <> 0) or (P^.Pid = 0) then begin Result := 0; Exit end;
@@ -1281,7 +1281,7 @@ var
   Buf: array[0..4095] of Byte;
   N:   Int64;
   R:   PChar;
-  I:   Integer;
+  I:   Int;
 begin
   P := Proc;
   if P^.PipeFd < 0 then begin Result := StrAlloc(0); Exit end;
@@ -1292,16 +1292,16 @@ begin
     P^.PipeFd := -1;
     Exit(StrAlloc(0));
   end;
-  R := StrAlloc(Integer(N));
+  R := StrAlloc(Int32(N));
   if R <> nil then
-    for I := 0 to Integer(N) - 1 do R[I] := Chr(Buf[I]);
+    for I := 0 to Int32(N) - 1 do R[I] := Chr(Buf[I]);
   Result := R;
 end;
 
 procedure TRtlPlatformPosix.ProcessWaitOnExit(Proc: Pointer);
 var
   P:      PBlaiseProcess;
-  Status: Integer;
+  Status: Int;
 begin
   P := Proc;
   if (P^.Waited <> 0) or (P^.Pid = 0) then Exit;
@@ -1314,7 +1314,7 @@ begin
   P^.Waited := 1;
 end;
 
-function TRtlPlatformPosix.ProcessExitCode(Proc: Pointer): Integer;
+function TRtlPlatformPosix.ProcessExitCode(Proc: Pointer): Int32;
 begin
   Result := PBlaiseProcess(Proc)^.ExitCode;
 end;
@@ -1322,7 +1322,7 @@ end;
 procedure TRtlPlatformPosix.ProcessFree(Proc: Pointer);
 var
   P:    PBlaiseProcess;
-  I:    Integer;
+  I:    Int;
   Slot: PChar;
 begin
   P := Proc;
@@ -1345,7 +1345,7 @@ end;
 { Underscore ABI stubs                                                 }
 { ================================================================== }
 
-procedure _SetArgs(Argc: Integer; Argv: Pointer);
+procedure _SetArgs(Argc: Int32; Argv: Pointer);
 begin
   GArgC := Argc;
   GArgV := TPCharArray(Argv);
@@ -1360,17 +1360,17 @@ begin
     GRtlPlatform := TRtlPlatformPosix.Create();
 end;
 
-function _ParamCount: Integer;
+function _ParamCount: Int32;
 begin
   Result := GRtlPlatform.ParamCount();
 end;
 
-function _ParamStr(Index: Integer): Pointer;
+function _ParamStr(Index: Int32): Pointer;
 begin
   Result := Pointer(GRtlPlatform.ParamStr(Index));
 end;
 
-function _FileExists(const Path: string): Integer;
+function _FileExists(const Path: string): Int32;
 begin
   if GRtlPlatform.FileExists(Path) then Result := 1 else Result := 0;
 end;
@@ -1380,7 +1380,7 @@ begin
   GRtlPlatform.DeleteFile(Path);
 end;
 
-function _RenameFile(const OldPath, NewPath: string): Integer;
+function _RenameFile(const OldPath, NewPath: string): Int32;
 begin
   if GRtlPlatform.RenameFile(OldPath, NewPath) then Result := 1 else Result := 0;
 end;
@@ -1405,17 +1405,17 @@ begin
   Result := GRtlPlatform.FileAge(Path);
 end;
 
-function _DirectoryExists(const Path: string): Integer;
+function _DirectoryExists(const Path: string): Int32;
 begin
   if GRtlPlatform.DirectoryExists(Path) then Result := 1 else Result := 0;
 end;
 
-function _PathKind(const Path: string; FollowLinks: Integer): Integer;
+function _PathKind(const Path: string; FollowLinks: Int32): Int32;
 begin
   Result := GRtlPlatform.PathKind(Path, FollowLinks <> 0);
 end;
 
-function _ForceDirectories(const Path: string): Integer;
+function _ForceDirectories(const Path: string): Int32;
 begin
   if GRtlPlatform.ForceDirectories(Path) then Result := 1 else Result := 0;
 end;
@@ -1430,7 +1430,7 @@ begin
   Result := Pointer(GRtlPlatform.GetCurrentDir());
 end;
 
-function _SetCurrentDir(const Path: string): Integer;
+function _SetCurrentDir(const Path: string): Int32;
 begin
   if GRtlPlatform.SetCurrentDir(Path) then Result := 1 else Result := 0;
 end;
@@ -1450,7 +1450,7 @@ begin
   Result := Pointer(GRtlPlatform.GetTempFileName(Dir, Prefix));
 end;
 
-function _GetProcessID: Integer;
+function _GetProcessID: Int32;
 begin
   Result := GRtlPlatform.GetProcessID();
 end;
@@ -1460,22 +1460,22 @@ begin
   Result := Pointer(GRtlPlatform.GetEnvVar(Name));
 end;
 
-procedure _Sleep(Ms: Integer);
+procedure _Sleep(Ms: Int32);
 begin
   GRtlPlatform.Sleep(Ms);
 end;
 
-procedure _Halt(Code: Integer);
+procedure _Halt(Code: Int32);
 begin
   GRtlPlatform.Halt(Code);
 end;
 
-function _Exec(const Cmd: string): Integer;
+function _Exec(const Cmd: string): Int32;
 begin
   Result := GRtlPlatform.Exec(Cmd);
 end;
 
-procedure _SysWriteStr(Fd: Integer; S: Pointer);
+procedure _SysWriteStr(Fd: Int32; S: Pointer);
 begin
   GRtlPlatform.SysWriteStr(Fd, S);
 end;
@@ -1483,87 +1483,87 @@ end;
 { Write/WriteLn of a PChar: the bytes up to its NUL.  A PChar need not point
   into a Blaise string, so there is no length header in front of it to read
   (that is _SysWriteStr's contract). }
-procedure _SysWritePChar(Fd: Integer; P: PChar);
+procedure _SysWritePChar(Fd: Int32; P: PChar);
 var
-  Len: Integer;
+  Len: Int;
 begin
   if P = nil then Exit;
-  Len := Integer(libc_strlen(P));
+  Len := Int32(libc_strlen(P));
   if Len > 0 then
     WriteAllToFd(Fd, P, Len);
 end;
 
-procedure _SysWriteInt(Fd: Integer; N: Integer);
+procedure _SysWriteInt(Fd: Int32; N: Int32);
 begin
   GRtlPlatform.SysWriteInt(Fd, N);
 end;
 
-procedure _SysWriteInt64(Fd: Integer; N: Int64);
+procedure _SysWriteInt64(Fd: Int32; N: Int64);
 begin
   GRtlPlatform.SysWriteInt64(Fd, N);
 end;
 
-procedure _SysWriteUInt64(Fd: Integer; N: UInt64);
+procedure _SysWriteUInt64(Fd: Int32; N: UInt64);
 begin
   GRtlPlatform.SysWriteUInt64(Fd, N);
 end;
 
-procedure _SysWriteDouble(Fd: Integer; V: Float64);
+procedure _SysWriteDouble(Fd: Int32; V: Float64);
 begin
   GRtlPlatform.SysWriteDouble(Fd, V);
 end;
 
-procedure _SysWriteSingle(Fd: Integer; V: Float32);
+procedure _SysWriteSingle(Fd: Int32; V: Float32);
 begin
   GRtlPlatform.SysWriteSingle(Fd, V);
 end;
 
-procedure _SysWriteBool(Fd: Integer; B: Boolean);
+procedure _SysWriteBool(Fd: Int32; B: Boolean);
 begin
   GRtlPlatform.SysWriteBool(Fd, B);
 end;
 
-procedure _SysWriteNewline(Fd: Integer);
+procedure _SysWriteNewline(Fd: Int32);
 begin
   GRtlPlatform.SysWriteNewline(Fd);
 end;
 
-function _FdOpenRead(Path: Pointer): Integer;
+function _FdOpenRead(Path: Pointer): Int32;
 begin
   Result := GRtlPlatform.FdOpenRead(Path);
 end;
 
-function _FdOpenWrite(Path: Pointer): Integer;
+function _FdOpenWrite(Path: Pointer): Int32;
 begin
   Result := GRtlPlatform.FdOpenWrite(Path);
 end;
 
-function _FdOpenAppend(Path: Pointer): Integer;
+function _FdOpenAppend(Path: Pointer): Int32;
 begin
   Result := GRtlPlatform.FdOpenAppend(Path);
 end;
 
-function _FdRead(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
+function _FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int;
 begin
   Result := GRtlPlatform.FdRead(Fd, Buf, Count);
 end;
 
-function _FdWrite(Fd: Integer; Buf: Pointer; Count: Integer): Integer;
+function _FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int;
 begin
   Result := GRtlPlatform.FdWrite(Fd, Buf, Count);
 end;
 
-function _FdSeek(Fd: Integer; Offset: Int64; Origin: Integer): Int64;
+function _FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64;
 begin
   Result := GRtlPlatform.FdSeek(Fd, Offset, Origin);
 end;
 
-function _FdSize(Fd: Integer): Int64;
+function _FdSize(Fd: Int32): Int64;
 begin
   Result := GRtlPlatform.FdSize(Fd);
 end;
 
-procedure _FdClose(Fd: Integer);
+procedure _FdClose(Fd: Int32);
 begin
   GRtlPlatform.FdClose(Fd);
 end;
@@ -1573,28 +1573,28 @@ begin
   Result := GRtlPlatform.TimeNow();
 end;
 
-function _TimeLocalOffsetSecs: Integer;
+function _TimeLocalOffsetSecs: Int32;
 begin
   Result := GRtlPlatform.TimeLocalOffsetSecs();
 end;
 
 procedure _TimeSplit(Nanos: Int64;
-  out Year, Month, Day, Hour, Min, Sec, NSec: Integer);
+  out Year, Month, Day, Hour, Min, Sec, NSec: Int32);
 begin
   GRtlPlatform.TimeSplit(Nanos, Year, Month, Day, Hour, Min, Sec, NSec);
 end;
 
-function _TimeJoin(Year, Month, Day, Hour, Min, Sec, NSec: Integer): Int64;
+function _TimeJoin(Year, Month, Day, Hour, Min, Sec, NSec: Int32): Int64;
 begin
   Result := GRtlPlatform.TimeJoin(Year, Month, Day, Hour, Min, Sec, NSec);
 end;
 
-function _TimeIsLeapYear(Year: Integer): Integer;
+function _TimeIsLeapYear(Year: Int32): Int32;
 begin
   Result := GRtlPlatform.TimeIsLeapYear(Year);
 end;
 
-function _TimeDaysInMonth(Year, Month: Integer): Integer;
+function _TimeDaysInMonth(Year, Month: Int32): Int32;
 begin
   Result := GRtlPlatform.TimeDaysInMonth(Year, Month);
 end;
@@ -1619,7 +1619,7 @@ begin
   GRtlPlatform.ProcessExecute(Proc);
 end;
 
-function _ProcessRunning(Proc: Pointer): Integer;
+function _ProcessRunning(Proc: Pointer): Int32;
 begin
   Result := GRtlPlatform.ProcessRunning(Proc);
 end;
@@ -1634,7 +1634,7 @@ begin
   GRtlPlatform.ProcessWaitOnExit(Proc);
 end;
 
-function _ProcessExitCode(Proc: Pointer): Integer;
+function _ProcessExitCode(Proc: Pointer): Int32;
 begin
   Result := GRtlPlatform.ProcessExitCode(Proc);
 end;

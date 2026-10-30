@@ -88,7 +88,7 @@ type
   keeps them untouched.  The push re-establishes 16-byte alignment for the
   call (our own entry left %rsp at 8 mod 16), mirroring what Scrt1.o does.
   __libc_start1 never returns. }
-procedure LibcStart1(AArgc: Integer; AArgv, AEnvp, ACleanup: Pointer);
+procedure LibcStart1(AArgc: Int32; AArgv, AEnvp, ACleanup: Pointer);
   assembler; nostackframe;
 asm
     lea  main(%rip), %r8
@@ -109,7 +109,7 @@ begin
   Argv := Pointer(PChar(ASP) + 8);
   { envp = &argv[argc + 1] — one past the NULL that terminates argv. }
   Envp := Pointer(PChar(Argv) + (Argc + 1) * 8);
-  LibcStart1(Integer(Argc), Argv, Envp, ACleanup);
+  LibcStart1(Int32(Argc), Argv, Envp, ACleanup);
 end;
 
 { The ELF entry.  %rdi (argument block) and %rsi (rtld cleanup) are already

@@ -39,33 +39,33 @@ uses
 type
   TPlatformLayoutDarwinArm64 = class(TPlatformLayout)
   public
-    function O_RDONLY: Integer; override;
-    function O_WRONLY: Integer; override;
-    function O_RDWR:   Integer; override;
-    function O_CREAT:  Integer; override;
-    function O_TRUNC:  Integer; override;
-    function O_APPEND: Integer; override;
+    function O_RDONLY: Int32; override;
+    function O_WRONLY: Int32; override;
+    function O_RDWR:   Int32; override;
+    function O_CREAT:  Int32; override;
+    function O_TRUNC:  Int32; override;
+    function O_APPEND: Int32; override;
 
-    function S_IFMT:  Integer; override;
-    function S_IFDIR: Integer; override;
-    function S_IFREG: Integer; override;
-    function S_IFLNK: Integer; override;
+    function S_IFMT:  Int32; override;
+    function S_IFDIR: Int32; override;
+    function S_IFREG: Int32; override;
+    function S_IFLNK: Int32; override;
 
-    function SEEK_SET: Integer; override;
-    function SEEK_CUR: Integer; override;
-    function SEEK_END: Integer; override;
+    function SEEK_SET: Int32; override;
+    function SEEK_CUR: Int32; override;
+    function SEEK_END: Int32; override;
 
-    function CLOCK_REALTIME: Integer; override;
-    function WNOHANG:        Integer; override;
+    function CLOCK_REALTIME: Int32; override;
+    function WNOHANG:        Int32; override;
 
-    function SC_NPROCESSORS_ONLN: Integer; override;
+    function SC_NPROCESSORS_ONLN: Int32; override;
 
-    function StatBufSize: Integer; override;
+    function StatBufSize: Int32; override;
     function StatSize(Buf: Pointer):  Int64; override;
     function StatMtime(Buf: Pointer): Int64; override;
-    function StatMode(Buf: Pointer):  Integer; override;
+    function StatMode(Buf: Pointer):  Int32; override;
 
-    function DirentRecLen(Ent: Pointer): Integer; override;
+    function DirentRecLen(Ent: Pointer): Int32; override;
     function DirentName(Ent: Pointer): Pointer; override;
   end;
 
@@ -74,7 +74,7 @@ type
   Target-guarded like every flat function here — see the rationale in
   rtl.platform.layout.linux: a host test build linking this unit for its
   class API must not define colliding flat symbols. }
-function _MapAnonFlag: Integer;
+function _MapAnonFlag: Int32;
 
 { Flat park/wake primitives for the fiber scheduler: futex semantics (block
   while the 32-bit word at AAddr equals AExpected, for at most the RELATIVE
@@ -88,12 +88,12 @@ function _MapAnonFlag: Integer;
   the wait cannot be lost.  A broadcast may wake waiters on other words that
   share the bucket; park protocols already tolerate spurious wakeups and
   re-check their word. }
-procedure _ParkWait(AAddr: Pointer; AExpected: Integer; ATs: Pointer);
-procedure _ParkWake(AAddr: Pointer; ACount: Integer);
+procedure _ParkWait(AAddr: Pointer; AExpected: Int32; ATs: Pointer);
+procedure _ParkWake(AAddr: Pointer; ACount: Int32);
 
 { The target's CLOCK_MONOTONIC clockid for clock_gettime: Darwin 6.
   (Linux is 1, FreeBSD 4; Darwin's 4 is CLOCK_MONOTONIC_RAW.) }
-function _ClockMonotonicId: Integer;
+function _ClockMonotonicId: Int32;
 
 { Socket-layer OS constants (Net.Sockets / async.io).  Darwin values from
   sys/socket.h / sys/fcntl.h.  _MsgNoSignal and _SockNonBlock are 0 —
@@ -101,14 +101,14 @@ function _ClockMonotonicId: Integer;
   fallbacks.  SIGPIPE is suppressed per socket instead: Net.Sockets sets
   _SoNoSigPipe on every socket it creates (the other targets report 0
   there, because MSG_NOSIGNAL already covers each send). }
-function _SolSocket: Integer;      { SOL_SOCKET   = $FFFF }
-function _SoReuseAddr: Integer;    { SO_REUSEADDR = $0004 }
-function _SoReusePort: Integer;    { SO_REUSEPORT = $0200 }
-function _SoError: Integer;        { SO_ERROR     = $1007 }
-function _MsgNoSignal: Integer;    { no MSG_NOSIGNAL on Darwin — 0 }
-function _ONonBlock: Integer;      { O_NONBLOCK   = $0004 }
-function _SockNonBlock: Integer;   { no SOCK_NONBLOCK/accept4 on Darwin — 0 }
-function _SoNoSigPipe: Integer;    { SO_NOSIGPIPE = $1022 }
+function _SolSocket: Int32;      { SOL_SOCKET   = $FFFF }
+function _SoReuseAddr: Int32;    { SO_REUSEADDR = $0004 }
+function _SoReusePort: Int32;    { SO_REUSEPORT = $0200 }
+function _SoError: Int32;        { SO_ERROR     = $1007 }
+function _MsgNoSignal: Int32;    { no MSG_NOSIGNAL on Darwin — 0 }
+function _ONonBlock: Int32;      { O_NONBLOCK   = $0004 }
+function _SockNonBlock: Int32;   { no SOCK_NONBLOCK/accept4 on Darwin — 0 }
+function _SoNoSigPipe: Int32;    { SO_NOSIGPIPE = $1022 }
 
 { Fill a 16-byte struct sockaddr_in at P for AF_INET.  APortN/AAddrN are
   ALREADY in network byte order.  Darwin layout matches FreeBSD: sin_len
@@ -120,7 +120,7 @@ procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
   thread exits, while its threadvars are still readable.  dyld's _tlv_atexit:
   a pthread key destructor is NOT equivalent -- dyld frees the thread's TLV
   block from its own key first, so a key destructor reads fresh storage. }
-function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Int32;
 {$ENDIF}
 
 implementation
@@ -139,29 +139,29 @@ const
   DIRENT_OFF_RECLEN = 16;
   DIRENT_OFF_NAME   = 21;
 
-function TPlatformLayoutDarwinArm64.O_RDONLY: Integer; begin Result := 0;     end;
-function TPlatformLayoutDarwinArm64.O_WRONLY: Integer; begin Result := 1;     end;
-function TPlatformLayoutDarwinArm64.O_RDWR:   Integer; begin Result := 2;     end;
-function TPlatformLayoutDarwinArm64.O_CREAT:  Integer; begin Result := $0200; end;
-function TPlatformLayoutDarwinArm64.O_TRUNC:  Integer; begin Result := $0400; end;
-function TPlatformLayoutDarwinArm64.O_APPEND: Integer; begin Result := $0008; end;
+function TPlatformLayoutDarwinArm64.O_RDONLY: Int32; begin Result := 0;     end;
+function TPlatformLayoutDarwinArm64.O_WRONLY: Int32; begin Result := 1;     end;
+function TPlatformLayoutDarwinArm64.O_RDWR:   Int32; begin Result := 2;     end;
+function TPlatformLayoutDarwinArm64.O_CREAT:  Int32; begin Result := $0200; end;
+function TPlatformLayoutDarwinArm64.O_TRUNC:  Int32; begin Result := $0400; end;
+function TPlatformLayoutDarwinArm64.O_APPEND: Int32; begin Result := $0008; end;
 
-function TPlatformLayoutDarwinArm64.S_IFMT:  Integer; begin Result := $F000; end;
-function TPlatformLayoutDarwinArm64.S_IFDIR: Integer; begin Result := $4000; end;
-function TPlatformLayoutDarwinArm64.S_IFREG: Integer; begin Result := $8000; end;
-function TPlatformLayoutDarwinArm64.S_IFLNK: Integer; begin Result := $A000; end;
+function TPlatformLayoutDarwinArm64.S_IFMT:  Int32; begin Result := $F000; end;
+function TPlatformLayoutDarwinArm64.S_IFDIR: Int32; begin Result := $4000; end;
+function TPlatformLayoutDarwinArm64.S_IFREG: Int32; begin Result := $8000; end;
+function TPlatformLayoutDarwinArm64.S_IFLNK: Int32; begin Result := $A000; end;
 
-function TPlatformLayoutDarwinArm64.SEEK_SET: Integer; begin Result := 0; end;
-function TPlatformLayoutDarwinArm64.SEEK_CUR: Integer; begin Result := 1; end;
-function TPlatformLayoutDarwinArm64.SEEK_END: Integer; begin Result := 2; end;
+function TPlatformLayoutDarwinArm64.SEEK_SET: Int32; begin Result := 0; end;
+function TPlatformLayoutDarwinArm64.SEEK_CUR: Int32; begin Result := 1; end;
+function TPlatformLayoutDarwinArm64.SEEK_END: Int32; begin Result := 2; end;
 
-function TPlatformLayoutDarwinArm64.CLOCK_REALTIME: Integer; begin Result := 0; end;
-function TPlatformLayoutDarwinArm64.WNOHANG:        Integer; begin Result := 1; end;
+function TPlatformLayoutDarwinArm64.CLOCK_REALTIME: Int32; begin Result := 0; end;
+function TPlatformLayoutDarwinArm64.WNOHANG:        Int32; begin Result := 1; end;
 
 { Darwin sys/unistd.h — 58, as on FreeBSD, not glibc's 84. }
-function TPlatformLayoutDarwinArm64.SC_NPROCESSORS_ONLN: Integer; begin Result := 58; end;
+function TPlatformLayoutDarwinArm64.SC_NPROCESSORS_ONLN: Int32; begin Result := 58; end;
 
-function TPlatformLayoutDarwinArm64.StatBufSize: Integer;
+function TPlatformLayoutDarwinArm64.StatBufSize: Int32;
 begin
   Result := STAT_SIZE;
 end;
@@ -182,17 +182,17 @@ begin
   Result := P^;
 end;
 
-function TPlatformLayoutDarwinArm64.StatMode(Buf: Pointer): Integer;
+function TPlatformLayoutDarwinArm64.StatMode(Buf: Pointer): Int32;
 var
   P: ^UInt16;
 begin
   { mode_t is 16 bits and nlink_t sits in the adjacent two bytes — a
     32-bit read here would fold the link count into the mode }
   P := Pointer(PChar(Buf) + STAT_OFF_MODE);
-  Result := Integer(P^);
+  Result := Int32(P^);
 end;
 
-function TPlatformLayoutDarwinArm64.DirentRecLen(Ent: Pointer): Integer;
+function TPlatformLayoutDarwinArm64.DirentRecLen(Ent: Pointer): Int32;
 var
   P: ^UInt16;
 begin
@@ -234,25 +234,25 @@ asm
     b _AssignLayoutDarwin
 end;
 
-function _MapAnonFlag: Integer;
+function _MapAnonFlag: Int32;
 begin
   Result := $1000;
 end;
 
-function darwin_mutex_init(M: Pointer; Attr: Pointer): Integer;
+function darwin_mutex_init(M: Pointer; Attr: Pointer): Int32;
   external name 'pthread_mutex_init';
-function darwin_mutex_lock(M: Pointer): Integer;
+function darwin_mutex_lock(M: Pointer): Int32;
   external name 'pthread_mutex_lock';
-function darwin_mutex_unlock(M: Pointer): Integer;
+function darwin_mutex_unlock(M: Pointer): Int32;
   external name 'pthread_mutex_unlock';
-function darwin_cond_init(C: Pointer; Attr: Pointer): Integer;
+function darwin_cond_init(C: Pointer; Attr: Pointer): Int32;
   external name 'pthread_cond_init';
-function darwin_cond_wait(C: Pointer; M: Pointer): Integer;
+function darwin_cond_wait(C: Pointer; M: Pointer): Int32;
   external name 'pthread_cond_wait';
 function darwin_cond_timedwait_rel(C: Pointer; M: Pointer;
-  RelTs: Pointer): Integer;
+  RelTs: Pointer): Int32;
   external name 'pthread_cond_timedwait_relative_np';
-function darwin_cond_broadcast(C: Pointer): Integer;
+function darwin_cond_broadcast(C: Pointer): Int32;
   external name 'pthread_cond_broadcast';
 
 const
@@ -268,14 +268,14 @@ var
 
 { the bucket's base address -- plain arithmetic on the byte block, so the
   RTL stays buildable by the release bootstrap compiler }
-function ParkBucketBase(AIndex: Integer): Pointer;
+function ParkBucketBase(AIndex: Int): Pointer;
 begin
   Result := Pointer(Int64(@GParkBuckets) + Int64(AIndex) * PARK_BUCKET_SIZE);
 end;
 
 procedure InitParkBuckets;
 var
-  I: Integer;
+  I: Int;
   P: Pointer;
 begin
   for I := 0 to PARK_BUCKETS - 1 do
@@ -286,17 +286,17 @@ begin
   end;
 end;
 
-function ParkBucketOf(AAddr: Pointer): Integer;
+function ParkBucketOf(AAddr: Pointer): Int;
 begin
   { words are at least 4-aligned and usually live in distinct records, so
     drop the low bits before folding }
-  Result := Integer((Int64(AAddr) shr 4) and (PARK_BUCKETS - 1));
+  Result := Int32((Int64(AAddr) shr 4) and (PARK_BUCKETS - 1));
 end;
 
-procedure _ParkWait(AAddr: Pointer; AExpected: Integer; ATs: Pointer);
+procedure _ParkWait(AAddr: Pointer; AExpected: Int32; ATs: Pointer);
 var
   P, M, C: Pointer;
-  W: ^Integer;
+  W: ^Int32;
 begin
   P := ParkBucketBase(ParkBucketOf(AAddr));
   M := Pointer(Int64(P) + PARK_MUTEX_OFF);
@@ -313,7 +313,7 @@ begin
   darwin_mutex_unlock(M);
 end;
 
-procedure _ParkWake(AAddr: Pointer; ACount: Integer);
+procedure _ParkWake(AAddr: Pointer; ACount: Int32);
 var
   P, M: Pointer;
 begin
@@ -326,26 +326,26 @@ begin
   darwin_mutex_unlock(M);
 end;
 
-function _ClockMonotonicId: Integer;
+function _ClockMonotonicId: Int32;
 begin
   Result := 6;
 end;
 
-function _SolSocket: Integer;    begin Result := $FFFF; end;
-function _SoReuseAddr: Integer;  begin Result := $0004; end;
-function _SoReusePort: Integer;  begin Result := $0200; end;
-function _SoError: Integer;      begin Result := $1007; end;
-function _MsgNoSignal: Integer;  begin Result := 0;     end;
-function _ONonBlock: Integer;    begin Result := $0004; end;
-function _SockNonBlock: Integer; begin Result := 0;     end;
-function _SoNoSigPipe: Integer;  begin Result := $1022; end;
+function _SolSocket: Int32;    begin Result := $FFFF; end;
+function _SoReuseAddr: Int32;  begin Result := $0004; end;
+function _SoReusePort: Int32;  begin Result := $0200; end;
+function _SoError: Int32;      begin Result := $1007; end;
+function _MsgNoSignal: Int32;  begin Result := 0;     end;
+function _ONonBlock: Int32;    begin Result := $0004; end;
+function _SockNonBlock: Int32; begin Result := 0;     end;
+function _SoNoSigPipe: Int32;  begin Result := $1022; end;
 
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 var
   PB: ^Byte;
   PW: ^UInt16;
   PD: ^UInt32;
-  I: Integer;
+  I: Int;
 begin
   PB := P;
   PB^ := 16;                               { sin_len = sizeof(sockaddr_in) }
@@ -364,7 +364,7 @@ end;
 
 procedure darwin_tlv_atexit(Fn, Arg: Pointer); external name '_tlv_atexit';
 
-function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Int32;
 begin
   darwin_tlv_atexit(Fn, Arg);
   Result := 0;

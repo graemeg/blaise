@@ -30,7 +30,7 @@ function FdExhausted(N: Int64): Boolean;
 
 { No errno variable exists in this profile; always 0.  Present so shared code
   binding the symbol links in both profiles. }
-function GetOsErrno: Integer;
+function GetOsErrno: Int;
 
 implementation
 
@@ -55,7 +55,7 @@ begin
   Result := (N = -EMFILE) or (N = -ENFILE);
 end;
 
-function GetOsErrno: Integer;
+function GetOsErrno: Int;
 begin
   Result := 0;
 end;

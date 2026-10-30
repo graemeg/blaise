@@ -53,8 +53,8 @@ procedure _Raise(Obj: Pointer);
 procedure _Reraise(Exc: Pointer);
 function  _CurrentException: Pointer;
 function  _CurrentExceptionMessage: Pointer;
-function  _IsInstance(Obj: Pointer; Target: Pointer): Integer;
-function  _ImplementsInterface(Obj: Pointer; IntfTI: Pointer): Integer;
+function  _IsInstance(Obj: Pointer; Target: Pointer): Int32;
+function  _ImplementsInterface(Obj: Pointer; IntfTI: Pointer): Int32;
 function  _GetItab(Obj: Pointer; IntfTI: Pointer): Pointer;
 procedure _Raise_InvalidCast;
 procedure _CheckNil(Obj: Pointer);
@@ -107,10 +107,10 @@ const
 type
   PPointer = ^Pointer;
 
-procedure _blaise_longjmp(Buf: Pointer; Val: Integer); external name '_blaise_longjmp';
+procedure _blaise_longjmp(Buf: Pointer; Val: Int32); external name '_blaise_longjmp';
 
 function  _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
-function  _libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64; external name 'write';
+function  _libc_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64; external name 'write';
 procedure _libc_abort; external name 'abort';
 
 threadvar
@@ -120,7 +120,7 @@ threadvar
 function ExcStrEmpty: Pointer;
 var
   Base: Pointer;
-  RC: ^Integer;
+  RC: ^Int32;
   LN, CP: PStrLen;
   Data: PChar;
 begin
@@ -233,7 +233,7 @@ end;
     offset 8: impllist  (Pointer — nil-terminated array of (typeinfo*, itab*) pairs)
   ------------------------------------------------------------------ }
 
-function _IsInstance(Obj: Pointer; Target: Pointer): Integer;
+function _IsInstance(Obj: Pointer; Target: Pointer): Int32;
 var
   VTable: PPointer;
   TI: Pointer;
@@ -254,7 +254,7 @@ begin
   end;
 end;
 
-function _ImplementsInterface(Obj: Pointer; IntfTI: Pointer): Integer;
+function _ImplementsInterface(Obj: Pointer; IntfTI: Pointer): Int32;
 var
   VTable: PPointer;
   TI: Pointer;
@@ -314,7 +314,7 @@ begin
   end;
 end;
 
-procedure DiagAbort(Msg: Pointer; Len: Integer);
+procedure DiagAbort(Msg: Pointer; Len: Int);
 var
   NL: Byte;
 begin

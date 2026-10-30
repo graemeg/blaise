@@ -55,7 +55,7 @@ procedure _StringRelease(Ptr: Pointer);                external name '_StringRel
 procedure _DynArrayRelease(Ptr: Pointer);              external name '_DynArrayRelease';
 
 { blaise_float binding — used by Format()'s %f/%e/%g handling. }
-function  _FormatFloatSpec(V: Float64; Spec: Integer; Prec: Integer): Pointer;
+function  _FormatFloatSpec(V: Float64; Spec: Int32; Prec: Int32): Pointer;
   external name '_FormatFloatSpec';
 
 { ------------------------------------------------------------------ }
@@ -71,17 +71,17 @@ function  _StringSetLength(S: Pointer; N: Int64): Pointer;
 function  _StringUpperCase(S: Pointer): Pointer;
 function  _StringLowerCase(S: Pointer): Pointer;
 function  _StringTrim(S: Pointer): Pointer;
-function  _StringSameText(S1, S2: Pointer): Integer;
-function  _IntToStr(N: Integer): Pointer;
+function  _StringSameText(S1, S2: Pointer): Int32;
+function  _IntToStr(N: Int32): Pointer;
 function  _Int64ToStr(N: Int64): Pointer;
 function  _UInt64ToStr(N: UInt64): Pointer;
-function  _StrToInt(S: Pointer): Integer;
+function  _StrToInt(S: Pointer): Int32;
 function  _StrToInt64(S: Pointer): Int64;
-function  _OrdAt(S: Pointer; I: Int64): Integer;
-function  _Chr(N: Integer): Pointer;
-function  _UpCase(N: Integer): Pointer;
-function  _StringCompare(S1, S2: Pointer): Integer;
-function  _StringCompareText(S1, S2: Pointer): Integer;
+function  _OrdAt(S: Pointer; I: Int64): Int32;
+function  _Chr(N: Int32): Pointer;
+function  _UpCase(N: Int32): Pointer;
+function  _StringCompare(S1, S2: Pointer): Int32;
+function  _StringCompareText(S1, S2: Pointer): Int32;
 function  _StringFromPChar(P: PChar): Pointer;
 
 { ------------------------------------------------------------------ }
@@ -111,10 +111,10 @@ function _Utf8DecodeAt(S: Pointer; Idx: Int64): Int64;
   _DynArrayLength(Ptr) → length (0 for nil).
   Refcount helpers (_DynArrayAddRef / _DynArrayRelease) and the element
   hooks live in runtime.arc alongside the other ARC primitives. }
-function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Integer;
+function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Int32;
   Hook: Pointer): Pointer;
 function _DynArraySetLength(Ptr: Pointer; NewLen: Int64;
-  ElemSize: Integer): Pointer;
+  ElemSize: Int32): Pointer;
 function _DynArrayLength(Ptr: Pointer): Int64;
 
 { File-path manipulation — pure string operations, no OS calls }
@@ -136,7 +136,7 @@ function _ExcludeTrailingPathDelimiter(Path: Pointer): Pointer;
     width  minimum field width; the rendered value is space-padded to it.
     .prec  precision — fraction digits for %f/%e, significant digits for %g.
   Conversions: d (integer), s (string), f/F/e/E/g/G (float), %% (literal %). }
-function _StringFormatN(Fmt: Pointer; Args: Pointer; Count: Integer): Pointer;
+function _StringFormatN(Fmt: Pointer; Args: Pointer; Count: Int32): Pointer;
 
 { _StringFormatVarRecs — Format() over a FORWARDED 'array of const' parameter
   (BUG-047).  VarRecs points to Count real 16-byte TVarRecs ([VType:Byte@0,
@@ -147,7 +147,7 @@ function _StringFormatN(Fmt: Pointer; Args: Pointer; Count: Integer): Pointer;
   open-array reference rather than a bracket literal (the literal case boxes
   directly at the call site). }
 function _StringFormatVarRecs(Fmt: Pointer; VarRecs: Pointer;
-  Count: Integer): Pointer;
+  Count: Int32): Pointer;
 
 implementation
 
@@ -174,7 +174,7 @@ type
   TDaLen  = Int64;     { the width of a dynamic-array header's Length }
   PDaLen  = ^TDaLen;
 
-procedure _libc_memset(Dst: Pointer; Val: Integer; N: Int64); external name 'memset';
+procedure _libc_memset(Dst: Pointer; Val: Int32; N: Int64); external name 'memset';
 
 { ------------------------------------------------------------------ }
 { Memory helpers                                                        }
@@ -216,7 +216,7 @@ end;
 function StrAlloc(Len: Int64): Pointer;
 var
   Base:   Pointer;
-  RC:     ^Integer;
+  RC:     ^Int32;
   LN, CP: PStrLen;
   NulPtr: PChar;
 begin
@@ -385,7 +385,7 @@ end;
 
 function _StringUnique(S: Pointer): Pointer;
 var
-  RC:   ^Integer;
+  RC:   ^Int32;
   SLen: Int64;
 begin
   if S = nil then Exit(nil);
@@ -559,7 +559,7 @@ end;
 { _StringSameText                                                      }
 { ------------------------------------------------------------------ }
 
-function _StringSameText(S1, S2: Pointer): Integer;
+function _StringSameText(S1, S2: Pointer): Int32;
 var
   Len1, Len2, I: Int64;
   D1, D2:        PChar;
@@ -592,16 +592,16 @@ end;
 { Buf must have at least 21 bytes.  Returns character count.         }
 { ------------------------------------------------------------------ }
 
-function WriteDecimal(N: Int64; Buf: PChar): Integer;
+function WriteDecimal(N: Int64; Buf: PChar): Int;
 var
   IsNeg: Boolean;
   NegN:  Int64;
-  Pos:   Integer;
+  Pos:   Int;
   Tmp:   array[0..21] of Byte;   { stack scratch — this is the hottest
                                    integer-to-text path; no heap traffic }
   TP:    PChar;
-  I, J:  Integer;
-  Digit: Integer;
+  I, J:  Int;
+  Digit: Int;
 begin
   TP  := PChar(@Tmp[0]);
   IsNeg := N < 0;
@@ -624,7 +624,7 @@ begin
     Pos := 0;
     while NegN < 0 do
     begin
-      Digit  := -Integer(NegN mod 10);
+      Digit  := -Int32(NegN mod 10);
       TP[Pos] := 48 + Digit;
       NegN   := NegN div 10;
       Inc(Pos);
@@ -650,11 +650,11 @@ end;
 { _IntToStr                                                            }
 { ------------------------------------------------------------------ }
 
-function _IntToStr(N: Integer): Pointer;
+function _IntToStr(N: Int32): Pointer;
 var
   Buf:     array[0..21] of Byte;
   BP:      PChar;
-  Written: Integer;
+  Written: Int;
 begin
   BP      := PChar(@Buf[0]);
   Written := WriteDecimal(Int64(N), BP);
@@ -671,7 +671,7 @@ function _Int64ToStr(N: Int64): Pointer;
 var
   Buf:     array[0..21] of Byte;
   BP:      PChar;
-  Written: Integer;
+  Written: Int;
 begin
   BP      := PChar(@Buf[0]);
   Written := WriteDecimal(N, BP);
@@ -684,13 +684,13 @@ end;
   decimal digits into Buf (no NUL).  Buf must have at least 21 bytes.
   Returns character count.  Distinct from WriteDecimal because the
   magnitude can exceed Int64 range. }
-function WriteDecimalU(N: UInt64; Buf: PChar): Integer;
+function WriteDecimalU(N: UInt64; Buf: PChar): Int;
 var
-  Pos:   Integer;
+  Pos:   Int;
   Tmp:   array[0..21] of Byte;
   TP:    PChar;
-  I, J:  Integer;
-  Digit: Integer;
+  I, J:  Int;
+  Digit: Int;
 begin
   TP  := PChar(@Tmp[0]);
   if N = UInt64(0) then
@@ -703,7 +703,7 @@ begin
     Pos := 0;
     while N > UInt64(0) do
     begin
-      Digit   := Integer(N mod UInt64(10));
+      Digit   := Int32(N mod UInt64(10));
       TP[Pos] := 48 + Digit;
       N       := N div UInt64(10);
       Inc(Pos);
@@ -724,7 +724,7 @@ function _UInt64ToStr(N: UInt64): Pointer;
 var
   Buf:     array[0..21] of Byte;
   BP:      PChar;
-  Written: Integer;
+  Written: Int;
 begin
   BP      := PChar(@Buf[0]);
   Written := WriteDecimalU(N, BP);
@@ -737,11 +737,11 @@ end;
 { _StrToInt / _StrToInt64                                             }
 { ------------------------------------------------------------------ }
 
-function _StrToInt(S: Pointer): Integer;
+function _StrToInt(S: Pointer): Int32;
 var
   Data:  PChar;
   Neg:   Boolean;
-  I, C:  Integer;
+  I, C:  Int;
   Value: Int64;
 begin
   Data  := StrData(S);
@@ -784,16 +784,16 @@ begin
     end;
   end;
   if Neg then
-    Result := Integer(-Value)
+    Result := Int32(-Value)
   else
-    Result := Integer(Value);
+    Result := Int32(Value);
 end;
 
 function _StrToInt64(S: Pointer): Int64;
 var
   Data:  PChar;
   Neg:   Boolean;
-  I, C:  Integer;
+  I, C:  Int;
 begin
   Data  := StrData(S);
   I     := 0;
@@ -842,7 +842,7 @@ end;
 { _OrdAt                                                               }
 { ------------------------------------------------------------------ }
 
-function _OrdAt(S: Pointer; I: Int64): Integer;
+function _OrdAt(S: Pointer; I: Int64): Int32;
 var
   Len:  Int64;
   Data: PChar;
@@ -860,7 +860,7 @@ end;
 { _Chr                                                                 }
 { ------------------------------------------------------------------ }
 
-function _Chr(N: Integer): Pointer;
+function _Chr(N: Int32): Pointer;
 var
   DP: PChar;
 begin
@@ -874,9 +874,9 @@ end;
 { _UpCase                                                              }
 { ------------------------------------------------------------------ }
 
-function _UpCase(N: Integer): Pointer;
+function _UpCase(N: Int32): Pointer;
 var
-  C: Integer;
+  C: Int;
 begin
   C := N;
   if (C >= 97) and (C <= 122) then
@@ -888,7 +888,7 @@ end;
 { _StringCompare                                                       }
 { ------------------------------------------------------------------ }
 
-function _StringCompare(S1, S2: Pointer): Integer;
+function _StringCompare(S1, S2: Pointer): Int32;
 var
   Len1, Len2, Len: Int64;
   D1, D2:          PChar;
@@ -918,7 +918,7 @@ end;
 { _StringCompareText                                                   }
 { ------------------------------------------------------------------ }
 
-function _StringCompareText(S1, S2: Pointer): Integer;
+function _StringCompareText(S1, S2: Pointer): Int32;
 var
   Len1, Len2, Len: Int64;
   D1, D2:          PChar;
@@ -973,8 +973,8 @@ end;
 function _Utf8DecodeAt(S: Pointer; Idx: Int64): Int64;
 var
   P: PChar;
-  B0, B1, B2, B3: Integer;
-  CP: Integer;
+  B0, B1, B2, B3: Int;
+  CP: Int;
 begin
   P := StrData(S);
   B0 := P[Idx];
@@ -1009,7 +1009,7 @@ end;
 
 { Number of characters WriteDecimal will produce for N — used by
   _StringFormatN's sizing pass so it doesn't render the digits twice. }
-function DecimalWidth(N: Int64): Integer;
+function DecimalWidth(N: Int64): Int;
 var
   AbsN: Int64;
 begin
@@ -1038,7 +1038,7 @@ end;
     Tag    : 0=int, 1=string, 2=float (raw double bits in Val).
     Conv   : ASCII code of the conversion letter ('d','s','f','e','g',...).
     Prec   : precision (-1 = default). }
-function RenderFmtArg(Tag: Integer; Val: Int64; Conv: Integer; Prec: Integer;
+function RenderFmtArg(Tag: Int; Val: Int64; Conv: Int; Prec: Int;
   out OutBuf: PChar; out OutFree: Boolean): Int64;
 var
   Buf: PChar;
@@ -1129,17 +1129,17 @@ begin
   Result := OutB;
 end;
 
-function _StringFormatN(Fmt: Pointer; Args: Pointer; Count: Integer): Pointer;
+function _StringFormatN(Fmt: Pointer; Args: Pointer; Count: Int32): Pointer;
 var
   F, Dst:  PChar;
   FLen, I: Int64;
-  ArgIdx, Tag: Integer;
+  ArgIdx, Tag: Int;
   Val:     Int64;
   AP:      Pointer;
   TagPtr, ValPtr: ^Int64;
   OutB:    PChar;        { growable output buffer (raw bytes, no header) }
   OutLen, OutCap: Int64;
-  Width, Prec, Conv: Integer;
+  Width, Prec, Conv: Int;
   LeftJust: Boolean;
   ArgBuf:  PChar;
   ArgFree: Boolean;
@@ -1221,7 +1221,7 @@ begin
         AP := Args + ArgIdx * 16;
         TagPtr := AP;
         ValPtr := AP + 8;
-        Tag := Integer(TagPtr^);
+        Tag := Int32(TagPtr^);
         Val := ValPtr^;
         Inc(ArgIdx);
 
@@ -1265,12 +1265,12 @@ begin
 end;
 
 function _StringFormatVarRecs(Fmt: Pointer; VarRecs: Pointer;
-  Count: Integer): Pointer;
+  Count: Int32): Pointer;
 var
   Block: Pointer;
-  I: Integer;
+  I: Int;
   VRec: Pointer;
-  VType: Integer;
+  VType: Int;
   VTypePtr: ^Byte;
   VValPtr: ^Int64;
   VVal: Int64;
@@ -1285,7 +1285,7 @@ begin
   begin
     VRec := VarRecs + I * 16;      { real TVarRec: VType@0 (byte), VValue@8 }
     VTypePtr := VRec;
-    VType := Integer(VTypePtr^);
+    VType := Int32(VTypePtr^);
     VValPtr := VRec + 8;
     VVal := VValPtr^;
     TagPtr := Block + I * 16;
@@ -1459,7 +1459,7 @@ end;
 { ------------------------------------------------------------------ }
 
 type
-  TDynElemHook = procedure(Data: Pointer; Count: Int64; ARetain: Integer);
+  TDynElemHook = procedure(Data: Pointer; Count: Int64; ARetain: Int32);
 
 function _DynArrayLength(Ptr: Pointer): Int64;
 var
@@ -1473,7 +1473,7 @@ begin
   Result := LenPtr^;
 end;
 
-function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Integer;
+function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Int32;
   Hook: Pointer): Pointer;
 var
   NewBase:  Pointer;
@@ -1483,7 +1483,7 @@ var
   CopyLen:  Int64;
   LenPtr:   PDaLen;
   HookSlot: ^Pointer;
-  RC:       ^Integer;
+  RC:       ^Int32;
   Shared:   Boolean;
   H:        TDynElemHook;
 begin
@@ -1542,7 +1542,7 @@ begin
 end;
 
 function _DynArraySetLength(Ptr: Pointer; NewLen: Int64;
-  ElemSize: Integer): Pointer;
+  ElemSize: Int32): Pointer;
 begin
   Result := _DynArraySetLengthM(Ptr, NewLen, ElemSize, nil);
 end;

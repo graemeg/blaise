@@ -73,7 +73,7 @@ function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Int64): Pointer;
 procedure _BlaiseMove(Src, Dst: Pointer; N: Int64);
 { FillByte(Dest, Count, Value): sets Count bytes at Dst to the low byte of
   Value; a Count of zero or less writes nothing. }
-procedure _BlaiseFillByte(Dst: Pointer; N: Int64; Value: Integer);
+procedure _BlaiseFillByte(Dst: Pointer; N: Int64; Value: Int32);
 
 { Managed threadvars at thread exit.  For each threadvar of a managed type
   (string, dynamic array, class, interface, closure, or an aggregate holding
@@ -94,11 +94,11 @@ procedure _ThreadVarsRelease;
   global arena registry and the per-arena live-block counters. }
 
 { Number of arenas on the process-global arena registry. }
-function _MemArenaCount: Integer;
+function _MemArenaCount: Int32;
 
 { Number of registered arenas that are abandoned (OwnerTid = 0: their
   owning thread has exited and no thread has adopted them yet). }
-function _MemAbandonedArenaCount: Integer;
+function _MemAbandonedArenaCount: Int32;
 
 { Live-block counter of the arena owning the given SMALL block.  The
   counter counts blocks in use or still in flight on the arena's remote
@@ -118,17 +118,17 @@ procedure _MemDrainRemoteFrees;
   adoption and unmap are serialised) or keep it as the caller's own.
   Also run from the allocation cold path before a fresh arena is
   mapped.  Returns the number of arenas unmapped. }
-function _MemReclaimAbandoned: Integer;
+function _MemReclaimAbandoned: Int32;
 
 implementation
 
-function  _libc_mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
+function  _libc_mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
             Offset: Int64): Pointer; external name 'mmap';
-function  _libc_munmap(Addr: Pointer; Length: Int64): Integer;
+function  _libc_munmap(Addr: Pointer; Length: Int64): Int32;
             external name 'munmap';
 procedure _libc_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
 procedure _libc_memmove(Dst, Src: Pointer; N: Int64); external name 'memmove';
-procedure _libc_memset(Dst: Pointer; C: Integer; N: Int64); external name 'memset';
+procedure _libc_memset(Dst: Pointer; C: Int32; N: Int64); external name 'memset';
 
 {$IFDEF BLAISE_MEMDEBUG}
 { Diagnostic-only: a double-free detector (BUG-20260724-arm64-classes-emit-
@@ -136,10 +136,10 @@ procedure _libc_memset(Dst: Pointer; C: Integer; N: Int64); external name 'memse
   already-freed block writes a marker line to stderr and aborts, so the
   abort's backtrace names the OVER-RELEASING caller (the emit site whose ARC
   over-releases a string).  Compiled only under -dBLAISE_MEMDEBUG; never ships. }
-function  _libc_write(Fd: Integer; Buf: Pointer; N: Int64): Int64; external name 'write';
+function  _libc_write(Fd: Int32; Buf: Pointer; N: Int64): Int64; external name 'write';
 procedure _libc_abort; external name 'abort';
 const
-  FREED_MARK = Integer($F2EEF2EE);   { in the freed block's Flags; != FLAG_SMALL/LARGE }
+  FREED_MARK = Int32($F2EEF2EE);   { in the freed block's Flags; != FLAG_SMALL/LARGE }
 {$ENDIF}
 
 {$IFDEF BLAISE_MEMPOISON}
@@ -154,7 +154,7 @@ const
   a later read of it sees a huge/garbage length (0xAAAAAAAA) and faults AT the
   reference that outlived the free, whose backtrace names the true over-release.
   Compiled only under -dBLAISE_MEMPOISON; never ships. }
-procedure _libc_memset(Dst: Pointer; Val: Integer; N: Int64); external name 'memset';
+procedure _libc_memset(Dst: Pointer; Val: Int32; N: Int64); external name 'memset';
 const
   QUARANTINE_N = 256;   { blocks held before reuse — deep enough to outlast a
                           stale reference, small enough to bound memory. }
@@ -173,16 +173,16 @@ const
   sweep found no arenas and every worker's arenas stayed registered for
   good (test_blaise_mem_mt failed three tests on arm64).  The static build's
   no-op key seam meant its worker sweep never ran at all. }
-function _ThreadAtExit(Fn, Arg: Pointer): Integer;
+function _ThreadAtExit(Fn, Arg: Pointer): Int32;
   external name '_BlaiseThreadAtExit';
-function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Integer;
+function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Int32;
   external name '__cxa_atexit';
 
 { OS-specific MAP_ANONYMOUS value, provided by the linked platform layout
   unit (rtl.platform.layout.<os>).  Linux = $20, FreeBSD = $1000.  A flat
   function rather than a GPlatformLayout virtual call because the allocator
   runs before the platform layer is initialised. }
-function  _MapAnonFlag: Integer; external name '_MapAnonFlag';
+function  _MapAnonFlag: Int32; external name '_MapAnonFlag';
 
 const
   PROT_READ       = 1;
@@ -215,8 +215,8 @@ type
 
   PBlockHeader = ^TBlockHeader;
   TBlockHeader = record
-    AllocSize: Integer;
-    Flags:     Integer;
+    AllocSize: Int32;
+    Flags:     Int32;
     Arena:     PArena;   { owning arena — the cross-thread routing key }
   end;
 
@@ -224,8 +224,8 @@ type
   TLargeHeader = record
     TotalMapped: Int64;
     AllocSize:   Int64;    { a large block may exceed 2 GiB }
-    Pad:         Integer;  { keeps Flags at Ptr - 12 (the invariant above) }
-    Flags:       Integer;
+    Pad:         Int32;  { keeps Flags at Ptr - 12 (the invariant above) }
+    Flags:       Int32;
     OwnerTid:    Int64;  { allocating thread's tid (MyTid).  LargeFreeMem
                            caches on a local free and munmaps on a
                            foreign one (concurrent-allocator-design.adoc,
@@ -258,8 +258,8 @@ type
 
   TArena = record
     Base:     Pointer;
-    Offset:   Integer;
-    Capacity: Integer;
+    Offset:   Int32;
+    Capacity: Int32;
     Next:     PArena;
     { Migration-safe cross-thread free path (concurrent-allocator-design.adoc).
       OwnerTid identifies the owning thread (0 = abandoned).  It is
@@ -291,7 +291,7 @@ type
   PRemoteNode = ^TRemoteNode;
   TRemoteNode = record
     Next:      PRemoteNode;
-    SizeClass: Integer;
+    SizeClass: Int32;
   end;
 
 const
@@ -302,19 +302,19 @@ threadvar
   FreeLists: array[0..7] of PFreeNode;
   ArenaHead: PArena;
   LargeFreeHead: PLargeFreeNode;
-  LargeFreeCount: Integer;
+  LargeFreeCount: Int;
   { Cross-thread free path state.  TidAnchor exists only for its per-thread
     TLS address (see MyTid); FreeDrainCounter and DrainCursor implement the
     periodic rotating free-side drain. }
   TidAnchor: Int64;
-  FreeDrainCounter: Integer;
+  FreeDrainCounter: Int;
   DrainCursor: PArena;
 {$IFDEF BLAISE_MEMPOISON}
   { poison+quarantine ring (diagnostic) — QRing[QIdx] is the next slot to fill;
     filling an occupied slot first evicts its (older) block to the real free
     path.  Sized QUARANTINE_N. }
   QRing: array[0..255] of Pointer;
-  QIdx:  Integer;
+  QIdx:  Int;
 {$ENDIF}
   { True once this thread's exit hook is registered (_ThreadAtExit). }
   ExitHookArmed: Boolean;
@@ -328,7 +328,7 @@ var
   GRegLock: Pointer;           { CAS spinlock word: nil = free }
   GArenaRegistry: PArena;      { all live arenas, linked via RemoteList }
   GAbandonedCount: Int64;      { registered arenas with OwnerTid = 0 }
-  GHooksReady: Integer;        { main-thread atexit sweep registered once }
+  GHooksReady: Int;        { main-thread atexit sweep registered once }
   GThreadVarNodes: PThreadVarNode;  { registered threadvar finalisers }
 
 { Registry spinlock — CAS built on the allocator's own atomic leaves,
@@ -360,7 +360,7 @@ end;
   remote-free stack (Treiber push; one CAS, retried on contention with
   another producer).  lock cmpxchg is a full barrier on x86-64, so the
   node-field stores are published before the new head (release). }
-procedure RemoteFreePush(Arena: PArena; Ptr: Pointer; SizeClass: Integer);
+procedure RemoteFreePush(Arena: PArena; Ptr: Pointer; SizeClass: Int);
 var
   Node: PRemoteNode;
   OldHead: Pointer;
@@ -454,7 +454,7 @@ end;
       future foreign frees are routed to the caller as owner.
 
   Returns the number of arenas unmapped. }
-function ReclaimAbandonedSweep: Integer;
+function ReclaimAbandonedSweep: Int;
 var
   A, Nxt: PArena;
   Claimed, Node, NodeNext: PRemoteNode;
@@ -548,7 +548,7 @@ var
   Claimed, Node, Tail: PRemoteNode;
   N: Int64;
   OldHead: Pointer;
-  I: Integer;
+  I: Int;
 begin
   if ArenaHead <> nil then
   begin
@@ -695,7 +695,7 @@ begin
     Result := nil;
 end;
 
-function SizeClassIndex(Size: Integer): Integer;
+function SizeClassIndex(Size: Int): Int;
 begin
   if Size <= 16 then begin Result := 0; Exit end;
   if Size <= 32 then begin Result := 1; Exit end;
@@ -707,7 +707,7 @@ begin
   Result := 7;
 end;
 
-function SizeClassBytes(Index: Integer): Integer;
+function SizeClassBytes(Index: Int): Int;
 begin
   case Index of
     0: Result := 16;
@@ -722,7 +722,7 @@ begin
   end;
 end;
 
-function RoundUpToClass(Size: Integer): Integer;
+function RoundUpToClass(Size: Int): Int;
 begin
   Result := SizeClassBytes(SizeClassIndex(Size));
 end;
@@ -757,13 +757,13 @@ begin
   Result := A;
 end;
 
-function ArenaAlloc(Size: Integer): Pointer;
+function ArenaAlloc(Size: Int): Pointer;
 var
   A: PArena;
-  BlockSize, Needed: Integer;
+  BlockSize, Needed: Int;
   Hdr: PBlockHeader;
   Node: PFreeNode;
-  Idx: Integer;
+  Idx: Int;
 begin
   BlockSize := RoundUpToClass(Size);
   Needed := HEADER_SIZE + BlockSize;
@@ -819,9 +819,9 @@ begin
   Result := Pointer(UInt(Hdr) + HEADER_SIZE);
 end;
 
-function SmallGetMem(Size: Integer): Pointer;
+function SmallGetMem(Size: Int): Pointer;
 var
-  Idx: Integer;
+  Idx: Int;
   Node: PFreeNode;
   Hdr: PBlockHeader;
   A: PArena;
@@ -858,7 +858,7 @@ end;
 procedure SmallFreeMem(Ptr: Pointer);
 var
   Hdr: PBlockHeader;
-  Idx: Integer;
+  Idx: Int;
   Node: PFreeNode;
   Arena: PArena;
 {$IFDEF BLAISE_MEMPOISON}
@@ -1022,7 +1022,7 @@ end;
 { Phase-5 maintenance / diagnostic API (see interface comments)        }
 { ------------------------------------------------------------------ }
 
-function _MemArenaCount: Integer;
+function _MemArenaCount: Int32;
 var
   A: PArena;
 begin
@@ -1037,7 +1037,7 @@ begin
   RegLockRelease();
 end;
 
-function _MemAbandonedArenaCount: Integer;
+function _MemAbandonedArenaCount: Int32;
 var
   A: PArena;
 begin
@@ -1068,7 +1068,7 @@ begin
   DrainAllRemoteFrees();
 end;
 
-function _MemReclaimAbandoned: Integer;
+function _MemReclaimAbandoned: Int32;
 begin
   Result := ReclaimAbandonedSweep();
 end;
@@ -1095,7 +1095,7 @@ begin
     _libc_memmove(Dst, Src, N);
 end;
 
-procedure _BlaiseFillByte(Dst: Pointer; N: Int64; Value: Integer);
+procedure _BlaiseFillByte(Dst: Pointer; N: Int64; Value: Int32);
 begin
   if N > 0 then
     _libc_memset(Dst, Value and $FF, N);

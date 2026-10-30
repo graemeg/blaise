@@ -24,8 +24,8 @@ unit runtime.setjmp;
 
 interface
 
-function  _blaise_setjmp(Buf: Pointer): Integer;
-procedure _blaise_longjmp(Buf: Pointer; Val: Integer);
+function  _blaise_setjmp(Buf: Pointer): Int32;
+procedure _blaise_longjmp(Buf: Pointer; Val: Int32);
 
 implementation
 
@@ -36,7 +36,7 @@ implementation
   resume address), sp at 96, d8..d15 at 104..160. }
 
 { Save the machine context into Buf; returns 0 on the direct call. }
-function _blaise_setjmp(Buf: Pointer): Integer; assembler; nostackframe;
+function _blaise_setjmp(Buf: Pointer): Int32; assembler; nostackframe;
 asm
     stp x19, x20, [x0]
     stp x21, x22, [x0, #16]
@@ -61,7 +61,7 @@ end;
 { Restore the context saved in Buf and resume there, returning Val (or 1
   if Val is 0, mirroring C longjmp).  The final ret goes through the
   RESTORED x30 — control resumes just after the original setjmp call. }
-procedure _blaise_longjmp(Buf: Pointer; Val: Integer); assembler; nostackframe;
+procedure _blaise_longjmp(Buf: Pointer; Val: Int32); assembler; nostackframe;
 asm
     ldp x19, x20, [x0]
     ldp x21, x22, [x0, #16]
@@ -87,7 +87,7 @@ asm
 end;
 {$ELSE}
 { Save the machine context into Buf; returns 0 on the direct call. }
-function _blaise_setjmp(Buf: Pointer): Integer; assembler; nostackframe;
+function _blaise_setjmp(Buf: Pointer): Int32; assembler; nostackframe;
 asm
     mov  %rbx,    (%rdi)
     mov  %rbp,   8(%rdi)
@@ -105,7 +105,7 @@ end;
 
 { Restore the context saved in Buf and resume there, returning Val (or 1 if
   Val is 0, mirroring C longjmp). }
-procedure _blaise_longjmp(Buf: Pointer; Val: Integer); assembler; nostackframe;
+procedure _blaise_longjmp(Buf: Pointer; Val: Int32); assembler; nostackframe;
 asm
     mov  %esi, %eax
     test %eax, %eax

@@ -35,20 +35,20 @@ interface
 { ------------------------------------------------------------------ }
 { Jumbo set RTL public interface                                      }
 { ------------------------------------------------------------------ }
-function  _SetIn(S: Pointer; Ord: Integer): Integer;          { 0 or 1 }
-procedure _SetInclude(S: Pointer; Ord: Integer);
-procedure _SetExclude(S: Pointer; Ord: Integer);
-procedure _SetUnion(Dest, A, B: Pointer; NBytes: Integer);    { Dest := A or B }
-procedure _SetInter(Dest, A, B: Pointer; NBytes: Integer);    { Dest := A and B }
-procedure _SetDiff(Dest, A, B: Pointer; NBytes: Integer);     { Dest := A and not B }
-function  _SetEqual(A, B: Pointer; NBytes: Integer): Integer;  { 1 if equal }
-function  _SetSubset(A, B: Pointer; NBytes: Integer): Integer; { 1 if A subset of B }
-procedure _SetCopy(Dest, Src: Pointer; NBytes: Integer);      { byte copy }
+function  _SetIn(S: Pointer; Ord: Int32): Int32;          { 0 or 1 }
+procedure _SetInclude(S: Pointer; Ord: Int32);
+procedure _SetExclude(S: Pointer; Ord: Int32);
+procedure _SetUnion(Dest, A, B: Pointer; NBytes: Int32);    { Dest := A or B }
+procedure _SetInter(Dest, A, B: Pointer; NBytes: Int32);    { Dest := A and B }
+procedure _SetDiff(Dest, A, B: Pointer; NBytes: Int32);     { Dest := A and not B }
+function  _SetEqual(A, B: Pointer; NBytes: Int32): Int32;  { 1 if equal }
+function  _SetSubset(A, B: Pointer; NBytes: Int32): Int32; { 1 if A subset of B }
+procedure _SetCopy(Dest, Src: Pointer; NBytes: Int32);      { byte copy }
 
 implementation
 
 { Read byte i of a bitmap. }
-function GetByte(S: Pointer; I: Integer): Integer;
+function GetByte(S: Pointer; I: Int): Int;
 var
   P: ^Byte;
 begin
@@ -57,7 +57,7 @@ begin
 end;
 
 { Write byte i of a bitmap. }
-procedure PutByte(S: Pointer; I, V: Integer);
+procedure PutByte(S: Pointer; I, V: Int);
 var
   P: ^Byte;
 begin
@@ -65,9 +65,9 @@ begin
   P^ := Byte(V);
 end;
 
-function _SetIn(S: Pointer; Ord: Integer): Integer;
+function _SetIn(S: Pointer; Ord: Int32): Int32;
 var
-  ByteIdx, BitMask, B: Integer;
+  ByteIdx, BitMask, B: Int;
 begin
   if S = nil then
     Exit(0);
@@ -80,9 +80,9 @@ begin
     Result := 0;
 end;
 
-procedure _SetInclude(S: Pointer; Ord: Integer);
+procedure _SetInclude(S: Pointer; Ord: Int32);
 var
-  ByteIdx, BitMask, B: Integer;
+  ByteIdx, BitMask, B: Int;
 begin
   ByteIdx := Ord shr 3;
   BitMask := 1 shl (Ord and 7);
@@ -90,9 +90,9 @@ begin
   PutByte(S, ByteIdx, B or BitMask);
 end;
 
-procedure _SetExclude(S: Pointer; Ord: Integer);
+procedure _SetExclude(S: Pointer; Ord: Int32);
 var
-  ByteIdx, BitMask, B: Integer;
+  ByteIdx, BitMask, B: Int;
 begin
   ByteIdx := Ord shr 3;
   BitMask := 1 shl (Ord and 7);
@@ -100,9 +100,9 @@ begin
   PutByte(S, ByteIdx, B and (not BitMask));
 end;
 
-procedure _SetUnion(Dest, A, B: Pointer; NBytes: Integer);
+procedure _SetUnion(Dest, A, B: Pointer; NBytes: Int32);
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < NBytes do
@@ -112,9 +112,9 @@ begin
   end;
 end;
 
-procedure _SetInter(Dest, A, B: Pointer; NBytes: Integer);
+procedure _SetInter(Dest, A, B: Pointer; NBytes: Int32);
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < NBytes do
@@ -124,9 +124,9 @@ begin
   end;
 end;
 
-procedure _SetDiff(Dest, A, B: Pointer; NBytes: Integer);
+procedure _SetDiff(Dest, A, B: Pointer; NBytes: Int32);
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < NBytes do
@@ -136,9 +136,9 @@ begin
   end;
 end;
 
-function _SetEqual(A, B: Pointer; NBytes: Integer): Integer;
+function _SetEqual(A, B: Pointer; NBytes: Int32): Int32;
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < NBytes do
@@ -151,9 +151,9 @@ begin
 end;
 
 { 1 if A is a subset of B (every bit set in A is also set in B), else 0. }
-function _SetSubset(A, B: Pointer; NBytes: Integer): Integer;
+function _SetSubset(A, B: Pointer; NBytes: Int32): Int32;
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < NBytes do
@@ -166,9 +166,9 @@ begin
   Result := 1;
 end;
 
-procedure _SetCopy(Dest, Src: Pointer; NBytes: Integer);
+procedure _SetCopy(Dest, Src: Pointer; NBytes: Int32);
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < NBytes do

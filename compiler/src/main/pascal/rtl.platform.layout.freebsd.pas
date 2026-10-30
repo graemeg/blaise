@@ -44,33 +44,33 @@ uses
 type
   TPlatformLayoutFreeBSDX86_64 = class(TPlatformLayout)
   public
-    function O_RDONLY: Integer; override;
-    function O_WRONLY: Integer; override;
-    function O_RDWR:   Integer; override;
-    function O_CREAT:  Integer; override;
-    function O_TRUNC:  Integer; override;
-    function O_APPEND: Integer; override;
+    function O_RDONLY: Int32; override;
+    function O_WRONLY: Int32; override;
+    function O_RDWR:   Int32; override;
+    function O_CREAT:  Int32; override;
+    function O_TRUNC:  Int32; override;
+    function O_APPEND: Int32; override;
 
-    function S_IFMT:  Integer; override;
-    function S_IFDIR: Integer; override;
-    function S_IFREG: Integer; override;
-    function S_IFLNK: Integer; override;
+    function S_IFMT:  Int32; override;
+    function S_IFDIR: Int32; override;
+    function S_IFREG: Int32; override;
+    function S_IFLNK: Int32; override;
 
-    function SEEK_SET: Integer; override;
-    function SEEK_CUR: Integer; override;
-    function SEEK_END: Integer; override;
+    function SEEK_SET: Int32; override;
+    function SEEK_CUR: Int32; override;
+    function SEEK_END: Int32; override;
 
-    function CLOCK_REALTIME: Integer; override;
-    function WNOHANG:        Integer; override;
+    function CLOCK_REALTIME: Int32; override;
+    function WNOHANG:        Int32; override;
 
-    function SC_NPROCESSORS_ONLN: Integer; override;
+    function SC_NPROCESSORS_ONLN: Int32; override;
 
-    function StatBufSize: Integer; override;
+    function StatBufSize: Int32; override;
     function StatSize(Buf: Pointer):  Int64; override;
     function StatMtime(Buf: Pointer): Int64; override;
-    function StatMode(Buf: Pointer):  Integer; override;
+    function StatMode(Buf: Pointer):  Int32; override;
 
-    function DirentRecLen(Ent: Pointer): Integer; override;
+    function DirentRecLen(Ent: Pointer): Int32; override;
     function DirentName(Ent: Pointer): Pointer; override;
   end;
 
@@ -83,7 +83,7 @@ type
   would collide with — and win over — the archived Linux copy, handing the
   Linux allocator FreeBSD's MAP_ANON. }
 {$IFDEF FREEBSD}
-function _MapAnonFlag: Integer;
+function _MapAnonFlag: Int32;
 
 { Flat park/wake primitives for the fiber scheduler (async.fibers).  The
   FreeBSD futex analogue is _umtx_op(2); issued as a raw syscall so the same
@@ -91,25 +91,25 @@ function _MapAnonFlag: Integer;
   the 32-bit word at AAddr equals AExpected, bounded by the RELATIVE timeout
   in ATs (a plain struct timespec — never nil; callers always bound the
   wait).  _ParkWake wakes up to ACount waiters on AAddr. }
-procedure _ParkWait(AAddr: Pointer; AExpected: Integer; ATs: Pointer);
-procedure _ParkWake(AAddr: Pointer; ACount: Integer);
+procedure _ParkWait(AAddr: Pointer; AExpected: Int32; ATs: Pointer);
+procedure _ParkWake(AAddr: Pointer; ACount: Int32);
 
 { The target's CLOCK_MONOTONIC clockid for clock_gettime: FreeBSD 4.
   (Linux is 1; FreeBSD's 1 is CLOCK_VIRTUAL — using it would give process
   CPU time, silently breaking the fiber timer heap.) }
-function _ClockMonotonicId: Integer;
+function _ClockMonotonicId: Int32;
 
 { Socket-layer OS constants (Net.Sockets / async.io) — the per-platform layer
   the Net.Sockets PORTING BOUNDARY note calls for.  FreeBSD values from
   sys/socket.h / sys/fcntl.h. }
-function _SolSocket: Integer;      { SOL_SOCKET   = $FFFF }
-function _SoReuseAddr: Integer;    { SO_REUSEADDR = $0004 }
-function _SoReusePort: Integer;    { SO_REUSEPORT = $0200 }
-function _SoError: Integer;        { SO_ERROR     = $1007 }
-function _MsgNoSignal: Integer;    { MSG_NOSIGNAL = $20000 }
-function _ONonBlock: Integer;      { O_NONBLOCK   = $0004 }
-function _SockNonBlock: Integer;   { SOCK_NONBLOCK = $20000000 (accept4) }
-function _SoNoSigPipe: Integer;    { unused — MSG_NOSIGNAL covers it — 0 }
+function _SolSocket: Int32;      { SOL_SOCKET   = $FFFF }
+function _SoReuseAddr: Int32;    { SO_REUSEADDR = $0004 }
+function _SoReusePort: Int32;    { SO_REUSEPORT = $0200 }
+function _SoError: Int32;        { SO_ERROR     = $1007 }
+function _MsgNoSignal: Int32;    { MSG_NOSIGNAL = $20000 }
+function _ONonBlock: Int32;      { O_NONBLOCK   = $0004 }
+function _SockNonBlock: Int32;   { SOCK_NONBLOCK = $20000000 (accept4) }
+function _SoNoSigPipe: Int32;    { unused — MSG_NOSIGNAL covers it — 0 }
 
 { Fill a 16-byte struct sockaddr_in at P for AF_INET.  APortN/AAddrN are
   ALREADY in network byte order.  FreeBSD layout: sin_len (u8, = 16),
@@ -121,7 +121,7 @@ procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
   thread exits, while its threadvars are still readable.  FreeBSD libc's
   __cxa_thread_atexit_impl under a libc link; the --static build supplies
   its own (runtime.thread.static.freebsd), run by the thread trampoline. }
-function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Int32;
 {$ENDIF}
 
 implementation
@@ -141,31 +141,31 @@ const
   DIRENT_OFF_RECLEN = 16;
   DIRENT_OFF_NAME   = 24;
 
-function TPlatformLayoutFreeBSDX86_64.O_RDONLY: Integer; begin Result := 0;      end;
-function TPlatformLayoutFreeBSDX86_64.O_WRONLY: Integer; begin Result := 1;      end;
-function TPlatformLayoutFreeBSDX86_64.O_RDWR:   Integer; begin Result := 2;      end;
-function TPlatformLayoutFreeBSDX86_64.O_CREAT:  Integer; begin Result := $0200;  end;
-function TPlatformLayoutFreeBSDX86_64.O_TRUNC:  Integer; begin Result := $0400;  end;
-function TPlatformLayoutFreeBSDX86_64.O_APPEND: Integer; begin Result := $0008;  end;
+function TPlatformLayoutFreeBSDX86_64.O_RDONLY: Int32; begin Result := 0;      end;
+function TPlatformLayoutFreeBSDX86_64.O_WRONLY: Int32; begin Result := 1;      end;
+function TPlatformLayoutFreeBSDX86_64.O_RDWR:   Int32; begin Result := 2;      end;
+function TPlatformLayoutFreeBSDX86_64.O_CREAT:  Int32; begin Result := $0200;  end;
+function TPlatformLayoutFreeBSDX86_64.O_TRUNC:  Int32; begin Result := $0400;  end;
+function TPlatformLayoutFreeBSDX86_64.O_APPEND: Int32; begin Result := $0008;  end;
 
-function TPlatformLayoutFreeBSDX86_64.S_IFMT:  Integer; begin Result := $F000; end;
-function TPlatformLayoutFreeBSDX86_64.S_IFDIR: Integer; begin Result := $4000; end;
-function TPlatformLayoutFreeBSDX86_64.S_IFREG: Integer; begin Result := $8000; end;
-function TPlatformLayoutFreeBSDX86_64.S_IFLNK: Integer; begin Result := $A000; end;
+function TPlatformLayoutFreeBSDX86_64.S_IFMT:  Int32; begin Result := $F000; end;
+function TPlatformLayoutFreeBSDX86_64.S_IFDIR: Int32; begin Result := $4000; end;
+function TPlatformLayoutFreeBSDX86_64.S_IFREG: Int32; begin Result := $8000; end;
+function TPlatformLayoutFreeBSDX86_64.S_IFLNK: Int32; begin Result := $A000; end;
 
-function TPlatformLayoutFreeBSDX86_64.SEEK_SET: Integer; begin Result := 0; end;
-function TPlatformLayoutFreeBSDX86_64.SEEK_CUR: Integer; begin Result := 1; end;
-function TPlatformLayoutFreeBSDX86_64.SEEK_END: Integer; begin Result := 2; end;
+function TPlatformLayoutFreeBSDX86_64.SEEK_SET: Int32; begin Result := 0; end;
+function TPlatformLayoutFreeBSDX86_64.SEEK_CUR: Int32; begin Result := 1; end;
+function TPlatformLayoutFreeBSDX86_64.SEEK_END: Int32; begin Result := 2; end;
 
-function TPlatformLayoutFreeBSDX86_64.CLOCK_REALTIME: Integer; begin Result := 0; end;
-function TPlatformLayoutFreeBSDX86_64.WNOHANG:        Integer; begin Result := 1; end;
+function TPlatformLayoutFreeBSDX86_64.CLOCK_REALTIME: Int32; begin Result := 0; end;
+function TPlatformLayoutFreeBSDX86_64.WNOHANG:        Int32; begin Result := 1; end;
 
 { FreeBSD sys/unistd.h.  Not glibc's 84 — that number is _SC_THREAD_CPUTIME
   here and answers 200112 rather than failing, so the mistake reads as a CPU
   count instead of an error. }
-function TPlatformLayoutFreeBSDX86_64.SC_NPROCESSORS_ONLN: Integer; begin Result := 58; end;
+function TPlatformLayoutFreeBSDX86_64.SC_NPROCESSORS_ONLN: Int32; begin Result := 58; end;
 
-function TPlatformLayoutFreeBSDX86_64.StatBufSize: Integer;
+function TPlatformLayoutFreeBSDX86_64.StatBufSize: Int32;
 begin
   Result := STAT_SIZE;
 end;
@@ -186,15 +186,15 @@ begin
   Result := P^;
 end;
 
-function TPlatformLayoutFreeBSDX86_64.StatMode(Buf: Pointer): Integer;
+function TPlatformLayoutFreeBSDX86_64.StatMode(Buf: Pointer): Int32;
 var
-  P: ^Integer;
+  P: ^Int32;
 begin
   P := Pointer(PChar(Buf) + STAT_OFF_MODE);
   Result := P^;
 end;
 
-function TPlatformLayoutFreeBSDX86_64.DirentRecLen(Ent: Pointer): Integer;
+function TPlatformLayoutFreeBSDX86_64.DirentRecLen(Ent: Pointer): Int32;
 var
   P: ^UInt16;
 begin
@@ -231,7 +231,7 @@ end;
 {$ENDIF}
 
 {$IFDEF FREEBSD}
-function _MapAnonFlag: Integer;
+function _MapAnonFlag: Int32;
 begin
   Result := $1000;
 end;
@@ -244,8 +244,8 @@ const
   Same shape as the runtime.syscall.freebsd leaf, duplicated here because
   that unit is only linked under --static and these primitives must exist
   on both profiles. }
-function _park_umtx_op(Obj: Pointer; Op, Val: Integer;
-  Uaddr, Uaddr2: Pointer): Integer; assembler; nostackframe;
+function _park_umtx_op(Obj: Pointer; Op, Val: Int32;
+  Uaddr, Uaddr2: Pointer): Int32; assembler; nostackframe;
 asm
     movq %rcx, %r10
     movq $454, %rax          { SYS__umtx_op }
@@ -256,7 +256,7 @@ asm
     ret
 end;
 
-procedure _ParkWait(AAddr: Pointer; AExpected: Integer; ATs: Pointer);
+procedure _ParkWait(AAddr: Pointer; AExpected: Int32; ATs: Pointer);
 begin
   { uaddr = sizeof(struct timespec) selects the plain-timespec RELATIVE
     timeout form of _umtx_op's WAIT (uaddr2 points at the timespec). }
@@ -264,31 +264,31 @@ begin
     Pointer(16), ATs);
 end;
 
-procedure _ParkWake(AAddr: Pointer; ACount: Integer);
+procedure _ParkWake(AAddr: Pointer; ACount: Int32);
 begin
   _park_umtx_op(AAddr, UMTX_OP_WAKE_PRIVATE, ACount, nil, nil);
 end;
 
-function _ClockMonotonicId: Integer;
+function _ClockMonotonicId: Int32;
 begin
   Result := 4;
 end;
 
-function _SolSocket: Integer;    begin Result := $FFFF;     end;
-function _SoReuseAddr: Integer;  begin Result := $0004;     end;
-function _SoReusePort: Integer;  begin Result := $0200;     end;
-function _SoError: Integer;      begin Result := $1007;     end;
-function _MsgNoSignal: Integer;  begin Result := $20000;    end;
-function _ONonBlock: Integer;    begin Result := $0004;     end;
-function _SockNonBlock: Integer; begin Result := $20000000; end;
-function _SoNoSigPipe: Integer;  begin Result := 0;         end;
+function _SolSocket: Int32;    begin Result := $FFFF;     end;
+function _SoReuseAddr: Int32;  begin Result := $0004;     end;
+function _SoReusePort: Int32;  begin Result := $0200;     end;
+function _SoError: Int32;      begin Result := $1007;     end;
+function _MsgNoSignal: Int32;  begin Result := $20000;    end;
+function _ONonBlock: Int32;    begin Result := $0004;     end;
+function _SockNonBlock: Int32; begin Result := $20000000; end;
+function _SoNoSigPipe: Int32;  begin Result := 0;         end;
 
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 var
   PB: ^Byte;
   PW: ^UInt16;
   PD: ^UInt32;
-  I: Integer;
+  I: Int;
 begin
   PB := P;
   PB^ := 16;                               { sin_len = sizeof(sockaddr_in) }
@@ -305,10 +305,10 @@ begin
   end;
 end;
 
-function cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
+function cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Int32;
   external name '__cxa_thread_atexit_impl';
 
-function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Int32;
 begin
   { The third argument names the module the callback lives in (C passes
     &__dso_handle, which has no Blaise equivalent); any address inside it

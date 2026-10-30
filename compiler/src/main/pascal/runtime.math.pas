@@ -96,7 +96,7 @@ function _BlaiseFloorD(X: Float64): Float64;
 function _BlaiseCeilD(X: Float64): Float64;
 function _BlaiseRoundD(X: Float64): Float64;
 function _BlaiseFabs(X: Float64): Float64;
-function _BlaiseScalbn(X: Float64; N: Integer): Float64;
+function _BlaiseScalbn(X: Float64; N: Int32): Float64;
 
 implementation
 
@@ -181,7 +181,7 @@ begin
   Result := BitsToDouble(DoubleBits(X) and $7FFFFFFFFFFFFFFF);
 end;
 
-function _BlaiseScalbn(X: Float64; N: Integer): Float64;
+function _BlaiseScalbn(X: Float64; N: Int32): Float64;
 var
   Y: Float64;
 begin
@@ -224,7 +224,7 @@ const
 function _BlaiseFloorD(X: Float64): Float64;
 var
   B: Int64;
-  E: Integer;
+  E: Int;
   Y: Float64;
 begin
   B := DoubleBits(X);
@@ -250,7 +250,7 @@ end;
 function _BlaiseCeilD(X: Float64): Float64;
 var
   B: Int64;
-  E: Integer;
+  E: Int;
   Y: Float64;
 begin
   B := DoubleBits(X);
@@ -279,7 +279,7 @@ end;
 function _BlaiseRoundD(X: Float64): Float64;
 var
   B: Int64;
-  E: Integer;
+  E: Int;
   Y: Float64;
 begin
   B := DoubleBits(X);
@@ -458,8 +458,8 @@ const
 function _BlaiseExp(X: Float64): Float64;
 var
   Hi, Lo, C, XX, Y: Float64;
-  K: Integer;
-  Sign: Integer;
+  K: Int;
+  Sign: Int;
   Hx: Int64;
 begin
   Hx := HiU(X);
@@ -528,7 +528,7 @@ const
 function _BlaiseExpm1(X: Float64): Float64;
 var
   Y, Hi, Lo, C, T, E, Hxs, Hfx, R1, Twopk: Float64;
-  K, Sign: Integer;
+  K, Sign: Int;
   Hx: Int64;
 begin
   Hx := HiU(X) and $7FFFFFFF;
@@ -638,7 +638,7 @@ const
 { Shared head of the three logarithms: filters specials, reduces x into
   [sqrt(2)/2, sqrt(2)] and computes f, hfsq, s, R and k.  Returns True
   when the caller must return ASpecial immediately. }
-function LogReduce(var X: Float64; var K: Integer;
+function LogReduce(var X: Float64; var K: Int;
                    var F, Hfsq, S, R: Float64;
                    var ASpecial: Float64): Boolean;
 var
@@ -700,7 +700,7 @@ const
   Ln2Hi = 6.93147180369123816490e-01;  { 3fe62e42 fee00000 }
   Ln2Lo = 1.90821492927058770002e-10;  { 3dea39ef 35793c76 }
 var
-  K: Integer;
+  K: Int;
   F, Hfsq, S, R, Dk, Special: Float64;
 begin
   if LogReduce(X, K, F, Hfsq, S, R, Special) then
@@ -714,7 +714,7 @@ const
   IvLn2Hi = 1.44269504072144627571e+00;  { 0x3ff71547, 0x65200000 }
   IvLn2Lo = 1.67517131648865118353e-10;  { 0x3de705fc, 0x2eefa200 }
 var
-  K: Integer;
+  K: Int;
   F, Hfsq, S, R, Special: Float64;
   Hi, Lo, ValHi, ValLo, W, Y: Float64;
 begin
@@ -745,7 +745,7 @@ const
   Log102Hi = 3.01029995663611771306e-01;   { 0x3FD34413, 0x509F6000 }
   Log102Lo = 3.69423907715893078616e-13;   { 0x3D59FEF3, 0x11F12B36 }
 var
-  K: Integer;
+  K: Int;
   F, Hfsq, S, R, Special: Float64;
   Hi, Lo, ValHi, ValLo, Dk, W, Y: Float64;
 begin
@@ -776,7 +776,7 @@ const
   { 24-bit chunks of 2/pi after the binary point: chunk i holds bits
     24i..24i+23.  66 terms cover every finite double (e0 <= 1000 needs
     (e0-3)/24 + jk + margin ~ 50 terms). }
-  IPIO2: array[0..65] of Integer = (
+  IPIO2: array[0..65] of Int32 = (
     $A2F983, $6E4E44, $1529FC, $2757D1, $F534DD, $C0DB62,
     $95993C, $439041, $FE5163, $ABDEBB, $C561B7, $246E3A,
     $424DD2, $E00649, $2EEA09, $D1921C, $FE1DEB, $1CB129,
@@ -809,15 +809,15 @@ const
   AArch64 backend does not lower var static-array parameters yet), AE0
   is the scaled exponent of AX0. }
 function RemPio2Large(AX0, AX1, AX2: Float64; var Y0, Y1: Float64;
-                      AE0, ANx: Integer): Integer;
+                      AE0, ANx: Int): Int;
 const
   JK = 4;   { init_jk[1]: double precision }
 var
-  Jz, Jx, Jv, Jp, Carry, N, I, J, K, M, Q0, Ih: Integer;
+  Jz, Jx, Jv, Jp, Carry, N, I, J, K, M, Q0, Ih: Int;
   Z, Fw: Float64;
   AX: array[0..2] of Float64;
   F, Fq, Q: array[0..19] of Float64;
-  Iq: array[0..19] of Integer;
+  Iq: array[0..19] of Int32;
   NeedRecompute: Boolean;
 begin
   AX[0] := AX0;
@@ -1036,10 +1036,10 @@ const
 { The medium-size path: n = rint(x/(pi/2)) and a 2-3 round compensated
   subtraction.  Factored out because the C original reaches it by goto
   from the small-multiple fast paths on cancellation-risky inputs. }
-function RemPio2Medium(X: Float64; Ix: Int64; var Y0, Y1: Float64): Integer;
+function RemPio2Medium(X: Float64; Ix: Int64; var Y0, Y1: Float64): Int;
 var
   Fn, R, W, T: Float64;
-  N, Ex, Ey: Integer;
+  N, Ex, Ey: Int;
 begin
   { rint(x/(pi/2)); assumes round-to-nearest }
   Fn := X * RP_INVPIO2 + RP_TOINT - RP_TOINT;
@@ -1074,13 +1074,13 @@ end;
 
 { Reduce x mod pi/2: result in Y0+Y1, returns n (quadrant count).
   Caller must handle |x| ~<= pi/4 itself. }
-function RemPio2(X: Float64; var Y0, Y1: Float64): Integer;
+function RemPio2(X: Float64; var Y0, Y1: Float64): Int;
 var
   Ix: Int64;
-  Sign: Integer;
+  Sign: Int;
   Z, W: Float64;
   Tx: array[0..2] of Float64;
-  N, I: Integer;
+  N, I: Int;
   Bits: Int64;
 begin
   Bits := DoubleBits(X);
@@ -1222,7 +1222,7 @@ const
   KS_S6 =  1.58969099521155010221e-10;  { 0x3DE5D93A, 0x5ACFD57C }
 
 { kernel sin on ~[-pi/4, pi/4]; y is the tail of x, iy=0 means y is 0 }
-function KernSin(X, Y: Float64; Iy: Integer): Float64;
+function KernSin(X, Y: Float64; Iy: Int): Float64;
 var
   Z, R, V, W: Float64;
 begin
@@ -1275,12 +1275,12 @@ const
   KT_PIO4LO = 3.06161699786838301793e-17; { 3C81A626, 33145C07 }
 
 { kernel tan on ~[-pi/4, pi/4]; returns tan when Odd=0, -1/tan when Odd=1 }
-function KernTan(X, Y: Float64; Odd: Integer): Float64;
+function KernTan(X, Y: Float64; Odd: Int): Float64;
 var
   Z, R, V, W, S, A: Float64;
   W0, A0: Float64;
   Hx: Int64;
-  Big, Sign: Integer;
+  Big, Sign: Int;
 begin
   Hx := HiU(X);
   Sign := 0;
@@ -1334,7 +1334,7 @@ function _BlaiseSin(X: Float64): Float64;
 var
   Y0, Y1: Float64;
   Ix: Int64;
-  N: Integer;
+  N: Int;
 begin
   Ix := HiU(X) and $7FFFFFFF;
 
@@ -1368,7 +1368,7 @@ function _BlaiseCos(X: Float64): Float64;
 var
   Y0, Y1: Float64;
   Ix: Int64;
-  N: Integer;
+  N: Int;
 begin
   Ix := HiU(X) and $7FFFFFFF;
 
@@ -1401,7 +1401,7 @@ function _BlaiseTan(X: Float64): Float64;
 var
   Y0, Y1: Float64;
   Ix: Int64;
-  N: Integer;
+  N: Int;
 begin
   Ix := HiU(X) and $7FFFFFFF;
 
@@ -1573,7 +1573,7 @@ function _BlaiseArcTan(X: Float64): Float64;
 var
   W, S1, S2, Z: Float64;
   Ix, Sign: Int64;
-  Id: Integer;
+  Id: Int;
 begin
   Ix := HiU(X);
   Sign := Ix shr 31;
