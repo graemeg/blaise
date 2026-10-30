@@ -189,8 +189,8 @@ end;
 procedure TE2EEmbedTests.TestRun_Embed_LargeAssetIsIntact;
 var
   Blob: string;
-  I:    Integer;
-  Sum:  Integer;
+  I:    Int;
+  Sum:  Int;
 begin
   { A payload big enough to span more than a handful of data items, with a
     known checksum so a dropped or reordered byte is caught.  1024 bytes
@@ -238,7 +238,7 @@ end;
 procedure TE2EEmbedTests.TestRun_Embed_InUnitInterface_CrossesBif;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   { An embedded constant declared in a unit INTERFACE is serialised into the
     unit's .bif and read back when the program imports it.  The bounds are

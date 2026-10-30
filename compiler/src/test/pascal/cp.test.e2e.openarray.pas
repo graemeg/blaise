@@ -266,7 +266,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EOpenArrayTests.TestRun_OpenArray_Sum;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcOpenArraySum, Output, RCode));
@@ -275,7 +275,7 @@ begin
 end;
 
 procedure TE2EOpenArrayTests.TestRun_OpenArray_HighLow;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -292,7 +292,7 @@ begin
 end;
 
 procedure TE2EOpenArrayTests.TestRun_OpenArray_Length;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcOpenArrayLength, Output, RCode));
@@ -305,7 +305,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EOpenArrayTests.TestRun_StaticToOpen_Length_ZeroBase;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcStaticLenZeroBase, Output, RCode));
@@ -314,7 +314,7 @@ begin
 end;
 
 procedure TE2EOpenArrayTests.TestRun_StaticToOpen_Length_NonZeroBase;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcStaticLenNonZero, Output, RCode));
@@ -323,7 +323,7 @@ begin
 end;
 
 procedure TE2EOpenArrayTests.TestRun_StaticToOpen_Sum;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcStaticSum, Output, RCode));
@@ -332,7 +332,7 @@ begin
 end;
 
 procedure TE2EOpenArrayTests.TestRun_StaticToOpen_PassToNested;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcStaticPassNested, Output, RCode));
@@ -341,7 +341,7 @@ begin
 end;
 
 procedure TE2EOpenArrayTests.TestRun_StaticToOpen_ConstParam_NoMutation;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -389,7 +389,7 @@ const
     ''';
 
 procedure TE2EOpenArrayTests.TestRun_OpenArray_ProcType_CallEach;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcProcTypeOpenArray, Output, RCode));

@@ -381,7 +381,7 @@ const
     ''';
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile + run',

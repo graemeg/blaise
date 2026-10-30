@@ -39,7 +39,7 @@ implementation
 function TFlagCoverageTests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then begin Result := IncludeTrailingPathDelimiter(Result); Exit end;
@@ -77,7 +77,7 @@ procedure TFlagCoverageTests.TestRun_FlagCoverage_NoDrops;
 var
   Bin, Stdout, Chunk: string;
   Proc: TProcess;
-  Code: Integer;
+  Code: Int;
 begin
   Bin := BinaryPath();
   if not FileExists(Bin) then

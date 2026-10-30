@@ -1074,7 +1074,7 @@ end;
 procedure TE2EClasses2Tests.TestRun_Phase2Milestone_Stdout;
 var
   Path, Src, Output: string;
-  RCode: Integer;
+  RCode: Int;
   Expected: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -1143,7 +1143,7 @@ end;
 procedure TE2EClasses2Tests.TestRun_Phase3Milestone_Stdout;
 var
   Path, Src, Output: string;
-  RCode: Integer;
+  RCode: Int;
   Expected: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -1203,7 +1203,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_MultiTypeBlock_BothClassesWork;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcMultiTypeBlock, Output, RCode));
@@ -1243,7 +1243,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_ToString_OverrideDispatchedVirtually;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcToStringOverride, Output, RCode));
@@ -1253,7 +1253,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_ToString_InheritedOverrideStillReached;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcToStringInheritedOverride, Output, RCode));
@@ -1299,7 +1299,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Is_CorrectSubclass_True;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIsTrue, Output, RCode));
@@ -1308,7 +1308,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Is_WrongClass_False;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIsFalse, Output, RCode));
@@ -1317,7 +1317,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_As_DowncastCallsMethod;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcAsDowncast, Output, RCode));
@@ -1326,7 +1326,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Inherited_CallsParentMethod;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInherited, Output, RCode));
@@ -1341,7 +1341,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Inherited_VarParam_PassesByReference;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInheritedVarParam, Output, RCode));
@@ -1350,7 +1350,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Virtual_OverrideDispatch;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcVirtualOverride, Output, RCode));
@@ -1359,7 +1359,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_MultiLevel_Inheritance_Chain;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcMultiLevelChain, Output, RCode));
@@ -1368,7 +1368,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Interface_Dispatch_CallsImpl;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntfDispatch, Output, RCode));
@@ -1377,7 +1377,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Interface_ARC_NoLeak;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntfDispatch, Output, RCode));
@@ -1385,7 +1385,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Interface_GlobalNil_LinksAndRuns;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntfGlobalNil, Output, RCode));
@@ -1395,7 +1395,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Interface_Is_As_Roundtrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntfIsAs, Output, RCode));
@@ -1404,7 +1404,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Interface_MethodParam_ByValue_Dispatches;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntfMethodParam, Output, RCode));
@@ -1413,7 +1413,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Supports_TwoArg_BooleanResult;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSupportsTwoArgRun, Output, RCode));
@@ -1422,7 +1422,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_Supports_ThreeArg_AssignsAndCalls;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSupportsThreeArgRun, Output, RCode));
@@ -1431,7 +1431,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_ConstructorOverload_PicksCorrectArity;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcCtorOverloadArity, Output, RCode));
@@ -1739,7 +1739,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_MethodReadsProgramGlobal;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcMethodReadsProgramGlobal, Output, RCode));
@@ -1748,7 +1748,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_VarParam_ClassFields_WritebackVisible;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   { Regression for bugs.txt BUG-001 — Fill(N.Value, N.IsBig) where N is a
     class reference must address into the heap object, not into the storage
@@ -1761,7 +1761,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_LocalVar_ShadowsOwnMethod;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcResolve_LocalVar_OverOwnMethod, Output, RCode));
@@ -1770,7 +1770,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_ParentMethod_ShadowsProgramProc;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcResolve_ParentMethod_OverProgramProc, Output, RCode));
@@ -1779,7 +1779,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_ExplicitSelf_AlwaysClassMember;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcResolve_ExplicitSelf_AlwaysClassMember, Output, RCode));
@@ -1788,7 +1788,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_InheritedCall_AlwaysParent;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcResolve_InheritedAlwaysParent, Output, RCode));
@@ -1797,7 +1797,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_InterfaceField_ShadowsGlobal_Dispatches;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntfFieldShadowsGlobal, Output, RCode));
@@ -2107,7 +2107,7 @@ const
     ''';
 
 procedure TE2EClasses2Tests.TestRun_InterfaceProperty_CaseMismatchAndUses;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run (native)',
@@ -2999,7 +2999,7 @@ begin
 end;
 
 procedure TE2EClasses2Tests.TestRun_ForwardClass_MutualRefRuns;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcForwardClass, Output, RCode));
@@ -3038,7 +3038,7 @@ const
         ''';
 
 procedure TE2EClasses2Tests.TestRun_IntToFloatField_Converts;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { All four forms convert the integer to the field's float width — including

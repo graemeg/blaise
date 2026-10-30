@@ -159,7 +159,7 @@ end;
 procedure TE2ESetTests.TestRun_TSet_IncludeDeduplicates;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcDeduplicate, Output, RCode));
@@ -170,7 +170,7 @@ end;
 procedure TE2ESetTests.TestRun_TSet_ExcludeRemoves;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcExclude, Output, RCode));
@@ -183,7 +183,7 @@ end;
 procedure TE2ESetTests.TestRun_TSet_ContainsMembership;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcContains, Output, RCode));
@@ -196,7 +196,7 @@ end;
 procedure TE2ESetTests.TestRun_TSet_CountTracking;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcCountTracking, Output, RCode));

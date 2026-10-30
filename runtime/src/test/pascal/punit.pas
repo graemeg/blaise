@@ -58,8 +58,8 @@ interface
   ----------------------------------------------------------------------- }
 
 var
-  InitListLength   : Integer;
-  GrowFactor       : Integer;
+  InitListLength   : Int;
+  GrowFactor       : Int;
   DefaultSuiteName : string;
   RequirePassed    : Boolean;
   DefaultDoubleDelta : Float64;
@@ -117,8 +117,8 @@ type
   { Manual growable array of PTest pointers. }
   TTestList = record
     Items    : Pointer;   { block of ^TTest values, each 8 bytes on 64-bit }
-    Count    : Integer;
-    Capacity : Integer;
+    Count    : Int;
+    Capacity : Int;
   end;
 
   TSuiteOption  = (soInactive, soSetupTearDownPerTest);
@@ -128,8 +128,8 @@ type
   { Manual growable array of ^TSuite pointers. }
   TSuiteList = record
     Items    : Pointer;   { block of ^TSuite values }
-    Count    : Integer;
-    Capacity : Integer;
+    Count    : Int;
+    Capacity : Int;
   end;
 
   { Raw pointer block used for run-start hook.  Each slot is a PSuite (8 bytes).
@@ -166,7 +166,7 @@ type
   TResultRecord = record
     Suite           : ^TSuite;
     Test            : ^TTest;
-    ElapsedTime     : Integer;
+    ElapsedTime     : Int;
     TestResult      : TTestResult;
     TestMessage     : string;
     ExpectException : Pointer;
@@ -182,22 +182,22 @@ type
     TestsIgnored,
     TestsRun,
     TestsError,
-    TestsUnimplemented : Integer;
+    TestsUnimplemented : Int;
   end;
 
   PRunSummary = ^TRunSummary;
   TRunSummary = record
-    SuitesRun          : Integer;
-    SuitesFailed       : Integer;
-    SuitesInactive     : Integer;
-    TestsRun           : Integer;
-    TestsFailed        : Integer;
-    TestsIgnored       : Integer;
-    TestsUnimplemented : Integer;
-    TestsInactive      : Integer;
-    AssertCount        : Integer;
+    SuitesRun          : Int;
+    SuitesFailed       : Int;
+    SuitesInactive     : Int;
+    TestsRun           : Int;
+    TestsFailed        : Int;
+    TestsIgnored       : Int;
+    TestsUnimplemented : Int;
+    TestsInactive      : Int;
+    AssertCount        : Int;
     Results            : TResultRecord;
-    ElapsedTime        : Integer;
+    ElapsedTime        : Int;
   end;
 
   EFail = class(TObject)
@@ -227,13 +227,13 @@ function AddSuite(const AName : string; ASetup : TTestSetup;
   aPerTestSetupTearDown : Boolean) : ^TSuite; overload;
 function AddSuite(const AName : string; AParent : ^TSuite) : ^TSuite; overload;
 
-function GetSuiteCount : Integer; overload;
-function GetSuiteCount(Recurse : Boolean) : Integer; overload;
-function GetSuiteCount(ASuite : ^TSuite) : Integer; overload;
-function GetSuiteCount(ASuite : ^TSuite; Recurse : Boolean) : Integer; overload;
-function GetSuiteIndex(const AName : string) : Integer; overload;
-function GetSuiteIndex(ASuite : ^TSuite; const AName : string) : Integer; overload;
-function GetSuite(const AIndex : Integer) : ^TSuite; overload;
+function GetSuiteCount : Int; overload;
+function GetSuiteCount(Recurse : Boolean) : Int; overload;
+function GetSuiteCount(ASuite : ^TSuite) : Int; overload;
+function GetSuiteCount(ASuite : ^TSuite; Recurse : Boolean) : Int; overload;
+function GetSuiteIndex(const AName : string) : Int; overload;
+function GetSuiteIndex(ASuite : ^TSuite; const AName : string) : Int; overload;
+function GetSuite(const AIndex : Int) : ^TSuite; overload;
 function GetSuite(const AName : string) : ^TSuite; overload;
 function GetSuite(const AName : string; AParent : ^TSuite) : ^TSuite; overload;
 
@@ -250,14 +250,14 @@ function AddTest(const ATestName : string; ARun : TTestRun;
 function AddTest(const ATestName : string; ARun : TTestRunProc;
   const ASuite : ^TSuite) : ^TTest; overload;
 
-function GetTestIndex(const ASuiteName : string; const ATestName : string) : Integer; overload;
-function GetTestIndex(const ASuite : ^TSuite; const ATestName : string) : Integer; overload;
-function GetTestIndex(const ASuite : ^TSuite; const ATest : ^TTest) : Integer; overload;
-function GetTestCount(const ASuiteName : string) : Integer; overload;
-function GetTestCount(const ASuite : ^TSuite) : Integer; overload;
+function GetTestIndex(const ASuiteName : string; const ATestName : string) : Int; overload;
+function GetTestIndex(const ASuite : ^TSuite; const ATestName : string) : Int; overload;
+function GetTestIndex(const ASuite : ^TSuite; const ATest : ^TTest) : Int; overload;
+function GetTestCount(const ASuiteName : string) : Int; overload;
+function GetTestCount(const ASuite : ^TSuite) : Int; overload;
 function GetTest(const ASuiteName : string; const ATestName : string) : ^TTest; overload;
 function GetTest(const ASuite : ^TSuite; const ATestName : string) : ^TTest; overload;
-function GetTest(const ASuite : ^TSuite; const ATestIndex : Integer) : ^TTest; overload;
+function GetTest(const ASuite : ^TSuite; const ATestIndex : Int) : ^TTest; overload;
 function TestIsInSuite(const ASuite : ^TSuite; const ATest : ^TTest) : Boolean;
 
 { -----------------------------------------------------------------------
@@ -266,7 +266,7 @@ function TestIsInSuite(const ASuite : ^TSuite; const ATest : ^TTest) : Boolean;
 
 function  RunAllTests : TTestError;
 function  RunSuite(const ASuiteName : string) : TTestError; overload;
-function  RunSuite(ASuiteIndex : Integer) : TTestError; overload;
+function  RunSuite(ASuiteIndex : Int) : TTestError; overload;
 function  RunSuite(ASuite : ^TSuite) : TTestError; overload;
 function  RunTest(const ASuiteName : string; const ATestName : string) : TTestError; overload;
 function  RunTest(ASuite : ^TSuite; const ATestName : string) : TTestError; overload;
@@ -278,7 +278,7 @@ function  GetCurrentSuite : ^TSuite;
 function  GetCurrentTest : ^TTest;
 function  GetCurrentResult : ^TResultRecord;
 procedure GetSuiteStats(AResults : ^TResultRecord; out Stats : TSuiteStats);
-function  CountResults(Results : ^TResultRecord) : Integer;
+function  CountResults(Results : ^TResultRecord) : Int;
 
 { -----------------------------------------------------------------------
   Assertions
@@ -297,7 +297,7 @@ function AssertFalse(const AMessage : string; ACondition : Boolean) : Boolean;
 function AssertEquals(AMessage : string; const AExpected, AActual : string) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : Boolean) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : Byte) : Boolean; overload;
-function AssertEquals(AMessage : string; const AExpected, AActual : Integer) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual : Int32) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : UInt32) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : Int64) : Boolean; overload;
 function AssertEquals(AMessage : string; const AExpected, AActual : UInt64) : Boolean; overload;
@@ -321,7 +321,7 @@ function ExpectException(AMessage : string; AClass : Pointer) : Boolean;
   ----------------------------------------------------------------------- }
 
 type
-  TRunStartHandler        = procedure(Count : Integer; Suites : PSuiteArray);
+  TRunStartHandler        = procedure(Count : Int; Suites : PSuiteArray);
   TRunCompleteHandler     = procedure(const ARunResult : TRunSummary);
   TSuiteStartHandler      = procedure(ASuite : ^TSuite);
   TSuiteCompleteHandler   = procedure(ASuite : ^TSuite;
@@ -431,7 +431,7 @@ type
   PPointer = ^Pointer;  { pointer to a pointer slot }
 
 { Read the I-th pointer slot from a raw block. }
-function BlockGet(Block : Pointer; I : Integer) : Pointer;
+function BlockGet(Block : Pointer; I : Int) : Pointer;
 var
   Slot : PPointer;
 begin
@@ -440,7 +440,7 @@ begin
 end;
 
 { Write a pointer into slot I of a raw block. }
-procedure BlockSet(Block : Pointer; I : Integer; Value : Pointer);
+procedure BlockSet(Block : Pointer; I : Int; Value : Pointer);
 var
   Slot : PPointer;
 begin
@@ -450,7 +450,7 @@ end;
 
 procedure CheckGrowSuiteList(AList : ^TSuiteList);
 var
-  NewCap : Integer;
+  NewCap : Int;
 begin
   if AList^.Count < AList^.Capacity then
     Exit;
@@ -464,7 +464,7 @@ end;
 
 procedure CheckGrowTestList(AList : ^TTestList);
 var
-  NewCap : Integer;
+  NewCap : Int;
 begin
   if AList^.Count < AList^.Capacity then
     Exit;
@@ -476,22 +476,22 @@ begin
   AList^.Capacity := NewCap;
 end;
 
-function SuiteListGet(AList : ^TSuiteList; I : Integer) : ^TSuite;
+function SuiteListGet(AList : ^TSuiteList; I : Int) : ^TSuite;
 begin
   Result := PSuite(BlockGet(AList^.Items, I));
 end;
 
-procedure SuiteListSet(AList : ^TSuiteList; I : Integer; Value : ^TSuite);
+procedure SuiteListSet(AList : ^TSuiteList; I : Int; Value : ^TSuite);
 begin
   BlockSet(AList^.Items, I, Value);
 end;
 
-function TestListGet(AList : ^TTestList; I : Integer) : ^TTest;
+function TestListGet(AList : ^TTestList; I : Int) : ^TTest;
 begin
   Result := PTest(BlockGet(AList^.Items, I));
 end;
 
-procedure TestListSet(AList : ^TTestList; I : Integer; Value : ^TTest);
+procedure TestListSet(AList : ^TTestList; I : Int; Value : ^TTest);
 begin
   BlockSet(AList^.Items, I, Value);
 end;
@@ -705,7 +705,7 @@ procedure FreeSuiteList(var Suites : TSuiteList); overload; forward;
 
 procedure FreeSuite(ASuite : ^TSuite);
 var
-  I : Integer;
+  I : Int;
 begin
   FreeSuiteList(ASuite^.Suites);
   for I := 0 to ASuite^.Tests.Count - 1 do
@@ -717,7 +717,7 @@ end;
 
 procedure FreeSuiteList(var Suites : TSuiteList); overload;
 var
-  I : Integer;
+  I : Int;
 begin
   for I := 0 to Suites.Count - 1 do
     FreeSuite(SuiteListGet(@Suites, I));
@@ -759,9 +759,9 @@ begin
   Result := AddSuite(AName, nil, nil, AParent, False);
 end;
 
-function GetSuiteCountInternal(AList : ^TSuiteList; Recurse : Boolean) : Integer;
+function GetSuiteCountInternal(AList : ^TSuiteList; Recurse : Boolean) : Int;
 var
-  I    : Integer;
+  I    : Int;
   Sub  : ^TSuite;
 begin
   Result := AList^.Count;
@@ -773,22 +773,22 @@ begin
       end;
 end;
 
-function GetSuiteCount : Integer; overload;
+function GetSuiteCount : Int; overload;
 begin
   Result := GetSuiteCount(True);
 end;
 
-function GetSuiteCount(Recurse : Boolean) : Integer; overload;
+function GetSuiteCount(Recurse : Boolean) : Int; overload;
 begin
   Result := GetSuiteCountInternal(@TestRegistry, Recurse);
 end;
 
-function GetSuiteCount(ASuite : ^TSuite) : Integer; overload;
+function GetSuiteCount(ASuite : ^TSuite) : Int; overload;
 begin
   Result := GetSuiteCount(ASuite, True);
 end;
 
-function GetSuiteCount(ASuite : ^TSuite; Recurse : Boolean) : Integer; overload;
+function GetSuiteCount(ASuite : ^TSuite; Recurse : Boolean) : Int; overload;
 begin
   if ASuite = nil then
     Result := 0
@@ -796,7 +796,7 @@ begin
     Result := GetSuiteCountInternal(@ASuite^.Suites, Recurse);
 end;
 
-function GetSuiteIndexInternal(AList : ^TSuiteList; const AName : string) : Integer;
+function GetSuiteIndexInternal(AList : ^TSuiteList; const AName : string) : Int;
 begin
   Result := -1;
   if AList = nil then
@@ -810,12 +810,12 @@ begin
     Dec(Result);
 end;
 
-function GetSuiteIndex(const AName : string) : Integer; overload;
+function GetSuiteIndex(const AName : string) : Int; overload;
 begin
   Result := GetSuiteIndexInternal(@TestRegistry, AName);
 end;
 
-function GetSuiteIndex(ASuite : ^TSuite; const AName : string) : Integer; overload;
+function GetSuiteIndex(ASuite : ^TSuite; const AName : string) : Int; overload;
 begin
   if ASuite = nil then
     Result := 0
@@ -825,7 +825,7 @@ end;
 
 function GetSuiteByName(AList : ^TSuiteList; const AName : string) : ^TSuite;
 var
-  I, P : Integer;
+  I, P : Int;
   N : string;
   L : ^TSuiteList;
 begin
@@ -856,7 +856,7 @@ begin
     Result := SuiteListGet(L, I);
 end;
 
-function GetSuite(const AIndex : Integer) : ^TSuite; overload;
+function GetSuite(const AIndex : Int) : ^TSuite; overload;
 begin
   if (AIndex >= 0) and (AIndex < TestRegistry.Count) then
     Result := SuiteListGet(@TestRegistry, AIndex)
@@ -934,7 +934,7 @@ end;
 
 function DoAddTest(const ATestName : string; const ASuite : ^TSuite) : ^TTest;
 var
-  I : Integer;
+  I : Int;
 begin
   Result := nil;
   SetTestError(teOK);
@@ -1023,12 +1023,12 @@ begin
     Result := AddTest(ATestName, ARun, S);
 end;
 
-function GetTestIndex(const ASuiteName : string; const ATestName : string) : Integer; overload;
+function GetTestIndex(const ASuiteName : string; const ATestName : string) : Int; overload;
 begin
   Result := GetTestIndex(GetSuite(ASuiteName), ATestName);
 end;
 
-function GetTestIndex(const ASuite : ^TSuite; const ATestName : string) : Integer; overload;
+function GetTestIndex(const ASuite : ^TSuite; const ATestName : string) : Int; overload;
 begin
   Result := -1;
   SetTestError(teOK);
@@ -1042,7 +1042,7 @@ begin
     end;
 end;
 
-function GetTestIndex(const ASuite : ^TSuite; const ATest : ^TTest) : Integer; overload;
+function GetTestIndex(const ASuite : ^TSuite; const ATest : ^TTest) : Int; overload;
 begin
   SetTestError(teOK);
   Result := -1;
@@ -1058,12 +1058,12 @@ begin
     end;
 end;
 
-function GetTestCount(const ASuiteName : string) : Integer; overload;
+function GetTestCount(const ASuiteName : string) : Int; overload;
 begin
   Result := GetTestCount(GetSuite(ASuiteName));
 end;
 
-function GetTestCount(const ASuite : ^TSuite) : Integer; overload;
+function GetTestCount(const ASuite : ^TSuite) : Int; overload;
 begin
   SetTestError(teOK);
   Result := -1;
@@ -1080,7 +1080,7 @@ end;
 
 function GetTest(const ASuite : ^TSuite; const ATestName : string) : ^TTest; overload;
 var
-  I, P : Integer;
+  I, P : Int;
   N : string;
   S : ^TSuite;
 begin
@@ -1108,7 +1108,7 @@ begin
     Result := TestListGet(@S^.Tests, I);
 end;
 
-function GetTest(const ASuite : ^TSuite; const ATestIndex : Integer) : ^TTest; overload;
+function GetTest(const ASuite : ^TSuite; const ATestIndex : Int) : ^TTest; overload;
 begin
   SetTestError(teOK);
   Result := nil;
@@ -1171,7 +1171,7 @@ begin
     SetTestResultRec(CurrentResult^, trAssertFailed, ACondition);
 end;
 
-function CountResults(Results : ^TResultRecord) : Integer;
+function CountResults(Results : ^TResultRecord) : Int;
 begin
   Result := 0;
   while Results <> nil do
@@ -1276,7 +1276,7 @@ begin
     AExpected = AActual);
 end;
 
-function AssertEquals(AMessage : string; const AExpected, AActual : Integer) : Boolean; overload;
+function AssertEquals(AMessage : string; const AExpected, AActual : Int32) : Boolean; overload;
 begin
   Result := AssertTrue(
     AMessage + '. ' + ExpectMessage(IntToStr(AExpected), IntToStr(AActual)),
@@ -1337,7 +1337,7 @@ const
 var
   V : UInt;
   S : string;
-  I : Integer;
+  I : Int;
 begin
   if P = nil then
     begin
@@ -1523,7 +1523,7 @@ end;
   Protected hook calls
   ----------------------------------------------------------------------- }
 
-function RunGlobalRunStartHandler(Count : Integer; Suites : PSuiteArray) : TTestError;
+function RunGlobalRunStartHandler(Count : Int; Suites : PSuiteArray) : TTestError;
 begin
   Result := SetTestError(teOK);
   try
@@ -1762,7 +1762,7 @@ const
   stTearDown       = 3;
   stCompleteHandler = 4;
 
-function TestStagePrefix(Stage : Integer) : string;
+function TestStagePrefix(Stage : Int) : string;
 begin
   case Stage of
     stStartHandler   : Result := 'Test start handler';
@@ -1773,7 +1773,7 @@ begin
   end;
 end;
 
-function TestStageError(Stage : Integer) : TTestResult;
+function TestStageError(Stage : Int) : TTestResult;
 begin
   case Stage of
     stStartHandler   : Result := trHandlerError;
@@ -1787,8 +1787,8 @@ end;
 function RunSingleTest(T : ^TTest) : TTestError;
 var
   S             : string;
-  Stage         : Integer;
-  CurrentAsserts : Integer;
+  Stage         : Int;
+  CurrentAsserts : Int;
 begin
   SetTestError(teOK);
   if CurrentSuite = nil then Halt(1);  { assertion: CurrentSuite must be set }
@@ -1853,7 +1853,7 @@ end;
   Running a suite
   ----------------------------------------------------------------------- }
 
-function SuiteStagePrefix(Stage : Integer) : string;
+function SuiteStagePrefix(Stage : Int) : string;
 begin
   case Stage of
     stStartHandler : Result := 'Start handler';
@@ -1864,7 +1864,7 @@ begin
   end;
 end;
 
-function SuiteStageError(Stage : Integer) : TTestResult;
+function SuiteStageError(Stage : Int) : TTestResult;
 begin
   case Stage of
     stStartHandler    : Result := trHandlerError;
@@ -1879,8 +1879,8 @@ function RunSingleSuite(ASuite : ^TSuite; IsChild : Boolean) : TTestError;
 var
   S               : string;
   T               : ^TTest;
-  Stage           : Integer;
-  I               : Integer;
+  Stage           : Int;
+  I               : Int;
   R2              : TTestError;
   OldCurrentSuite : ^TSuite;
   SuiteResult     : ^TResultRecord;
@@ -2037,7 +2037,7 @@ begin
   Result := RunSuite(GetSuite(ASuiteName));
 end;
 
-function RunSuite(ASuiteIndex : Integer) : TTestError; overload;
+function RunSuite(ASuiteIndex : Int) : TTestError; overload;
 begin
   Result := RunSuite(GetSuite(ASuiteIndex));
 end;
@@ -2091,7 +2091,7 @@ end;
 
 function RunAllTests : TTestError;
 var
-  I : Integer;
+  I : Int;
   A : PSuiteArray;
 begin
   A := nil;
@@ -2290,9 +2290,9 @@ begin
   Delete(SysSuiteIndent, 1, 2);
 end;
 
-procedure SysRunStartHandler(Count : Integer; Suites : PSuiteArray);
+procedure SysRunStartHandler(Count : Int; Suites : PSuiteArray);
 var
-  I, TC : Integer;
+  I, TC : Int;
 begin
   if CurrentRunMode in [rvQuiet, rvFailures] then
     exit;
@@ -2405,7 +2405,7 @@ end;
 
 procedure SysListTests(ASuiteList : PSuiteList; ASuite : PSuite; ATest : PTest);
 var
-  I, J : Integer;
+  I, J : Int;
   S : PSuite;
   T : PTest;
 begin
@@ -2433,9 +2433,9 @@ begin
     end;
 end;
 
-function TestO(const Short, Long : string; var AIdx : Integer; var AStr : string) : Boolean;
+function TestO(const Short, Long : string; var AIdx : Int; var AStr : string) : Boolean;
 var
-  L : Integer;
+  L : Int;
   LO : string;
 begin
   Result := AStr = '-' + Short;
@@ -2456,7 +2456,7 @@ end;
 
 procedure ProcessSysCommandline;
 var
-  I : Integer;
+  I : Int;
   S : string;
 begin
   SysRunMode := rmTest;
@@ -2542,7 +2542,7 @@ procedure RunAllSysTests;
 var
   S : PSuite;
   T : PTest;
-  P : Integer;
+  P : Int;
 begin
   S := nil;
   T := nil;

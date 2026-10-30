@@ -83,7 +83,7 @@ begin
   Body := ABody;
 end;
 
-function IsIdentByte(AB: Integer): Boolean;
+function IsIdentByte(AB: Int): Boolean;
 begin
   Result := ((AB >= Ord('A')) and (AB <= Ord('Z'))) or
             ((AB >= Ord('a')) and (AB <= Ord('z'))) or
@@ -93,7 +93,7 @@ end;
 
 function MatchesAnyFile(const AFile: string; AMatches: TList<String>): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := AMatches.Count = 0;
   for I := 0 to AMatches.Count - 1 do
@@ -107,7 +107,7 @@ end;
 { Extract the quoted path from a '# <line> "<file>" ...' linemarker. }
 function LineMarkerFile(const ALine: string): string;
 var
-  Q1, Q2: Integer;
+  Q1, Q2: Int;
 begin
   Result := '';
   Q1 := Pos('"', ALine);
@@ -124,7 +124,7 @@ var
   Matches: TList<String>;
   ByName: TDictionary<string, TCMacro>;
   CurFile: string;
-  I, P: Integer;
+  I, P: Int;
   Line, Rest, Name, Body: string;
   M: TCMacro;
 begin
@@ -189,7 +189,7 @@ function BuildProbeSource(const AHeaderPath: string;
   AMacros: TList<TCMacro>): string;
 var
   Lines: TStringList;
-  I: Integer;
+  I: Int;
 begin
   Lines := TStringList.Create();
   Lines.Add('#include "' + AHeaderPath + '"');
@@ -331,7 +331,7 @@ var
   Root: TJSONData;
   Inner: TJSONData;
   Arr: TJSONArray;
-  I, J: Integer;
+  I, J: Int;
   Node: TJSONObject;
   NameD: TJSONData;
   Name: string;

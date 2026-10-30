@@ -425,7 +425,7 @@ var
   Prog:  TProgram;
   MD:    TMethodDecl;
   Thunk: TMethodDecl;
-  I:     Integer;
+  I:     Int;
 begin
   Prog := AnalyseSrc(Src);
   try
@@ -522,7 +522,7 @@ var
   Prog:  TProgram;
   MD:    TMethodDecl;
   Thunk: TMethodDecl;
-  I:     Integer;
+  I:     Int;
 begin
   Prog := AnalyseSrc(Src);
   try
@@ -613,7 +613,7 @@ var
   Prog:  TProgram;
   MD:    TMethodDecl;
   Thunk: TMethodDecl;
-  I:     Integer;
+  I:     Int;
 begin
   Prog := AnalyseSrc(Src);
   try
@@ -1036,7 +1036,7 @@ const
     ''';
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   MD: TMethodDecl;
   Found: Boolean;
 begin
@@ -1161,7 +1161,7 @@ const
     ''';
 var
   Prog: TProgram;
-  I, N: Integer;
+  I, N: Int;
 begin
   Prog := ParseSrc(Src);
   try
@@ -1436,7 +1436,7 @@ procedure TAnonMethodTests.TestSemantic_RoutineAdapterInMethod_CapturesNothing;
 var
   Prog: TProgram;
   MD, Thunk: TMethodDecl;
-  I: Integer;
+  I: Int;
 begin
   Prog := AnalyseSrc('''
     program Prg;
@@ -1690,7 +1690,7 @@ const
 var
   Prog: TProgram;
   Outer, Thunk: TMethodDecl;
-  I: Integer;
+  I: Int;
 begin
   Prog := Analyse(Src);
   try

@@ -266,7 +266,7 @@ begin
 end;
 
 function ArgList(const A: array of string): TList<String>;
-var I: Integer;
+var I: Int;
 begin
   Result := TList<String>.Create();
   for I := 0 to High(A) do

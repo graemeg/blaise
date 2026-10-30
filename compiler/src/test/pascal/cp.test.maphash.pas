@@ -42,10 +42,10 @@ implementation
 
 procedure TMapHashTests.TestDict_StringKeys_ContentEquality_Large;
 var
-  D: TDictionary<string, Integer>;
-  I, V: Integer;
+  D: TDictionary<string, Int>;
+  I, V: Int;
 begin
-  D := TDictionary<string, Integer>.Create();
+  D := TDictionary<string, Int>.Create();
   try
     for I := 0 to 199 do
       D.Add('key_' + IntToStr(I), I * 10);
@@ -65,10 +65,10 @@ end;
 
 procedure TMapHashTests.TestDict_AddExistingKey_Overwrites;
 var
-  D: TDictionary<string, Integer>;
-  I, V: Integer;
+  D: TDictionary<string, Int>;
+  I, V: Int;
 begin
-  D := TDictionary<string, Integer>.Create();
+  D := TDictionary<string, Int>.Create();
   try
     for I := 0 to 49 do
       D.Add('k' + IntToStr(I), I);
@@ -83,10 +83,10 @@ end;
 
 procedure TMapHashTests.TestDict_Remove_ThenLookups;
 var
-  D: TDictionary<string, Integer>;
-  I, V: Integer;
+  D: TDictionary<string, Int>;
+  I, V: Int;
 begin
-  D := TDictionary<string, Integer>.Create();
+  D := TDictionary<string, Int>.Create();
   try
     for I := 0 to 99 do
       D.Add('k' + IntToStr(I), I);
@@ -109,10 +109,10 @@ end;
 
 procedure TMapHashTests.TestDict_IntegerKeys_Large;
 var
-  D: TDictionary<Integer, Integer>;
-  I, V: Integer;
+  D: TDictionary<Int, Int>;
+  I, V: Int;
 begin
-  D := TDictionary<Integer, Integer>.Create();
+  D := TDictionary<Int, Int>.Create();
   try
     for I := 0 to 199 do
       D.Add(I * 7, I);
@@ -126,10 +126,10 @@ end;
 
 procedure TMapHashTests.TestOrderedDict_PreservesInsertionOrder;
 var
-  D: TOrderedDictionary<string, Integer>;
-  I, V: Integer;
+  D: TOrderedDictionary<string, Int>;
+  I, V: Int;
 begin
-  D := TOrderedDictionary<string, Integer>.Create();
+  D := TOrderedDictionary<string, Int>.Create();
   try
     for I := 0 to 99 do
       D.Add('k' + IntToStr(I), I);
@@ -147,11 +147,11 @@ end;
 
 procedure TMapHashTests.TestOrderedDict_Remove_KeepsOrder;
 var
-  D: TOrderedDictionary<string, Integer>;
-  V: Integer;
-  I: Integer;
+  D: TOrderedDictionary<string, Int>;
+  V: Int;
+  I: Int;
 begin
-  D := TOrderedDictionary<string, Integer>.Create();
+  D := TOrderedDictionary<string, Int>.Create();
   try
     for I := 0 to 49 do
       D.Add('k' + IntToStr(I), I);
@@ -167,10 +167,10 @@ end;
 
 procedure TMapHashTests.TestSet_IncludeExcludeContains_Large;
 var
-  S: TSet<Integer>;
-  I: Integer;
+  S: TSet<Int>;
+  I: Int;
 begin
-  S := TSet<Integer>.Create();
+  S := TSet<Int>.Create();
   try
     for I := 0 to 199 do
       S.Include(I * 3);

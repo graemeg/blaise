@@ -74,7 +74,7 @@ end;
 
 function DoTest10 : string;
 var
-  O1, O2 : Integer;
+  O1, O2 : Int;
 begin
   O1 := 1;
   O2 := 2;
@@ -84,7 +84,7 @@ end;
 
 function DoTest11 : string;
 var
-  O1, O2 : Integer;   { was Smallint — narrowed to Integer in Blaise punit }
+  O1, O2 : Int;   { was Smallint — narrowed to Integer in Blaise punit }
 begin
   O1 := 1;
   O2 := 2;
@@ -94,7 +94,7 @@ end;
 
 function DoTest12 : string;
 var
-  O1, O2 : Integer;   { was Longint — same type in Blaise }
+  O1, O2 : Int;   { was Longint — same type in Blaise }
 begin
   O1 := 1;
   O2 := 2;
@@ -114,7 +114,7 @@ end;
 
 function DoTest14 : string;
 var
-  O1, O2 : Integer;   { was Shortint — narrowed to Integer in Blaise punit }
+  O1, O2 : Int;   { was Shortint — narrowed to Integer in Blaise punit }
 begin
   O1 := 1;
   O2 := 2;
@@ -164,7 +164,7 @@ end;
 
 function DoTest19 : string;
 var
-  O1, O2 : Integer;   { was Word — narrowed to Integer in Blaise punit }
+  O1, O2 : Int;   { was Word — narrowed to Integer in Blaise punit }
 begin
   O1 := 1;
   O2 := 2;

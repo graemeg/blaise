@@ -95,7 +95,7 @@ end;
 procedure TVarArgsTests.TestParse_VarArgsDirective_SetsFlag;
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   Found: Boolean;
 begin
   Prog := Self.AnalyseSrc(

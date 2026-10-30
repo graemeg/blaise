@@ -493,7 +493,7 @@ end;
 procedure TE2ETStringListTests.TestRun_AddGet;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -512,7 +512,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Count;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -532,7 +532,7 @@ end;
 procedure TE2ETStringListTests.TestRun_IndexOf_Found;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcIndexOfFound, Output, RCode));
@@ -543,7 +543,7 @@ end;
 procedure TE2ETStringListTests.TestRun_IndexOf_NotFound;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcIndexOfNotFound, Output, RCode));
@@ -554,7 +554,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Delete;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -574,7 +574,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Insert;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -595,7 +595,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Clear;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -615,7 +615,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Put;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcPut, Output, RCode));
@@ -626,7 +626,7 @@ end;
 procedure TE2ETStringListTests.TestRun_AddStrings;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -647,7 +647,7 @@ end;
 procedure TE2ETStringListTests.TestRun_ForIn;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -667,7 +667,7 @@ end;
 procedure TE2ETStringListTests.TestRun_TextGet;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -687,7 +687,7 @@ end;
 procedure TE2ETStringListTests.TestRun_TextGet_ManyLines;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
   LenStr: string;
 begin
@@ -711,7 +711,7 @@ end;
 procedure TE2ETStringListTests.TestRun_TextSet;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -731,7 +731,7 @@ end;
 procedure TE2ETStringListTests.TestRun_TextSet_PreservesLeadingWhitespace;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run',
@@ -747,7 +747,7 @@ end;
 procedure TE2ETStringListTests.TestRun_GrowBeyondInitialCapacity;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -767,7 +767,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Sorted_Add_OrderedOutput;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -787,7 +787,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Sorted_Find;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -807,7 +807,7 @@ end;
 procedure TE2ETStringListTests.TestRun_CaseInsensitive_IndexOf;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -826,7 +826,7 @@ end;
 procedure TE2ETStringListTests.TestRun_Duplicates_Ignore;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -880,7 +880,7 @@ end;
 procedure TE2ETStringListTests.TestRun_CustomSort;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -900,7 +900,7 @@ end;
 procedure TE2ETStringListTests.TestRun_CommaText_Get;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCommaTextGet, Output, RCode));
@@ -911,7 +911,7 @@ end;
 procedure TE2ETStringListTests.TestRun_CommaText_Set;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -932,7 +932,7 @@ end;
 procedure TE2ETStringListTests.TestRun_CommaText_Quoted;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCommaTextQuoted, Output, RCode));

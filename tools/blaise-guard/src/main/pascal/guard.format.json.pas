@@ -44,7 +44,7 @@ uses
 function TJsonFormatter.Render(AReport: TReport): string;
 var
   W: TJSONWriter;
-  I: Integer;
+  I: Int;
   D: TDiagnostic;
 begin
   W := TJSONWriter.Create();

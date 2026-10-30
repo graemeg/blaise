@@ -28,20 +28,20 @@ program test_blaise_errno;
 
 uses punit;
 
-function pipe(Fds: Pointer): Integer; external name 'pipe';
+function pipe(Fds: Pointer): Int32; external name 'pipe';
 { fcntl is variadic: Apple's arm64 ABI passes variadic arguments on the
   stack, so a fixed three-Integer declaration put the flags in a register
   fcntl never read -- the pipe stayed blocking and the setup read hung. }
-function fcntl(Fd, Cmd: Integer): Integer; varargs; external name 'fcntl';
-function xread(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function fcntl(Fd, Cmd: Int32): Int32; varargs; external name 'fcntl';
+function xread(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   external name 'read';
 function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
 function Interrupted(N: Int64): Boolean; external name 'Interrupted';
 function FdExhausted(N: Int64): Boolean; external name 'FdExhausted';
-function GetOsErrno: Integer; external name 'GetOsErrno';
+function GetOsErrno: Int32; external name 'GetOsErrno';
 { O_NONBLOCK differs per OS (Linux $800, FreeBSD 4); the rtl.platform.layout
   seam supplies the linked target's value. }
-function O_NONBLOCK: Integer; external name '_ONonBlock';
+function O_NONBLOCK: Int32; external name '_ONonBlock';
 
 const
   F_GETFL = 3;
@@ -54,9 +54,9 @@ var
   same failing return value. }
 function DoSetup: string;
 var
-  Fds: array[0..1] of Integer;
+  Fds: array[0..1] of Int32;
   Buf: array[0..7] of Byte;
-  Flags: Integer;
+  Flags: Int;
 begin
   Result := '';
   if pipe(@Fds[0]) <> 0 then
@@ -115,9 +115,9 @@ end;
 
 function TestEmfileClassifies: string;
 var
-  Fds: array[0..1] of Integer;
-  LastRet, Rc: Integer;
-  I: Integer;
+  Fds: array[0..1] of Int32;
+  LastRet, Rc: Int;
+  I: Int;
 begin
   { Exhaust the process fd table by pipe()-ing (2 fds per call) until it fails,
     then confirm FdExhausted classifies that EMFILE return (GH #189).  Uses only

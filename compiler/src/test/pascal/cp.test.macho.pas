@@ -50,8 +50,8 @@ type
   TMachOExecWriterTests = class(TTestCase)
   private
     function BuildExec: TMachOFile;
-    function RdU32At(const ABuf: string; AOff: Integer): Integer;
-    function RdU64At(const ABuf: string; AOff: Integer): Int64;
+    function RdU32At(const ABuf: string; AOff: Int): Int;
+    function RdU64At(const ABuf: string; AOff: Int): Int64;
   published
     procedure TestExecHeader_TypeAndPieFlags;
     procedure TestPageZero_FourGiBUnmapped;
@@ -117,7 +117,7 @@ implementation
 function TMachOWriterTests.BuildProbe: TMachOFile;
 var
   W: IContainerWriter;
-  UndefIdx, GlobIdx, LocIdx, DataIdx: Integer;
+  UndefIdx, GlobIdx, LocIdx, DataIdx: Int;
   Buf: string;
 begin
   W := TMachOObjectWriter.Create();
@@ -176,7 +176,7 @@ end;
 procedure TMachOWriterTests.TestSections_NamesAndOrder_ZerofillLast;
 var
   F: TMachOFile;
-  I, TextIdx, BssIdx: Integer;
+  I, TextIdx, BssIdx: Int;
 begin
   F := BuildProbe();
   try
@@ -210,12 +210,12 @@ begin
   F := BuildProbe();
   try
     T := F.FindSection('__TEXT', '__text');
-    AssertEquals(16, Integer(T.Size));
+    AssertEquals(16, Int32(T.Size));
     AssertTrue('text data offset lands after the load commands',
       T.Offset >= 32);
     AssertEquals('text bytes round-trip: nop first',
       $1F, StrAt(T.Data, 0));
-    AssertEquals('text addr starts the object vm layout', 0, Integer(T.Addr));
+    AssertEquals('text addr starts the object vm layout', 0, Int32(T.Addr));
     AssertTrue('data addr follows text/const',
       F.FindSection('__DATA', '__data').Addr >=
       T.Addr + T.Size);
@@ -257,10 +257,10 @@ begin
   try
     S := F.FindSymbol('Lloc');
     AssertTrue(S <> nil);
-    AssertEquals('n_value = section addr + offset', 8, Integer(S.Value));
+    AssertEquals('n_value = section addr + offset', 8, Int32(S.Value));
     S := F.FindSymbol('_probe_data');
     D := F.FindSection('__DATA', '__data');
-    AssertEquals(Integer(D.Addr), Integer(S.Value));
+    AssertEquals(Int32(D.Addr), Int32(S.Value));
     AssertEquals('n_sect is the 1-based ordinal of __data',
       3, S.Sect);   { emitted order: __text(1) __const(2) __data(3) }
   finally
@@ -332,7 +332,7 @@ var
   W: IContainerWriter;
   F: TMachOFile;
   T: TMoSection;
-  Idx: Integer;
+  Idx: Int;
 begin
   W := TMachOObjectWriter.Create();
   Idx := W.ExternSymbol('_target');
@@ -431,7 +431,7 @@ end;
 
 { ---- TMachOExecWriterTests ---- }
 
-function TMachOExecWriterTests.RdU32At(const ABuf: string; AOff: Integer): Integer;
+function TMachOExecWriterTests.RdU32At(const ABuf: string; AOff: Int): Int;
 begin
   Result := StrAt(ABuf, AOff)
          or (StrAt(ABuf, AOff + 1) shl 8)
@@ -439,7 +439,7 @@ begin
          or (StrAt(ABuf, AOff + 3) shl 24);
 end;
 
-function TMachOExecWriterTests.RdU64At(const ABuf: string; AOff: Integer): Int64;
+function TMachOExecWriterTests.RdU64At(const ABuf: string; AOff: Int): Int64;
 begin
   Result := (Int64(RdU32At(ABuf, AOff)) and $FFFFFFFF)
     or (Int64(RdU32At(ABuf, AOff + 4)) shl 32);
@@ -449,7 +449,7 @@ function TMachOExecWriterTests.BuildExec: TMachOFile;
 var
   W: TMachOExecWriter;
   T, D: string;
-  I: Integer;
+  I: Int;
   Buf: string;
 begin
   { 8 instructions of nop + ret }
@@ -504,9 +504,9 @@ begin
   try
     S := F.FindSegment('__PAGEZERO');
     AssertTrue(S <> nil);
-    AssertEquals(0, Integer(S.VmAddr));
+    AssertEquals(0, Int32(S.VmAddr));
     AssertTrue('vmsize is 4 GiB', S.VmSize = $100000000);
-    AssertEquals(0, Integer(S.FileSize));
+    AssertEquals(0, Int32(S.FileSize));
     AssertEquals('no access', 0, S.InitProt);
   finally
     F.Free();
@@ -524,16 +524,16 @@ begin
     S := F.FindSegment('__TEXT');
     AssertTrue(S <> nil);
     AssertTrue('__TEXT at the 4 GiB base', S.VmAddr = $100000000);
-    AssertEquals('maps from file offset 0', 0, Integer(S.FileOff));
+    AssertEquals('maps from file offset 0', 0, Int32(S.FileOff));
     AssertEquals('16 KiB-aligned filesize', 0,
-      Integer(S.FileSize mod $4000));
+      Int32(S.FileSize mod $4000));
     AssertEquals('r-x', 5, S.InitProt);
     T := F.FindSection('__TEXT', '__text');
     AssertTrue(T <> nil);
     AssertTrue('vmaddr = base + fileoff',
       T.Addr = $100000000 + T.Offset);
     AssertEquals('ret rides at the right file spot',
-      $D6, StrAt(F.Raw, T.Offset + Integer(T.Size) - 1));
+      $D6, StrAt(F.Raw, T.Offset + Int32(T.Size) - 1));
   finally
     F.Free();
   end;
@@ -549,12 +549,12 @@ begin
   try
     S := F.FindSegment('__DATA');
     AssertTrue(S <> nil);
-    AssertEquals('16 KiB-aligned vmaddr', 0, Integer(S.VmAddr mod $4000));
+    AssertEquals('16 KiB-aligned vmaddr', 0, Int32(S.VmAddr mod $4000));
     AssertEquals('rw-', 3, S.InitProt);
     B := F.FindSection('__DATA', '__bss');
     AssertTrue(B <> nil);
     AssertEquals('zerofill', S_ZEROFILL, B.Flags and $FF);
-    AssertEquals(64, Integer(B.Size));
+    AssertEquals(64, Int32(B.Size));
     AssertEquals('no file bytes', 0, B.Offset);
     AssertTrue('bss follows data in vm',
       B.Addr = F.FindSection('__DATA', '__data').Addr + 16);
@@ -568,7 +568,7 @@ var
   F: TMachOFile;
   S: TMoSegment;
   LC: TMoLoadCmd;
-  RebOff, RebSize, BindOff, BindSize: Integer;
+  RebOff, RebSize, BindOff, BindSize: Int;
 begin
   F := BuildExec();
   try
@@ -652,7 +652,7 @@ procedure TMachOExecWriterTests.TestRebaseStream_OpcodesDecode;
 var
   F: TMachOFile;
   LC: TMoLoadCmd;
-  RebOff: Integer;
+  RebOff: Int;
 begin
   F := BuildExec();
   try
@@ -674,7 +674,7 @@ procedure TMachOExecWriterTests.TestBindStream_NamesLibSystemSymbol;
 var
   F: TMachOFile;
   LC: TMoLoadCmd;
-  BindOff, BindSize: Integer;
+  BindOff, BindSize: Int;
 begin
   F := BuildExec();
   try
@@ -716,7 +716,7 @@ var
   LC: TMoLoadCmd;
   Buf, Bind: string;
   Base: Int64;
-  I, NDylibs, BindOff, BindSize, PZ, PC: Integer;
+  I, NDylibs, BindOff, BindSize, PZ, PC: Int;
 begin
   W := TMachOExecWriter.Create();
   try
@@ -801,7 +801,7 @@ var
   S, D, LE: TMoSegment;
   O: TMoSection;
   Payload, Buf: string;
-  I: Integer;
+  I: Int;
 begin
   F := BuildExec();
   try
@@ -836,7 +836,7 @@ begin
     AssertTrue('before __LINKEDIT (file)', S.FileOff + S.FileSize <= LE.FileOff);
     O := F.FindSection('__OPDF', '__opdf');
     AssertTrue('__opdf section', O <> nil);
-    AssertEquals(Length(Payload), Integer(O.Size));
+    AssertEquals(Length(Payload), Int32(O.Size));
     AssertTrue('vmaddr = segment start', O.Addr = S.VmAddr);
     AssertEquals('payload bytes in the file', Payload,
       Copy(F.Raw, O.Offset, Length(Payload)));
@@ -972,7 +972,7 @@ end;
 function DylibWith(const AInstall: string; const ASyms: array of string;
   AKnown: Boolean): TMachODylib;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TMachODylib.Create();
   Result.InstallName := AInstall;
@@ -1063,13 +1063,13 @@ begin
   end;
 end;
 
-function Le32(V: Integer): string;
+function Le32(V: Int): string;
 begin
   Result := Chr(V and $FF) + Chr((V shr 8) and $FF) + Chr((V shr 16) and $FF) +
     Chr((V shr 24) and $FF);
 end;
 
-function Be32Of(V: Integer): string;
+function Be32Of(V: Int): string;
 begin
   Result := Chr((V shr 24) and $FF) + Chr((V shr 16) and $FF) +
     Chr((V shr 8) and $FF) + Chr(V and $FF);
@@ -1080,7 +1080,7 @@ var
   Thin, Name, Trie, Fat: string;
   IdCmd, TrieCmd: string;
   D: TMachODylib;
-  TrieOff: Integer;
+  TrieOff: Int;
 begin
   Name := '/opt/x/libdemo.1.dylib' + Chr(0);
   while (Length(Name) mod 8) <> 0 do Name := Name + Chr(0);
@@ -1088,12 +1088,12 @@ begin
     Le32($10000) + Le32($10000) + Name;
   Trie := TrieOf();
   TrieOff := 32 + Length(IdCmd) + 16;
-  TrieCmd := Le32(Integer($80000033)) + Le32(16) + Le32(TrieOff) + Le32(Length(Trie));
-  Thin := Le32(Integer($FEEDFACF)) + Le32($0100000C) + Le32(0) + Le32(6) +
+  TrieCmd := Le32(Int32($80000033)) + Le32(16) + Le32(TrieOff) + Le32(Length(Trie));
+  Thin := Le32(Int32($FEEDFACF)) + Le32($0100000C) + Le32(0) + Le32(6) +
     Le32(2) + Le32(Length(IdCmd) + Length(TrieCmd)) + Le32(0) + Le32(0) +
     IdCmd + TrieCmd + Trie;
   { a fat wrapper: an x86_64 entry first (must be skipped), then arm64 }
-  Fat := Be32Of(Integer($CAFEBABE)) + Be32Of(2) +
+  Fat := Be32Of(Int32($CAFEBABE)) + Be32Of(2) +
     Be32Of($01000007) + Be32Of(3) + Be32Of(64) + Be32Of(4) + Be32Of(0) +
     Be32Of($0100000C) + Be32Of(0) + Be32Of(64) + Be32Of(Length(Thin)) + Be32Of(0);
   while Length(Fat) < 64 do Fat := Fat + Chr(0);
@@ -1184,23 +1184,23 @@ procedure TSha256Tests.TestExecSignature_PageHashesRecompute;
 var
   W: TMachOExecWriter;
   Img, Page, Slot: string;
-  SigOff, CdOff, HashOff, CodeLimit: Integer;
-  NSlots, I, PageLen: Integer;
+  SigOff, CdOff, HashOff, CodeLimit: Int;
+  NSlots, I, PageLen: Int;
 
-  function BeU32(AOff: Integer): Integer;
+  function BeU32(AOff: Int): Int;
   begin
     Result := (StrAt(Img, AOff) shl 24) or (StrAt(Img, AOff + 1) shl 16)
       or (StrAt(Img, AOff + 2) shl 8) or StrAt(Img, AOff + 3);
   end;
 
-  function LeU32(AOff: Integer): Integer;
+  function LeU32(AOff: Int): Int;
   begin
     Result := StrAt(Img, AOff) or (StrAt(Img, AOff + 1) shl 8)
       or (StrAt(Img, AOff + 2) shl 16) or (StrAt(Img, AOff + 3) shl 24);
   end;
 
 var
-  Off, Cmd, CSz, N: Integer;
+  Off, Cmd, CSz, N: Int;
 begin
   { emit a minimal signed executable and re-verify every CodeDirectory
     page hash independently — the structural self-check that runs on
@@ -1227,9 +1227,9 @@ begin
   end;
   AssertTrue('LC_CODE_SIGNATURE present', SigOff > 0);
   { SuperBlob: magic, length, count=1, type=0, cd offset }
-  AssertEquals(Integer($FADE0CC0), BeU32(SigOff));
+  AssertEquals(Int32($FADE0CC0), BeU32(SigOff));
   CdOff := SigOff + BeU32(SigOff + 16);
-  AssertEquals(Integer($FADE0C02), BeU32(CdOff));
+  AssertEquals(Int32($FADE0C02), BeU32(CdOff));
   HashOff := CdOff + BeU32(CdOff + 16);
   NSlots := BeU32(CdOff + 28);
   CodeLimit := BeU32(CdOff + 32);

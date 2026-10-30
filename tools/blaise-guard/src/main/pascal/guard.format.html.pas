@@ -42,7 +42,7 @@ const
 function HtmlEscape(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Integer;
+  I, N: Int;
   B: Byte;
 begin
   SB := TStringBuilder.Create();
@@ -106,7 +106,7 @@ end;
 function THtmlFormatter.Render(AReport: TReport): string;
 var
   SB: TStringBuilder;
-  I:  Integer;
+  I:  Int;
   D:  TDiagnostic;
   Cls: string;
 begin

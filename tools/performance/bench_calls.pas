@@ -7,21 +7,21 @@
 }
 program BenchCalls;
 
-function Clamp(V, Lo, Hi: Integer): Integer;
+function Clamp(V, Lo, Hi: Int): Int;
 begin
   if V < Lo then Exit(Lo);
   if V > Hi then Exit(Hi);
   Result := V;
 end;
 
-function Mix(A, B: Integer): Integer;
+function Mix(A, B: Int): Int;
 begin
   Result := Clamp(A + B, 0, 4000) + Clamp(A - B, -50, 50);
 end;
 
-function Run(N: Integer): Int64;
+function Run(N: Int): Int64;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := 0;
   for I := 0 to N - 1 do

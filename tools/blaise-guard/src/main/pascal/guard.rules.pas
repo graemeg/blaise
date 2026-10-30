@@ -127,7 +127,7 @@ type
   protected
     { ALineNo is 1-based to match diagnostic line numbers. }
     procedure CheckLine(AContext: TRuleContext; const ALine: string;
-                        ALineNo: Integer); virtual; abstract;
+                        ALineNo: Int); virtual; abstract;
   public
     procedure Analyse(AContext: TRuleContext); override;
   end;
@@ -166,8 +166,8 @@ type
 { Register a rule instance.  Called from each rule unit's initialization
   section; the registry keeps the instance alive via ARC. }
 procedure RegisterRule(ARule: IRule);
-function  RegisteredRuleCount: Integer;
-function  RegisteredRule(AIndex: Integer): IRule;
+function  RegisteredRuleCount: Int;
+function  RegisteredRule(AIndex: Int): IRule;
 
 implementation
 
@@ -203,7 +203,7 @@ end;
 function TRuleContext.MarkerCovers(const ALine, AMarker: string): Boolean;
 var
   Low, Rest: string;
-  P, IdP:    Integer;
+  P, IdP:    Int;
 begin
   Result := False;
   Low := LowerCase(ALine);
@@ -242,7 +242,7 @@ end;
 
 function TRuleContext.IsSuppressed(const ALoc: TSourceLocation): Boolean;
 var
-  Idx, K, Scan: Integer;
+  Idx, K, Scan: Int;
   Low:          string;
 begin
   Result := False;
@@ -332,7 +332,7 @@ procedure TRuleBase.Finalize(AContext: TRuleContext); begin end;
 
 procedure TLineRuleBase.Analyse(AContext: TRuleContext);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to AContext.Model.Lines.Count - 1 do
     CheckLine(AContext, AContext.Model.Lines[I], I + 1);
@@ -386,12 +386,12 @@ begin
   GRules.Add(ARule);
 end;
 
-function RegisteredRuleCount: Integer;
+function RegisteredRuleCount: Int;
 begin
   Result := GRules.Count;
 end;
 
-function RegisteredRule(AIndex: Integer): IRule;
+function RegisteredRule(AIndex: Int): IRule;
 begin
   Result := GRules[AIndex];
 end;

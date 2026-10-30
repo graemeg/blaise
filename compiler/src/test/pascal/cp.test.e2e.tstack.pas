@@ -150,7 +150,7 @@ end;
 procedure TE2EStackTests.TestRun_TStack_PushPopLIFO;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcPushPopLIFO, Output, RCode));
@@ -163,7 +163,7 @@ end;
 procedure TE2EStackTests.TestRun_TStack_PeekDoesNotRemove;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcPeekNoRemove, Output, RCode));
@@ -175,7 +175,7 @@ end;
 procedure TE2EStackTests.TestRun_TStack_CountTracking;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcCountTracking, Output, RCode));
@@ -187,7 +187,7 @@ end;
 procedure TE2EStackTests.TestRun_TStack_GrowBeyondInitialCapacity;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcGrowBeyond, Output, RCode));

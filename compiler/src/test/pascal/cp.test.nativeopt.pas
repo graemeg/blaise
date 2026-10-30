@@ -66,7 +66,7 @@ const
 
 function TNativeOptTests.FuncRegion(const AAsm, AName: string): string;
 var
-  StartP, EndP: Integer;
+  StartP, EndP: Int;
 begin
   StartP := Pos(AName + ':', AAsm);
   AssertTrue('function ' + AName + ' present in asm', StartP >= 0);

@@ -26,16 +26,16 @@ uses
 { Size and alignment of a clang qualType.  False = not computable
   (undeclared name, incomplete record, unsupported construct). }
 function CTypeSizeAlign(AModel: TCModel; const AQualType: string;
-  var ASize, AAlign: Integer): Boolean;
+  var ASize, AAlign: Int): Boolean;
 
 { Layout of a harvested record: struct = C field packing with padding;
   union = max member size.  False if any field is not computable. }
 function RecordSizeAlign(AModel: TCModel; ARec: TCRecord;
-  var ASize, AAlign: Integer): Boolean;
+  var ASize, AAlign: Int): Boolean;
 
 implementation
 
-function BuiltinSize(const ABlaiseName: string; var ASize: Integer): Boolean;
+function BuiltinSize(const ABlaiseName: string; var ASize: Int): Boolean;
 begin
   Result := True;
   if ABlaiseName = 'Byte' then ASize := 1
@@ -55,14 +55,14 @@ begin
   else Result := False;
 end;
 
-function AlignUp(AValue, AAlign: Integer): Integer;
+function AlignUp(AValue, AAlign: Int): Int;
 begin
   Result := ((AValue + AAlign - 1) div AAlign) * AAlign;
 end;
 
 function FindTypedef(AModel: TCModel; const AName: string): TCTypedef;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to AModel.Typedefs.Count - 1 do
@@ -74,11 +74,11 @@ begin
 end;
 
 function RecordSizeAlign(AModel: TCModel; ARec: TCRecord;
-  var ASize, AAlign: Integer): Boolean;
+  var ASize, AAlign: Int): Boolean;
 var
-  I: Integer;
-  FSize, FAlign: Integer;
-  Offset: Integer;
+  I: Int;
+  FSize, FAlign: Int;
+  Offset: Int;
 begin
   Result := False;
   if not ARec.IsComplete then Exit;
@@ -114,13 +114,13 @@ begin
 end;
 
 function CTypeSizeAlign(AModel: TCModel; const AQualType: string;
-  var ASize, AAlign: Integer): Boolean;
+  var ASize, AAlign: Int): Boolean;
 var
   S: string;
   Base: string;
   CountStr: string;
-  Count: Integer;
-  BracketPos: Integer;
+  Count: Int;
+  BracketPos: Int;
   Mapped: string;
   R: TCRecord;
   T: TCTypedef;

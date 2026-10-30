@@ -26,7 +26,7 @@ type
   TElfReaderTests = class(TTestCase)
   private
     function ProjectRoot: string;
-    function PadField(const AVal: string; AWidth: Integer): string;
+    function PadField(const AVal: string; AWidth: Int): string;
   published
     procedure TestParse_TextSectionBytes;
     procedure TestParse_GlobalFuncSymbol;
@@ -79,12 +79,12 @@ type
   private
     FScratch: string;
     function ProjectRoot: string;
-    function RunBin(const AExe: string; out AStdout: string): Integer;
+    function RunBin(const AExe: string; out AStdout: string): Int;
     { Encoded `movq $imm32, %rax` = 48 C7 C0 <imm32-LE>.  These byte strings
       must appear in the linked .text if the correct syscall number was
       emitted.  (Was a nested helper in three tests — nested routines inside
       method bodies are rejected since BUG-008.) }
-    function MovRaxImm(AImm: Integer): string;
+    function MovRaxImm(AImm: Int): string;
   protected
     procedure SetUp; override;
   published
@@ -128,7 +128,7 @@ type
       output is laid out at base 0, so a virtual address doubles as a file
       offset. }
     function FindDynSym(const ABytes, AName: string;
-      out AShndx: Integer; out AValue: Int64): Boolean;
+      out AShndx: Int; out AValue: Int64): Boolean;
   published
     procedure TestDyn_CollectsExternals;
     procedure TestDyn_PieHeaderEmitted;
@@ -177,7 +177,7 @@ type
   private
     FScratch: string;
     function ProjectRoot: string;
-    function RunBin(const AExe: string; out AStdout: string): Integer;
+    function RunBin(const AExe: string; out AStdout: string): Int;
   protected
     procedure SetUp; override;
   published
@@ -190,15 +190,15 @@ type
     FCompiler: string;
     FRTLPath: string;
     FStdlibPath: string;
-    FCounter: Integer;
+    FCounter: Int;
     function ProjectRoot: string;
     function CompilerAvailable: Boolean;
     function RunProc(const AExe: string; AArgs: array of string;
-      out AStdout: string): Integer;
+      out AStdout: string): Int;
     function RunProcNoArgs(const AExe: string;
-      out AStdout: string): Integer;
+      out AStdout: string): Int;
     function CompileAndRun(const ASrc: string;
-      out AStdout: string; out AExitCode: Integer): Boolean;
+      out AStdout: string; out AExitCode: Int): Boolean;
   protected
     procedure SetUp; override;
   published
@@ -221,7 +221,7 @@ implementation
 function TElfReaderTests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then
@@ -245,7 +245,7 @@ begin
   Result := IncludeTrailingPathDelimiter(GetCurrentDir());
 end;
 
-function TElfReaderTests.PadField(const AVal: string; AWidth: Integer): string;
+function TElfReaderTests.PadField(const AVal: string; AWidth: Int): string;
 begin
   Result := AVal;
   while Length(Result) < AWidth do
@@ -262,7 +262,7 @@ begin
   try
     Sec := Obj.FindSection('.text');
     AssertTrue('.text section missing', Sec <> nil);
-    AssertEquals(4, Integer(Sec.Size));
+    AssertEquals(4, Int32(Sec.Size));
     AssertEquals(Chr($48) + Chr($89) + Chr($08) + Chr($C3), Sec.Data);
     AssertEquals(SHT_PROGBITS, Sec.ShType);
     AssertTrue('SHF_EXECINSTR missing',
@@ -275,7 +275,7 @@ end;
 procedure TElfReaderTests.TestParse_GlobalFuncSymbol;
 var
   Obj: TElfObjectFile;
-  I: Integer;
+  I: Int;
   Sym: TRdSymbol;
   Found: TRdSymbol;
 begin
@@ -294,7 +294,7 @@ begin
     AssertEquals(STB_GLOBAL, Found.Bind);
     AssertEquals(STT_FUNC, Found.SymType);
     AssertEquals(Obj.SectionIndexOf('.text'), Found.Shndx);
-    AssertEquals(0, Integer(Found.Value));
+    AssertEquals(0, Int32(Found.Value));
   finally
     Obj.Free();
   end;
@@ -314,8 +314,8 @@ begin
     Rel := Obj.Relocs.Get(0);
     AssertEquals(R_X86_64_64, Rel.RelocType);
     AssertEquals(Obj.SectionIndexOf('.data'), Rel.TargetSection);
-    AssertEquals(0, Integer(Rel.Offset));
-    AssertEquals(16, Integer(Rel.Addend));
+    AssertEquals(0, Int32(Rel.Offset));
+    AssertEquals(16, Int32(Rel.Addend));
     AssertEquals('some_method', Obj.Symbols.Get(Rel.SymIndex).Name);
   finally
     Obj.Free();
@@ -335,7 +335,7 @@ begin
     Sec := Obj.FindSection('.bss');
     AssertTrue('.bss section missing', Sec <> nil);
     AssertEquals(SHT_NOBITS, Sec.ShType);
-    AssertEquals(64, Integer(Sec.Size));
+    AssertEquals(64, Int32(Sec.Size));
     AssertEquals(0, Length(Sec.Data));
   finally
     Obj.Free();
@@ -364,7 +364,7 @@ var
   LongTab: string;
   Ar: string;
   Members: TList<TArchiveMember>;
-  I: Integer;
+  I: Int;
 begin
   { Two members: one via the GNU long-name table, one short-named.
     Member data is arbitrary bytes — ParseArchive does not interpret
@@ -426,7 +426,7 @@ var
   ObjList: TStringList;
   Proc: TProcess;
   Chunk: string;
-  I: Integer;
+  I: Int;
   M: TArchiveMember;
   Obj: TElfObjectFile;
   SawLongName: Boolean;
@@ -554,13 +554,13 @@ begin
     M := Mg.FindMerged('.text');
     AssertTrue('.text missing', M <> nil);
     AssertEquals(Chr($C3) + Chr($90) + Chr($C3), M.Data);
-    AssertEquals(3, Integer(M.Size));
+    AssertEquals(3, Int32(M.Size));
     P := Mg.PlacementOf(0, O1.SectionIndexOf('.text'));
     AssertTrue('placement 0 missing', P <> nil);
-    AssertEquals(0, Integer(P.Offset));
+    AssertEquals(0, Int32(P.Offset));
     P := Mg.PlacementOf(1, O2.SectionIndexOf('.text'));
     AssertTrue('placement 1 missing', P <> nil);
-    AssertEquals(1, Integer(P.Offset));
+    AssertEquals(1, Int32(P.Offset));
   finally
     Mg.Free();
     O2.Free();
@@ -588,14 +588,14 @@ begin
     Mg.AddObject(1, O2);
     M := Mg.FindMerged('.data');
     AssertTrue('.data missing', M <> nil);
-    AssertEquals(9, Integer(M.Size));
-    AssertEquals(8, Integer(M.Align));
+    AssertEquals(9, Int32(M.Size));
+    AssertEquals(8, Int32(M.Align));
     AssertEquals(17, Ord(M.Data[0]));
     AssertEquals(0, Ord(M.Data[1]));
     AssertEquals(34, Ord(M.Data[8]));
     P := Mg.PlacementOf(1, O2.SectionIndexOf('.data'));
     AssertTrue('placement missing', P <> nil);
-    AssertEquals(8, Integer(P.Offset));
+    AssertEquals(8, Int32(P.Offset));
   finally
     Mg.Free();
     O2.Free();
@@ -620,7 +620,7 @@ begin
     M := Mg.FindMerged('.bss');
     AssertTrue('.bss missing', M <> nil);
     AssertEquals(SHT_NOBITS, M.ShType);
-    AssertEquals(64, Integer(M.Size));
+    AssertEquals(64, Int32(M.Size));
     AssertEquals(0, Length(M.Data));
   finally
     Mg.Free();
@@ -649,9 +649,9 @@ begin
   end;
 end;
 
-function LeAt(const ABytes: string; AOff, ACount: Integer): Int64;
+function LeAt(const ABytes: string; AOff, ACount: Int): Int64;
 var
-  K: Integer;
+  K: Int;
 begin
   Result := 0;
   for K := ACount - 1 downto 0 do
@@ -660,15 +660,15 @@ end;
 
 { The first program header of type APType in a linked image: its file offset,
   virtual address, file size and memory size.  False when there is none. }
-function FindPhdr(const ABytes: string; APType: Integer;
+function FindPhdr(const ABytes: string; APType: Int;
   out AOffset, AVAddr, AFileSz, AMemSz: Int64): Boolean;
 var
-  PhOff, PhEntSz, PhCount, J, E: Integer;
+  PhOff, PhEntSz, PhCount, J, E: Int;
 begin
   Result := False;
-  PhOff := Integer(LeAt(ABytes, 32, 8));
-  PhEntSz := Integer(LeAt(ABytes, 54, 2));
-  PhCount := Integer(LeAt(ABytes, 56, 2));
+  PhOff := Int32(LeAt(ABytes, 32, 8));
+  PhEntSz := Int32(LeAt(ABytes, 54, 2));
+  PhCount := Int32(LeAt(ABytes, 56, 2));
   for J := 0 to PhCount - 1 do
   begin
     E := PhOff + J * PhEntSz;
@@ -687,9 +687,9 @@ end;
   header table.  AIndex is the symbol's index and AFirstGlobal the section's
   sh_info (the index of the first non-local symbol). }
 function FindSymtabSym(const ABytes, AName: string; out AIndex, AInfo,
-  AShndx, AFirstGlobal: Integer; out AValue, ASize: Int64): Boolean;
+  AShndx, AFirstGlobal: Int; out AValue, ASize: Int64): Boolean;
 var
-  ShOff, ShNum, J, E, K, StrOff, NameOff, Ent: Integer;
+  ShOff, ShNum, J, E, K, StrOff, NameOff, Ent: Int;
   SymOff, SymSize: Int64;
 begin
   Result := False;
@@ -699,27 +699,27 @@ begin
   AFirstGlobal := 0;
   AValue := 0;
   ASize := 0;
-  ShOff := Integer(LeAt(ABytes, 40, 8));
-  ShNum := Integer(LeAt(ABytes, 60, 2));
+  ShOff := Int32(LeAt(ABytes, 40, 8));
+  ShNum := Int32(LeAt(ABytes, 60, 2));
   for J := 0 to ShNum - 1 do
   begin
     E := ShOff + J * 64;
     if LeAt(ABytes, E + 4, 4) <> 2 then Continue;   { SHT_SYMTAB }
     SymOff := LeAt(ABytes, E + 24, 8);
     SymSize := LeAt(ABytes, E + 32, 8);
-    AFirstGlobal := Integer(LeAt(ABytes, E + 44, 4));
-    StrOff := Integer(LeAt(ABytes,
-      ShOff + Integer(LeAt(ABytes, E + 40, 4)) * 64 + 24, 8));
-    for K := 0 to Integer(SymSize div 24) - 1 do
+    AFirstGlobal := Int32(LeAt(ABytes, E + 44, 4));
+    StrOff := Int32(LeAt(ABytes,
+      ShOff + Int32(LeAt(ABytes, E + 40, 4)) * 64 + 24, 8));
+    for K := 0 to Int32(SymSize div 24) - 1 do
     begin
-      Ent := Integer(SymOff) + K * 24;
-      NameOff := StrOff + Integer(LeAt(ABytes, Ent, 4));
+      Ent := Int32(SymOff) + K * 24;
+      NameOff := StrOff + Int32(LeAt(ABytes, Ent, 4));
       if (Copy(ABytes, NameOff, Length(AName)) = AName) and
          (OrdAt(ABytes, NameOff + Length(AName)) = 0) then
       begin
         AIndex := K;
         AInfo := OrdAt(ABytes, Ent + 4);
-        AShndx := Integer(LeAt(ABytes, Ent + 6, 2));
+        AShndx := Int32(LeAt(ABytes, Ent + 6, 2));
         AValue := LeAt(ABytes, Ent + 8, 8);
         ASize := LeAt(ABytes, Ent + 16, 8);
         Exit(True);
@@ -731,13 +731,13 @@ end;
 { True when some PT_LOAD maps file bytes [AOff, AOff + ALen) from the file. }
 function FileRangeLoaded(const ABytes: string; AOff, ALen: Int64): Boolean;
 var
-  PhOff, PhEntSz, PhCount, J, E: Integer;
+  PhOff, PhEntSz, PhCount, J, E: Int;
   POff, PFileSz: Int64;
 begin
   Result := False;
-  PhOff := Integer(LeAt(ABytes, 32, 8));
-  PhEntSz := Integer(LeAt(ABytes, 54, 2));
-  PhCount := Integer(LeAt(ABytes, 56, 2));
+  PhOff := Int32(LeAt(ABytes, 32, 8));
+  PhEntSz := Int32(LeAt(ABytes, 54, 2));
+  PhCount := Int32(LeAt(ABytes, 56, 2));
   for J := 0 to PhCount - 1 do
   begin
     E := PhOff + J * PhEntSz;
@@ -758,7 +758,7 @@ function TLinkerTests.LinkObjs(AObjAsm: array of string;
   const AEntry: string; out ABytes: string): TLinker;
 var
   Lk: TLinker;
-  I: Integer;
+  I: Int;
   Obj: TElfObjectFile;
 begin
   Lk := TLinker.Create();
@@ -842,7 +842,7 @@ var
   Rel: TRdReloc;
   TextSec: TMergedSection;
   StartAddr: Int64;
-  PatchOff, Disp: Integer;
+  PatchOff, Disp: Int;
   Expected: Int64;
 begin
   { The internal assembler always emits an undefined reference as
@@ -909,7 +909,7 @@ begin
     { S=0, A=-4, P = StartAddr+1 → disp = -4 - (StartAddr+1). }
     Expected := Int64(0) - 4 - (StartAddr + 1);
     AssertEquals('weak-undef PC32 disp (S=0)',
-      Integer(Expected and $FFFFFFFF), Disp);
+      Int32(Expected and $FFFFFFFF), Disp);
   finally
     Lk.Free();
   end;
@@ -947,8 +947,8 @@ var
   TextSec: TMergedSection;
   CalleeAddr, StartAddr: Int64;
   CallSiteVaddr, CallEnd: Int64;
-  PatchOff: Integer;
-  Disp: Integer;
+  PatchOff: Int;
+  Disp: Int;
   Expected: Int64;
 begin
   { Object 0 defines callee; object 1's _start does `call callee`.
@@ -975,12 +975,12 @@ begin
     CallEnd := CallSiteVaddr + 5;         { next insn after the 5-byte call }
     Expected := CalleeAddr - CallEnd;
 
-    PatchOff := Integer(StartAddr - CalleeAddr) + 1; { skip 0xE8 }
+    PatchOff := Int32(StartAddr - CalleeAddr) + 1; { skip 0xE8 }
     Disp := (Ord(TextSec.Data[PatchOff]) and $FF)
          or ((Ord(TextSec.Data[PatchOff + 1]) and $FF) shl 8)
          or ((Ord(TextSec.Data[PatchOff + 2]) and $FF) shl 16)
          or ((Ord(TextSec.Data[PatchOff + 3]) and $FF) shl 24);
-    AssertEquals('PC32 call displacement', Integer(Expected and $FFFFFFFF), Disp);
+    AssertEquals('PC32 call displacement', Int32(Expected and $FFFFFFFF), Disp);
   finally
     Lk.Free();
   end;
@@ -1017,7 +1017,7 @@ var
   Lk: TLinker;
   Bytes: string;
   Addr, Got: Int64;
-  I, Slot: Integer;
+  I, Slot: Int;
 begin
   { An absolute 32-bit data reference (.long target, R_X86_64_32) is
     resolvable at link time in a non-PIE ET_EXEC: the image is linked at a
@@ -1093,7 +1093,7 @@ begin
     { e_entry is an 8-byte LE field at offset 24. }
     Entry := 0;
     for I := 0 to 7 do
-      Entry := Entry or (Int64(Ord(Bytes[24 + Integer(I)]) and $FF) shl (I * 8));
+      Entry := Entry or (Int64(Ord(Bytes[24 + Int32(I)]) and $FF) shl (I * 8));
     AssertEquals('e_entry == addr(_start)', Lk.AddrOfSymbol('_start'), Entry);
   finally
     Lk.Free();
@@ -1175,7 +1175,7 @@ const
 var
   Lk: TLinker;
   Bytes: string;
-  Idx, Info, Shndx, FirstGlobal: Integer;
+  Idx, Info, Shndx, FirstGlobal: Int;
   Value, Size, StartAddr: Int64;
 begin
   { The assembler records no sizes, so each comes from the next symbol in
@@ -1216,7 +1216,7 @@ procedure TLinkerTests.TestTls_SymtabHoldsSegmentOffsets;
 var
   Lk: TLinker;
   Bytes: string;
-  Idx, Info, Shndx, FirstGlobal: Integer;
+  Idx, Info, Shndx, FirstGlobal: Int;
   Value, Size: Int64;
 begin
   { An executable's STT_TLS symbol holds its offset in the TLS segment, not
@@ -1248,7 +1248,7 @@ const
 var
   Lk: TLinker;
   Bytes: string;
-  Idx, Info, Shndx, FirstGlobal: Integer;
+  Idx, Info, Shndx, FirstGlobal: Int;
   Value, Size: Int64;
 begin
   Lk := TLinker.Create();
@@ -1301,7 +1301,7 @@ begin
     AssertEquals('p_filesz is .tdata', Int64(4), FileSz);
     AssertTrue('the image lies inside the file', Off + FileSz <= Length(Bytes));
     AssertEquals('the image holds .tdata', Int64($5EEDF00D),
-      LeAt(Bytes, Integer(Off), 4));
+      LeAt(Bytes, Int32(Off), 4));
     AssertTrue('a PT_LOAD maps the image', FileRangeLoaded(Bytes, Off, FileSz));
   finally
     Lk.Free();
@@ -1313,7 +1313,7 @@ end;
 function TLinkerE2ETests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then
@@ -1344,7 +1344,7 @@ begin
   ForceDirectories(FScratch);
 end;
 
-function TLinkerE2ETests.MovRaxImm(AImm: Integer): string;
+function TLinkerE2ETests.MovRaxImm(AImm: Int): string;
 begin
   Result := Chr($48) + Chr($C7) + Chr($C0) +
             Chr(AImm and $FF) + Chr((AImm shr 8) and $FF) +
@@ -1352,7 +1352,7 @@ begin
 end;
 
 function TLinkerE2ETests.RunBin(const AExe: string;
-  out AStdout: string): Integer;
+  out AStdout: string): Int;
 var
   Proc:  TProcess;
   Chunk: string;
@@ -1419,7 +1419,7 @@ var
   Lk: TLinker;
   Obj: TElfObjectFile;
   BinPath, Output, FixtureAsm: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   BinPath := FScratch + '/hello_syscall';
   if HostTarget().OS = osFreeBSD then
@@ -1512,7 +1512,7 @@ var
   Obj: TElfObjectFile;
   Bytes: string;
   Entry, StartAddr: Int64;
-  PhOff, PhEntSz, PhCount, J, PType: Integer;
+  PhOff, PhEntSz, PhCount, J, PType: Int;
   FoundInterp: Boolean;
 begin
   { LinkToBytes returns the binary in memory — ReadFile would truncate at the
@@ -1788,7 +1788,7 @@ end;
 function TDynLinkerTests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then
@@ -1817,10 +1817,10 @@ end;
   every run-time loader uses to index a .hash bucket.  Written out here rather
   than reused from the linker so the tests check the linker's hash against the
   specification instead of against itself. }
-function SysVElfHash(const AName: string): Integer;
+function SysVElfHash(const AName: string): Int32;
 var
   H, G: Int64;
-  K: Integer;
+  K: Int;
 begin
   { Int64 throughout with an explicit 32-bit mask: the gABI hash is defined on
     an unsigned 32-bit word, and shifting its top nibble right on a signed
@@ -1834,24 +1834,24 @@ begin
       H := H xor (G shr 24);
     H := H and (not G);
   end;
-  Result := Integer(H);
+  Result := Int32(H);
 end;
 
 function TDynLinkerTests.FindDynSym(const ABytes, AName: string;
-  out AShndx: Integer; out AValue: Int64): Boolean;
+  out AShndx: Int; out AValue: Int64): Boolean;
 var
-  PhOff, PhEntSz, PhCount, J, Base: Integer;
+  PhOff, PhEntSz, PhCount, J, Base: Int;
   DynOff, Tag, Val, SymTab, StrTab, HashTab, Ent: Int64;
-  NBucket, NChain, I, NameOff, K: Integer;
+  NBucket, NChain, I, NameOff, K: Int;
   N: string;
 begin
   Result := False;
   AShndx := 0;
   AValue := 0;
 
-  PhOff   := Integer(LeAt(ABytes, 32, 8));
-  PhEntSz := Integer(LeAt(ABytes, 54, 2));
-  PhCount := Integer(LeAt(ABytes, 56, 2));
+  PhOff   := Int32(LeAt(ABytes, 32, 8));
+  PhEntSz := Int32(LeAt(ABytes, 54, 2));
+  PhCount := Int32(LeAt(ABytes, 56, 2));
 
   DynOff := -1;
   for J := 0 to PhCount - 1 do
@@ -1866,8 +1866,8 @@ begin
   J := 0;
   while J < 256 do
   begin
-    Tag := LeAt(ABytes, Integer(DynOff) + J * 16, 8);
-    Val := LeAt(ABytes, Integer(DynOff) + J * 16 + 8, 8);
+    Tag := LeAt(ABytes, Int32(DynOff) + J * 16, 8);
+    Val := LeAt(ABytes, Int32(DynOff) + J * 16 + 8, 8);
     if Tag = 0 then Break;                       { DT_NULL }
     if Tag = 4 then HashTab := Val;              { DT_HASH }
     if Tag = 5 then StrTab := Val;               { DT_STRTAB }
@@ -1879,18 +1879,18 @@ begin
   { Follow the bucket/chain exactly as the loader does — a symbol that is in
     .dynsym but unreachable through .hash does not exist as far as rtld is
     concerned, so a linear scan here would pass over a broken hash table. }
-  NBucket := Integer(LeAt(ABytes, Integer(HashTab), 4));
-  NChain  := Integer(LeAt(ABytes, Integer(HashTab) + 4, 4));
+  NBucket := Int32(LeAt(ABytes, Int32(HashTab), 4));
+  NChain  := Int32(LeAt(ABytes, Int32(HashTab) + 4, 4));
   if (NBucket < 1) or (NChain < 1) then Exit;
 
-  I := Integer(LeAt(ABytes,
-    Integer(HashTab) + 8 + (SysVElfHash(AName) mod NBucket) * 4, 4));
+  I := Int32(LeAt(ABytes,
+    Int32(HashTab) + 8 + (SysVElfHash(AName) mod NBucket) * 4, 4));
   while (I <> 0) and (I < NChain) do
   begin
     Ent := SymTab + Int64(I) * 24;               { ELF64_SYM_SIZE }
-    NameOff := Integer(LeAt(ABytes, Integer(Ent), 4));
+    NameOff := Int32(LeAt(ABytes, Int32(Ent), 4));
     N := '';
-    K := Integer(StrTab) + NameOff;
+    K := Int32(StrTab) + NameOff;
     while OrdAt(ABytes, K) <> 0 do
     begin
       N := N + Chr(OrdAt(ABytes, K));
@@ -1898,14 +1898,14 @@ begin
     end;
     if N = AName then
     begin
-      AShndx := Integer(LeAt(ABytes, Integer(Ent) + 6, 2));   { st_shndx }
-      AValue := LeAt(ABytes, Integer(Ent) + 8, 8);            { st_value }
+      AShndx := Int32(LeAt(ABytes, Int32(Ent) + 6, 2));   { st_shndx }
+      AValue := LeAt(ABytes, Int32(Ent) + 8, 8);            { st_value }
       Result := True;
       Exit;
     end;
     { chains[] follows buckets[] in the same table }
-    I := Integer(LeAt(ABytes,
-      Integer(HashTab) + 8 + (NBucket + I) * 4, 4));
+    I := Int32(LeAt(ABytes,
+      Int32(HashTab) + 8 + (NBucket + I) * 4, 4));
   end;
 end;
 
@@ -1950,8 +1950,8 @@ var
   Lk: TLinker;
   Obj: TElfObjectFile;
   Bytes: string;
-  PhOff, PhCount, PhEntSz: Integer;
-  J, PType: Integer;
+  PhOff, PhCount, PhEntSz: Int;
+  J, PType: Int;
   FoundInterp, FoundDynamic: Boolean;
 begin
   Lk := TLinker.Create();
@@ -2000,8 +2000,8 @@ var
   Lk: TLinker;
   Obj: TElfObjectFile;
   Bytes, Interp: string;
-  PhOff, PhCount, PhEntSz: Integer;
-  J, K, PType, Base: Integer;
+  PhOff, PhCount, PhEntSz: Int;
+  J, K, PType, Base: Int;
   SegOff, SegFileSz: Int64;
 begin
   Lk := TLinker.Create(FreeBSDX86_64Target());
@@ -2035,8 +2035,8 @@ begin
         for K := 7 downto 0 do
           SegFileSz := (SegFileSz shl 8) or OrdAt(Bytes, Base + 32 + K);
         { p_filesz counts the trailing NUL; drop it for the comparison. }
-        for K := 0 to Integer(SegFileSz) - 2 do
-          Interp := Interp + Chr(OrdAt(Bytes, Integer(SegOff) + K));
+        for K := 0 to Int32(SegFileSz) - 2 do
+          Interp := Interp + Chr(OrdAt(Bytes, Int32(SegOff) + K));
       end;
     end;
 
@@ -2074,7 +2074,7 @@ var
   Lk: TLinker;
   Obj: TElfObjectFile;
   Bytes: string;
-  Shndx: Integer;
+  Shndx: Int;
   Value: Int64;
 begin
   Lk := TLinker.Create(FreeBSDX86_64Target());
@@ -2116,7 +2116,7 @@ var
   Lk: TLinker;
   Obj: TElfObjectFile;
   Bytes: string;
-  Shndx: Integer;
+  Shndx: Int;
   Value: Int64;
 begin
   { glibc defines environ itself, so a Linux image must not publish it — an
@@ -2151,8 +2151,8 @@ var
   Lk: TLinker;
   Obj: TElfObjectFile;
   Bytes: string;
-  PhOff, PhCount, PhEntSz: Integer;
-  I, J, Off, Count: Integer;
+  PhOff, PhCount, PhEntSz: Int;
+  I, J, Off, Count: Int;
   Lo, Hi: array of Int64;
 begin
   Lk := TLinker.Create(FreeBSDX86_64Target());
@@ -2162,9 +2162,9 @@ begin
     Lk.AddOwnedObject(Obj);
     Bytes := Lk.LinkToBytes('main');
 
-    PhOff   := Integer(LeAt(Bytes, 32, 8));
-    PhEntSz := Integer(LeAt(Bytes, 54, 2));
-    PhCount := Integer(LeAt(Bytes, 56, 2));
+    PhOff   := Int32(LeAt(Bytes, 32, 8));
+    PhEntSz := Int32(LeAt(Bytes, 54, 2));
+    PhCount := Int32(LeAt(Bytes, 56, 2));
 
     { Collect the page-rounded extent of every non-empty PT_LOAD — the kernel
       maps whole pages, so page-rounded is the granularity that matters. }
@@ -2210,7 +2210,7 @@ end;
 function TDynLinkerE2ETests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then
@@ -2242,7 +2242,7 @@ begin
 end;
 
 function TDynLinkerE2ETests.RunBin(const AExe: string;
-  out AStdout: string): Integer;
+  out AStdout: string): Int;
 var
   Proc:  TProcess;
   Chunk: string;
@@ -2286,7 +2286,7 @@ var
   Lk: TLinker;
   Obj: TElfObjectFile;
   BinPath, Output: string;
-  Rc: Integer;
+  Rc: Int;
   Crt1, Crti, Crtn, CrtBegin, CrtEnd: string;
 begin
   BinPath := FScratch + '/hello_dyn';
@@ -2334,7 +2334,7 @@ end;
 { symlink(2): point the isolated-dir compiler name at the real binary so
   CompilerBinDir() resolves to the isolated dir (no blaise_rtl.a beside it),
   without copying ~3 MB.  Returns 0 on success. }
-function _test_symlink(ATarget, ALinkPath: PChar): Integer;
+function _test_symlink(ATarget, ALinkPath: PChar): Int32;
   external name 'symlink';
 
 var
@@ -2343,7 +2343,7 @@ var
 function TInternalLinkerE2ETests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then
@@ -2393,10 +2393,10 @@ begin
 end;
 
 function TInternalLinkerE2ETests.RunProc(const AExe: string;
-  AArgs: array of string; out AStdout: string): Integer;
+  AArgs: array of string; out AStdout: string): Int;
 var
   Proc: TProcess;
-  I: Integer;
+  I: Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -2418,7 +2418,7 @@ begin
 end;
 
 function TInternalLinkerE2ETests.RunProcNoArgs(const AExe: string;
-  out AStdout: string): Integer;
+  out AStdout: string): Int;
 var
   Proc: TProcess;
   Chunk: string;
@@ -2440,10 +2440,10 @@ begin
 end;
 
 function TInternalLinkerE2ETests.CompileAndRun(const ASrc: string;
-  out AStdout: string; out AExitCode: Integer): Boolean;
+  out AStdout: string; out AExitCode: Int): Boolean;
 var
   SrcFile, OutFile, CompOut: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   Result := False;
   if not Self.CompilerAvailable() then Exit;
@@ -2473,7 +2473,7 @@ end;
 procedure TInternalLinkerE2ETests.TestRun_HelloWorld;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_hello;' + LineEnding +
@@ -2492,7 +2492,7 @@ end;
 procedure TInternalLinkerE2ETests.TestRun_StringOps;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_str;' + LineEnding +
@@ -2517,7 +2517,7 @@ end;
 procedure TInternalLinkerE2ETests.TestRun_ExceptionHandling;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_exc;' + LineEnding +
@@ -2543,7 +2543,7 @@ end;
 procedure TInternalLinkerE2ETests.TestRun_ClassAndVirtual;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_cls;' + LineEnding +
@@ -2591,7 +2591,7 @@ end;
 procedure TInternalLinkerE2ETests.TestLink_MissingRTL_FailsLoudly;
 var
   IsoDir, IsoCompiler, SrcFile, OutFile, CompOut: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not Self.CompilerAvailable() then
   begin
@@ -2636,7 +2636,7 @@ end;
 procedure TInternalLinkerE2ETests.TestCompile_FreeBSDTarget_EmitsStaticFreeBSDExe;
 var
   SrcFile, OutFile, CompOut, Bytes: string;
-  Rc, PhOff, PhEntSz, PhCount, J, PType: Integer;
+  Rc, PhOff, PhEntSz, PhCount, J, PType: Int;
   FoundInterp: Boolean;
 begin
   if not Self.CompilerAvailable() then
@@ -2704,7 +2704,7 @@ end;
 procedure TInternalLinkerE2ETests.TestCompile_LinuxTarget_ExeHasSymbolTable;
 var
   SrcFile, OutFile, CompOut, Bytes: string;
-  Rc, Idx, Info, Shndx, FirstGlobal: Integer;
+  Rc, Idx, Info, Shndx, FirstGlobal: Int;
   Value, Size: Int64;
 begin
   if not Self.CompilerAvailable() then

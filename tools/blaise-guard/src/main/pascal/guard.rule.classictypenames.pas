@@ -111,7 +111,7 @@ end;
 procedure TClassicTypeNamesRule.CheckTokens(AContext: TRuleContext;
   ATokens: TList<TToken>);
 var
-  I:           Integer;
+  I:           Int;
   Replacement: string;
   Note:        string;
   OwnNames:    TSet<string>;

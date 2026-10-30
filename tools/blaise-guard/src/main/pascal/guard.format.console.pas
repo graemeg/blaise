@@ -57,7 +57,7 @@ end;
 
 function TConsoleFormatter.Render(AReport: TReport): string;
 var
-  I:      Integer;
+  I:      Int;
   D:      TDiagnostic;
   SevTxt: string;
   SevCol: string;

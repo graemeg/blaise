@@ -461,7 +461,7 @@ const
     ''';
 
 procedure TPackedRecordE2ETests.TestRun_PackedRecord_ByteInt_Offsets;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcByteIntOffsets, Output, RCode));
@@ -471,7 +471,7 @@ begin
 end;
 
 procedure TPackedRecordE2ETests.TestRun_PackedRecord_SizeOfMatchesPacked;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcPackedVsUnpacked, Output, RCode));

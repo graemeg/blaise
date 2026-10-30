@@ -160,7 +160,7 @@ end;
 procedure TE2ETListTests.TestRun_TListString_AddGetCount;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+link+run', CompileAndRunWithRTL(SrcTListString, Output, RCode));
@@ -173,7 +173,7 @@ end;
 procedure TE2ETListTests.TestRun_TListInteger_AddGetCount;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+link+run', CompileAndRunWithRTL(SrcTListInteger, Output, RCode));
@@ -186,7 +186,7 @@ end;
 procedure TE2ETListTests.TestRun_TListInteger_IndexOf;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+link+run', CompileAndRunWithRTL(SrcTListIndexOfInteger, Output, RCode));
@@ -200,7 +200,7 @@ end;
 procedure TE2ETListTests.TestRun_TListString_IndexOf_NotFound;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+link+run', CompileAndRunWithRTL(SrcTListIndexOfStringNotFound, Output, RCode));
@@ -212,7 +212,7 @@ end;
 procedure TE2ETListTests.TestRun_TList_RecordArg_FrontEndAccepts;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+link+run', CompileAndRunWithRTL(SrcTListRecordArg, Output, RCode));
@@ -251,7 +251,7 @@ const
     ''';
 
 procedure TE2ETListTests.TestRun_TList_ClassElements_RetainedAcrossScope;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+link+run (native)',
@@ -296,7 +296,7 @@ const
     ''';
 
 procedure TE2ETListTests.TestRun_TList_DefaultProperty_ReadWrite;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run (native)',
@@ -306,7 +306,7 @@ begin
 end;
 
 procedure TE2ETListTests.TestRun_TList_DefaultProperty_Polymorphic;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run (native)',

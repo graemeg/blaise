@@ -2512,7 +2512,7 @@ var
   Iface: TUnitInterface;
   Tab:   TSymbolTable;
   RT:    TRecordTypeDesc;
-  Slot:  Integer;
+  Slot:  Int;
   Ent:   TVTableEntry;
 begin
   Iface := ParseAnalyseAndExport(SRC);
@@ -2547,7 +2547,7 @@ var
   Iface: TUnitInterface;
   Tab:   TSymbolTable;
   Base, Derived: TRecordTypeDesc;
-  BaseSlot, DerSlot: Integer;
+  BaseSlot, DerSlot: Int;
 begin
   Iface := ParseAnalyseAndExport(SRC);
   Tab   := FreshTableWithBuiltins();
@@ -3493,7 +3493,7 @@ var
   Buf:          string;
   E:            TTypeEntry;
   M:            TRoutineSig;
-  I:            Integer;
+  I:            Int;
 begin
   Iface := ParseAnalyseAndExport(SRC);
   try
@@ -3537,7 +3537,7 @@ var
   Buf:          string;
   E:            TTypeEntry;
   M:            TMethodDecl;
-  I:            Integer;
+  I:            Int;
 begin
   Iface := ParseAnalyseAndExport(SRC);
   try
@@ -3900,7 +3900,7 @@ var
   Tab:   TSymbolTable;
   Iface: TUnitInterface;
   RT:    TRecordTypeDesc;
-  Slot:  Integer;
+  Slot:  Int;
 begin
   DiskPathImport(SRC, Tab, Iface);
   try

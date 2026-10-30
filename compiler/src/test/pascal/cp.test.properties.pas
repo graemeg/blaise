@@ -896,7 +896,7 @@ const
   the class-body declaration it was attached to }
 function FindMethodBody(AProg: TProgram; const AName: string): TBlock;
 var
-  I, J: Integer;
+  I, J: Int;
   MD: TMethodDecl;
   TD: TTypeDecl;
 begin
@@ -1056,7 +1056,7 @@ const
 var
   Prog: TProgram;
   E: TASTExpr;
-  I: Integer;
+  I: Int;
 begin
   Prog := AnalyseSrc(Src);
   try
@@ -1187,7 +1187,7 @@ const
 procedure TPropertyTests.TestSem_DefaultPropWriteOnCallResult_IsSetterCall;
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   SA: TStaticSubscriptAssign;
 begin
   Prog := Analyse(DefPropCallResultHead + '''

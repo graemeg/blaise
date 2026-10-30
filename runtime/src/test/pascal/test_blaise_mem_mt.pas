@@ -67,19 +67,19 @@ var
 
   { Cross-thread small-free shared state (written by main, freed by B). }
   GBlocks: array[0..63] of Pointer;
-  GSizes: array[0..63] of Integer;
+  GSizes: array[0..63] of Int32;
   GBadPattern: Int64;
   GForeignLeak: Int64;
   GPump: array[0..8191] of Pointer;
 
   { Cross-thread large-free shared state. }
   GLargePtr: Pointer;
-  GLargeSize: Integer;
+  GLargeSize: Int;
   GLargeBadPattern: Int64;
   GLargeProbeMapped: Int64;
   GLargeProbeOk: Int64;
 
-function ClassSize(C: Integer): Integer;
+function ClassSize(C: Int): Int;
 begin
   Result := 16 shl C;
 end;
@@ -90,7 +90,7 @@ end;
 { ------------------------------------------------------------------ }
 procedure SmallFreeWorker(Arg: Pointer);
 var
-  I, J: Integer;
+  I, J: Int;
   P: PChar;
   Q: Pointer;
 begin
@@ -100,7 +100,7 @@ begin
     { Verify the pattern the main thread wrote — cross-thread read. }
     P := PChar(GBlocks[I]);
     for J := 0 to GSizes[I] - 1 do
-      if Integer(P[J]) <> ((J + I) and $FF) then
+      if Int32(P[J]) <> ((J + I) and $FF) then
       begin
         if GBadPattern = -1 then
           GBadPattern := Int64(I) * 100000 + Int64(J);
@@ -130,13 +130,13 @@ end;
 { ------------------------------------------------------------------ }
 function Test_CrossThread_SmallFree: string;
 var
-  I, C, J, K, Sz, PumpCount, Rc, RcJoin, PumpNilFails: Integer;
+  I, C, J, K, Sz, PumpCount, Rc, RcJoin, PumpNilFails: Int;
   P: PChar;
   Q: Pointer;
   H: Int64;
   Fn: TThreadProc;
   Found: array[0..63] of Boolean;
-  FoundPerClass: array[0..7] of Integer;
+  FoundPerClass: array[0..7] of Int32;
 begin
   for C := 0 to NClasses - 1 do
     for I := 0 to NPerClass - 1 do
@@ -228,7 +228,7 @@ procedure LargeFreeWorker(Arg: Pointer);
 var
   P: PChar;
   Q: Pointer;
-  I: Integer;
+  I: Int;
   MappedP: ^Int64;
 begin
   P := PChar(GLargePtr);
@@ -236,7 +236,7 @@ begin
   I := 0;
   while I < GLargeSize do
   begin
-    if Integer(P[I]) <> ((I * 7) and $FF) then
+    if Int32(P[I]) <> ((I * 7) and $FF) then
     begin
       GLargeBadPattern := I;
       Break;
@@ -261,7 +261,7 @@ end;
 function Test_CrossThread_LargeFree: string;
 var
   P: PChar;
-  I, Rc: Integer;
+  I, Rc: Int;
   H: Int64;
   Fn: TThreadProc;
   Q: PChar;
@@ -296,9 +296,9 @@ begin
   AssertNotNull('main can allocate large again', Pointer(Q));
   Q[0] := 42;
   Q[GLargeSize - 1] := 43;
-  AssertEquals('new large block writable (first)', 42, Integer(Q[0]));
+  AssertEquals('new large block writable (first)', 42, Int32(Q[0]));
   AssertEquals('new large block writable (last)', 43,
-               Integer(Q[GLargeSize - 1]));
+               Int32(Q[GLargeSize - 1]));
   _BlaiseFreeMem(Pointer(Q));
   Result := '';
 end;
@@ -337,7 +337,7 @@ var
   BeforeLocal, AfterLocal: Int64;
   BeforeRemote, AfterPush, AfterDrain: Int64;
   H: Int64;
-  Rc, RcJoin: Integer;
+  Rc, RcJoin: Int;
   Fn: TThreadProc;
 begin
   { Local free decrements immediately. }
@@ -376,7 +376,7 @@ end;
 { ------------------------------------------------------------------ }
 procedure RegistryWorker(Arg: Pointer);
 var
-  I: Integer;
+  I: Int;
   Ptrs: array[0..255] of Pointer;
 begin
   { >2 arenas' worth of traffic on a fresh thread, all freed locally. }
@@ -388,9 +388,9 @@ end;
 
 function Test_Registry_WorkerExitReclaim: string;
 var
-  R0, R1, A1: Integer;
+  R0, R1, A1: Int;
   H: Int64;
-  Rc, RcJoin: Integer;
+  Rc, RcJoin: Int;
   Fn: TThreadProc;
 begin
   { Normalise: reclaim any abandoned arenas earlier tests left behind,
@@ -422,7 +422,7 @@ end;
 { ------------------------------------------------------------------ }
 procedure AbandonWorker(Arg: Pointer);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 63 do
     GAbBlocks[I] := _BlaiseGetMem(256);
@@ -431,10 +431,10 @@ end;
 
 function Test_Abandoned_AdoptAndReclaim: string;
 var
-  R0, RAbandoned, AAbandoned, RAfter, AAfter, Reclaimed: Integer;
-  I: Integer;
+  R0, RAbandoned, AAbandoned, RAfter, AAfter, Reclaimed: Int;
+  I: Int;
   H: Int64;
-  Rc, RcJoin: Integer;
+  Rc, RcJoin: Int;
   Fn: TThreadProc;
 begin
   _MemReclaimAbandoned();
@@ -476,7 +476,7 @@ end;
 { ------------------------------------------------------------------ }
 function Test_Stress_WorkerChurn: string;
 var
-  R0, R1, A1: Integer;
+  R0, R1, A1: Int;
   Bad: Int64;
 begin
   _MemReclaimAbandoned();

@@ -172,7 +172,7 @@ end;
 
 function TProcTypesTests.FindTypeDecl(AProg: TProgram; const AName: string): TTypeDecl;
 var
-  I: Integer;
+  I: Int;
   TD: TTypeDecl;
 begin
   Result := nil;

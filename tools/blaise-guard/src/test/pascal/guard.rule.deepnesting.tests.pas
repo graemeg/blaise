@@ -36,7 +36,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-1003';
 
-function RunDN(const ASource: string; AMaxDepth: Integer): TReport;
+function RunDN(const ASource: string; AMaxDepth: Int): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;

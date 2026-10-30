@@ -345,7 +345,7 @@ end;
 procedure TE2EIMapTests.TestRun_IMap_TDictionary_AddAndContainsKey;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcDictAddContains, Output, RCode));
@@ -359,7 +359,7 @@ end;
 procedure TE2EIMapTests.TestRun_IMap_TDictionary_TryGetValue;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcDictTryGet, Output, RCode));
@@ -372,7 +372,7 @@ end;
 procedure TE2EIMapTests.TestRun_IMap_TDictionary_Remove;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcDictRemove, Output, RCode));
@@ -385,7 +385,7 @@ end;
 procedure TE2EIMapTests.TestRun_IMap_TOrderedDictionary_AddAndContainsKey;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcOrdDictAddContains, Output, RCode));
@@ -398,7 +398,7 @@ end;
 procedure TE2EIMapTests.TestRun_IMap_TOrderedDictionary_TryGetValue;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcOrdDictTryGet, Output, RCode));
@@ -411,7 +411,7 @@ end;
 procedure TE2EIMapTests.TestRun_IMap_SwapImplementation_SameCallSite;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcSwapImpl, Output, RCode));
@@ -462,7 +462,7 @@ const
     ''';
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+link+run',

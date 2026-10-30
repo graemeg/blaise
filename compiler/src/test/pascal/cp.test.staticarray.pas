@@ -961,7 +961,7 @@ end;
 procedure TStaticArrayTests.TestSemantic_MultiDim_TypeIndexes_Bounds;
 var P: TProgram;
 
-  procedure CheckDecl(AIdx, ALo, AHi, AInnerLo, AInnerHi: Integer;
+  procedure CheckDecl(AIdx, ALo, AHi, AInnerLo, AInnerHi: Int;
                       const AWhat: string);
   var Outer, Inner: TStaticArrayTypeDesc;
   begin
@@ -1044,7 +1044,7 @@ end;
 procedure TStaticArrayTests.TestSemantic_SmallIntTypeIndex_Bounds;
 var P: TProgram; SAT: TStaticArrayTypeDesc;
 
-  procedure CheckDecl(AIdx: Integer; ALow, AHigh: Integer; const AWhat: string);
+  procedure CheckDecl(AIdx: Int; ALow, AHigh: Int; const AWhat: string);
   begin
     SAT := TStaticArrayTypeDesc(TVarDecl(P.Block.Decls.Items[AIdx]).ResolvedType);
     AssertEquals(AWhat + ' low', ALow, SAT.LowBound);

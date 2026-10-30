@@ -572,7 +572,7 @@ type
   public
     Table: TSymbolTable;
     UnitName: string;
-    Mismatches: Integer;
+    Mismatches: Int;
   protected
     procedure Execute; override;
   end;
@@ -580,7 +580,7 @@ type
 procedure TViewWorker.Execute;
 var
   V: TSymbolTableView;
-  I: Integer;
+  I: Int;
 begin
   V := Self.Table.EnterThreadView();
   try
@@ -599,7 +599,7 @@ procedure TSymbolTableTests.TestThreadView_ConcurrentWorkersEachSeeTheirOwnUnit;
 var
   ST: TSymbolTable;
   W: array[0..3] of TViewWorker;
-  I, Total: Integer;
+  I, Total: Int;
 begin
   { The incremental driver runs one worker per unit against ONE table.  With
     DefineOwningUnit a plain shared field, a worker read back another worker's

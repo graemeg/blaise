@@ -701,7 +701,7 @@ end;
 procedure TE2EGenericsTests.TestRun_GenericImport_PrivateMethodIsRejected;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Ok:     Boolean;
 begin
   { A `private` method on a generic was callable from any importing unit,
@@ -1187,7 +1187,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile + run', CompileAndRunWithUnit('gover', UnitSrc, Src,

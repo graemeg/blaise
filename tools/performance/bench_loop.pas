@@ -11,7 +11,7 @@
 program BenchLoop;
 
 var
-  i, j: Integer;
+  i, j: Int;
   acc: Int64;
 begin
   acc := 0;

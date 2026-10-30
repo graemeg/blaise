@@ -35,11 +35,11 @@ uses
 type
   TConstArgTests = class(TTestCase)
   private
-    function TargetOf(AIdx: Integer): string;
+    function TargetOf(AIdx: Int): string;
     { The assembly of one emitted function (label to its return) on target
       0 (x86-64) or 1 (arm64), so ARC assertions are not polluted by other
       functions' codegen. }
-    function FuncRegion(const ASrc: string; ATargetIdx: Integer;
+    function FuncRegion(const ASrc: string; ATargetIdx: Int;
       const AName: string): string;
   published
     procedure TestConstArg_ParamForward_NoArcOps;
@@ -55,7 +55,7 @@ type
 
 implementation
 
-function TConstArgTests.TargetOf(AIdx: Integer): string;
+function TConstArgTests.TargetOf(AIdx: Int): string;
 begin
   if AIdx = 0 then
     Result := TargetX86_64
@@ -63,11 +63,11 @@ begin
     Result := TargetArm64;
 end;
 
-function TConstArgTests.FuncRegion(const ASrc: string; ATargetIdx: Integer;
+function TConstArgTests.FuncRegion(const ASrc: string; ATargetIdx: Int;
   const AName: string): string;
 var
   AsmText: string;
-  StartP, EndP: Integer;
+  StartP, EndP: Int;
 begin
   AsmText := GenAsm(ASrc, TargetOf(ATargetIdx));
   { the label at the start of a line: 'Caller:' (ELF) or '_Caller:' (Mach-O) }
@@ -101,7 +101,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   { Forwarding a const param to a const param: borrowed all the way —
     the Caller body must contain no string ARC ops at all. }
@@ -137,8 +137,8 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
-  RelCount, I: Integer;
+  T: Int;
+  RelCount, I: Int;
 begin
   { L := Mk() consumes the owned return (no AddRef) but still releases L's
     previous value; Sink(L) borrows L (no pin).  Releases in Caller:
@@ -177,7 +177,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   for T := 0 to 1 do
   begin
@@ -206,7 +206,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   { A global can be reassigned by the callee (through its own name), which
     would release the buffer the borrowed argument points at — must pin. }
@@ -239,7 +239,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   { Mk() hands over a +1 temp; the post-call Release consumes it (this
     used to leak — the pin pair netted to zero and nobody released). }
@@ -272,7 +272,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   { _StringConcat returns an rc=0 transient: the AddRef/Release pair both
     protects it during the call and frees it afterwards. }
@@ -305,7 +305,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   { B aliases L itself: the callee's write to B releases L's buffer while
     A still borrows it — A must be pinned (variable shapes always pin). }
@@ -340,7 +340,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   { @L escapes: a callee could release L's buffer through the pointer
     while the argument borrows it — address-taken locals must pin. }
@@ -377,7 +377,7 @@ const
       ''';
 var
   Region: string;
-  T: Integer;
+  T: Int;
 begin
   { L is captured by Nested, which can reassign it — a callee reachable
     from Sink could do the same through the capture; must pin. }

@@ -464,7 +464,7 @@ const
 
   function LoadBetween(const AAsm, ACall, AMethod, ALoad: string): Boolean;
   var
-    P, Q: Integer;
+    P, Q: Int;
   begin
     P := Pos(ACall, AAsm);
     Q := Pos(AMethod, AAsm);

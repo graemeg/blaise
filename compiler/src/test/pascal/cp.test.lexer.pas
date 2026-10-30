@@ -656,7 +656,7 @@ end;
 procedure TLexerTests.TestSeq_VarDecl;
 var
   t: array[0..3] of TToken;
-  i: Integer;
+  i: Int;
 begin
   SetLexer('x : Integer');
   for i := 0 to 3 do
@@ -672,7 +672,7 @@ end;
 procedure TLexerTests.TestSeq_Assignment;
 var
   t: array[0..3] of TToken;
-  i: Integer;
+  i: Int;
 begin
   SetLexer('x := 42');
   for i := 0 to 3 do
@@ -687,7 +687,7 @@ end;
 procedure TLexerTests.TestSeq_ProcCall;
 var
   t: array[0..4] of TToken;
-  i: Integer;
+  i: Int;
 begin
   SetLexer('WriteLn(''hi'')');
   for i := 0 to 4 do

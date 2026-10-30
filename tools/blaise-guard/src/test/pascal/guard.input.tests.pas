@@ -162,7 +162,7 @@ var
   L: TList<string>;
 begin
   L := TDirectoryScanSource.Create(FRoot + '/src').Collect();
-  AssertEquals('count', 3, Integer(L.Count));
+  AssertEquals('count', 3, Int32(L.Count));
   AssertEquals('0', FRoot + '/src/a.pas', L[0]);
   AssertEquals('1', FRoot + '/src/b.pas', L[1]);
   AssertEquals('2', FRoot + '/src/sub/c.pas', L[2]);
@@ -180,7 +180,7 @@ begin
   finally
     SetCurrentDir(Saved);
   end;
-  AssertEquals('count', 3, Integer(L.Count));
+  AssertEquals('count', 3, Int32(L.Count));
   AssertEquals('0', './a.pas', L[0]);
 end;
 

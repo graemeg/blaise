@@ -846,7 +846,7 @@ const
 function AngleBracketSymbol(const AAsm: string): Boolean;
 var
   Lines: TStringList;
-  I: Integer;
+  I: Int;
 begin
   { True when 'TPair<' appears in a line of code or a symbol directive.  The
     class-name string the typeinfo carries keeps its source spelling, so a
@@ -875,7 +875,7 @@ const
     'vtable_TPair_Integer_Integer');
 var
   X86, A64: string;
-  I: Integer;
+  I: Int;
 begin
   { A generic class declared in a unit and instantiated by the program: the
     instance's method bodies, field-cleanup function, typeinfo and vtable
@@ -907,9 +907,9 @@ begin
   AssertTrue('arm64: no raw angle-bracket symbol', not AngleBracketSymbol(A64));
 end;
 
-function CountAsmOccurrences(const AHay, ANeedle: string): Integer;
+function CountAsmOccurrences(const AHay, ANeedle: string): Int;
 var
-  P: Integer;
+  P: Int;
   Rest: string;
 begin
   Result := 0;
@@ -1059,7 +1059,7 @@ const
     ''';
 var
   X86, A64: string;
-  I: Integer;
+  I: Int;
   Syms: array[0..6] of string;
 begin
   Syms[0] := 'typeinfo_TTestPlat';

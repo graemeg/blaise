@@ -40,10 +40,10 @@ type
     FRTLUnitPath: string;
     FStdlibUnitPath: string;
     FScratch:     string;
-    FCounter:     Integer;
+    FCounter:     Int;
     function  RunProc(const AExe: string; const AArgs: array of string;
-                      out AStdout: string): Integer;
-    function  RunProcNoArgs(const AExe: string; out AStdout: string): Integer;
+                      out AStdout: string): Int;
+    function  RunProcNoArgs(const AExe: string; out AStdout: string): Int;
     { Compile ASrc for the NATIVE backend by invoking the blaise compiler
       binary's own CLI, instead of driving TCodeGenNative + external cc in
       process.  The native driver defaults BOTH --assembler and --linker to
@@ -60,27 +60,27 @@ type
     function  CompileAndRunNativeCLI(const ASrc: string; ADebugMode: Boolean;
                           const AExtraUnitPath: string;
                           out AStdout: string;
-                          out AExitCode: Integer): Boolean;
+                          out AExitCode: Int): Boolean;
     { Compile-only half of CompileAndRunNativeCLI: returns the compiler's exit
       code, the binary path in ABinFile and its diagnostics in AToolOut. }
     function  CompileNativeCLI(const ASrc: string; ADebugMode: Boolean;
                           const AExtraUnitPath: string;
                           out ABinFile: string;
-                          out AToolOut: string): Integer;
+                          out AToolOut: string): Int;
     { Link an assembled program (AAsmFile) into ABinFile against the RTL.  The
       RTL is built from source by scripts/build-rtl-objects.sh (no blaise_rtl.a
       archive); --exclude-defined-by drops the RTL objects the whole-program
       assembly already inlines, so the loose objects do not double-define.
       Returns the cc exit code; AStdout carries any tool output. }
     function  LinkWithRTL(const AAsmFile, ABinFile: string;
-                          out AStdout: string): Integer;
+                          out AStdout: string): Int;
     { As LinkWithRTL but appends extra -l libraries (e.g. 'ssl','crypto') so an
       RTL program that binds an external library links via the external toolchain
       path.  The internal linker cannot resolve external libraries; this e2e path
       always links with cc, which can. }
     function  LinkWithRTLLibs(const AAsmFile, ABinFile: string;
                           const AExtraLibs: array of string;
-                          out AStdout: string): Integer;
+                          out AStdout: string): Int;
   protected
     function  ProjectRoot: string;
     function  ToolchainAvailable(): Boolean;
@@ -94,58 +94,58 @@ type
     procedure SetUp; override;
     function  CompileAndRun(const ASrc: string;
                             out AStdout: string;
-                            out AExitCode: Integer): Boolean; overload;
+                            out AExitCode: Int): Boolean; overload;
     function  CompileAndRun(const ASrc: string;
                             out AStdout: string;
-                            out AExitCode: Integer;
+                            out AExitCode: Int;
                             const AExtraArgs: array of string): Boolean; overload;
     { Same as CompileAndRun; kept for the callers that name the backend. }
     function  CompileAndRunNative(const ASrc: string;
                             out AStdout: string;
-                            out AExitCode: Integer): Boolean;
+                            out AExitCode: Int): Boolean;
     { Compile and run ASrc on the chosen backend through the compiler's own
       CLI.  CompileAndRun and CompileAndRunNative both delegate here. }
     function  CompileAndRunOn(ABackend: TBackend; const ASrc: string;
                             out AStdout: string;
-                            out AExitCode: Integer): Boolean;
+                            out AExitCode: Int): Boolean;
     { As CompileAndRunOn; AExtraLibs is accepted for the callers that name
       libraries, which the native compiler links itself from the program's
       external declarations. }
     function  CompileAndRunOnLibs(ABackend: TBackend; const ASrc: string;
                             const AExtraLibs: array of string;
                             out AStdout: string;
-                            out AExitCode: Integer): Boolean;
+                            out AExitCode: Int): Boolean;
     { Run ASrc on every backend in AllBackends (native only) and assert each
       produces AExpectedOut / AExpectedCode. }
     procedure AssertRunsOnAll(const ASrc, AExpectedOut: string;
-                            AExpectedCode: Integer);
+                            AExpectedCode: Int);
     { As AssertRunsOnAll but links with extra -l libraries.  For FFI tests
       whose external symbols live in a real system library (e.g. libm's
       sinf) -- the plain harness link deliberately carries no -lm. }
     procedure AssertRunsOnAllLibs(const ASrc: string;
                             const ALibs: array of string;
                             const AExpectedOut: string;
-                            AExpectedCode: Integer);
+                            AExpectedCode: Int);
     { Run ASrc on a specific set of backends only.  Use when a test should
       exercise fewer than AllBackends (e.g. a feature not yet ported). }
     procedure AssertRunsOn(ABackends: TBackends; const ASrc, AExpectedOut: string;
-                            AExpectedCode: Integer);
+                            AExpectedCode: Int);
     { RTL/stdlib equivalents of AssertRunsOn*: compile+run ASrc against the RTL
       and stdlib (multi-unit, TUnitLoader) on every backend in the set. }
     procedure AssertRTLRunsOnAll(const ASrc, AExpectedOut: string;
-                            AExpectedCode: Integer);
+                            AExpectedCode: Int);
     procedure AssertRTLRunsOn(ABackends: TBackends; const ASrc, AExpectedOut: string;
-                            AExpectedCode: Integer);
+                            AExpectedCode: Int);
     procedure AssertRTLRunsOnOne(ABackend: TBackend; const AName, ASrc,
-                            AExpectedOut: string; AExpectedCode: Integer);
+                            AExpectedOut: string; AExpectedCode: Int);
     { Convenience: RTL/stdlib compile+run on a specific backend (debug off). }
     function  CompileAndRunWithRTLOn(ABackend: TBackend; const ASrc: string;
                             out AStdout: string;
-                            out AExitCode: Integer): Boolean;
+                            out AExitCode: Int): Boolean;
     { Per-backend worker used by AssertRunsOn (separate method because Blaise
       has no nested procedures). }
     procedure AssertRunsOnOne(ABackend: TBackend; const AName, ASrc,
-                            AExpectedOut: string; AExpectedCode: Integer);
+                            AExpectedOut: string; AExpectedCode: Int);
     { Assert ASrc runs with NO ARC leak under the --debug leak tracker, on
       every backend in AllBackends.  Complements RunUnderValgrind: valgrind
       catches UAF / invalid access but is BLIND to ARC refcount leaks (the
@@ -162,19 +162,19 @@ type
     function  RunUnderValgrindNative(const ASrc: string; out ALog: string): Boolean;
     function  CompileAndRunWithRTL(const ASrc: string;
                                    out AStdout: string;
-                                   out AExitCode: Integer): Boolean; overload;
+                                   out AExitCode: Int): Boolean; overload;
     function  CompileAndRunWithRTL(const ASrc: string;
                                    out AStdout: string;
-                                   out AExitCode: Integer;
+                                   out AExitCode: Int;
                                    ADebugMode: Boolean): Boolean; overload;
     function  CompileAndRunWithRTLDebug(const ASrc: string;
                                    out AStdout: string;
-                                   out AExitCode: Integer;
+                                   out AExitCode: Int;
                                    ADebugMode: Boolean): Boolean;
     function  CompileAndRunWithRTLDebugOn(ABackend: TBackend;
                                    const ASrc: string;
                                    out AStdout: string;
-                                   out AExitCode: Integer;
+                                   out AExitCode: Int;
                                    ADebugMode: Boolean): Boolean;
     { Compile a program that USES a user unit written to the scratch dir, so
       the unit (not the program) is the compilation unit.  Exercises the
@@ -182,17 +182,17 @@ type
       ASrc are full sources.  RTL + stdlib units are also on the search path. }
     function  CompileAndRunWithUnit(const AUnitName, AUnitSrc, ASrc: string;
                                    out AStdout: string;
-                                   out AExitCode: Integer): Boolean;
+                                   out AExitCode: Int): Boolean;
     { Backend-parameterised multi-unit compile+run: the user unit is written
       to the scratch dir, which goes on the compiler's --unit-path. }
     function  CompileAndRunWithUnitOn(ABackend: TBackend;
                                    const AUnitName, AUnitSrc, ASrc: string;
                                    out AStdout: string;
-                                   out AExitCode: Integer): Boolean;
+                                   out AExitCode: Int): Boolean;
     { Native convenience over the multi-unit path. }
     function  CompileAndRunWithUnitNative(const AUnitName, AUnitSrc, ASrc: string;
                                    out AStdout: string;
-                                   out AExitCode: Integer): Boolean;
+                                   out AExitCode: Int): Boolean;
     { Two-written-units compile+run.  Writes both units to the scratch
       dir (filename derived from each `unit <name>;` header) so the program's
       `uses` clause resolves them, then lowers + links + runs.  Needed for
@@ -201,7 +201,7 @@ type
       slots) so the stage-1 native ABI does not overflow. }
     function  CompileAndRunWithUnits(const AUnit1Src, AUnit2Src, ASrc: string;
                                      out AStdout: string;
-                                     out AExitCode: Integer): Boolean;
+                                     out AExitCode: Int): Boolean;
   end;
 
 implementation
@@ -218,7 +218,7 @@ var
     every compile in the process gets a path no earlier compile ever used,
     which sidesteps the race entirely rather than depending on exactly how
     fast the kernel retires the previous inode. }
-  GNativeCLICounter: Integer = 0;
+  GNativeCLICounter: Int32 = 0;
 
 { A [Threaded] suite reports through its subprocess's --verbose output, and
   the parent keeps only the first line of a failure message: a compiler error
@@ -236,7 +236,7 @@ end;
 function TE2ETestCase.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then begin Result := IncludeTrailingPathDelimiter(Result); Exit end;
@@ -261,7 +261,7 @@ const
   Candidates: array[0..1] of string = ('/opt/homebrew/opt/openssl/lib',
     '/usr/local/opt/openssl/lib');
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   if HostTarget().OS <> osMacOS then Exit;
@@ -304,10 +304,10 @@ end;
 
 function TE2ETestCase.RunProc(const AExe: string;
                               const AArgs: array of string;
-                              out AStdout: string): Integer;
+                              out AStdout: string): Int;
 var
   Proc:  TProcess;
-  I:     Integer;
+  I:     Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -332,11 +332,11 @@ function TE2ETestCase.CompileNativeCLI(const ASrc: string;
                                        ADebugMode: Boolean;
                                        const AExtraUnitPath: string;
                                        out ABinFile: string;
-                                       out AToolOut: string): Integer;
+                                       out AToolOut: string): Int;
 var
   SrcFile, BinFile, ToolOut, Chunk: string;
   Proc: TProcess;
-  Rc: Integer;
+  Rc: Int;
 begin
   Inc(GNativeCLICounter);
   SrcFile := FScratch + '/n' + IntToStr(GNativeCLICounter) + '.pas';
@@ -383,10 +383,10 @@ function TE2ETestCase.CompileAndRunNativeCLI(const ASrc: string;
                                              ADebugMode: Boolean;
                                              const AExtraUnitPath: string;
                                              out AStdout: string;
-                                             out AExitCode: Integer): Boolean;
+                                             out AExitCode: Int): Boolean;
 var
   BinFile, ToolOut: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   Result := False;
   Rc := Self.CompileNativeCLI(ASrc, ADebugMode, AExtraUnitPath, BinFile, ToolOut);
@@ -396,7 +396,7 @@ begin
 end;
 
 function TE2ETestCase.LinkWithRTL(const AAsmFile, ABinFile: string;
-                                 out AStdout: string): Integer;
+                                 out AStdout: string): Int;
 var
   NoLibs: array[0..0] of string;
 begin
@@ -407,12 +407,12 @@ end;
 
 function TE2ETestCase.LinkWithRTLLibs(const AAsmFile, ABinFile: string;
                                  const AExtraLibs: array of string;
-                                 out AStdout: string): Integer;
+                                 out AStdout: string): Int;
 var
   ProgObj, ObjDir, Compiler, ScriptOut: string;
   Objs: TStringList;
   Proc: TProcess;
-  I: Integer;
+  I: Int;
 begin
   { 1. Assemble the program to an object so build-rtl-objects.sh can see which
        RTL symbols it already defines (it inlines the RTL units it uses). }
@@ -484,7 +484,7 @@ end;
 
 
 function TE2ETestCase.RunProcNoArgs(const AExe: string;
-                                    out AStdout: string): Integer;
+                                    out AStdout: string): Int;
 const
   { Wall-clock budget for one compiled e2e program.  Generous: the slowest
     legitimate program (the 10k-fiber scheduler smoke test) runs in ~2 s. }
@@ -527,7 +527,7 @@ end;
 
 function TE2ETestCase.CompileAndRunOn(ABackend: TBackend; const ASrc: string;
                                      out AStdout: string;
-                                     out AExitCode: Integer): Boolean;
+                                     out AExitCode: Int): Boolean;
 var
   NoLibs: array[0..0] of string;
 begin
@@ -538,7 +538,7 @@ end;
 function TE2ETestCase.CompileAndRunOnLibs(ABackend: TBackend; const ASrc: string;
                                      const AExtraLibs: array of string;
                                      out AStdout: string;
-                                     out AExitCode: Integer): Boolean;
+                                     out AExitCode: Int): Boolean;
 begin
   { Single choke point for a plain compile+run.  The compiler's own CLI does
     front-end, codegen, assembly, RTL and link in one subprocess (see
@@ -549,14 +549,14 @@ end;
 
 function TE2ETestCase.CompileAndRun(const ASrc: string;
                                     out AStdout: string;
-                                    out AExitCode: Integer): Boolean;
+                                    out AExitCode: Int): Boolean;
 begin
   Result := Self.CompileAndRunOn(beNative, ASrc, AStdout, AExitCode)
 end;
 
 function TE2ETestCase.CompileAndRunNative(const ASrc: string;
                                           out AStdout: string;
-                                          out AExitCode: Integer): Boolean;
+                                          out AExitCode: Int): Boolean;
 begin
   Result := Self.CompileAndRunOn(beNative, ASrc, AStdout, AExitCode)
 end;
@@ -564,10 +564,10 @@ end;
 { Run ASrc on one backend and assert its stdout/exit match the expected
   values, tagging the failure message with the backend name. }
 procedure TE2ETestCase.AssertRunsOnOne(ABackend: TBackend; const AName, ASrc,
-                                       AExpectedOut: string; AExpectedCode: Integer);
+                                       AExpectedOut: string; AExpectedCode: Int);
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   OK:     Boolean;
 begin
   OK := Self.CompileAndRunOn(ABackend, ASrc, Output, RCode);
@@ -586,7 +586,7 @@ begin
 end;
 
 procedure TE2ETestCase.AssertRunsOnAll(const ASrc, AExpectedOut: string;
-                                       AExpectedCode: Integer);
+                                       AExpectedCode: Int);
 begin
   Self.AssertRunsOn(AllBackends, ASrc, AExpectedOut, AExpectedCode)
 end;
@@ -594,12 +594,12 @@ end;
 procedure TE2ETestCase.AssertRunsOnAllLibs(const ASrc: string;
                                        const ALibs: array of string;
                                        const AExpectedOut: string;
-                                       AExpectedCode: Integer);
+                                       AExpectedCode: Int);
 var
   BE: TBackend;
   Backends: TBackends;
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   OK:     Boolean;
 begin
   Backends := AllBackends;
@@ -619,7 +619,7 @@ begin
 end;
 
 procedure TE2ETestCase.AssertRunsOn(ABackends: TBackends; const ASrc, AExpectedOut: string;
-                                    AExpectedCode: Integer);
+                                    AExpectedCode: Int);
 var
   BE: TBackend;
 begin
@@ -635,12 +635,12 @@ end;
 
 function TE2ETestCase.CompileAndRun(const ASrc: string;
                                     out AStdout: string;
-                                    out AExitCode: Integer;
+                                    out AExitCode: Int;
                                     const AExtraArgs: array of string): Boolean;
 var
   BinFile:  string;
   ToolOut:  string;
-  Rc:       Integer;
+  Rc:       Int;
 begin
   { As CompileAndRun, running the binary with AExtraArgs. }
   Result := False;
@@ -654,7 +654,7 @@ procedure TE2ETestCase.AssertLeakFreeOnAll(const ASrc: string;
   const AExpectSubstr: string);
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
   Ok: Boolean;
   BE: TBackend;
   Tag: string;
@@ -678,7 +678,7 @@ function TE2ETestCase.RunUnderValgrind(const ASrc: string; out ALog: string): Bo
 var
   BinFile:  string;
   ToolOut:  string;
-  Rc:       Integer;
+  Rc:       Int;
 begin
   Result := False;
   ALog   := '';
@@ -701,7 +701,7 @@ var
   AsmFile:  string;
   BinFile:  string;
   ToolOut:  string;
-  Rc:       Integer;
+  Rc:       Int;
 begin
   Result := False;
   ALog   := '';
@@ -738,7 +738,7 @@ end;
 
 function TE2ETestCase.CompileAndRunWithRTL(const ASrc: string;
                                            out AStdout: string;
-                                           out AExitCode: Integer): Boolean;
+                                           out AExitCode: Int): Boolean;
 begin
   Result := Self.CompileAndRunWithRTLDebugOn(beNative, ASrc, AStdout, AExitCode,
                                              False)
@@ -746,7 +746,7 @@ end;
 
 function TE2ETestCase.CompileAndRunWithRTL(const ASrc: string;
                                            out AStdout: string;
-                                           out AExitCode: Integer;
+                                           out AExitCode: Int;
                                            ADebugMode: Boolean): Boolean;
 begin
   Result := CompileAndRunWithRTLDebug(ASrc, AStdout, AExitCode, ADebugMode);
@@ -754,7 +754,7 @@ end;
 
 function TE2ETestCase.CompileAndRunWithRTLDebug(const ASrc: string;
                                            out AStdout: string;
-                                           out AExitCode: Integer;
+                                           out AExitCode: Int;
                                            ADebugMode: Boolean): Boolean;
 begin
   Result := Self.CompileAndRunWithRTLDebugOn(beNative, ASrc, AStdout, AExitCode,
@@ -764,21 +764,21 @@ end;
 function TE2ETestCase.CompileAndRunWithRTLOn(ABackend: TBackend;
                                            const ASrc: string;
                                            out AStdout: string;
-                                           out AExitCode: Integer): Boolean;
+                                           out AExitCode: Int): Boolean;
 begin
   Result := Self.CompileAndRunWithRTLDebugOn(ABackend, ASrc, AStdout, AExitCode,
                                              False)
 end;
 
 procedure TE2ETestCase.AssertRTLRunsOnAll(const ASrc, AExpectedOut: string;
-                                          AExpectedCode: Integer);
+                                          AExpectedCode: Int);
 begin
   Self.AssertRTLRunsOn(AllBackends, ASrc, AExpectedOut, AExpectedCode)
 end;
 
 procedure TE2ETestCase.AssertRTLRunsOn(ABackends: TBackends;
                                        const ASrc, AExpectedOut: string;
-                                       AExpectedCode: Integer);
+                                       AExpectedCode: Int);
 var
   BE: TBackend;
 begin
@@ -795,10 +795,10 @@ end;
 
 procedure TE2ETestCase.AssertRTLRunsOnOne(ABackend: TBackend;
                                           const AName, ASrc, AExpectedOut: string;
-                                          AExpectedCode: Integer);
+                                          AExpectedCode: Int);
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Ok:     Boolean;
 begin
   { Evaluate FIRST, then build the message: Output is an out-param, so it is
@@ -818,7 +818,7 @@ end;
 function TE2ETestCase.CompileAndRunWithRTLDebugOn(ABackend: TBackend;
                                          const ASrc: string;
                                          out AStdout: string;
-                                         out AExitCode: Integer;
+                                         out AExitCode: Int;
                                          ADebugMode: Boolean): Boolean;
 begin
   { The CLI's --unit-path RTL/stdlib pair gives the compiler's own unit
@@ -829,7 +829,7 @@ end;
 
 function TE2ETestCase.CompileAndRunWithUnit(const AUnitName, AUnitSrc, ASrc: string;
                                             out AStdout: string;
-                                            out AExitCode: Integer): Boolean;
+                                            out AExitCode: Int): Boolean;
 begin
   Result := Self.CompileAndRunWithUnitOn(beNative, AUnitName, AUnitSrc, ASrc,
                                          AStdout, AExitCode)
@@ -837,7 +837,7 @@ end;
 
 function TE2ETestCase.CompileAndRunWithUnitNative(const AUnitName, AUnitSrc, ASrc: string;
                                             out AStdout: string;
-                                            out AExitCode: Integer): Boolean;
+                                            out AExitCode: Int): Boolean;
 begin
   Result := Self.CompileAndRunWithUnitOn(beNative, AUnitName, AUnitSrc, ASrc,
                                          AStdout, AExitCode)
@@ -846,7 +846,7 @@ end;
 function TE2ETestCase.CompileAndRunWithUnitOn(ABackend: TBackend;
                                             const AUnitName, AUnitSrc, ASrc: string;
                                             out AStdout: string;
-                                            out AExitCode: Integer): Boolean;
+                                            out AExitCode: Int): Boolean;
 begin
   { Write the user unit to the scratch dir, which goes on the compiler's
     --unit-path so the program's uses clause resolves it. }
@@ -861,7 +861,7 @@ end;
   substring is absent. }
 function UnitNameOf(const ASrc: string): string;
 var
-  P, Q: Integer;
+  P, Q: Int;
 begin
   P := Pos('unit ', ASrc);
   if P < 0 then begin Result := ''; Exit; end;
@@ -876,7 +876,7 @@ end;
 function TE2ETestCase.CompileAndRunWithUnits(const AUnit1Src, AUnit2Src,
                                              ASrc: string;
                                              out AStdout: string;
-                                             out AExitCode: Integer): Boolean;
+                                             out AExitCode: Int): Boolean;
 begin
   { Both units go beside the program, named from their own headers, so the
     compiler's loader finds them on the scratch path. }

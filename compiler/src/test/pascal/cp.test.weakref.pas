@@ -237,7 +237,7 @@ var
   TD:    TTypeDecl;
   Cls:   TClassTypeDef;
   FDecl: TFieldDecl;
-  I:     Integer;
+  I:     Int;
 begin
   Prog := ParseSrc(SrcWeakOnField);
   try

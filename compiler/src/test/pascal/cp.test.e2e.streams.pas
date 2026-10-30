@@ -576,7 +576,7 @@ const
     ''';
 
 procedure TE2EStreamsTests.TestRun_MemoryOutputStream_WriteAndReadBack;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcMemOutRoundTrip, Output, RCode));
@@ -585,7 +585,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_MemoryInputStream_ReadsBytesBack;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcMemInRoundTrip, Output, RCode));
@@ -595,7 +595,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_FileStream_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcFileRoundTrip, Output, RCode));
@@ -606,7 +606,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_VirtualDispatch_ThroughAbstractBase;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcVirtualDispatch, Output, RCode));
@@ -615,7 +615,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_ISeekable_Supports;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcSupportsISeekable, Output, RCode));
@@ -624,7 +624,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_BufferedFile_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcBufferedFileRoundTrip, Output, RCode));
@@ -636,7 +636,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_BufferedOutput_FlushOnClose;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcBufferedFlushOnClose, Output, RCode));
@@ -647,7 +647,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_FileOpen_MissingFile_Raises;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcOpenMissingRaises, Output, RCode));
@@ -656,7 +656,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_TextRoundTrip_WriteLineReadLine;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcTextRoundTrip, Output, RCode));
@@ -666,7 +666,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_TextReader_MixedLineEndings;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcTextMixedLineEndings, Output, RCode));
@@ -676,7 +676,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_TextReader_ReadAll;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcTextReadAll, Output, RCode));
@@ -686,7 +686,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_TBuffer_WriteThenRead;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcTBufferRoundTrip, Output, RCode));
@@ -699,7 +699,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_TBuffer_TransferTo_SplitsCorrectly;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcTBufferTransferTo, Output, RCode));
@@ -712,7 +712,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_TBuffer_IndexOf_FindsByte;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcTBufferIndexOf, Output, RCode));
@@ -722,7 +722,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_InterfaceDispatch_ViaSupports;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcInterfaceViaSupports, Output, RCode));
@@ -731,7 +731,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_InterfaceDispatch_AsFunctionParam;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcInterfaceAsParam, Output, RCode));
@@ -740,7 +740,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_InterfaceArg_AsExpr;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcInterfaceArgAsExpr, Output, RCode));
@@ -749,7 +749,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_CopyStream_MemoryToMemory;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCopyStreamMemMem, Output, RCode));
@@ -759,7 +759,7 @@ begin
 end;
 
 procedure TE2EStreamsTests.TestRun_CopyStream_FileToFile;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCopyStreamFileFile, Output, RCode));

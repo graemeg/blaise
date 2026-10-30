@@ -294,7 +294,7 @@ end;
   exists.  The global ARC releases are emitted only after the exit label. }
 function TNativeArcTests.MainExitRegion(const AAsm: string): string;
 var
-  StartP, EndP, MainP: Integer;
+  StartP, EndP, MainP: Int;
   Tail: string;
 begin
   MainP := Pos('main:', AAsm);
@@ -450,7 +450,7 @@ end;
 procedure TNativeArcTests.TestMain_DiscardedRecordCall_ReleasesElements;
 var
   Asm_, MainR: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   Asm_ := GenAsm(
     '''
@@ -704,7 +704,7 @@ end;
 procedure TNativeArcTests.TestMain_DiscardedInterfaceCall_ReleasesObj;
 var
   Asm_, MainR: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   Asm_ := GenAsm(
     '''
@@ -742,7 +742,7 @@ end;
 procedure TNativeArcTests.TestFunc_DynArrayValueParam_RetainedAndReleased;
 var
   Asm_, FnR: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   Asm_ := GenAsm(
     '''
@@ -776,7 +776,7 @@ end;
 procedure TNativeArcTests.TestMain_PropSetterConcatValue_DisposedAfterCall;
 var
   Asm_, Tail: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   Asm_ := GenAsm(
     '''
@@ -840,9 +840,9 @@ const
     end.
     ''';
 
-  function ReleasesIn(const AAsm, ALabel: string): Integer;
+  function ReleasesIn(const AAsm, ALabel: string): Int;
   var
-    P, E, Q: Integer;
+    P, E, Q: Int;
   begin
     { _ClassRelease calls between the routine's label and its first ret --
       only the two by-value parameters' own releases belong there }

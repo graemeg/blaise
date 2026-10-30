@@ -114,7 +114,7 @@ const
 function TRecordReturnTests.Callee(const ASrc, AName, ATarget: string): string;
 var
   AsmText, Lbl: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   { The callee's body, from its label to its first ret.  The programs below
     have an empty main, so the patterns cannot come from a caller. }
@@ -399,7 +399,7 @@ const
     ''';
 var
   A: string;
-  P: Integer;
+  P: Int;
 begin
   { the release must follow the call in the main body -- the callee's own
     code releases strings too, so the whole listing proves nothing }
@@ -466,7 +466,7 @@ const
     ''';
 var
   A: string;
-  P: Integer;
+  P: Int;
 begin
   AssertEquals('the indirect call takes a result pointer', '',
     AsmMissing(Src, #9'movq 16(%rsp), %rdi'#10#9'callq *%r10',

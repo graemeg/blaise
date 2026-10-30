@@ -146,7 +146,7 @@ end;
 
 function TOperatorTests.FindMethod(AProg: TProgram; const ATypeName, AMethodName: string): TMethodDecl;
 var
-  I, J:  Integer;
+  I, J:  Int;
   TD:    TTypeDecl;
   RD:    TRecordTypeDef;
   CD:    TClassTypeDef;
@@ -334,7 +334,7 @@ const
       ''';
 var
   Prog: TProgram;
-  I:    Integer;
+  I:    Int;
   MD:   TMethodDecl;
   Seen: Boolean;
 begin
@@ -380,7 +380,7 @@ var
   L:    TLexer;
   P:    TParser;
   U:    TUnit;
-  I:    Integer;
+  I:    Int;
   MD:   TMethodDecl;
   Seen: Boolean;
 begin
@@ -556,7 +556,7 @@ end;
 procedure TOperatorTests.TestSem_RecordAdd_LoweredCallSet;
 var
   Prog:  TProgram;
-  I:     Integer;
+  I:     Int;
   Asgn:  TAssignment;
   Call:  TMethodCallExpr;
   MD:    TMethodDecl;
@@ -654,7 +654,7 @@ const
       ''';
 var
   Prog: TProgram;
-  I:    Integer;
+  I:    Int;
   Stmt: TObject;
   Bin:  TBinaryExpr;
   Checked: Boolean;
@@ -707,7 +707,7 @@ const
       ''';
 var
   Prog:  TProgram;
-  I:     Integer;
+  I:     Int;
   Cond:  TASTExpr;
   Names: string;
 begin

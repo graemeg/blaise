@@ -350,7 +350,7 @@ type
       warm-rebuild .bif round-trip bug for unit-interface static arrays). }
     function RunUnitFiniDebug(const ABackend, AUnit1Src, AUnit2Src,
                               AProgSrc: string;
-                              out AOutput: string): Integer;
+                              out AOutput: string): Int;
   end;
 
 implementation
@@ -583,7 +583,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_NestedOwnedStringTransientArgs_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -707,7 +707,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_InterfaceThroughProcValue_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -789,7 +789,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_DiscardedResultOnNamedReceiver_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -802,7 +802,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ClosureReturningCalls_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -816,7 +816,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_DiscardedAggregateThroughProcValue_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -830,7 +830,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_OwnedClassTransientArgs_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -896,7 +896,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_ImplicitSelfProcFieldResult_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -910,7 +910,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_OwnedClassTested_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -924,7 +924,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ForInEnumerator_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -937,7 +937,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ForInEnumerator_NoLeak_Native;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -970,7 +970,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_GenericAllocSite_ReportsDefiningUnit_Native;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -1032,7 +1032,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode, P: Integer;
+  ExitCode, P: Int;
 begin
   { Both instances are monomorphised in the program, but their bodies (and
     the line numbers in the report) are the unit's source. }
@@ -1056,7 +1056,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_NoLeak_NoReport;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcNoLeak, Output, ExitCode, True));
@@ -1068,7 +1068,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ExceptionHandlerVar_NoLeakNoOverRelease;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -1083,7 +1083,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ConstructorWithArgs_NoDoubleAddRef;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcConstructorWithArgs, Output, ExitCode, True));
@@ -1095,7 +1095,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_LeakedObject_ReportedOnExit;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcOneLeak, Output, ExitCode, True));
@@ -1108,7 +1108,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_MultipleLeaks_AllReported;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcTwoLeaks, Output, ExitCode, True));
@@ -1122,7 +1122,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_CycleRetained_Reported;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcCycleLeak, Output, ExitCode, True));
@@ -1135,7 +1135,7 @@ end;
 procedure TE2ELeakCheckTests.TestRelease_NoReport_WhenDebugOff;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { Same leaking source but compiled without debug mode — no report expected. }
@@ -1147,7 +1147,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_LeakReport_IncludesUnitAndLine_Native;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -1162,7 +1162,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_StringLeak_Reported;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -1175,7 +1175,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_StringClean_NoReport;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -1425,7 +1425,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_ClassFieldFromCall_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1438,7 +1438,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_FuncReturnAssign_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1451,7 +1451,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_DiscardedClassReturn_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1464,7 +1464,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_CallResultClassFieldRead_NoUseAfterFree;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { The CORRECTNESS guard: the stored field value must survive the base
@@ -1482,7 +1482,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_TransientFieldInCallArg_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1494,7 +1494,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_TransientFieldInIfCond_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1506,7 +1506,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_TransientFieldInWhileCond_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { the loop runs 5 iterations; per-iteration flush releases each transient —
@@ -1521,7 +1521,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_DeepChainFieldRead_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1535,7 +1535,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_MultiHandlerVar_NoOverRelease;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1581,7 +1581,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_IntfCallResultArg_NoLeak_Native;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -1687,7 +1687,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_ReceiverFieldAccess_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -1700,7 +1700,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_StaticArrayOfInterface_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2100,7 +2100,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_StaticArrayOfClass_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2113,7 +2113,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_StaticArrayOfString_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2126,7 +2126,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_StaticArrayOfRecord_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2139,7 +2139,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_StaticArrayOfClass_ExceptionExit_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2152,7 +2152,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_StaticArrayManualFree_NoDoubleFree;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2165,7 +2165,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_RecordStaticArrayField_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2178,7 +2178,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_RecordStaticArrayField_ByValueParam_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2191,7 +2191,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ClassStaticArrayField_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2204,7 +2204,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ProgramLevelStaticArrayOfClass_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2217,7 +2217,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ProgramLevelStaticArrayOfString_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2230,7 +2230,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ProgramLevelStaticArrayOfInterface_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2243,7 +2243,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ProgramLevelStaticArrayOfRecord_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2256,7 +2256,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ProgramLevelStaticArrayManualFree_NoDoubleFree;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2269,7 +2269,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ProgramLevelStaticArray_ExceptionExit_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { A caught exception leaks its `Exception (rc=0)` object on BOTH backends
@@ -2426,7 +2426,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_StrTransientDispose_NoArenaGrowth_Native;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2439,7 +2439,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_BuiltinOwnedStrArg_NoLeak_Native;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2452,7 +2452,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ValueStrCallResultArg_NoLeak_Native;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2465,7 +2465,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_WriteLnCallArg_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -2649,7 +2649,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_BlockEnvPerIteration_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcBlockEnvLoop, Output, ExitCode, True));
@@ -2691,7 +2691,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_ClosureWeakSelfCycle_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcClosureWeakSelfCycle, Output, ExitCode, True));
@@ -2703,7 +2703,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ClosureSelfCycle_LeaksByDesign;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcClosureSelfCycle, Output, ExitCode, True));
@@ -2715,7 +2715,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_MethodPtrCoercion_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcMethodPtrCoercionClean, Output, ExitCode, True));
@@ -2727,7 +2727,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ClosureEnv_ReleasedExactlyOnce;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcClosureEnvOnce, Output, ExitCode, True));
@@ -2765,7 +2765,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcLinqLeak, Output, ExitCode, True));
@@ -2777,7 +2777,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ClosureArgBalance_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcClosureArgBalance, Output, ExitCode, True));
@@ -2789,7 +2789,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_ClosureCapturedString_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcClosureCapturedString, Output, ExitCode, True));
@@ -2805,7 +2805,7 @@ end;
   matching <name>.pas the unit loader expects. }
 function FiniUnitNameOf(const ASrc: string): string;
 var
-  P, Q: Integer;
+  P, Q: Int;
 begin
   P := Pos('unit ', ASrc);
   if P < 0 then begin Result := ''; Exit; end;
@@ -2840,10 +2840,10 @@ begin
 end;
 
 function FiniRunProc(const AExe: string; AArgs: TStringList;
-                     out AStdout: string): Integer;
+                     out AStdout: string): Int;
 var
   Proc:  TProcess;
-  I:     Integer;
+  I:     Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -2866,11 +2866,11 @@ begin
 end;
 
 function TE2ELeakCheckTests.RunUnitFiniDebug(const ABackend, AUnit1Src,
-  AUnit2Src, AProgSrc: string; out AOutput: string): Integer;
+  AUnit2Src, AProgSrc: string; out AOutput: string): Int;
 var
   Dir, ProgPas, BinPath, CompOut: string;
   Args: TStringList;
-  Rc: Integer;
+  Rc: Int;
   NoArgs: TStringList;
 begin
   Inc(FCounter);
@@ -3120,7 +3120,7 @@ const
 procedure TE2ELeakCheckTests.TestDebug_UnitGlobalStaticArrayOfString_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniArrayUnit, '',
@@ -3133,7 +3133,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_UnitGlobalScalarString_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniScalarUnit, '',
@@ -3147,7 +3147,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_UnitGlobalClass_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniClassUnit, '',
@@ -3163,7 +3163,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_UnitImplementationGlobal_NoLeak;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniImplUnit, '',
@@ -3176,7 +3176,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_TwoUnits_FiniReverseOrder;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniOrderUnitX,
@@ -3192,7 +3192,7 @@ end;
 procedure TE2ELeakCheckTests.TestDebug_FinalizationSection_RunsBeforeRelease;
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniFinalUnit, '',
@@ -3236,7 +3236,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run (native)',
@@ -4201,7 +4201,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4306,7 +4306,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4430,7 +4430,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4518,7 +4518,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4601,7 +4601,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4676,7 +4676,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4750,7 +4750,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4816,7 +4816,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4880,7 +4880,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4916,7 +4916,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',
@@ -4962,7 +4962,7 @@ const
     ''';
 var
   Output: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run',

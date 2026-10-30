@@ -114,7 +114,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_FromStr_RoundTrip_TwoDp;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -128,7 +128,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_FromStr_NegativeFraction;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -142,7 +142,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_FromStr_WholeNumber;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -156,7 +156,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_FromStr_LeadingZeroFraction;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -170,7 +170,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_FromStr_PreservesTrailingZeros;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Scale is retained for formatting; '4.0000' must NOT collapse to '4'. }
@@ -185,7 +185,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_FromStr_PlusSign;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -203,7 +203,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_Scale_TwoDp;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -217,7 +217,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Scale_WholeNumberIsZero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -235,7 +235,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_IsZero_True;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -249,7 +249,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_IsZero_FalseForSmallFraction;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -263,7 +263,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Sign_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -277,7 +277,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Sign_PositiveAndZero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -299,7 +299,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_FromInt;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -313,7 +313,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_FromInt64_Large;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -331,7 +331,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_ToPlainString_NoExponent;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -349,7 +349,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_Equals_DifferentScale_True;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -367,7 +367,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Compare_OrdersByValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -386,7 +386,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Compare_NegativeOrdering;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -404,7 +404,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Hash_ValueEqualHashesMatch;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Value-equal decimals must hash identically (safe as dictionary keys). }
@@ -423,7 +423,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Equals_ZeroScaleInsensitive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -445,7 +445,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_Add_SameScale;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -462,7 +462,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Add_MixedScale_ResultMaxScale;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Result scale is max of the two operand scales (the exact-arithmetic rule). }
@@ -480,7 +480,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Subtract_Basic;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -497,7 +497,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Subtract_ToNegative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -514,7 +514,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Negate;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -530,7 +530,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Abs_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -550,7 +550,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_Multiply_ScalesAdd;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Result scale = sum of operand scales: 2 + 2 = 4. }
@@ -568,7 +568,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Multiply_Squared;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -585,7 +585,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Multiply_NegativeTimesPositive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -602,7 +602,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_FromStr_LargeValue_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 20 nines: exceeds Int64, must inflate and round-trip exactly. }
@@ -619,7 +619,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Add_OverflowsInt64_Inflates;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 9e18 + 9e18 = 1.8e19 overflows Int64 and must inflate. }
@@ -638,7 +638,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Multiply_BigProduct;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -659,7 +659,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_Divide_ExactToScale;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -676,7 +676,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Divide_NonTerminating_HalfEven;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 1/3 never terminates — must round at the target scale, never throw. }
@@ -694,7 +694,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Divide_BankersRoundsToEven;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 2.5 -> 2 and 3.5 -> 4 under banker's rounding (ties to even). }
@@ -713,7 +713,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Divide_HalfUp;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -730,7 +730,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_RoundTo_HalfEven;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -746,7 +746,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_RoundTo_IncreaseScaleIsExact;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -762,7 +762,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_CustomStrategy_Truncates;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Inject a user IRoundingStrategy that always truncates: 2/3 @2 -> 0.66. }
@@ -789,7 +789,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Divide_ByZero_Raises;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Division by zero raises EDivByZero -> non-zero exit. }
@@ -806,7 +806,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Money_TaxThenRound;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 19.99 * 0.20 = 3.9980 exact; rounded to cents (banker's) = 4.00. }
@@ -830,7 +830,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EDecimalTests.TestRun_DecFromFloat_Safe;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Safe conversion takes the shortest decimal: 0.1 stays 0.1 (the Java trap fix). }
@@ -845,7 +845,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_DecFromFloatExact_ShowsBinaryError;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { The exact path exposes the binary tail — it must NOT equal a clean 0.1. }
@@ -864,7 +864,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_StripTrailingZeros_Fraction;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -878,7 +878,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_StripTrailingZeros_KeepsIntegerZeros;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 600 must stay 600 (never 6E+2) — integer-part zeros are not stripped. }
@@ -893,7 +893,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_ToInt64_TruncatesTowardZero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -910,7 +910,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Operators_Arithmetic;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Each operator matches the method it delegates to.  The self-assigning
@@ -940,7 +940,7 @@ begin
 end;
 
 procedure TE2EDecimalTests.TestRun_Operators_Comparisons;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Comparison is by value: 2.0 and 2.00 are equal. }

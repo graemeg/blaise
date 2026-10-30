@@ -63,9 +63,9 @@ begin
   P[1] := 66;
   P[2] := 67;
   P[3] := 0;
-  AssertEquals('written byte 0', 65, Integer(P[0]));
-  AssertEquals('written byte 1', 66, Integer(P[1]));
-  AssertEquals('written byte 2', 67, Integer(P[2]));
+  AssertEquals('written byte 0', 65, Int32(P[0]));
+  AssertEquals('written byte 1', 66, Int32(P[1]));
+  AssertEquals('written byte 2', 67, Int32(P[2]));
   _BlaiseFreeMem(Pointer(P));
   Result := '';
 end;
@@ -115,8 +115,8 @@ begin
   P[1] := 73;
   P := PChar(_BlaiseReallocMem(Pointer(P), 64));
   AssertNotNull('realloc result', Pointer(P));
-  AssertEquals('byte 0 preserved', 72, Integer(P[0]));
-  AssertEquals('byte 1 preserved', 73, Integer(P[1]));
+  AssertEquals('byte 0 preserved', 72, Int32(P[0]));
+  AssertEquals('byte 1 preserved', 73, Int32(P[1]));
   _BlaiseFreeMem(Pointer(P));
   Result := '';
 end;
@@ -158,7 +158,7 @@ begin
   P := PChar(_BlaiseGetMem(8));
   AssertNotNull('small alloc', Pointer(P));
   P[0] := 42;
-  AssertEquals('small alloc writable', 42, Integer(P[0]));
+  AssertEquals('small alloc writable', 42, Int32(P[0]));
   _BlaiseFreeMem(Pointer(P));
   Result := '';
 end;
@@ -169,15 +169,15 @@ end;
 function Test_Large_Alloc: string;
 var
   P: PChar;
-  Size: Integer;
+  Size: Int;
 begin
   Size := 1024 * 1024;
   P := PChar(_BlaiseGetMem(Size));
   AssertNotNull('large alloc', Pointer(P));
   P[0] := 1;
   P[Size - 1] := 2;
-  AssertEquals('large alloc first byte', 1, Integer(P[0]));
-  AssertEquals('large alloc last byte', 2, Integer(P[Size - 1]));
+  AssertEquals('large alloc first byte', 1, Int32(P[0]));
+  AssertEquals('large alloc last byte', 2, Int32(P[Size - 1]));
   _BlaiseFreeMem(Pointer(P));
   Result := '';
 end;
@@ -204,7 +204,7 @@ function Test_Many_Small_Allocs: string;
 const
   Count = 1000;
 var
-  I: Integer;
+  I: Int;
   P: Pointer;
 begin
   for I := 0 to Count - 1 do
@@ -261,13 +261,13 @@ begin
   P := _BlaiseGetMem(7);
   AssertNotNull('alloc for alignment test', P);
   Addr := UInt(P);
-  AssertEquals('8-byte aligned', 0, Integer(Addr and 7));
+  AssertEquals('8-byte aligned', 0, Int32(Addr and 7));
   _BlaiseFreeMem(P);
 
   P := _BlaiseGetMem(1);
   AssertNotNull('alloc for alignment test (1 byte)', P);
   Addr := UInt(P);
-  AssertEquals('8-byte aligned (1 byte)', 0, Integer(Addr and 7));
+  AssertEquals('8-byte aligned (1 byte)', 0, Int32(Addr and 7));
   _BlaiseFreeMem(P);
 
   Result := '';
@@ -276,9 +276,9 @@ end;
 { ------------------------------------------------------------------ }
 { Helper: fill N bytes of P with a known pattern based on Seed         }
 { ------------------------------------------------------------------ }
-procedure FillPattern(P: PChar; N: Integer; Seed: Integer);
+procedure FillPattern(P: PChar; N: Int; Seed: Int);
 var
-  I, V: Integer;
+  I, V: Int;
 begin
   for I := 0 to N - 1 do
   begin
@@ -290,13 +290,13 @@ end;
 { ------------------------------------------------------------------ }
 { Helper: check first N bytes of P match the pattern                   }
 { ------------------------------------------------------------------ }
-function CheckPattern(P: PChar; N: Integer; Seed: Integer): Integer;
+function CheckPattern(P: PChar; N: Int; Seed: Int): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := -1;
   for I := 0 to N - 1 do
-    if Integer(P[I]) <> ((I + Seed) and $FF) then
+    if Int32(P[I]) <> ((I + Seed) and $FF) then
     begin
       Result := I;
       Exit;
@@ -308,10 +308,10 @@ end;
 { ------------------------------------------------------------------ }
 function Test_SizeClass_Boundaries: string;
 var
-  Classes: array[0..7] of Integer;
-  I: Integer;
+  Classes: array[0..7] of Int32;
+  I: Int;
   P: Pointer;
-  Size: Integer;
+  Size: Int;
 begin
   Classes[0] := 16; Classes[1] := 32; Classes[2] := 64; Classes[3] := 128;
   Classes[4] := 256; Classes[5] := 512; Classes[6] := 1024; Classes[7] := 2048;
@@ -342,7 +342,7 @@ end;
 function Test_Realloc_SameClass: string;
 var
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(16));
   AssertNotNull('alloc 16', Pointer(P));
@@ -361,7 +361,7 @@ end;
 function Test_Realloc_Shrink: string;
 var
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(256));
   AssertNotNull('alloc 256', Pointer(P));
@@ -380,7 +380,7 @@ end;
 function Test_Realloc_Grow_Steps: string;
 var
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(16));
   AssertNotNull('alloc 16', Pointer(P));
@@ -412,7 +412,7 @@ end;
 function Test_Realloc_SmallToLarge: string;
 var
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(1024));
   AssertNotNull('alloc 1024', Pointer(P));
@@ -422,7 +422,7 @@ begin
   Bad := CheckPattern(P, 1024, 5);
   AssertEquals('small->large preserves first 1024 bytes', -1, Bad);
   P[8191] := 99;
-  AssertEquals('last byte writable', 99, Integer(P[8191]));
+  AssertEquals('last byte writable', 99, Int32(P[8191]));
   _BlaiseFreeMem(Pointer(P));
   Result := '';
 end;
@@ -433,7 +433,7 @@ end;
 function Test_Realloc_LargeToSmall: string;
 var
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(8192));
   AssertNotNull('alloc 8192', Pointer(P));
@@ -452,7 +452,7 @@ end;
 function Test_Realloc_Large_SamePage: string;
 var
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(3000));
   AssertNotNull('alloc 3000', Pointer(P));
@@ -471,7 +471,7 @@ end;
 function Test_Realloc_Large_GrowPages: string;
 var
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(4000));
   AssertNotNull('alloc 4000', Pointer(P));
@@ -481,7 +481,7 @@ begin
   Bad := CheckPattern(P, 4000, 17);
   AssertEquals('large grow-pages preserves bytes', -1, Bad);
   P[16383] := 123;
-  AssertEquals('last byte writable', 123, Integer(P[16383]));
+  AssertEquals('last byte writable', 123, Int32(P[16383]));
   _BlaiseFreeMem(Pointer(P));
   Result := '';
 end;
@@ -511,7 +511,7 @@ const
   Count = 64;
 var
   Blocks: array[0..63] of Pointer;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Count - 1 do
   begin
@@ -538,9 +538,9 @@ const
   Count = 200;
 var
   Blocks: array[0..199] of Pointer;
-  I, J, V: Integer;
+  I, J, V: Int;
   P: PChar;
-  Bad: Integer;
+  Bad: Int;
 begin
   for I := 0 to Count - 1 do
   begin
@@ -558,7 +558,7 @@ begin
   begin
     P := PChar(Blocks[I]);
     for J := 0 to 31 do
-      if Integer(P[J]) <> ((J + I) and $FF) then
+      if Int32(P[J]) <> ((J + I) and $FF) then
       begin
         Bad := I * 100 + J;
         Break;
@@ -579,7 +579,7 @@ const
   Count = 500;
 var
   Small, Large: Pointer;
-  I, Sz: Integer;
+  I, Sz: Int;
 begin
   for I := 0 to Count - 1 do
   begin
@@ -602,7 +602,7 @@ const
   Count = 200;
 var
   P: PChar;
-  I, Bad: Integer;
+  I, Bad: Int;
 begin
   P := PChar(_BlaiseGetMem(16));
   FillPattern(P, 16, 42);
@@ -622,8 +622,8 @@ end;
 { ------------------------------------------------------------------ }
 function Test_Alignment_All_Classes: string;
 var
-  Classes: array[0..7] of Integer;
-  I: Integer;
+  Classes: array[0..7] of Int32;
+  I: Int;
   P: Pointer;
   Addr: UInt;
 begin
@@ -635,12 +635,12 @@ begin
     AssertNotNull('class ' + IntToStr(Classes[I]), P);
     Addr := UInt(P);
     AssertEquals('class ' + IntToStr(Classes[I]) + ' aligned',
-                 0, Integer(Addr and 7));
+                 0, Int32(Addr and 7));
     _BlaiseFreeMem(P);
   end;
   P := _BlaiseGetMem(65536);
   AssertNotNull('large alloc', P);
-  AssertEquals('large aligned', 0, Integer(UInt(P) and 7));
+  AssertEquals('large aligned', 0, Int32(UInt(P) and 7));
   _BlaiseFreeMem(P);
   Result := '';
 end;
@@ -658,7 +658,7 @@ end;
 function Test_FlagsOffset_Invariant: string;
 var
   P: Pointer;
-  FlagsP: ^Integer;
+  FlagsP: ^Int32;
 begin
   P := _BlaiseGetMem(64);
   AssertNotNull('small alloc', P);
@@ -818,8 +818,8 @@ var
   RemoteHeadP: ^Pointer;
   OwnerTidP: ^Int64;
   NodeNextP: ^Pointer;
-  NodeClassP: ^Integer;
-  I: Integer;
+  NodeClassP: ^Int32;
+  I: Int;
   Found: Boolean;
 begin
   P := _BlaiseGetMem(Sz);
@@ -873,7 +873,7 @@ end;
 function Test_AtomicCASPtr_Success: string;
 var
   Slot: Pointer;
-  A, B: Integer;
+  A, B: Int;
   Ok: Boolean;
 begin
   Slot := @A;
@@ -886,7 +886,7 @@ end;
 function Test_AtomicCASPtr_Failure: string;
 var
   Slot: Pointer;
-  A, B, C: Integer;
+  A, B, C: Int;
   Ok: Boolean;
 begin
   Slot := @A;
@@ -899,7 +899,7 @@ end;
 function Test_AtomicCASPtr_NilTransitions: string;
 var
   Slot: Pointer;
-  A: Integer;
+  A: Int;
   Ok: Boolean;
 begin
   Slot := nil;
@@ -915,7 +915,7 @@ end;
 function Test_AtomicXchgPtr: string;
 var
   Slot: Pointer;
-  A, B: Integer;
+  A, B: Int;
   Old: Pointer;
 begin
   Slot := @A;

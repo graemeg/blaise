@@ -733,7 +733,7 @@ const
 var
   Prog: TProgram;
   M: TMethodDecl;
-  I, J: Integer;
+  I, J: Int;
 begin
   { inside a method the record FIELD R shadows the global R for a field
     access, exactly as for a bare identifier: R.N read and wrote the global }
@@ -1018,7 +1018,7 @@ begin
     Call := TExprCallStmt(PC.LoweredCall).Call;
     AssertTrue('of the builtin function call', Call is TFuncCallExpr);
     AssertEquals('name', 'Exec', TFuncCallExpr(Call).Name);
-    AssertEquals('argument', 1, Integer(TFuncCallExpr(Call).Args.Count));
+    AssertEquals('argument', 1, Int32(TFuncCallExpr(Call).Args.Count));
     AssertNotNull('analysed', Call.ResolvedType);
   finally
     Prog.Free();

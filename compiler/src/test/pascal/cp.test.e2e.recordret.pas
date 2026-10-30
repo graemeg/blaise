@@ -486,7 +486,7 @@ const
     ''';
 
 procedure TE2ERecordReturnTests.TestRun_RcInt1_OneByte_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcOneByte, Output, RCode));
@@ -495,7 +495,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcInt1_TwoByte_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTwoByte, Output, RCode));
@@ -504,7 +504,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcInt1_TwoSmallInt_NegativeValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTwoSmallIntNeg, Output, RCode));
@@ -516,7 +516,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcInt1_TwoInteger_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTwoInteger, Output, RCode));
@@ -525,7 +525,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcInt1_Int64_MaxValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInt64Max, Output, RCode));
@@ -534,7 +534,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcInt2_TwoInt64_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTwoInt64, Output, RCode));
@@ -543,7 +543,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcInt2_IntegerPlusInt64;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcMixIntInt64, Output, RCode));
@@ -552,7 +552,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcSSE1_Double_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcOneDouble, Output, RCode));
@@ -561,7 +561,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcSSE2_TwoDoubles_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTwoDouble, Output, RCode));
@@ -570,7 +570,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcIntSSE_Int64Double_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntSSE, Output, RCode));
@@ -579,7 +579,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcSSEInt_DoubleInt64_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSSEInt, Output, RCode));
@@ -647,7 +647,7 @@ begin
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcSSE1_Single_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcOneSingle, Output, RCode));
@@ -674,7 +674,7 @@ const
       WriteLn(R.A.X, ' ', R.A.Y, ' ', R.B)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -699,7 +699,7 @@ const
       WriteLn(R.B)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -722,7 +722,7 @@ const
       WriteLn(R.S)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2170,7 +2170,7 @@ const
     ''';
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   B:      TBackend;
 begin
   { Obj.ListField[I] where the element is a RECORD: semantic resolved the

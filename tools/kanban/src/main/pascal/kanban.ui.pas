@@ -19,29 +19,29 @@ type
   TKanbanUI = class
     FTerm: TTerminal;
     FBoard: TBoard;
-    FActiveCol: Integer;
-    FActiveRow: Integer;
+    FActiveCol: Int;
+    FActiveRow: Int;
     FViewMode: TViewMode;
-    FDetailScroll: Integer;
+    FDetailScroll: Int;
     FDetailTask: TTask;
     FInputBuf: string;
     FInputPrompt: string;
     FStatusMsg: string;
     FNeedsRedraw: Boolean;
-    FPollCounter: Integer;
+    FPollCounter: Int;
     procedure DrawBoard;
-    procedure DrawColumn(ColIndex: Integer; Row, Col, Width, Height: Integer);
+    procedure DrawColumn(ColIndex: Int; Row, Col, Width, Height: Int);
     procedure DrawStatusBar;
     procedure DrawInputBar;
     procedure DrawDetailView;
-    function ColumnTitle(ColIndex: Integer): string;
-    function ColumnStatus(ColIndex: Integer): TTaskStatus;
-    function ColumnColor(ColIndex: Integer): Integer;
+    function ColumnTitle(ColIndex: Int): string;
+    function ColumnStatus(ColIndex: Int): TTaskStatus;
+    function ColumnColor(ColIndex: Int): Int;
     function GetActiveTask: TTask;
     procedure ClampRow;
-    procedure HandleBoardKey(Key: Integer);
-    procedure HandleDetailKey(Key: Integer);
-    procedure HandleInputKey(Key: Integer);
+    procedure HandleBoardKey(Key: Int);
+    procedure HandleDetailKey(Key: Int);
+    procedure HandleInputKey(Key: Int);
     procedure StartInput(const APrompt: string);
     procedure FinishInput;
     procedure CancelInput;
@@ -69,21 +69,21 @@ begin
   FPollCounter := 0
 end;
 
-function TKanbanUI.ColumnTitle(ColIndex: Integer): string;
+function TKanbanUI.ColumnTitle(ColIndex: Int): string;
 begin
   if ColIndex = 0 then Exit('Todo');
   if ColIndex = 1 then Exit('In Progress');
   Result := 'Done'
 end;
 
-function TKanbanUI.ColumnStatus(ColIndex: Integer): TTaskStatus;
+function TKanbanUI.ColumnStatus(ColIndex: Int): TTaskStatus;
 begin
   if ColIndex = 0 then Exit(tsTodo);
   if ColIndex = 1 then Exit(tsInProgress);
   Result := tsDone
 end;
 
-function TKanbanUI.ColumnColor(ColIndex: Integer): Integer;
+function TKanbanUI.ColumnColor(ColIndex: Int): Int;
 begin
   if ColIndex = 0 then Exit(COLOR_CYAN);
   if ColIndex = 1 then Exit(COLOR_YELLOW);
@@ -97,7 +97,7 @@ end;
 
 procedure TKanbanUI.ClampRow;
 var
-  MaxRow: Integer;
+  MaxRow: Int;
 begin
   MaxRow := FBoard.CountByStatus(Self.ColumnStatus(FActiveCol)) - 1;
   if MaxRow < 0 then MaxRow := 0;
@@ -107,7 +107,7 @@ end;
 
 procedure TKanbanUI.DrawBoard;
 var
-  ColWidth, ContentH, I: Integer;
+  ColWidth, ContentH, I: Int;
 begin
   FTerm.QuerySize();
   FTerm.BufClear();
@@ -138,9 +138,9 @@ begin
   FTerm.BufFlush()
 end;
 
-procedure TKanbanUI.DrawColumn(ColIndex: Integer; Row, Col, Width, Height: Integer);
+procedure TKanbanUI.DrawColumn(ColIndex: Int; Row, Col, Width, Height: Int);
 var
-  TaskCount, I, Y, MaxW: Integer;
+  TaskCount, I, Y, MaxW: Int;
   Task: TTask;
   Line, Prefix, PrioStr: string;
   IsActive: Boolean;
@@ -205,7 +205,7 @@ end;
 
 procedure TKanbanUI.DrawStatusBar;
 var
-  Pad: Integer;
+  Pad: Int;
 begin
   FTerm.MoveTo(FTerm.Rows, 1);
   FTerm.SetBg(COLOR_WHITE);
@@ -235,7 +235,7 @@ procedure TKanbanUI.DrawDetailView;
 var
   Content: string;
   Lines: TStringList;
-  I, Y, StartLine: Integer;
+  I, Y, StartLine: Int;
   Line, StatusBar: string;
 begin
   if FDetailTask = nil then Exit;
@@ -328,7 +328,7 @@ begin
   FNeedsRedraw := True
 end;
 
-procedure TKanbanUI.HandleBoardKey(Key: Integer);
+procedure TKanbanUI.HandleBoardKey(Key: Int);
 var
   Task: TTask;
   NewStatus: TTaskStatus;
@@ -494,10 +494,10 @@ begin
   end
 end;
 
-procedure TKanbanUI.HandleDetailKey(Key: Integer);
+procedure TKanbanUI.HandleDetailKey(Key: Int);
 var
   Editor, Cmd, Path: string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   if Key = KEY_NONE then Exit;
 
@@ -551,7 +551,7 @@ begin
   end
 end;
 
-procedure TKanbanUI.HandleInputKey(Key: Integer);
+procedure TKanbanUI.HandleInputKey(Key: Int);
 var
   Task: TTask;
 begin
@@ -593,7 +593,7 @@ end;
 
 procedure TKanbanUI.Run;
 var
-  Key, Merged: Integer;
+  Key, Merged: Int;
 begin
   FTerm.EnableRawMode();
   try

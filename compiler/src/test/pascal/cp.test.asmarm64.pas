@@ -24,8 +24,8 @@ type
   private
     { Assemble one .text body and return the __text words. }
     function TextWords(const ABody: string; out AFile: TMachOFile): TMoSection;
-    function WordAt(ASec: TMoSection; AIdx: Integer): Integer;
-    procedure AssertWord(const AAsm: string; AExpected: Integer);
+    function WordAt(ASec: TMoSection; AIdx: Int): Int;
+    procedure AssertWord(const AAsm: string; AExpected: Int);
     procedure AssertAsmRaises(const AAsm: string);
   published
     procedure TestNopRet;
@@ -82,7 +82,7 @@ begin
   AssertTrue('__text present', Result <> nil);
 end;
 
-function TArm64AsmTests.WordAt(ASec: TMoSection; AIdx: Integer): Integer;
+function TArm64AsmTests.WordAt(ASec: TMoSection; AIdx: Int): Int;
 begin
   Result := StrAt(ASec.Data, AIdx * 4)
     or (StrAt(ASec.Data, AIdx * 4 + 1) shl 8)
@@ -90,7 +90,7 @@ begin
     or (StrAt(ASec.Data, AIdx * 4 + 3) shl 24);
 end;
 
-procedure TArm64AsmTests.AssertWord(const AAsm: string; AExpected: Integer);
+procedure TArm64AsmTests.AssertWord(const AAsm: string; AExpected: Int);
 var
   F: TMachOFile;
   T: TMoSection;
@@ -120,85 +120,85 @@ begin
 
     0xCB3063FF = sub sp, sp, x16, uxtx #0   (correct)
     0xCB1003FF = sub xzr, xzr, x16          (the no-op it used to emit) }
-  AssertWord('sub sp, sp, x16', Integer($CB3063FF));
-  AssertWord('add sp, sp, x16', Integer($8B3063FF));
+  AssertWord('sub sp, sp, x16', Int32($CB3063FF));
+  AssertWord('add sp, sp, x16', Int32($8B3063FF));
   { a non-sp register operand keeps the shifted form }
-  AssertWord('sub x0, x1, x2', Integer($CB020020));
+  AssertWord('sub x0, x1, x2', Int32($CB020020));
 end;
 
 procedure TArm64AsmTests.TestNopRet;
 begin
-  AssertWord('nop', Integer($D503201F));
-  AssertWord('ret', Integer($D65F03C0));
-  AssertWord('brk #0', Integer($D4200000));
+  AssertWord('nop', Int32($D503201F));
+  AssertWord('ret', Int32($D65F03C0));
+  AssertWord('brk #0', Int32($D4200000));
 end;
 
 procedure TArm64AsmTests.TestPrologueEpilogue_StpLdp;
 begin
   { the canonical frame save/restore pair }
-  AssertWord('stp x29, x30, [sp, #-16]!', Integer($A9BF7BFD));
-  AssertWord('ldp x29, x30, [sp], #16', Integer($A8C17BFD));
-  AssertWord('stp x19, x20, [sp, #16]', Integer($A90153F3));
-  AssertWord('mov x29, sp', Integer($910003FD));
+  AssertWord('stp x29, x30, [sp, #-16]!', Int32($A9BF7BFD));
+  AssertWord('ldp x29, x30, [sp], #16', Int32($A8C17BFD));
+  AssertWord('stp x19, x20, [sp, #16]', Int32($A90153F3));
+  AssertWord('mov x29, sp', Int32($910003FD));
 end;
 
 procedure TArm64AsmTests.TestAddSubImm;
 begin
-  AssertWord('add x0, x1, #4', Integer($91001020));
-  AssertWord('sub sp, sp, #32', Integer($D10083FF));
-  AssertWord('subs w0, w1, #1', Integer($71000420));
-  AssertWord('cmp w0, #0', Integer($7100001F));
+  AssertWord('add x0, x1, #4', Int32($91001020));
+  AssertWord('sub sp, sp, #32', Int32($D10083FF));
+  AssertWord('subs w0, w1, #1', Int32($71000420));
+  AssertWord('cmp w0, #0', Int32($7100001F));
 end;
 
 procedure TArm64AsmTests.TestAddSubCmpReg;
 begin
-  AssertWord('add x0, x1, x2', Integer($8B020020));
-  AssertWord('sub w3, w4, w5', Integer($4B050083));
-  AssertWord('cmp x1, x2', Integer($EB02003F));
-  AssertWord('neg x0, x1', Integer($CB0103E0));
+  AssertWord('add x0, x1, x2', Int32($8B020020));
+  AssertWord('sub w3, w4, w5', Int32($4B050083));
+  AssertWord('cmp x1, x2', Int32($EB02003F));
+  AssertWord('neg x0, x1', Int32($CB0103E0));
 end;
 
 procedure TArm64AsmTests.TestMovFamily;
 begin
-  AssertWord('movz w0, #5', Integer($528000A0));
-  AssertWord('movk x0, #1, lsl #16', Integer($F2A00020));
-  AssertWord('mov x1, x2', Integer($AA0203E1));
-  AssertWord('mov w0, #7', Integer($528000E0));
-  AssertWord('mov x0, #-1', Integer($92800000));
+  AssertWord('movz w0, #5', Int32($528000A0));
+  AssertWord('movk x0, #1, lsl #16', Int32($F2A00020));
+  AssertWord('mov x1, x2', Int32($AA0203E1));
+  AssertWord('mov w0, #7', Int32($528000E0));
+  AssertWord('mov x0, #-1', Int32($92800000));
 end;
 
 procedure TArm64AsmTests.TestMulDiv;
 begin
-  AssertWord('mul x0, x1, x2', Integer($9B027C20));
-  AssertWord('sdiv x0, x1, x2', Integer($9AC20C20));
-  AssertWord('udiv w0, w1, w2', Integer($1AC20820));
-  AssertWord('msub x0, x1, x2, x3', Integer($9B028C20));
+  AssertWord('mul x0, x1, x2', Int32($9B027C20));
+  AssertWord('sdiv x0, x1, x2', Int32($9AC20C20));
+  AssertWord('udiv w0, w1, w2', Int32($1AC20820));
+  AssertWord('msub x0, x1, x2, x3', Int32($9B028C20));
 end;
 
 procedure TArm64AsmTests.TestLogicAndShifts;
 begin
-  AssertWord('and x0, x1, x2', Integer($8A020020));
-  AssertWord('orr x0, x1, x2', Integer($AA020020));
-  AssertWord('eor w0, w1, w2', Integer($4A020020));
-  AssertWord('lsl x0, x1, x2', Integer($9AC22020));
-  AssertWord('lsr x0, x1, #3', Integer($D343FC20));
-  AssertWord('lsl x0, x1, #4', Integer($D37CEC20));
-  AssertWord('asr w0, w1, #1', Integer($13017C20));
-  AssertWord('sxtw x0, w0', Integer($93407C00));
+  AssertWord('and x0, x1, x2', Int32($8A020020));
+  AssertWord('orr x0, x1, x2', Int32($AA020020));
+  AssertWord('eor w0, w1, w2', Int32($4A020020));
+  AssertWord('lsl x0, x1, x2', Int32($9AC22020));
+  AssertWord('lsr x0, x1, #3', Int32($D343FC20));
+  AssertWord('lsl x0, x1, #4', Int32($D37CEC20));
+  AssertWord('asr w0, w1, #1', Int32($13017C20));
+  AssertWord('sxtw x0, w0', Int32($93407C00));
 end;
 
 procedure TArm64AsmTests.TestLogicImmediates;
 begin
-  AssertWord('and x0, x0, #0xff', Integer($92401C00));
-  AssertWord('and w0, w0, #0xff', Integer($12001C00));
-  AssertWord('orr x0, x1, #0x5555555555555555', Integer($B200F020));
-  AssertWord('eor x2, x3, #0xff00ff00ff00ff00', Integer($D2089C62));
-  AssertWord('ands w0, w1, #0x80000000', Integer($72010020));
-  AssertWord('and x0, x1, #0xfffffffffffffffe', Integer($927FF820));
-  AssertWord('and w0, w1, #0xfffffffe', Integer($121F7820));
-  AssertWord('and x0, x1, #0x8000000000000001', Integer($92410420));
-  AssertWord('ands x9, x10, #0xf0', Integer($F27C0D49));
-  AssertWord('orr w3, w4, #0x3c3c3c3c', Integer($3206CC83));
+  AssertWord('and x0, x0, #0xff', Int32($92401C00));
+  AssertWord('and w0, w0, #0xff', Int32($12001C00));
+  AssertWord('orr x0, x1, #0x5555555555555555', Int32($B200F020));
+  AssertWord('eor x2, x3, #0xff00ff00ff00ff00', Int32($D2089C62));
+  AssertWord('ands w0, w1, #0x80000000', Int32($72010020));
+  AssertWord('and x0, x1, #0xfffffffffffffffe', Int32($927FF820));
+  AssertWord('and w0, w1, #0xfffffffe', Int32($121F7820));
+  AssertWord('and x0, x1, #0x8000000000000001', Int32($92410420));
+  AssertWord('ands x9, x10, #0xf0', Int32($F27C0D49));
+  AssertWord('orr w3, w4, #0x3c3c3c3c', Int32($3206CC83));
 end;
 
 procedure TArm64AsmTests.AssertAsmRaises(const AAsm: string);
@@ -225,26 +225,26 @@ end;
 
 procedure TArm64AsmTests.TestLoadsStores;
 begin
-  AssertWord('ldr x0, [x1, #8]', Integer($F9400420));
-  AssertWord('str x0, [sp]', Integer($F90003E0));
-  AssertWord('ldr w2, [x3, #4]', Integer($B9400462));
-  AssertWord('ldrb w0, [x1]', Integer($39400020));
-  AssertWord('strb w0, [x1, #1]', Integer($39000420));
-  AssertWord('ldrh w0, [x1]', Integer($79400020));
-  AssertWord('ldrsw x0, [x1]', Integer($B9800020));
-  AssertWord('ldur x0, [x1, #-8]', Integer($F85F8020));
+  AssertWord('ldr x0, [x1, #8]', Int32($F9400420));
+  AssertWord('str x0, [sp]', Int32($F90003E0));
+  AssertWord('ldr w2, [x3, #4]', Int32($B9400462));
+  AssertWord('ldrb w0, [x1]', Int32($39400020));
+  AssertWord('strb w0, [x1, #1]', Int32($39000420));
+  AssertWord('ldrh w0, [x1]', Int32($79400020));
+  AssertWord('ldrsw x0, [x1]', Int32($B9800020));
+  AssertWord('ldur x0, [x1, #-8]', Int32($F85F8020));
   { single-register pre/post-index — the backend's stack brackets }
-  AssertWord('str x0, [sp, #-16]!', Integer($F81F0FE0));
-  AssertWord('ldr x9, [sp], #16', Integer($F84107E9));
-  AssertWord('ldr d0, [x1, #8]', Integer($FD400420));
-  AssertWord('str d0, [sp]', Integer($FD0003E0));
+  AssertWord('str x0, [sp, #-16]!', Int32($F81F0FE0));
+  AssertWord('ldr x9, [sp], #16', Int32($F84107E9));
+  AssertWord('ldr d0, [x1, #8]', Int32($FD400420));
+  AssertWord('str d0, [sp]', Int32($FD0003E0));
 end;
 
 procedure TArm64AsmTests.TestLoadStore_UnscaledAutoDowngrade;
 var
   F: TMachOFile;
   T: TMoSection;
-  UrWord: Integer;
+  UrWord: Int;
 begin
   { A plain ldr/str whose offset is not a multiple of the access size, or is
     negative, cannot use the scaled 12-bit form but IS a valid unscaled
@@ -267,39 +267,39 @@ begin
   { the FP registers too: `stur s0, [x29, #-24]` (a Single stored to a frame
     slot) raised "unscaled/negative load-store offset" -- the FP branch
     always took the scaled form.  Words from Apple's `as`. }
-  AssertWord('stur s0, [x29, #-24]', Integer($BC1E83A0));
-  AssertWord('ldur d0, [x29, #-8]', Integer($FC5F83A0));
-  AssertWord('str s1, [x29, #-4]', Integer($BC1FC3A1));
-  AssertWord('ldr d2, [x9, #3]', Integer($FC403122));
+  AssertWord('stur s0, [x29, #-24]', Int32($BC1E83A0));
+  AssertWord('ldur d0, [x29, #-8]', Int32($FC5F83A0));
+  AssertWord('str s1, [x29, #-4]', Int32($BC1FC3A1));
+  AssertWord('ldr d2, [x9, #3]', Int32($FC403122));
 end;
 
 procedure TArm64AsmTests.TestFloatOps;
 begin
-  AssertWord('fadd d0, d1, d2', Integer($1E622820));
-  AssertWord('fsub d0, d1, d2', Integer($1E623820));
-  AssertWord('fmul d0, d1, d2', Integer($1E620820));
-  AssertWord('fdiv d0, d1, d2', Integer($1E621820));
-  AssertWord('fcmp d0, d1', Integer($1E612000));
-  AssertWord('fcmp d0, #0.0', Integer($1E602008));
-  AssertWord('scvtf d0, x1', Integer($9E620020));
-  AssertWord('fcvtzs x0, d1', Integer($9E780020));
+  AssertWord('fadd d0, d1, d2', Int32($1E622820));
+  AssertWord('fsub d0, d1, d2', Int32($1E623820));
+  AssertWord('fmul d0, d1, d2', Int32($1E620820));
+  AssertWord('fdiv d0, d1, d2', Int32($1E621820));
+  AssertWord('fcmp d0, d1', Int32($1E612000));
+  AssertWord('fcmp d0, #0.0', Int32($1E602008));
+  AssertWord('scvtf d0, x1', Int32($9E620020));
+  AssertWord('fcvtzs x0, d1', Int32($9E780020));
   { round to nearest, ties to even -- the Round builtin (clang-verified) }
-  AssertWord('fcvtns x0, d1', Integer($9E600020));
-  AssertWord('fcvtns x3, d7', Integer($9E6000E3));
-  AssertWord('fmov d0, x1', Integer($9E670020));
-  AssertWord('fmov x0, d1', Integer($9E660020));
-  AssertWord('fmov d0, d1', Integer($1E604020));
+  AssertWord('fcvtns x0, d1', Int32($9E600020));
+  AssertWord('fcvtns x3, d7', Int32($9E6000E3));
+  AssertWord('fmov d0, x1', Int32($9E670020));
+  AssertWord('fmov x0, d1', Int32($9E660020));
+  AssertWord('fmov d0, d1', Int32($1E604020));
   { unary minus on a float flips the sign bit (Apple `as`) }
-  AssertWord('fneg d0, d1', Integer($1E614020));
-  AssertWord('fneg s2, s3', Integer($1E214062));
+  AssertWord('fneg d0, d1', Int32($1E614020));
+  AssertWord('fneg s2, s3', Int32($1E214062));
   { precision conversions + 32-bit fp load/store (Single support) }
-  AssertWord('fcvt d0, s1', Integer($1E22C020));
-  AssertWord('fcvt s2, d3', Integer($1E624062));
-  AssertWord('ldr s0, [x9, #8]', Integer($BD400920));
-  AssertWord('str s1, [x9, #4]', Integer($BD000521));
+  AssertWord('fcvt d0, s1', Int32($1E22C020));
+  AssertWord('fcvt s2, d3', Int32($1E624062));
+  AssertWord('ldr s0, [x9, #8]', Int32($BD400920));
+  AssertWord('str s1, [x9, #4]', Int32($BD000521));
   { fp pre/post-index — the backend's float stack brackets }
-  AssertWord('str d0, [sp, #-16]!', Integer($FC1F0FE0));
-  AssertWord('ldr d0, [sp], #16', Integer($FC4107E0));
+  AssertWord('str d0, [sp, #-16]!', Int32($FC1F0FE0));
+  AssertWord('ldr d0, [sp], #16', Int32($FC4107E0));
 end;
 
 procedure TArm64AsmTests.TestLocalBranches_ResolveToDeltas;
@@ -315,11 +315,11 @@ begin
     'b.eq top' + LineEnding, F);
   try
     AssertEquals('b back by one word',
-      Integer($17FFFFFF), WordAt(T, 1));
+      Int32($17FFFFFF), WordAt(T, 1));
     AssertEquals('cbz back by two words',
-      Integer($B4FFFFC0), WordAt(T, 2));
+      Int32($B4FFFFC0), WordAt(T, 2));
     AssertEquals('b.eq back by three words',
-      Integer($54FFFFA0), WordAt(T, 3));
+      Int32($54FFFFA0), WordAt(T, 3));
     AssertEquals('no relocations for local branches', 0, T.Relocs.Count);
   finally
     F.Free();
@@ -377,7 +377,7 @@ var
 begin
   T := TextWords('bl _puts' + LineEnding, F);
   try
-    AssertEquals(Integer($94000000), WordAt(T, 0));
+    AssertEquals(Int32($94000000), WordAt(T, 0));
     AssertEquals(1, T.Relocs.Count);
     AssertEquals(ARM64_RELOC_BRANCH26, T.Relocs.Get(0).RType);
     AssertTrue(T.Relocs.Get(0).PcRel);
@@ -409,8 +409,8 @@ begin
     { the target is the DEFINED local _gvar, not a minted extern }
     AssertTrue('_gvar defined in __data',
       not F.Symbols.Get(T.Relocs.Get(0).SymbolNum).IsUndef());
-    AssertEquals('adrp word', Integer($90000000), WordAt(T, 0));
-    AssertEquals('add-pageoff word', Integer($91000000), WordAt(T, 1));
+    AssertEquals('adrp word', Int32($90000000), WordAt(T, 0));
+    AssertEquals('add-pageoff word', Int32($91000000), WordAt(T, 1));
   finally
     F.Free();
   end;
@@ -436,13 +436,13 @@ begin
     'add x1, x0, #7' + LineEnding, F);
   try
     { two instructions, four words would mean a comment leaked through }
-    AssertEquals('only the two instructions were encoded', 8, Integer(T.Size));
+    AssertEquals('only the two instructions were encoded', 8, Int32(T.Size));
     { mov x0, #5  -> MOVZ x0, #5   = 0xD2800000 or (5 shl 5) }
     AssertEquals('mov immediate survived',
-      Integer($D2800000) or (5 shl 5), WordAt(T, 0));
+      Int32($D2800000) or (5 shl 5), WordAt(T, 0));
     { add x1, x0, #7 -> 0x91000000 or (7 shl 10) or (0 shl 5) or 1 }
     AssertEquals('add immediate survived',
-      Integer($91000000) or (7 shl 10) or 1, WordAt(T, 1));
+      Int32($91000000) or (7 shl 10) or 1, WordAt(T, 1));
   finally
     F.Free();
   end;
@@ -471,9 +471,9 @@ begin
       (BUG-20260726-arm64-tlv-nonldr-reloc).  ldr x0, [x0, #0] = 0xF9400000;
       ldr x1, [x1, #0] adds Rn=1 (bits 9:5) and Rd=1 (bits 4:0). }
     AssertEquals('got pageoff is an LDR word',
-      Integer($F9400000), WordAt(T, 1));
+      Int32($F9400000), WordAt(T, 1));
     AssertEquals('tlv pageoff is an LDR word',
-      Integer($F9400021), WordAt(T, 3));
+      Int32($F9400021), WordAt(T, 3));
   finally
     F.Free();
   end;
@@ -497,7 +497,7 @@ begin
     D := F.FindSection('__DATA', '__data');
     AssertTrue(D <> nil);
     AssertEquals('quad slot + word + 2 bytes + "hi\0"',
-      8 + 4 + 2 + 3, Integer(D.Size));
+      8 + 4 + 2 + 3, Int32(D.Size));
     AssertEquals(1, D.Relocs.Count);
     AssertEquals(ARM64_RELOC_UNSIGNED, D.Relocs.Get(0).RType);
     AssertEquals('8-byte width', 3, D.Relocs.Get(0).Length_);
@@ -527,7 +527,7 @@ begin
     D := F.FindSection('__DATA', '__data');
     AssertTrue(D <> nil);
     { one ';' byte + four bytes 'a//b' }
-    AssertEquals('";" + "a//b"', 1 + 4, Integer(D.Size));
+    AssertEquals('";" + "a//b"', 1 + 4, Int32(D.Size));
     AssertEquals('semicolon preserved', Ord(';'), StrAt(D.Data, 0));
     AssertEquals('a', Ord('a'), StrAt(D.Data, 1));
     AssertEquals('first slash preserved', Ord('/'), StrAt(D.Data, 2));
@@ -553,7 +553,7 @@ begin
   try
     D := F.FindSection('__DATA', '__data');
     AssertTrue(D <> nil);
-    AssertEquals('"A" + "#x" + one double', 1 + 2 + 8, Integer(D.Size));
+    AssertEquals('"A" + "#x" + one double', 1 + 2 + 8, Int32(D.Size));
     AssertEquals('A', Ord('A'), StrAt(D.Data, 0));
     AssertEquals('in-string # kept', Ord('#'), StrAt(D.Data, 1));
     AssertEquals('x', Ord('x'), StrAt(D.Data, 2));
@@ -586,7 +586,7 @@ begin
   try
     D := F.FindSection('__DATA', '__data');
     AssertTrue(D <> nil);
-    AssertEquals('2 + 4 + 8 + 4 + 4 bytes', 22, Integer(D.Size));
+    AssertEquals('2 + 4 + 8 + 4 + 4 bytes', 22, Int32(D.Size));
     AssertEquals('.2byte low', 1, StrAt(D.Data, 0));
     AssertEquals('.2byte high', 2, StrAt(D.Data, 1));
     AssertEquals('.4byte value, comment ignored', 7, StrAt(D.Data, 2));
@@ -644,8 +644,8 @@ end;
 procedure TArm64AsmTests.TestCsetAndConditionals;
 begin
   { cset w0, eq  ->  csinc w0, wzr, wzr, ne }
-  AssertWord('cset w0, eq', Integer($1A9F17E0));
-  AssertWord('cset x0, lt', Integer($9A9FA7E0));
+  AssertWord('cset w0, eq', Int32($1A9F17E0));
+  AssertWord('cset x0, lt', Int32($9A9FA7E0));
 end;
 
 procedure TArm64AsmTests.TestLseAtomics;
@@ -653,12 +653,12 @@ begin
   { LSE atomics for runtime.atomic.arm64 (acquire+release variants only —
     that is what ARC and the allocator's remote-free queue need).
     Reference encodings cross-checked against GNU as. }
-  AssertWord('ldaddal w1, w2, [x0]', Integer($B8E10002));
-  AssertWord('ldaddal x1, x9, [x0]', Integer($F8E10009));
-  AssertWord('swpal x1, x9, [x0]', Integer($F8E18009));
-  AssertWord('swpal w1, w2, [x0]', Integer($B8E18002));
-  AssertWord('casal x1, x2, [x0]', Integer($C8E1FC02));
-  AssertWord('casal w1, w2, [x0]', Integer($88E1FC02));
+  AssertWord('ldaddal w1, w2, [x0]', Int32($B8E10002));
+  AssertWord('ldaddal x1, x9, [x0]', Int32($F8E10009));
+  AssertWord('swpal x1, x9, [x0]', Int32($F8E18009));
+  AssertWord('swpal w1, w2, [x0]', Int32($B8E18002));
+  AssertWord('casal x1, x2, [x0]', Int32($C8E1FC02));
+  AssertWord('casal w1, w2, [x0]', Int32($88E1FC02));
 end;
 
 procedure TArm64AsmTests.TestErrors_HaveLineNumbers;

@@ -18,7 +18,7 @@ type
   TARCTests = class(TTestCase)
   private
     function IRContains(const AIR, AFragment: string): Boolean;
-    function CountSubstring(const AHaystack, ANeedle: string): Integer;
+    function CountSubstring(const AHaystack, ANeedle: string): Int;
     function FuncRegion(const AIR, AHeader: string): string;
   published
     { const and var parameters borrow: the callee takes no reference }
@@ -125,9 +125,9 @@ begin
   Result := Pos(AFragment, AIR) > 0;
 end;
 
-function TARCTests.CountSubstring(const AHaystack, ANeedle: string): Integer;
+function TARCTests.CountSubstring(const AHaystack, ANeedle: string): Int;
 var
-  Found: Integer;
+  Found: Int;
   Tail:  string;
 begin
   Result := 0;
@@ -162,7 +162,7 @@ const
 
 function TARCTests.FuncRegion(const AIR, AHeader: string): string;
 var
-  P, E: Integer;
+  P, E: Int;
   Tail: string;
 begin
   { Slice one emitted function: from its header line to the closing brace.
@@ -177,7 +177,7 @@ end;
 
 function ExtractDoSomethingBody(const AIR: string): string;
 var
-  FnPos, NextPos: Integer;
+  FnPos, NextPos: Int;
 begin
   FnPos := Pos('function $DoSomething', AIR);
   if FnPos = 0 then Exit('');
@@ -223,7 +223,7 @@ const
 const
 function CallerBody(const AIR: string): string;
 var
-  P: Integer;
+  P: Int;
 begin
   { Return the IR of the Run procedure (the caller), excluding the callee
     Make whose own AddRef/Release calls would confuse the assertion. }
@@ -279,7 +279,7 @@ const
     ''';
 var
   T, Name, AsmText, Body: string;
-  I, J, P, E: Integer;
+  I, J, P, E: Int;
   Names: array[0..5] of string;
 begin
   { A const or var parameter is borrowed: an extra retain/release pair in the

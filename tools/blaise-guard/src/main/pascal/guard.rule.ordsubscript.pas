@@ -62,7 +62,7 @@ end;
 procedure TOrdSubscriptRule.CheckTokens(AContext: TRuleContext;
   ATokens: TList<TToken>);
 var
-  I: Integer;
+  I: Int;
 begin
   { Window: Ord '(' IDENT '['.  Stop 3 before the end so the window fits. }
   for I := 0 to ATokens.Count - 4 do

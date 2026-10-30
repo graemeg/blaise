@@ -107,7 +107,7 @@ end;
 function ParseCommandLine: TCliOptions;
 var
   Opt:    TCliOptions;
-  I:      Integer;
+  I:      Int;
   Arg:    string;
   Val:    string;
   Fmt:    TFormatKind;

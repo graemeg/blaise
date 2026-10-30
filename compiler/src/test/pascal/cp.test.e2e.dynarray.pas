@@ -1030,7 +1030,7 @@ const
     ''';
 var
   RunOut: string;
-  Code: Integer;
+  Code: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
@@ -1236,7 +1236,7 @@ const
     ''';
 var
   RunOut: string;
-  Code: Integer;
+  Code: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { targets: var, empty, Result, field, argument; elements: Integer, Double

@@ -52,11 +52,11 @@ type
   public
     Name:     string;
     FileName: string;
-    Line:     Integer;
-    Col:      Integer;
+    Line:     Int;
+    Col:      Int;
     Edges:    TList<string>;   { raw referenced type identifiers (strong only) }
-    Color:    Integer;         { DFS: 0 white, 1 gray (on stack), 2 done }
-    constructor Create(const AName, AFileName: string; ALine, ACol: Integer);
+    Color:    Int;         { DFS: 0 white, 1 gray (on stack), 2 done }
+    constructor Create(const AName, AFileName: string; ALine, ACol: Int);
   end;
 
   TReferenceCyclesRule = class(TAstRuleBase)
@@ -69,7 +69,7 @@ type
     function  IsWeakField(AField: TFieldDecl): Boolean;
     procedure ExtractIdents(const ATypeName: string; ATarget: TList<string>);
     procedure DetectFrom(const AName: string);
-    procedure RecordCycle(AClosingIdx: Integer);
+    procedure RecordCycle(AClosingIdx: Int);
   public
     constructor Create;
     procedure Reset; override;
@@ -94,7 +94,7 @@ end;
 { ---- TClassNode ---- }
 
 constructor TClassNode.Create(const AName, AFileName: string;
-  ALine, ACol: Integer);
+  ALine, ACol: Int);
 begin
   inherited Create();
   Name     := AName;
@@ -125,7 +125,7 @@ end;
 
 function TReferenceCyclesRule.IsWeakField(AField: TFieldDecl): Boolean;
 var
-  I: Integer;
+  I: Int;
   A: string;
 begin
   Result := False;
@@ -143,7 +143,7 @@ end;
 procedure TReferenceCyclesRule.ExtractIdents(const ATypeName: string;
   ATarget: TList<string>);
 var
-  I, N:  Integer;
+  I, N:  Int;
   Ident: string;
 begin
   N := Length(ATypeName);
@@ -169,7 +169,7 @@ procedure TReferenceCyclesRule.VisitClass(AClass: TClassTypeDef;
   ADecl: TTypeDecl);
 var
   Node: TClassNode;
-  I:    Integer;
+  I:    Int;
   Fld:  TFieldDecl;
   Tn:   string;
 begin
@@ -200,10 +200,10 @@ begin
   end;
 end;
 
-procedure TReferenceCyclesRule.RecordCycle(AClosingIdx: Integer);
+procedure TReferenceCyclesRule.RecordCycle(AClosingIdx: Int);
 var
   Members: TList<string>;
-  I, MinI: Integer;
+  I, MinI: Int;
   Key:     string;
   Path:    string;
   Anchor:  TClassNode;
@@ -240,7 +240,7 @@ end;
 procedure TReferenceCyclesRule.DetectFrom(const AName: string);
 var
   Node, TNode: TClassNode;
-  I:     Integer;
+  I:     Int;
   Edge:  string;
 begin
   if not FNodes.TryGetValue(AName, Node) then
@@ -268,7 +268,7 @@ end;
 
 procedure TReferenceCyclesRule.Finalize(AContext: TRuleContext);
 var
-  I:    Integer;
+  I:    Int;
   Node: TClassNode;
 begin
   FIncludeSelf := AContext.RuleCfg.GetBool('includeSelfReference', False);

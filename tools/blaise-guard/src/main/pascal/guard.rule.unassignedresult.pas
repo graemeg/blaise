@@ -58,7 +58,7 @@ const
 type
   TUnassignedResultRule = class(TAstRuleBase)
   private
-    FDepth:      Integer;   { nesting of routines, so only the outermost reports }
+    FDepth:      Int;   { nesting of routines, so only the outermost reports }
     FInFunction: Boolean;
     FAssigned:   Boolean;   { saw Result := / Exit(v) }
     FRaises:     Boolean;   { saw a raise — no normal return path }
@@ -68,7 +68,7 @@ type
     procedure Reset; override;
     procedure VisitMethodEnter(AMethod: TMethodDecl); override;
     procedure VisitMethodExit(AMethod: TMethodDecl); override;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
     procedure VisitExpr(AExpr: TASTExpr); override;
   end;
 
@@ -136,7 +136,7 @@ begin
     Result := TIdentExpr(E).Name;
 end;
 
-procedure TUnassignedResultRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TUnassignedResultRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
   A:  TAssignment;
   X:  TExitStmt;
@@ -144,7 +144,7 @@ var
   SA: TStaticSubscriptAssign;
   PC: TProcCall;
   E:  TASTExpr;
-  I:  Integer;
+  I:  Int;
 begin
   if not FInFunction then Exit;
   if FAssigned and FRaises then Exit;
@@ -232,7 +232,7 @@ var
 
   procedure ScanArgs(AArgs: TObjectList);
   var
-    J: Integer;
+    J: Int;
     A: TASTExpr;
   begin
     if AArgs = nil then Exit;

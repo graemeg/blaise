@@ -197,7 +197,7 @@ end;
 procedure TE2EOrdDictTests.TestRun_OrdDict_InsertionOrderPreserved;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcInsertionOrder, Output, RCode));
@@ -210,7 +210,7 @@ end;
 procedure TE2EOrdDictTests.TestRun_OrdDict_TryGetValue;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcTryGetValue, Output, RCode));
@@ -224,7 +224,7 @@ end;
 procedure TE2EOrdDictTests.TestRun_OrdDict_Remove;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcRemove, Output, RCode));
@@ -237,7 +237,7 @@ end;
 procedure TE2EOrdDictTests.TestRun_OrdDict_UpdateKeepsOrder;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcUpdateKeepsOrder, Output, RCode));

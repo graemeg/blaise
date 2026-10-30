@@ -37,13 +37,13 @@ const
 type
   TMaxFunctionLinesRule = class(TAstRuleBase)
   private
-    FStartLines: TList<Integer>;   { stack: routine start line per frame }
-    FMaxLines:   TList<Integer>;   { stack: max line seen per frame }
+    FStartLines: TList<Int>;   { stack: routine start line per frame }
+    FMaxLines:   TList<Int>;   { stack: max line seen per frame }
   public
     constructor Create;
     procedure VisitMethodEnter(AMethod: TMethodDecl); override;
     procedure VisitMethodExit(AMethod: TMethodDecl); override;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
   end;
 
 constructor TMaxFunctionLinesRule.Create;
@@ -52,8 +52,8 @@ begin
   FId         := RULE_ID;
   FName       := RULE_NAME;
   FSeverity   := sevWarning;
-  FStartLines := TList<Integer>.Create();
-  FMaxLines   := TList<Integer>.Create();
+  FStartLines := TList<Int>.Create();
+  FMaxLines   := TList<Int>.Create();
 end;
 
 procedure TMaxFunctionLinesRule.VisitMethodEnter(AMethod: TMethodDecl);
@@ -62,9 +62,9 @@ begin
   FMaxLines.Add(AMethod.Line);
 end;
 
-procedure TMaxFunctionLinesRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TMaxFunctionLinesRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
-  I: Integer;
+  I: Int;
 begin
   { Extend every open frame, so nested-routine lines count toward the span of
     the routines that enclose them. }
@@ -75,11 +75,11 @@ end;
 
 procedure TMaxFunctionLinesRule.VisitMethodExit(AMethod: TMethodDecl);
 var
-  Top:      Integer;
-  StartLn:  Integer;
-  MaxLn:    Integer;
-  Span:     Integer;
-  MaxLines: Integer;
+  Top:      Int;
+  StartLn:  Int;
+  MaxLn:    Int;
+  Span:     Int;
+  MaxLines: Int;
 begin
   Top := FMaxLines.Count - 1;
   if Top < 0 then

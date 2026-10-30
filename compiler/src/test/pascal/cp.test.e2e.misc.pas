@@ -1115,7 +1115,7 @@ const
     ''';
 
 procedure TE2EMiscTests.TestRun_BooleanOps_AllExpressions;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcBoolOps, Output, RCode));
@@ -1137,7 +1137,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_MultiArgWriteLn_PrintsAllArgs;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcMultiArg, Output, RCode));
@@ -1159,7 +1159,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_ChainedRecordField_LoadsInner;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcChainedRecord, Output, RCode));
@@ -1181,7 +1181,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_Const_StringConst;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcConstStr, Output, RCode));
@@ -1190,7 +1190,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_Const_LocalArrayInFunction;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcConstLocalArrayInFunc, Output, RCode));
@@ -1249,7 +1249,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_ProcType_CallViaVariable;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcProcTypeVar, Output, RCode));
@@ -1352,7 +1352,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_ProcType_OfObject_Dispatch;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcProcTypeOfObject, Output, RCode));
@@ -1830,7 +1830,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_DefaultParam_OmitMultiple;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcDefaultParamMulti, Output, RCode));
@@ -1845,7 +1845,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_VarParam_ModifyString;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcVarParamString, Output, RCode));
@@ -1866,7 +1866,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_TypeCast_PointerInteger;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTypeCastPointerInt, Output, RCode));
@@ -1875,7 +1875,7 @@ begin
 end;
 
 procedure TE2EMiscTests.TestRun_WriteUnsigned32_PrintsUnsigned;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcWriteUnsigned32, Output, RCode));
@@ -1943,7 +1943,7 @@ const
           Outer()
         end.
         ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -1978,7 +1978,7 @@ const
           Second()
         end.
         ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2020,7 +2020,7 @@ const
           F.MethodB()
         end.
         ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2218,7 +2218,7 @@ const
       WriteLn(B.GetValue())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2252,7 +2252,7 @@ const
       WriteLn(P.GetVal())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2279,7 +2279,7 @@ const Src = '''
       WriteLn(P^)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2300,7 +2300,7 @@ const Src = '''
       WriteLn(V.Value)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2325,7 +2325,7 @@ const Src = '''
       WriteLn(V.GetValue())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2349,7 +2349,7 @@ const Src = '''
       WriteLn(P.Val)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2370,7 +2370,7 @@ const Src = '''
       WriteLn(V.Value)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2387,7 +2387,7 @@ const Src = '''
       WriteLn(not I)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2404,7 +2404,7 @@ const Src = '''
       WriteLn(not B)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2423,7 +2423,7 @@ const Src = '''
       WriteLn(not I)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2442,7 +2442,7 @@ const Src = '''
       WriteLn(Flags)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -2460,7 +2460,7 @@ const Src = '''
     ''';
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   BE:     TBackend;
   BName:  string;
 begin
@@ -4890,7 +4890,7 @@ end;
 procedure TE2EMiscTests.TestRun_InlineProcType_UnitInterfaceVar;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run: ' + Output, CompileAndRunWithUnitNative('crs',
@@ -4941,7 +4941,7 @@ var
   SrcFile, AsmFile, ProgObj, Script, Compiler, ObjDir: string;
   AsmText, OutLocale, OutC: string;
   Lines: TStringList;
-  I, Rc: Integer;
+  I, Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { A program object whose symbol list mixes case and underscores, so a
@@ -5015,7 +5015,7 @@ const
     ''';
 var
   BinFile, ToolOut, Output: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   Rc := CompileNativeCLI(Src, False, '', BinFile, ToolOut);
   AssertEquals('compile: ' + ToolOut, 0, Rc);

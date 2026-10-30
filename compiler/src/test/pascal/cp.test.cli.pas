@@ -37,7 +37,7 @@ type
     FRTLPath: string;
     FStdlibPath: string;
     FScratch: string;
-    FCounter: Integer;
+    FCounter: Int;
     function ProjectRoot: string;
     function CompilerAvailable: Boolean;
     { True when the host links ELF executables (Linux, FreeBSD).  The link-mode
@@ -46,10 +46,10 @@ type
     function ElfHost: Boolean;
     { Run the compiler with the given args; capture combined stdout+stderr. }
     function RunCompiler(const AArgs: array of string;
-      out ACombined: string): Integer;
+      out ACombined: string): Int;
     function WriteScratchSource(const ASrc: string): string;
     { Run a produced binary, capturing stdout/stderr; returns its exit code. }
-    function RunBinary(const AExe: string; out ACombined: string): Integer;
+    function RunBinary(const AExe: string; out ACombined: string): Int;
     { `readelf -dW <exe>` output — the DT_NEEDED lines reveal which shared libs
       the binary links.  Empty string if readelf is unavailable. }
     function ReadelfDynamic(const AExe: string): string;
@@ -58,7 +58,7 @@ type
       that need stdlib units loaded + linked, which the in-process e2e harness
       cannot do. }
     function CompileRunFull(const ASrc, ABackend: string;
-      out AStdout: string; out AExitCode: Integer): Boolean;
+      out AStdout: string; out AExitCode: Int): Boolean;
   protected
     procedure SetUp; override;
   published
@@ -166,14 +166,14 @@ var
   with an actionable message instead of failing.
   0 = not probed, 1 = good, 2 = bad. }
 var
-  GCLIProbeState: Integer = 0;
+  GCLIProbeState: Int32 = 0;
 
 { ---- helpers ---- }
 
 function TCLIContractTests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then
@@ -220,7 +220,7 @@ end;
 function TCLIContractTests.CompilerAvailable: Boolean;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { The compiler binary source-builds the RTL itself (no blaise_rtl.a); only
     the binary and the RTL source need to be present. }
@@ -255,10 +255,10 @@ begin
 end;
 
 function TCLIContractTests.RunCompiler(const AArgs: array of string;
-  out ACombined: string): Integer;
+  out ACombined: string): Int;
 var
   Proc: TProcess;
-  I: Integer;
+  I: Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -294,7 +294,7 @@ end;
 procedure TCLIContractTests.TestHelpStillWorks;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -310,7 +310,7 @@ end;
 procedure TCLIContractTests.TestWithStatement_RejectedWithExplanation;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -343,7 +343,7 @@ end;
 procedure TCLIContractTests.TestUnitImplMismatch_RejectedWithBothLists;
 var
   UnitDir, Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -386,7 +386,7 @@ end;
 procedure TCLIContractTests.TestNormalCompileStillWorks;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -410,7 +410,7 @@ end;
 procedure TCLIContractTests.TestFPCVersionProbeGone;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -430,7 +430,7 @@ end;
 procedure TCLIContractTests.TestAssemblerInternalAccepted;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -458,7 +458,7 @@ end;
 procedure TCLIContractTests.TestAssemblerBogusRejected;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -489,7 +489,7 @@ end;
 procedure TCLIContractTests.TestEmitAsmStillValidatesAssembler;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -518,7 +518,7 @@ end;
 procedure TCLIContractTests.TestAssemblerLineInHelp;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -536,7 +536,7 @@ end;
 procedure TCLIContractTests.TestBackendQbe_Removed_Rejected;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   Src := WriteScratchSource(
@@ -552,7 +552,7 @@ end;
 procedure TCLIContractTests.TestEmitIr_Removed_Rejected;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   Src := WriteScratchSource(
@@ -564,7 +564,7 @@ begin
 end;
 
 function TCLIContractTests.RunBinary(const AExe: string;
-  out ACombined: string): Integer;
+  out ACombined: string): Int;
 var
   Proc: TProcess;
   Chunk: string;
@@ -612,10 +612,10 @@ begin
 end;
 
 function TCLIContractTests.CompileRunFull(const ASrc, ABackend: string;
-  out AStdout: string; out AExitCode: Integer): Boolean;
+  out AStdout: string; out AExitCode: Int): Boolean;
 var
   SrcPath, BinPath, CompileOut: string;
-  EC: Integer;
+  EC: Int;
 begin
   Result := False;
   SrcPath := WriteScratchSource(ASrc);
@@ -681,7 +681,7 @@ const
     'end.';
 
 procedure TCLIContractTests.TestExternalLib_MissingLib_FailsLink_Native;
-var SrcPath, BinPath, Out_: string; EC: Integer;
+var SrcPath, BinPath, Out_: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   SrcPath := WriteScratchSource(SrcMissingExternalLib);
@@ -700,7 +700,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLibm_FloatMath_NoLibm;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   { Sqrt (and all float math) now lowers to the pure-Pascal runtime.math
@@ -723,7 +723,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLibm_NoFloatMath_NoLibm;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   { A program with no float math must NOT drag in libm — proves -lm is
@@ -741,7 +741,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLinkAuto_PureProgram_Freestanding;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   if not ElfHost() then
@@ -767,7 +767,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLinkAuto_ExternalLib_DynamicWithNote;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   if not ElfHost() then
@@ -798,7 +798,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLinkAuto_BareLibcSymbol_FallsBackWithNote;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   if not ElfHost() then
@@ -827,7 +827,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLinkStatic_ExternalLib_Errors;
-var SrcPath, BinPath, Out_: string; EC: Integer;
+var SrcPath, BinPath, Out_: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   if not ElfHost() then
@@ -851,7 +851,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLinkStatic_UnresolvedSymbol_Errors;
-var SrcPath, BinPath, Out_: string; EC: Integer;
+var SrcPath, BinPath, Out_: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   if not ElfHost() then
@@ -875,7 +875,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLinkDynamic_Flag_ForcesDynamic;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   if not ElfHost() then
@@ -900,7 +900,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestLinkAuto_ExternalLib_BinaryRuns;
-var SrcPath, BinPath, Out_, RunOut: string; EC: Integer;
+var SrcPath, BinPath, Out_, RunOut: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   { sinf(0) is 0, so the program prints TRUE — a value that could only come
@@ -922,7 +922,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestPthread_NativeThreads_LinksLibpthread;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   { A native program that uses runtime.thread pulls libpthread via
@@ -954,7 +954,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestPthread_StaticThreads_NoNeeded;
-var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   if not ElfHost() then
@@ -978,7 +978,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestGetCPUCount_IsAPlausibleCount;
-var SrcPath, BinPath, Out_, RunOut: string; EC: Integer;
+var SrcPath, BinPath, Out_, RunOut: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   { The program prints the count and then the verdict, so a failure message
@@ -1041,7 +1041,7 @@ procedure TCLIContractTests.TestLinkerScriptLib_ResolvesToVersionedSoname_Native
 
 var
   SrcPath, BinPath, Out_, Dyn, LibName: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   { Find a system library whose lib<name>.so is a linker script.  ncurses is
@@ -1085,7 +1085,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestDivByZeroCaught_Native;
-var Out_: string; EC: Integer;
+var Out_: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   AssertTrue('compile+run', CompileRunFull(SrcDivByZeroCaught, 'native', Out_, EC));
@@ -1096,7 +1096,7 @@ begin
 end;
 
 procedure TCLIContractTests.TestModByZeroCaught_Native;
-var Out_: string; EC: Integer;
+var Out_: string; EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   AssertTrue('compile+run', CompileRunFull(SrcModByZeroCaught, 'native', Out_, EC));
@@ -1107,7 +1107,7 @@ end;
 procedure TCLIContractTests.TestBareOutput_UnitArtefacts_NotWrittenToRoot;
 var
   UnitPath, ProgPath, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   { Regression: incremental compilation (default) compiles each used unit to
@@ -1162,9 +1162,9 @@ end;
   fork+exec).  The native driver's --assembler flag is the observable: only a
   native selection accepts it.  setenv/unsetenv are bound directly
   to libc (already linked); no SetEnvironmentVariable builtin is needed. }
-function _setenv(Name, Value: Pointer; Overwrite: Integer): Integer;
+function _setenv(Name, Value: Pointer; Overwrite: Int32): Int32;
   external name 'setenv';
-function _unsetenv(Name: Pointer): Integer; external name 'unsetenv';
+function _unsetenv(Name: Pointer): Int32; external name 'unsetenv';
 
 procedure SetBackendEnv(const AValue: string);
 var
@@ -1185,7 +1185,7 @@ end;
 procedure TCLIContractTests.TestBackendEnv_Native_AcceptsNativeOnlyFlag;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -1218,7 +1218,7 @@ end;
 procedure TCLIContractTests.TestBackendEnv_InvalidValue_WarnsAndFallsBack;
 var
   Src, Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then
   begin
@@ -1258,7 +1258,7 @@ var
   Base, CfgDir, CliDir, BinDir, Src, Exe, Out_: string;
   Saved: string;
   Proc: TProcess;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompilerAvailable() then begin Ignore('compiler unavailable'); Exit end;
   Base := FScratch + 'cfgorder/';

@@ -31,7 +31,7 @@ type
     [TestCase('small',    '2,3,5')]
     [TestCase('negative', '-2,-3,-5')]
     [TestCase('zero',     '0,0,0')]
-    procedure TestTypedIntSum(A, B, Expected: Integer);
+    procedure TestTypedIntSum(A, B, Expected: Int);
 
     [TestCase('concat', 'foo,bar,foobar')]
     [TestCase('empty-right', 'foo,,foo')]
@@ -39,13 +39,13 @@ type
 
     [TestCase('yes', 'True,1')]
     [TestCase('no',  'False,0')]
-    procedure TestTypedBool(AFlag: Boolean; AExpected: Integer);
+    procedure TestTypedBool(AFlag: Boolean; AExpected: Int);
 
     [TestCase('wide', '4294967296,8589934592')]
     procedure TestTypedInt64(A, ATwice: Int64);
 
     [TestCase('mixed', '7,seven,True')]
-    procedure TestMixedKinds(N: Integer; const S: string; B: Boolean);
+    procedure TestMixedKinds(N: Int; const S: string; B: Boolean);
 
     [TestCase('labelled-only')]
     procedure TestLabelledParameterless;
@@ -60,7 +60,7 @@ type
 
 implementation
 
-procedure TParameterisedTests.TestTypedIntSum(A, B, Expected: Integer);
+procedure TParameterisedTests.TestTypedIntSum(A, B, Expected: Int);
 begin
   AssertEquals(CaseName, Expected, A + B);
 end;
@@ -70,7 +70,7 @@ begin
   AssertEquals(CaseName, Expected, A + B);
 end;
 
-procedure TParameterisedTests.TestTypedBool(AFlag: Boolean; AExpected: Integer);
+procedure TParameterisedTests.TestTypedBool(AFlag: Boolean; AExpected: Int);
 begin
   if AFlag then
     AssertEquals(CaseName, 1, AExpected)
@@ -83,7 +83,7 @@ begin
   AssertEquals(CaseName, ATwice, A * 2);
 end;
 
-procedure TParameterisedTests.TestMixedKinds(N: Integer; const S: string; B: Boolean);
+procedure TParameterisedTests.TestMixedKinds(N: Int; const S: string; B: Boolean);
 begin
   AssertEquals(CaseName + ' int', 7, N);
   AssertEquals(CaseName + ' str', 'seven', S);

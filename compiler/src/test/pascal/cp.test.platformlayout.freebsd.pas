@@ -120,7 +120,7 @@ procedure TFreeBSDLayoutTests.TestStatSizeOffset;
 var
   Buf: array[0..223] of Byte;
   P: ^Int64;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 223 do
     Buf[I] := 0;
@@ -135,7 +135,7 @@ procedure TFreeBSDLayoutTests.TestStatMtimeOffset;
 var
   Buf: array[0..223] of Byte;
   P: ^Int64;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 223 do
     Buf[I] := 0;
@@ -149,8 +149,8 @@ end;
 procedure TFreeBSDLayoutTests.TestStatModeOffset;
 var
   Buf: array[0..223] of Byte;
-  P: ^Integer;
-  I: Integer;
+  P: ^Int32;
+  I: Int;
 begin
   for I := 0 to 223 do
     Buf[I] := 0;

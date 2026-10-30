@@ -410,7 +410,7 @@ const
     ''';
 var
   CFile, OFile, Output, Dummy: string;
-  RCode: Integer;
+  RCode: Int;
   SL: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -476,7 +476,7 @@ const
     ''';
 var
   CFile, OFile, Output, Dummy: string;
-  RCode: Integer;
+  RCode: Int;
   SL: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;

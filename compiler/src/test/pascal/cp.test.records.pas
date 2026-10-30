@@ -769,7 +769,7 @@ const
     begin end.
     ''';
 var
-  I: Integer;
+  I: Int;
   Target: string;
 begin
   { A const record parameter is borrowed: the callee neither retains nor
@@ -854,7 +854,7 @@ const
     end.
     ''';
 var
-  I, J, P: Integer;
+  I, J, P: Int;
   Target, Src, AsmT, Call, Rel, Tail: string;
 begin
   { Make().Show(): the record Make returns is a transient receiver that owns
@@ -946,7 +946,7 @@ const
     end.
     ''';
 var
-  I, P, Q, Sites: Integer;
+  I, P, Q, Sites: Int;
   Target, AsmT, Call, CallOp, Rel, Tail: string;
 begin
   { A method call statement whose managed record result is discarded --

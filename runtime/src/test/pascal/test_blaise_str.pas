@@ -20,7 +20,7 @@ procedure _libc_puts(S: PChar); external name 'puts';
 
 var
   S: string;
-  N: Integer;
+  N: Int;
 
 begin
   { _IntToStr }

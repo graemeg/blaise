@@ -34,7 +34,7 @@ type
   TMaxLineLengthRule = class(TLineRuleBase)
   protected
     procedure CheckLine(AContext: TRuleContext; const ALine: string;
-                        ALineNo: Integer); override;
+                        ALineNo: Int); override;
   public
     constructor Create;
   end;
@@ -48,10 +48,10 @@ begin
 end;
 
 procedure TMaxLineLengthRule.CheckLine(AContext: TRuleContext;
-  const ALine: string; ALineNo: Integer);
+  const ALine: string; ALineNo: Int);
 var
-  MaxLen: Integer;
-  Len:    Integer;
+  MaxLen: Int;
+  Len:    Int;
 begin
   MaxLen := AContext.RuleCfg.GetInt('maxLength', DEFAULT_MAX);
   Len    := Length(ALine);

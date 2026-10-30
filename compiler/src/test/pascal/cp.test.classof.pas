@@ -448,7 +448,7 @@ const Src = '''
     ''';
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   S: TMethodCallStmt;
   E: TMethodCallExpr;
 begin
@@ -487,7 +487,7 @@ const Src = '''
     ''';
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   S: TMethodCallStmt;
 begin
   Prog := AnalyseSrc(Src);
@@ -554,7 +554,7 @@ const Src = '''
     ''';
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   S: TMethodCallStmt;
   E: TMethodCallExpr;
 begin

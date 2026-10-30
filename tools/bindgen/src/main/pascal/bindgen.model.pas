@@ -70,7 +70,7 @@ type
     Name: string;
     CType: string;
     IsBitfield: Boolean;
-    BitWidth: Integer;
+    BitWidth: Int;
     Note: string;      { emitter appends this as a comment, e.g. the
                          member:width list of a collapsed bitfield run }
     constructor Create(const AName, ACType: string);
@@ -197,7 +197,7 @@ end;
 
 function TCModel.FindRecord(const AName: string): TCRecord;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to Records.Count - 1 do

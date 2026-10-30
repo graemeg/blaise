@@ -69,7 +69,7 @@ type
     destructor Destroy; override;
     procedure Reset; override;
     procedure VisitTypeDecl(ADecl: TTypeDecl); override;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
   end;
 
 constructor TExhaustiveCaseRule.Create;
@@ -93,7 +93,7 @@ end;
 
 procedure TExhaustiveCaseRule.ClearEnums;
 var
-  I: Integer;
+  I: Int;
   L: TStringList;
 begin
   { The dictionary is non-owning over its VALUES, so free the lists first.
@@ -114,7 +114,7 @@ procedure TExhaustiveCaseRule.VisitTypeDecl(ADecl: TTypeDecl);
 var
   ED:      TEnumTypeDef;
   Members: TStringList;
-  I:       Integer;
+  I:       Int;
 begin
   if ADecl = nil then Exit;
   if not (ADecl.Def is TEnumTypeDef) then Exit;
@@ -129,9 +129,9 @@ function TExhaustiveCaseRule.MatchEnum(ALabels: TStringList): string;
 var
   K:       string;
   Members: TStringList;
-  I, N:    Integer;
+  I, N:    Int;
   AllIn:   Boolean;
-  Hits:    Integer;
+  Hits:    Int;
 begin
   Result := '';
   Hits   := 0;
@@ -157,7 +157,7 @@ begin
     Result := '';
 end;
 
-procedure TExhaustiveCaseRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TExhaustiveCaseRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
   CS:       TCaseStmt;
   Branch:   TCaseBranch;
@@ -165,7 +165,7 @@ var
   Missing:  TStringList;
   Members:  TStringList;
   EnumName: string;
-  I, J:     Integer;
+  I, J:     Int;
   E:        TASTExpr;
   Bare:     Boolean;
 begin

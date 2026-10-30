@@ -43,11 +43,11 @@ type
   private
     function  BlaisePath(): string;
     function  RunBlaise(const AArgs: array of string;
-                        out AStdout: string): Integer;
-    function  RunBinary(const AExe: string; out AStdout: string): Integer;
+                        out AStdout: string): Int;
+    function  RunBinary(const AExe: string; out AStdout: string): Int;
     { Run an arbitrary tool (ar, cc, nm, …) capturing its stdout. }
     function  RunProc(const AExe: string; const AArgs: array of string;
-                      out AStdout: string): Integer;
+                      out AStdout: string): Int;
     { Assert ASym is present in nm output ANm but not as a strong (T/D) local
       definition — the GH #174 archive-collision guard. }
     procedure AssertNotStrongDef(const ANm, ASym, AWhere: string);
@@ -477,10 +477,10 @@ begin
 end;
 
 function TSepCompileTests.RunBlaise(const AArgs: array of string;
-                                    out AStdout: string): Integer;
+                                    out AStdout: string): Int;
 var
   Proc:  TProcess;
-  I:     Integer;
+  I:     Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -502,7 +502,7 @@ begin
 end;
 
 function TSepCompileTests.RunBinary(const AExe: string;
-                                    out AStdout: string): Integer;
+                                    out AStdout: string): Int;
 var
   Proc:  TProcess;
   Chunk: string;
@@ -550,7 +550,7 @@ const
 var
   DepPas, DepObj, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -641,7 +641,7 @@ const
 var
   Dir, DepPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -707,7 +707,7 @@ const
 var
   Dir, DepPas, ProgPas, Bin1, Bin2: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -806,7 +806,7 @@ const
 var
   DepPas, DepObj, OkPas, OkBin, BarePas, BareBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -881,7 +881,7 @@ const
 var
   DepPas, DepObj, UsePas, UseBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -949,7 +949,7 @@ const
 var
   DepPas, DepObj, UsePas, UseBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1027,7 +1027,7 @@ const
 var
   DepPas, DepObj, OkPas, OkBin, BadPas, BadBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1116,7 +1116,7 @@ const
 var
   DepPas, DepObj, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1190,7 +1190,7 @@ const
 var
   UnitPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc, I: Integer;
+  Rc, I: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1261,7 +1261,7 @@ const
 var
   Dir, ProgPas: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -1326,7 +1326,7 @@ const
 var
   Dir, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1452,7 +1452,7 @@ const
 var
   Dir, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1492,7 +1492,7 @@ const
     ''';
 var
   Dir, ProgPas, ProgBin, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -1540,7 +1540,7 @@ const
     ''';
 var
   Dir, ProgPas, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if HostTarget().OS <> osMacOS then
   begin
@@ -1599,7 +1599,7 @@ const
     ''';
 var
   Dir, ProgPas, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -1667,7 +1667,7 @@ const
 var
   Dir, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1712,7 +1712,7 @@ const
 var
   Dir, UnitPas, ProgPas, ProgBin, ProgBin2: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1802,7 +1802,7 @@ const
 var
   Dir, UnitPas, ProgPas, Bin1, Bin2: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1888,7 +1888,7 @@ const
 var
   DepPas, DepObj, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -1988,7 +1988,7 @@ const
 var
   Dir, LeafPas, DepPas, ProgPas, Bin1, Bin2: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2085,7 +2085,7 @@ const
 var
   DepPas, DepObj, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2167,7 +2167,7 @@ const
 var
   APas, BPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2238,7 +2238,7 @@ const
 var
   UnitPas, ProgPas, ProgBin, UnitObj: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2308,7 +2308,7 @@ const
 var
   UnitPas, ProgPas, ProgBin, UnitObj: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2343,10 +2343,10 @@ begin
 end;
 
 function TSepCompileTests.RunProc(const AExe: string;
-  const AArgs: array of string; out AStdout: string): Integer;
+  const AArgs: array of string; out AStdout: string): Int;
 var
   Proc:  TProcess;
-  I:     Integer;
+  I:     Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -2478,7 +2478,7 @@ var
   BasePas, LeafAPas, LeafBPas: string;
   BaseObj, LeafAObj, LeafBObj: string;
   Captured, NmA, NmB: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -2597,7 +2597,7 @@ const
 var
   UnitPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2676,7 +2676,7 @@ const
 var
   UnitPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2752,7 +2752,7 @@ const
 var
   UnitAPas, UnitBPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -2819,7 +2819,7 @@ const
 var
   BasePas, DerivedPas, DerivedObj, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2894,7 +2894,7 @@ const
 var
   UnitPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -2964,7 +2964,7 @@ const
 var
   HelperPas, MidPas, ProgPas, ProgBin, CacheDir: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -3080,7 +3080,7 @@ const
 var
   Dir, LeafPas, ProgPas, ProgBin, CacheDir: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -3199,7 +3199,7 @@ const
 var
   GenPas, ConsPas, ProgPas, Bin1, Bin2, CacheDir, Dir: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -3409,7 +3409,7 @@ const
                            AExpected: string);
   var
     UnitPas, ProgPas, ProgBin, CacheDir, Captured: string;
-    Rc: Integer;
+    Rc: Int;
   begin
     UnitPas  := FScratch + '/' + AUnitName + '.pas';
     ProgPas  := FScratch + '/' + AProgName + '.pas';
@@ -3528,7 +3528,7 @@ const
 var
   BasePas, MidPas, LeafPas, ProgPas, ProgBin, CacheDir: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -3607,7 +3607,7 @@ const
     ''';
 var
   Dir, ProgPas, Captured, Other: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -3662,7 +3662,7 @@ const
     ''';
 var
   Dir, ProgPas, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -3724,7 +3724,7 @@ const
     ''';
 var
   Dir, ProgPas, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -3770,7 +3770,7 @@ const
     ''';
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -3866,7 +3866,7 @@ const
   Expected = 'tag:grand:True' + #10 + 'tag:bare:False' + #10;
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -3943,7 +3943,7 @@ const
     ''';
 var
   BasePas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4038,7 +4038,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4158,7 +4158,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4229,7 +4229,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   { Array constants declared in a unit INTERFACE, read by an importing
     program.  Pass 0 builds the unit from source; pass 1 imports it from its
@@ -4313,7 +4313,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4392,7 +4392,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4474,7 +4474,7 @@ const
     ''';
 var
   BasePas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4522,7 +4522,7 @@ const
     ''';
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4616,7 +4616,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4678,7 +4678,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4745,7 +4745,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Pass: Integer;
+  Rc, Pass: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4821,7 +4821,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4885,7 +4885,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -4960,7 +4960,7 @@ const
 var
   DepPas, ProgPas, ProgBin, CacheDir, DepObj: string;
   Captured, ObjOut: string;
-  Rc, MagicAt, WantArch: Integer;
+  Rc, MagicAt, WantArch: Int;
   FIn: TFileInputStream;
 begin
   if not ToolchainAvailable() then
@@ -5004,7 +5004,7 @@ begin
     archAArch64 = 4).  The arm64 emitter used to write 2 on every target. }
   FIn := TFileInputStream.Create(DepObj);
   try
-    SetLength(ObjOut, Integer(FIn.Size()));
+    SetLength(ObjOut, Int32(FIn.Size()));
     if Length(ObjOut) > 0 then
       FIn.Read(PChar(ObjOut), Length(ObjOut));
   finally
@@ -5068,7 +5068,7 @@ const
 var
   Dir, UnitPas, UnitObj, ProgPas, ProgBin: string;
   Captured, ObjOut: string;
-  Rc, MagicAt, WantArch: Integer;
+  Rc, MagicAt, WantArch: Int;
   FIn: TFileInputStream;
 begin
   if not ToolchainAvailable() then
@@ -5100,7 +5100,7 @@ begin
 
   FIn := TFileInputStream.Create(UnitObj);
   try
-    SetLength(ObjOut, Integer(FIn.Size()));
+    SetLength(ObjOut, Int32(FIn.Size()));
     if Length(ObjOut) > 0 then
       FIn.Read(PChar(ObjOut), Length(ObjOut));
   finally
@@ -5224,7 +5224,7 @@ procedure TSepCompileTests.RunRecordMethodsAndClosuresWarmCache(
 var
   UnitPas, ProgPas, ProgBin, CacheDir: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -5270,7 +5270,7 @@ procedure TSepCompileTests.TestStaticMembers_CrossUnit_Native;
 var
   UnitPas, ProgPas, ProgBin, CacheDir: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -5367,7 +5367,7 @@ const
     ''';
 var
   UnitAPas, UnitBPas, ProgPas, ProgBin, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -5523,7 +5523,7 @@ var
   Prog1Pas, Prog2Pas, Prog1Bin, Prog2Bin: string;
   Cache1, Cache2: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -5640,7 +5640,7 @@ const
 var
   DepPas, DepObj, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -5731,7 +5731,7 @@ const
 var
   ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -5819,7 +5819,7 @@ const
 var
   UnitAPas, UnitBPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -5896,7 +5896,7 @@ const
     ''';
 var
   Dir, ProgPas, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -5953,7 +5953,7 @@ const
   Expected = '42 8 abab xx' + #10;
 var
   Dir, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc, Leg: Integer;
+  Rc, Leg: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -6026,7 +6026,7 @@ const
 var
   UnitAPas, UnitBPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -6087,7 +6087,7 @@ const
     ''';
 var
   ProgPas, ProgBin, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
@@ -6153,7 +6153,7 @@ const
 var
   UnitPas, ProgPas, ProgBin, UnitObj: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
@@ -6234,7 +6234,7 @@ const
 var
   UnitPas, ProgPas, ProgBin: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
@@ -6288,7 +6288,7 @@ const
 var
   UnitPas, ProgPas, ProgBin, UnitObj: string;
   Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
@@ -6349,7 +6349,7 @@ const
     ''';
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -6466,7 +6466,7 @@ const
   Expected = '17 4 -2' + #10 + 'True True False' + #10 + '7' + #10;
 var
   LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -6601,7 +6601,7 @@ const
 procedure TSepCompileTests.TestIncrementalRebuild_StaleImplOnlyDep_Warm;
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -6645,7 +6645,7 @@ end;
 procedure TSepCompileTests.TestIncrementalRebuild_MissingImplOnlyDepObject_Warm;
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then
   begin
@@ -6736,7 +6736,7 @@ const
     ''';
 var
   BadPas, GoodPas, Bin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -6837,7 +6837,7 @@ const
              'PROG-CONST PROG-FUNC' + #10;
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -6911,7 +6911,7 @@ const
     ''';
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin
@@ -7000,7 +7000,7 @@ const
     ''';
 var
   ProgPas, ProgBin, CacheDir, Captured: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not FileExists(BlaisePath()) then
   begin

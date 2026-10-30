@@ -40,7 +40,7 @@ function EmitBinding(AModel: TCModel; const AUnitName, ALibName: string;
 
 { Make a C identifier safe as a Blaise identifier: reserved words get a
   trailing underscore; an empty name becomes 'a<index>'. }
-function SanitiseIdent(const AName: string; AIndex: Integer): string;
+function SanitiseIdent(const AName: string; AIndex: Int): string;
 
 implementation
 
@@ -61,7 +61,7 @@ begin
   Result := Pos(' ' + UpperCase(AName) + ' ', ReservedWords) >= 0;
 end;
 
-function SanitiseIdent(const AName: string; AIndex: Integer): string;
+function SanitiseIdent(const AName: string; AIndex: Int): string;
 begin
   if AName = '' then
   begin
@@ -77,7 +77,7 @@ end;
   pointer synthesises a named procedural type hinted by function and
   parameter name; everything else goes through plain Map.  Called from
   BOTH the pre-pass and emission so the two see identical types. }
-function ParamTypeName(F: TCFunction; AIndex: Integer;
+function ParamTypeName(F: TCFunction; AIndex: Int;
   AMapper: TTypeMapper): string;
 var
   Hint: string;
@@ -117,7 +117,7 @@ end;
 
 procedure PreMapModel(AModel: TCModel; AMapper: TTypeMapper);
 var
-  I, J: Integer;
+  I, J: Int;
   R: TCRecord;
   F: TCFunction;
   Hint: string;
@@ -160,7 +160,7 @@ end;
   aliases its tag ('XEvent' for 'union _XEvent'), else the tag itself. }
 function FriendlyRecordName(AModel: TCModel; R: TCRecord): string;
 var
-  I: Integer;
+  I: Int;
   T: TCTypedef;
 begin
   Result := R.Name;
@@ -178,8 +178,8 @@ end;
 procedure EmitUnion(R: TCRecord; AModel: TCModel; AMapper: TTypeMapper;
   ATypeLines, AFuncLines, AImplLines: TStringList);
 var
-  Size, Align: Integer;
-  J: Integer;
+  Size, Align: Int;
+  J: Int;
   Members: string;
   Mapped: string;
   PtrName: string;
@@ -231,7 +231,7 @@ end;
 procedure EmitRecord(R: TCRecord; AModel: TCModel; AMapper: TTypeMapper;
   ATypeLines, AFuncLines, AImplLines: TStringList);
 var
-  J: Integer;
+  J: Int;
 begin
   if R.Name = '' then Exit;  { anonymous and never typedef-named }
   if not R.IsComplete then
@@ -279,7 +279,7 @@ end;
 
 { The width in bytes of a Blaise builtin type name, or -1 when it is not a
   fixed-width builtin (uSymbolTable.RegisterBuiltins). }
-function BuiltinTypeWidth(const AName: string): Integer;
+function BuiltinTypeWidth(const AName: string): Int;
 var
   U: string;
 begin
@@ -348,7 +348,7 @@ end;
 
 procedure EmitEnum(E: TCEnum; ATypeLines, AConstLines: TStringList);
 var
-  J: Integer;
+  J: Int;
 begin
   if E.Name <> '' then
     ATypeLines.Add('  ' + E.Name + ' = Int32;');
@@ -360,7 +360,7 @@ end;
 procedure EmitFunction(F: TCFunction; const ALibName: string;
   AMapper: TTypeMapper; AFuncLines: TStringList; ADeclared: TSet<string>);
 var
-  J: Integer;
+  J: Int;
   ParamStr: string;
   Ret: string;
   Sig: string;
@@ -424,7 +424,7 @@ var
   ConstLines: TStringList;
   FuncLines: TStringList;
   ImplLines: TStringList;
-  I, J: Integer;
+  I, J: Int;
   D: TCDecl;
   Declared: TSet<string>;
   MacroNames: TSet<string>;

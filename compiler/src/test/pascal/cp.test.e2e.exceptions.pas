@@ -436,7 +436,7 @@ const
         ''';
 
 procedure TE2EExceptionTests.TestRun_BareTryFinally;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcBareTryFinally, Output, RCode));
@@ -445,7 +445,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_TryFinally_PreservesLocals;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcPreservesLocals, Output, RCode));
@@ -455,7 +455,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_NestedTryFinally;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcNestedTryFinally, Output, RCode));
@@ -465,7 +465,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_ExitThroughFinally;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcExitThroughFinally, Output, RCode));
@@ -476,7 +476,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_ExitValueThroughFinally;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcExitValueThroughFinally, Output, RCode));
@@ -489,7 +489,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_ExitThroughNestedFinally;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcExitThroughNestedFinally, Output, RCode));
@@ -500,7 +500,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_BreakThroughFinally;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcBreakThroughFinally, Output, RCode));
@@ -512,7 +512,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_VirtualDispatchInsideTryFinally;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcVirtualDispatchInTry, Output, RCode));
@@ -521,7 +521,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_TypedExcept_CorrectHandlerMatched;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTypedExceptCorrect, Output, RCode));
@@ -530,7 +530,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_TypedExcept_SubclassMatchesParentHandler;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTypedExceptSubclass, Output, RCode));
@@ -539,7 +539,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_TypedExcept_UnmatchedReraises;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTypedExceptUnmatched, Output, RCode));
@@ -548,7 +548,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_TypedExcept_BareRaisePropagatesToOuter;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTypedExceptBareRaise, Output, RCode));
@@ -557,7 +557,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_TypedExcept_ElseBodyRunsWhenNoMatch;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTypedExceptElseRun, Output, RCode));
@@ -566,7 +566,7 @@ begin
 end;
 
 procedure TE2EExceptionTests.TestRun_FinallyStringMutation_SurvivesReraise;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcFinallyStringMutationSurvives, Output, RCode));

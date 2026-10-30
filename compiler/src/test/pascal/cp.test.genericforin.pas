@@ -307,7 +307,7 @@ var
   GD:   TGenericTypeDef;
   MD:   TMethodDecl;
   Found: Boolean;
-  I:    Integer;
+  I:    Int;
 begin
   Prog := ParseSrc(SrcTListEnumeratorDecl);
   try

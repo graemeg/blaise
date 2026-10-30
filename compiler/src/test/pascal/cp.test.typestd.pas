@@ -286,7 +286,7 @@ const
     tyInt64, tyInt64, tyInt64, tyInteger, tyUInt64);
 var
   Prog: TProgram;
-  K: Integer;
+  K: Int;
   Asg: TAssignment;
 begin
   Prog := Analyse(Src);

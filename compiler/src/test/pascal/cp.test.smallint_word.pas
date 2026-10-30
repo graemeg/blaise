@@ -420,7 +420,7 @@ const
     ''';
 
 procedure TSmallIntWordE2ETests.TestRun_SmallInt_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSmallIntRoundTrip, Output, RCode));
@@ -429,7 +429,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_Word_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcWordRoundTrip, Output, RCode));
@@ -438,7 +438,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_SmallInt_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSmallIntNegative, Output, RCode));
@@ -447,7 +447,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_Word_MaxValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcWordMax, Output, RCode));
@@ -456,7 +456,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_MixedRecord_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcMixedRecord, Output, RCode));
@@ -466,7 +466,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_ImplicitSelf_ByteFields_NoBleed;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcImplicitSelfByteFields, Output, RCode));
@@ -476,7 +476,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_ImplicitSelf_SmallIntWord_Fields;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcImplicitSelfSmallIntFields, Output, RCode));
@@ -486,7 +486,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_VarParam_SmallInt_SignPreserved;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcVarParamSmallInt, Output, RCode));
@@ -499,7 +499,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_OutParam_SmallInt_SignPreserved;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcOutParamSmallInt, Output, RCode));
@@ -509,7 +509,7 @@ begin
 end;
 
 procedure TSmallIntWordE2ETests.TestRun_VarParam_NarrowWidths_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcVarParamNarrowWidths, Output, RCode));

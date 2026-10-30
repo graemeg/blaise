@@ -38,7 +38,7 @@ type
   TVisibilityParseTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
-    function ClassOf(AProg: TProgram; AIndex: Integer): TClassTypeDef;
+    function ClassOf(AProg: TProgram; AIndex: Int): TClassTypeDef;
     procedure ParseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
   published
     procedure TestParse_PrivateField_SetsMvPrivate;
@@ -137,7 +137,7 @@ begin
   end;
 end;
 
-function TVisibilityParseTests.ClassOf(AProg: TProgram; AIndex: Integer): TClassTypeDef;
+function TVisibilityParseTests.ClassOf(AProg: TProgram; AIndex: Int): TClassTypeDef;
 var TD: TTypeDecl;
 begin
   TD := TTypeDecl(AProg.Block.TypeDecls.Items[AIndex]);

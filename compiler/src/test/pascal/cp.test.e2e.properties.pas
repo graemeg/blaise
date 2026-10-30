@@ -1508,7 +1508,7 @@ const
 var
   LE: string;
   RunOut: string;
-  Code: Integer;
+  Code: Int;
 begin
   LE := LineEnding;
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;

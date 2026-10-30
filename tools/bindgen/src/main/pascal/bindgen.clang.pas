@@ -108,7 +108,7 @@ function FindConstantValue(ANode: TJSONObject; var AValue: Int64): Boolean;
 var
   Inner: TJSONData;
   Arr: TJSONArray;
-  I: Integer;
+  I: Int;
   Child: TJSONObject;
   ValStr: string;
 begin
@@ -138,7 +138,7 @@ end;
 
 { Size in bytes of a bitfield's base type, or 0 if unknown.  Bitfield
   bases are integer builtins by C rules. }
-function BitfieldUnitSize(const ACType: string): Integer;
+function BitfieldUnitSize(const ACType: string): Int;
 var
   S: string;
 begin
@@ -162,14 +162,14 @@ end;
 procedure CollapseBitfields(ARec: TCRecord);
 var
   OutFields: TList<TCField>;
-  I: Integer;
+  I: Int;
   F: TCField;
   Group: TCField;
   InGroup: Boolean;
-  UnitSize: Integer;
-  BitsUsed: Integer;
-  GroupIdx: Integer;
-  Sz: Integer;
+  UnitSize: Int;
+  BitsUsed: Int;
+  GroupIdx: Int;
+  Sz: Int;
   Any: Boolean;
 begin
   { Fast path: nothing to do for the vast majority of records. }
@@ -237,7 +237,7 @@ procedure LoadRecordFields(ANode: TJSONObject; ARec: TCRecord; AModel: TCModel);
 var
   Inner: TJSONData;
   Arr: TJSONArray;
-  I: Integer;
+  I: Int;
   Child: TJSONObject;
   QT: string;
   Lifted: TCRecord;
@@ -299,7 +299,7 @@ begin
         Fld.IsBitfield := True;
         Width := 0;
         if FindConstantValue(Child, Width) then
-          Fld.BitWidth := Integer(Width);
+          Fld.BitWidth := Int32(Width);
       end;
       ARec.Fields.Add(Fld);
     end;
@@ -312,7 +312,7 @@ end;
   receives its name from the later TypedefDecl). }
 procedure RenameLiftedRecords(AModel: TCModel);
 var
-  I, J: Integer;
+  I, J: Int;
   R: TCRecord;
   Lifted: TCRecord;
   NewName: string;
@@ -354,7 +354,7 @@ var
   E: TCEnum;
   Inner: TJSONData;
   Arr: TJSONArray;
-  I: Integer;
+  I: Int;
   Child: TJSONObject;
   NextValue: Int64;
   Explicit: Int64;
@@ -383,10 +383,10 @@ procedure LoadFunction(ANode: TJSONObject; AModel: TCModel);
 var
   F: TCFunction;
   QT: string;
-  ParenPos: Integer;
+  ParenPos: Int;
   Inner: TJSONData;
   Arr: TJSONArray;
-  I: Integer;
+  I: Int;
   Child: TJSONObject;
 begin
   if GetStr(ANode, 'storageClass') = 'static' then Exit;
@@ -497,7 +497,7 @@ end;
 
 function MatchesAny(const AFile: string; AMatches: TList<String>): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := AMatches.Count = 0;
   for I := 0 to AMatches.Count - 1 do
@@ -513,7 +513,7 @@ var
   Root: TJSONObject;
   Inner: TJSONData;
   Arr: TJSONArray;
-  I: Integer;
+  I: Int;
   Node: TJSONObject;
   Kind: string;
   CurFile: string;

@@ -138,7 +138,7 @@ end;
 procedure TE2ETComponentTests.TestRun_CreateNilOwner;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -157,7 +157,7 @@ end;
 procedure TE2ETComponentTests.TestRun_Name;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcName, Output, RCode));
@@ -168,7 +168,7 @@ end;
 procedure TE2ETComponentTests.TestRun_OwnerRef;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcOwnerRef, Output, RCode));
@@ -179,7 +179,7 @@ end;
 procedure TE2ETComponentTests.TestRun_ComponentCount;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcComponentCount, Output, RCode));
@@ -190,7 +190,7 @@ end;
 procedure TE2ETComponentTests.TestRun_ComponentsArray;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -209,7 +209,7 @@ end;
 procedure TE2ETComponentTests.TestRun_OwnerFreesChildren;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;

@@ -48,7 +48,7 @@ uses
 function TXmlFormatter.Render(AReport: TReport): string;
 var
   W: TXMLWriter;
-  I: Integer;
+  I: Int;
   D: TDiagnostic;
 begin
   W := TXMLWriter.Create();

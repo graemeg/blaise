@@ -44,7 +44,7 @@ type
   TEmptyHandlerRule = class(TAstRuleBase)
   public
     constructor Create;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
   end;
 
 { True when a compound body carries no statements at all.  A nil body is the
@@ -62,12 +62,12 @@ begin
   FSeverity := sevWarning;
 end;
 
-procedure TEmptyHandlerRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TEmptyHandlerRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
   TE: TTryExceptStmt;
   TF: TTryFinallyStmt;
   HC: TExceptHandlerClause;
-  I:  Integer;
+  I:  Int;
 begin
   if AStmt is TTryFinallyStmt then
   begin

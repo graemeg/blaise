@@ -1512,7 +1512,7 @@ end;
 procedure TClassTests.TestSemantic_TypeRefs_CarryDescriptors;
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   TES: TTryExceptStmt;
   H: TExceptHandlerClause;
   AU: TAttributeUse;
@@ -1751,7 +1751,7 @@ var
   Prog: TProgram;
   A: TSemanticAnalyser;
 
-  function RhsOf(AIdx: Integer): TFieldAccessExpr;
+  function RhsOf(AIdx: Int): TFieldAccessExpr;
   begin
     Result := TFieldAccessExpr(TAssignment(Prog.Block.Stmts.Items[AIdx]).Expr);
   end;
@@ -1765,7 +1765,7 @@ begin
     AssertEquals('KF text', '2.5', RhsOf(0).ConstString);
     AssertEquals('KS type', 'Single', RhsOf(1).ResolvedType.Name);
     AssertEquals('KSum type (untyped, so Int)', 'Int64', RhsOf(2).ResolvedType.Name);
-    AssertEquals('KSum value', 14, Integer(RhsOf(2).ConstValue));
+    AssertEquals('KSum value', 14, Int32(RhsOf(2).ConstValue));
     AssertEquals('KB type', 'Boolean', RhsOf(3).ResolvedType.Name);
     AssertEquals('KBig type', 'Int64', RhsOf(4).ResolvedType.Name);
     AssertEquals('KStr text', 'abcd', RhsOf(5).ConstString);
@@ -1822,7 +1822,7 @@ var
   Prog: TProgram;
   A: TSemanticAnalyser;
 
-  function RhsOf(AIdx: Integer): TMethodCallExpr;
+  function RhsOf(AIdx: Int): TMethodCallExpr;
   begin
     Result := TMethodCallExpr(TAssignment(Prog.Block.Stmts.Items[AIdx]).Expr);
   end;

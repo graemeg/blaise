@@ -100,7 +100,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_FromStr_TwoDp;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -114,7 +114,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_BankersRoundsHalfToEven;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 1.005 at 2dp, banker's: ties to even -> 1.00 (not 1.01). }
@@ -129,7 +129,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_CurrencyCodeUppercased;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -143,7 +143,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_JPY_ZeroScale;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { JPY has scale 0 — a fractional input rounds to a whole number. }
@@ -158,7 +158,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_KWD_ThreeScale;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { KWD has scale 3 — banker's at the 4th digit: 1.2345 -> 1.234. }
@@ -173,7 +173,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_UnknownCurrency_DefaultScale;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { An unknown code is accepted at the fallback scale of 2. }
@@ -188,7 +188,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromInt;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -202,7 +202,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -220,7 +220,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_ToString_WithCode;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -233,7 +233,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_AmountString_NoCode;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -250,7 +250,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_Add_SameCurrency;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -269,7 +269,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Subtract_SameCurrency;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -288,7 +288,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Negate;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -301,7 +301,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_MultiplyInt_Quantity;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Unit price * quantity. }
@@ -315,7 +315,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Multiply_TaxRate_BankersRound;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 19.99 * 1.08 = 21.5892 -> 21.59 at 2dp (banker's). }
@@ -337,7 +337,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_Add_MismatchRaises;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -360,7 +360,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Subtract_MismatchRaises;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -383,7 +383,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Compare_MismatchRaises;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -410,7 +410,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_Compare_OrdersByAmount;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -428,7 +428,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Equals_DifferentScaleSameValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 2 and 2.00 in the same currency are equal (value-based, like TDecimal). }
@@ -444,7 +444,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Equals_DifferentCurrency_False;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Same amount, different currency -> not equal (and does NOT raise). }
@@ -460,7 +460,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_IsZero_And_Sign;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -481,7 +481,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_FromStr_RoundingMode_HalfUp;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { rmHalfUp rounds the 1.005 tie up, unlike the banker's default (1.00). }
@@ -495,7 +495,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_RoundingMode_Down;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { rmDown truncates toward zero: 1.999 -> 1.99. }
@@ -509,7 +509,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_RoundingMode_Ceiling;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { rmCeiling rounds toward +infinity: 1.991 -> 1.99? no — 1.991 -> 2.00 only at
@@ -525,7 +525,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromDecimal_RoundingMode;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -542,7 +542,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Add_RoundingMode;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Two values whose common scale exceeds the currency scale; rmHalfUp on Add. }
@@ -562,7 +562,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Multiply_RoundingMode_Ceiling;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 10.00 * 1.0851 = 10.851 -> ceiling at 2dp -> 10.86. }
@@ -580,7 +580,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_FromStr_CustomStrategy_Truncates;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { A custom IRoundingStrategy that always truncates (never increments). }
@@ -607,7 +607,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_DefaultIsBankers;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { The no-mode overloads keep banker's: 2.5 and 3.5 at scale 0 -> 2 and 4. }
@@ -628,7 +628,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_CurrencyScale_Registry;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -648,7 +648,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMoneyTests.TestRun_Invoice_LineItemsAndTax;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 2 x 9.99 + 1 x 4.50 = 24.48; +8% tax = 26.4384 -> 26.44.
@@ -672,7 +672,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Operators_Arithmetic;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 2.50 x 4 = 10.00; 10% off = 9.00; 3 x 2.50 + 0.10 x 2.50 = 7.75;
@@ -703,7 +703,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Operators_Comparisons;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { = and <> compare currency and amount and never raise; the ordering
@@ -728,7 +728,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Operators_MismatchRaises;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -765,7 +765,7 @@ begin
 end;
 
 procedure TE2EMoneyTests.TestRun_Operators_Invoice;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { TestRun_Invoice_LineItemsAndTax with operators: same results. }

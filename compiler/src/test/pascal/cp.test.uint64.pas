@@ -382,7 +382,7 @@ const
     ''';
 
 procedure TUInt64E2ETests.TestRun_UInt64_RoundTrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcUInt64RoundTrip, Output, RCode));
@@ -391,7 +391,7 @@ begin
 end;
 
 procedure TUInt64E2ETests.TestRun_QWord_Alias;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcQWordAlias, Output, RCode));
@@ -400,7 +400,7 @@ begin
 end;
 
 procedure TUInt64E2ETests.TestRun_UInt64_LargeLiteral;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcUInt64LargeLiteral, Output, RCode));
@@ -410,7 +410,7 @@ begin
 end;
 
 procedure TUInt64E2ETests.TestRun_UInt64_Arithmetic;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcUInt64Arithmetic, Output, RCode));
@@ -420,7 +420,7 @@ begin
 end;
 
 procedure TUInt64E2ETests.TestRun_UInt64_UnsignedCompare;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcUInt64UnsignedCompare, Output, RCode));
@@ -430,7 +430,7 @@ begin
 end;
 
 procedure TUInt64E2ETests.TestRun_Int64_MinValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInt64MinValue, Output, RCode));

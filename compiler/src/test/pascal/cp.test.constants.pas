@@ -565,7 +565,7 @@ const
     end.
     ''';
 var
-  I: Integer;
+  I: Int;
   T, AsmText: string;
 begin
   { Each routine-local array const gets its own mangled __bac_<n>_<Name>
@@ -670,7 +670,7 @@ var
   Prog: TProgram;
   SA: TSemanticAnalyser;
 
-  function Rhs(AIdx: Integer): TIdentExpr;
+  function Rhs(AIdx: Int): TIdentExpr;
   begin
     Result := TIdentExpr(TAssignment(Prog.Block.Stmts.Items[AIdx]).Expr);
   end;
@@ -688,16 +688,16 @@ begin
   try
     SA.Analyse(Prog);
     AssertEquals('B type', 'Integer', Rhs(0).ResolvedType.Name);
-    AssertEquals('B value', 5, Integer(Rhs(0).ConstValue));
-    AssertEquals('C value', 6, Integer(Rhs(1).ConstValue));
+    AssertEquals('B value', 5, Int32(Rhs(0).ConstValue));
+    AssertEquals('C value', 6, Int32(Rhs(1).ConstValue));
     AssertEquals('G type', 'Double', Rhs(2).ResolvedType.Name);
     AssertEquals('T text', 'xy', Rhs(3).ConstString);
     AssertEquals('KB type', 'Boolean', Rhs(4).ResolvedType.Name);
     AssertEquals('KE type', 'TE', Rhs(5).ResolvedType.Name);
-    AssertEquals('KE value', 1, Integer(Rhs(5).ConstValue));
+    AssertEquals('KE value', 1, Int32(Rhs(5).ConstValue));
     AssertEquals('KT type', 'TE', Rhs(6).ResolvedType.Name);
-    AssertEquals('KT value', 2, Integer(Rhs(6).ConstValue));
-    AssertEquals('KO value', 2, Integer(Rhs(7).ConstValue));
+    AssertEquals('KT value', 2, Int32(Rhs(6).ConstValue));
+    AssertEquals('KO value', 2, Int32(Rhs(7).ConstValue));
   finally
     SA.Free();
     Prog.Free();

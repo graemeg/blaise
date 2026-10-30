@@ -30,8 +30,8 @@ type
   TStaticMembersParseTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
-    function ClassOf(AProg: TProgram; AIndex: Integer): TClassTypeDef;
-    function RecordOf(AProg: TProgram; AIndex: Integer): TRecordTypeDef;
+    function ClassOf(AProg: TProgram; AIndex: Int): TClassTypeDef;
+    function RecordOf(AProg: TProgram; AIndex: Int): TRecordTypeDef;
     procedure ParseExpectError(const ASrc: string);
     procedure ParseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
   published
@@ -84,14 +84,14 @@ begin
   end;
 end;
 
-function TStaticMembersParseTests.ClassOf(AProg: TProgram; AIndex: Integer): TClassTypeDef;
+function TStaticMembersParseTests.ClassOf(AProg: TProgram; AIndex: Int): TClassTypeDef;
 var TD: TTypeDecl;
 begin
   TD := TTypeDecl(AProg.Block.TypeDecls.Items[AIndex]);
   Result := TD.Def as TClassTypeDef;
 end;
 
-function TStaticMembersParseTests.RecordOf(AProg: TProgram; AIndex: Integer): TRecordTypeDef;
+function TStaticMembersParseTests.RecordOf(AProg: TProgram; AIndex: Int): TRecordTypeDef;
 var TD: TTypeDecl;
 begin
   TD := TTypeDecl(AProg.Block.TypeDecls.Items[AIndex]);

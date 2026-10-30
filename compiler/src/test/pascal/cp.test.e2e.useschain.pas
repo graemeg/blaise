@@ -141,7 +141,7 @@ const
     ''';
 
 procedure TE2EUsesChainTests.TestRun_ImplicitSystem_NoUsesClause_WriteLnInt;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcWriteLnInt, Output, RCode));
@@ -150,7 +150,7 @@ begin
 end;
 
 procedure TE2EUsesChainTests.TestRun_ImplicitSystem_NoUsesClause_IntToStr;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcIntToStr, Output, RCode));
@@ -159,7 +159,7 @@ begin
 end;
 
 procedure TE2EUsesChainTests.TestRun_ImplicitSystem_NoUsesClause_Length;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcLength, Output, RCode));
@@ -175,7 +175,7 @@ const
       System.WriteLn(System.Length('hello'))
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { 'System.WriteLn' (qualified call statement) and 'System.Length(...)'
@@ -208,7 +208,7 @@ const
       WriteLn(qsym.Add3(qsym.GBase))
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Qualified assignment target (qsym.GBase :=), qualified var read
@@ -264,7 +264,7 @@ const
       WriteLn((O as nsq.TMine).Tag, ' ', (O as nsq.IHi).Hi())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+link+run',
@@ -297,7 +297,7 @@ const
       WriteLn(My.Pkg.Add3(My.Pkg.GBase))
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Same as above but through a two-part dotted unit name 'My.Pkg'. }
@@ -332,7 +332,7 @@ const
       WriteLn(Foo)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Both ua and ub export `Foo`; ub is later in `uses`, so bare Foo = 200. }
@@ -351,7 +351,7 @@ const
       WriteLn(Foo)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Reversed `uses` order: ua is now later, so bare Foo = 100. }
@@ -371,7 +371,7 @@ const
       WriteLn(ub.Foo)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Both ua and ub export `Foo`; qualified references pick each unit's own
@@ -416,7 +416,7 @@ const
       WriteLn(C.Plus1())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { class(ua.TParent) resolves the qualified ancestor to ua's type; the child
@@ -462,7 +462,7 @@ const
       WriteLn(GetOne() + GetTwo())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Both units emit a global named G; without unit-prefix mangling the two
@@ -530,7 +530,7 @@ const
       Say(1); ura.Say(2); urb.Say(3)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('cold: ' + Output,
@@ -555,7 +555,7 @@ const
       Say(1); ura.Say(2)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('cold: ' + Output,
@@ -577,7 +577,7 @@ const
       WriteLn(V)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Both uva and uvb export `V`; uvb is later in `uses`, so bare V = 9.
@@ -597,7 +597,7 @@ const
       WriteLn(V)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Reversed `uses` order: uva is now later, so bare V = 7. }
@@ -617,7 +617,7 @@ const
       WriteLn(uvb.V)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Qualified references pick each unit's own slot (uva.V = 7, uvb.V = 9)
@@ -668,7 +668,7 @@ const
       WriteLn(uvc.S, ' ', uvd.S, ' ', S)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+link+run: ' + Output,
@@ -719,7 +719,7 @@ const
       WriteLn(S.Sides())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Both tca and tcb export class `TShape`; tcb is later in `uses`, so bare
@@ -742,7 +742,7 @@ const
       WriteLn(S.Sides())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Reversed `uses` order: tca is now later, so bare TShape binds to tca
@@ -768,7 +768,7 @@ const
       WriteLn(B.Sides())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Qualified references bind each variable to its own unit's class, so
@@ -826,7 +826,7 @@ const
         Ord(wca.TPalette.paThree), ' ', Ord(wcb.TPalette.paZero))
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('cold compile+link+run: ' + Output,
@@ -868,7 +868,7 @@ const
       WriteLn(Ord(eb.TPalette.paZero))
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+link+run',
@@ -883,7 +883,7 @@ end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_InheritedNonVirtual;
 var
-  Output: string; RCode: Integer; Dir: string;
+  Output: string; RCode: Int; Dir: string;
 begin
   { ub.TDer satisfies IThing purely by inheriting ua.TBase.Id, which is
     NON-VIRTUAL and therefore has no vtable slot.  The itab emitted for TDer
@@ -945,7 +945,7 @@ end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_InheritedCasingMismatch;
 var
-  Output: string; RCode: Integer; Dir: string;
+  Output: string; RCode: Int; Dir: string;
 begin
   { The interface declares Id; the class spells it ID.  Pascal identifiers are
     case-insensitive but LINK symbols are not, so the descriptor lookup has to
@@ -1004,7 +1004,7 @@ end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_InheritedVirtualStillUsesVTable;
 var
-  Output: string; RCode: Integer; Dir: string;
+  Output: string; RCode: Int; Dir: string;
 begin
   { Regression guard: a VIRTUAL inherited method must still resolve through the
     vtable's ImplName, not the new descriptor climb.  Both routes happen to
@@ -1064,7 +1064,7 @@ end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_OverrideWins;
 var
-  Output: string; RCode: Integer; Dir: string;
+  Output: string; RCode: Int; Dir: string;
 begin
   { An OVERRIDE in the descendant must win over the ancestor's body.  A climb
     that searched the chain before consulting the vtable would wrongly pick the
@@ -1125,7 +1125,7 @@ end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_DerivedGetsOwnItab;
 var
-  Output: string; RCode: Integer;
+  Output: string; RCode: Int;
 begin
   { QBE's UNIT path (AppendUnit) skipped any class whose own ImplementsCount
     was 0, so a derived class that INHERITS its interface emitted no itab and
@@ -1184,7 +1184,7 @@ end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_MultiHopAndIntfAncestor;
 var
-  Output: string; RCode: Integer;
+  Output: string; RCode: Int;
 begin
   { Harder shape for the same QBE unit path, all in one program:
       * TLeaf reaches its interface through a PASS-THROUGH ancestor (TMid

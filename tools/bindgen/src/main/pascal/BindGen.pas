@@ -68,7 +68,7 @@ end;
 
 function BaseName(const APath: string): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := APath;
   for I := Length(APath) - 1 downto 0 do
@@ -87,7 +87,7 @@ end;
 
 procedure ParseArgs;
 var
-  I: Integer;
+  I: Int;
   Arg: string;
 
   function NextValue: string;
@@ -148,7 +148,7 @@ function RunClangOn(const AModeArgs: array of string; const AInput: string;
 var
   Proc: TProcess;
   Chunk: string;
-  I: Integer;
+  I: Int;
   Cmd: string;
 begin
   Result := '';
@@ -221,10 +221,10 @@ var
   Lines: TStringList;
   Model: TCModel;
   Source: string;
-  Skipped: Integer;
-  I: Integer;
+  Skipped: Int;
+  I: Int;
   Macros: TList<TCMacro>;
-  MacroCount: Integer;
+  MacroCount: Int;
 begin
   ParseArgs();
 

@@ -115,7 +115,7 @@ procedure TDarwinLayoutTests.TestStatSizeOffset;
 var
   Buf: array[0..143] of Byte;
   P: ^Int64;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 143 do
     Buf[I] := 0;
@@ -130,7 +130,7 @@ procedure TDarwinLayoutTests.TestStatMtimeOffset;
 var
   Buf: array[0..143] of Byte;
   P: ^Int64;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 143 do
     Buf[I] := 0;
@@ -145,7 +145,7 @@ procedure TDarwinLayoutTests.TestStatModeOffset_IgnoresNlink;
 var
   Buf: array[0..143] of Byte;
   M: ^UInt16;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 143 do
     Buf[I] := 0;
@@ -161,7 +161,7 @@ procedure TDarwinLayoutTests.TestDirentRecLenOffset;
 var
   Buf: array[0..63] of Byte;
   W: ^UInt16;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 63 do
     Buf[I] := 0;

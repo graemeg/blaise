@@ -55,10 +55,10 @@ type
   public
     Name:    string;    { original spelling, for the message }
     Key:     string;    { lower-cased, for matching }
-    Line:    Integer;
-    Col:     Integer;
+    Line:    Int;
+    Col:     Int;
     IsParam: Boolean;
-    constructor Create(const AName: string; ALine, ACol: Integer; AIsParam: Boolean);
+    constructor Create(const AName: string; ALine, ACol: Int; AIsParam: Boolean);
   end;
 
   TScopeFrame = class
@@ -73,7 +73,7 @@ type
     FStack:       TList<TScopeFrame>;
     FCheckParams: Boolean;
     procedure MarkUsed(const AName: string);
-    procedure DeclareInTop(const AName: string; ALine, ACol: Integer;
+    procedure DeclareInTop(const AName: string; ALine, ACol: Int;
                            AIsParam: Boolean);
   public
     constructor Create;
@@ -81,13 +81,13 @@ type
     procedure VisitMethodEnter(AMethod: TMethodDecl); override;
     procedure VisitMethodExit(AMethod: TMethodDecl); override;
     procedure VisitVarDecl(AVar: TVarDecl); override;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
     procedure VisitExpr(AExpr: TASTExpr); override;
   end;
 
 { ---- helpers ---- }
 
-constructor TDeclInfo.Create(const AName: string; ALine, ACol: Integer;
+constructor TDeclInfo.Create(const AName: string; ALine, ACol: Int;
   AIsParam: Boolean);
 begin
   inherited Create();
@@ -124,7 +124,7 @@ end;
 procedure TUnusedIdentifiersRule.MarkUsed(const AName: string);
 var
   Key: string;
-  I:   Integer;
+  I:   Int;
 begin
   if AName = '' then
     Exit;
@@ -137,7 +137,7 @@ begin
 end;
 
 procedure TUnusedIdentifiersRule.DeclareInTop(const AName: string;
-  ALine, ACol: Integer; AIsParam: Boolean);
+  ALine, ACol: Int; AIsParam: Boolean);
 begin
   if (AName = '') or (FStack.Count = 0) then
     Exit;   { no enclosing routine -> a global/top-level name we don't track }
@@ -148,7 +148,7 @@ end;
 procedure TUnusedIdentifiersRule.VisitMethodEnter(AMethod: TMethodDecl);
 var
   Frame: TScopeFrame;
-  I:     Integer;
+  I:     Int;
   P:     TMethodParam;
 begin
   FCheckParams := FCtx.RuleCfg.GetBool('checkParameters', False);
@@ -164,7 +164,7 @@ end;
 
 procedure TUnusedIdentifiersRule.VisitVarDecl(AVar: TVarDecl);
 var
-  I: Integer;
+  I: Int;
 begin
   if AVar.Names = nil then
     Exit;
@@ -172,10 +172,10 @@ begin
     DeclareInTop(AVar.Names[I], AVar.Line, AVar.Col, False);
 end;
 
-procedure TUnusedIdentifiersRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TUnusedIdentifiersRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
   VD: TVarDecl;
-  I:  Integer;
+  I:  Int;
 begin
   { Block-scoped var statement declares locals in the current routine. }
   if AStmt is TVarDeclStmt then
@@ -220,7 +220,7 @@ end;
 procedure TUnusedIdentifiersRule.VisitMethodExit(AMethod: TMethodDecl);
 var
   Frame: TScopeFrame;
-  I:     Integer;
+  I:     Int;
   D:     TDeclInfo;
   Kind:  string;
 begin

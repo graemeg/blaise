@@ -36,7 +36,7 @@ type
       '.type Name, @function' trailer) so assertions are not polluted by
       other functions' code. }
     function FuncRegion(const AAsm, AName: string): string;
-    function CountOccurrences(const ANeedle, AHaystack: string): Integer;
+    function CountOccurrences(const ANeedle, AHaystack: string): Int;
   published
     procedure TestCallee_ConstStringParam_NoEntryExitPair;
     procedure TestCallee_ValueStringParam_KeepsEntryExitPair;
@@ -85,7 +85,7 @@ implementation
 
 function TNativeConstArgTests.FuncRegion(const AAsm, AName: string): string;
 var
-  StartP, EndP: Integer;
+  StartP, EndP: Int;
 begin
   StartP := Pos(AName + ':', AAsm);
   AssertTrue('function ' + AName + ' present in asm', StartP >= 0);
@@ -95,9 +95,9 @@ begin
 end;
 
 function TNativeConstArgTests.CountOccurrences(const ANeedle,
-  AHaystack: string): Integer;
+  AHaystack: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := 0;
   I := Pos(ANeedle, AHaystack);
@@ -651,7 +651,7 @@ const
     { the ParentSymbol recorded for ASym; '?' when ASym has no facts }
     function ParentOf(const ASym: string): string;
     var
-      I: Integer;
+      I: Int;
     begin
       for I := 0 to CG.GetDebugFacts().Funcs.Count - 1 do
       begin
@@ -719,7 +719,7 @@ var
   CG:   TCodeGenNative;
   F:    TDbgFunc;
   V:    TDbgVar;
-  I:    Integer;
+  I:    Int;
 begin
   L := TLexer.Create('''
       program P;

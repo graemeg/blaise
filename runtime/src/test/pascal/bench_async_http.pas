@@ -70,9 +70,9 @@ type
     RlimMax: UInt64;
   end;
 
-function c_setrlimit(AResource: Integer; ARlim: Pointer): Integer;
+function c_setrlimit(AResource: Int32; ARlim: Pointer): Int32;
   external name 'setrlimit';
-function c_getrlimit(AResource: Integer; ARlim: Pointer): Integer;
+function c_getrlimit(AResource: Int32; ARlim: Pointer): Int32;
   external name 'getrlimit';
 
 const
@@ -93,7 +93,7 @@ type
 { Cap how long a client blocks in recv, so a starved connection (the one-shot
   server that never gets to it) fails fast instead of hanging for the whole
   run.  Without this a single-server model at high K takes minutes. }
-procedure SetRecvTimeout(AFd, AMillis: Integer);
+procedure SetRecvTimeout(AFd, AMillis: Int);
 var
   Tv: TTimeVal;
 begin
@@ -136,29 +136,29 @@ end;
 
 { One client's work order + result, shared with its OS thread. }
 type
-  PInteger = ^Integer;
+  PInteger = ^Int32;
   PClientCtx = ^TClientCtx;
   TClientCtx = record
     Port: UInt16;
-    Requests: Integer;    { R sequential keep-alive requests }
-    Ok: Integer;          { requests that got a 200 back }
-    Failed: Integer;      { connect or request failures }
+    Requests: Int;    { R sequential keep-alive requests }
+    Ok: Int;          { requests that got a 200 back }
+    Failed: Int;      { connect or request failures }
     StartGateVal: PInteger; { spin until the coordinator opens the gate }
   end;
 
 var
-  GLiveConns: Integer;    { current open client connections (atomic) }
-  GPeakConns: Integer;    { high-water mark of GLiveConns (atomic) }
+  GLiveConns: Int;    { current open client connections (atomic) }
+  GPeakConns: Int;    { high-water mark of GLiveConns (atomic) }
 
 { Atomic load via a fetch-and-add-0 (runtime.atomic has no bare load). }
-function _AtomicLoadInt32(APtr: Pointer): Integer;
+function _AtomicLoadInt32(APtr: Pointer): Int;
 begin
   Result := _AtomicAddInt32(APtr, 0);
 end;
 
 procedure BumpPeak;
 var
-  Live, Peak: Integer;
+  Live, Peak: Int;
 begin
   Live := _AtomicLoadInt32(@GLiveConns);
   Peak := _AtomicLoadInt32(@GPeakConns);
@@ -178,7 +178,7 @@ end;
 procedure ClientThread(AArg: Pointer);
 var
   Ctx: PClientCtx;
-  Fd, I, Sep, ClPos, Eol, CLen, HeadLen, BodyHave: Integer;
+  Fd, I, Sep, ClPos, Eol, CLen, HeadLen, BodyHave: Int;
   Req, Acc, Chunk, Head, Lower, Line: string;
 begin
   Ctx := PClientCtx(AArg);
@@ -260,13 +260,13 @@ end;
 
 { Run K client threads, each doing R requests, against APort.  Returns wall-time
   nanoseconds and fills AOkOut / AFailOut / APeakOut. }
-procedure DriveLoad(APort: UInt16; AK, AR: Integer;
-  out AWallNs: Int64; out AOkOut, AFailOut, APeakOut: Integer);
+procedure DriveLoad(APort: UInt16; AK, AR: Int;
+  out AWallNs: Int64; out AOkOut, AFailOut, APeakOut: Int);
 var
   Threads: array of Int64;
   Ctxs: array of TClientCtx;
-  Gate: Integer;
-  I, TotalOk, TotalFail: Integer;
+  Gate: Int32;
+  I, TotalOk, TotalFail: Int;
   T0: Int64;
 begin
   SetLength(Threads, AK);
@@ -323,7 +323,7 @@ end;
 procedure FiberServerThread(AArg: Pointer);
 begin
   SpawnFiber(@FiberServeFiber, nil);
-  RunSchedulerMC(Integer(AArg));   { N workers }
+  RunSchedulerMC(Int32(AArg));   { N workers }
 end;
 
 { ---- server model 2: one-at-a-time baseline (THttpServer.ServeOnce) ---- }
@@ -331,7 +331,7 @@ end;
 var
   GBaseSrv: THttpServer;
   GBaseHandler: IRequestHandler;
-  GBaseRunning: Integer;
+  GBaseRunning: Int;
 
 procedure BaselineServerThread(AArg: Pointer);
 begin
@@ -343,8 +343,8 @@ end;
 { ---- server model 3: thread-per-connection (the Indy model) ---- }
 
 var
-  GTpcListen: Integer;
-  GTpcRunning: Integer;
+  GTpcListen: Int;
+  GTpcRunning: Int;
   GTpcHandler: IRequestHandler;
 
 { Per-connection worker: read one request head, serve keep-alive requests until
@@ -352,14 +352,14 @@ var
   ParseRequest (the shared contract). }
 procedure TpcConnThread(AArg: Pointer);
 var
-  Fd, Sep: Integer;
+  Fd, Sep: Int;
   Acc, Chunk, Raw: string;
   Req: THttpRequest;
   Resp: THttpResponse;
   Head: string;
   KeepAlive: Boolean;
 begin
-  Fd := Integer(Int64(AArg));
+  Fd := Int32(Int64(AArg));
   while True do
   begin
     { read a head }
@@ -401,7 +401,7 @@ end;
 
 procedure TpcAcceptThread(AArg: Pointer);
 var
-  ConnFd: Integer;
+  ConnFd: Int;
   Tid: Int64;
 begin
   MakeNonBlocking(GTpcListen);
@@ -416,30 +416,30 @@ end;
 
 { ---- reporting ---- }
 
-function ReqPerSec(AOk: Integer; AWallNs: Int64): Int64;
+function ReqPerSec(AOk: Int; AWallNs: Int64): Int64;
 begin
   if AWallNs <= 0 then
     Exit(0);
   Result := (Int64(AOk) * Int64(1000000000)) div AWallNs;
 end;
 
-procedure PrintRow(const AModel: string; AK, AR, AOk, AFail, APeak: Integer;
+procedure PrintRow(const AModel: string; AK, AR, AOk, AFail, APeak: Int;
   AWallNs: Int64);
 var
   Rps: Int64;
 begin
   Rps := ReqPerSec(AOk, AWallNs);
   WriteLn(Format('%-10s  K=%-6d  peak=%-6d  ok=%-8d  fail=%-6d  %6d ms  %8d req/s',
-    [AModel, AK, APeak, AOk, AFail, Integer(AWallNs div 1000000), Integer(Rps)]));
+    [AModel, AK, APeak, AOk, AFail, Int32(AWallNs div 1000000), Int32(Rps)]));
 end;
 
 { ---- drivers per model ---- }
 
-procedure RunFiberModel(APort: UInt16; AWorkers, AK, AR: Integer);
+procedure RunFiberModel(APort: UInt16; AWorkers, AK, AR: Int);
 var
   SrvTid: Int64;
   WallNs: Int64;
-  Ok, Fail, Peak, Tries: Integer;
+  Ok, Fail, Peak, Tries: Int;
   Started: Boolean;
 begin
   Started := False;
@@ -474,11 +474,11 @@ begin
   GFiberHandler := nil;
 end;
 
-procedure RunBaselineModel(APort: UInt16; AK, AR: Integer);
+procedure RunBaselineModel(APort: UInt16; AK, AR: Int);
 var
   SrvTid: Int64;
   WallNs: Int64;
-  Ok, Fail, Peak: Integer;
+  Ok, Fail, Peak: Int;
 begin
   GBaseSrv := THttpServer.Create(APort);
   if not GBaseSrv.Start() then
@@ -501,11 +501,11 @@ begin
   GBaseHandler := nil;
 end;
 
-procedure RunThreadModel(APort: UInt16; AK, AR: Integer);
+procedure RunThreadModel(APort: UInt16; AK, AR: Int);
 var
   AccTid: Int64;
   WallNs: Int64;
-  Ok, Fail, Peak: Integer;
+  Ok, Fail, Peak: Int;
 begin
   GTpcListen := TcpListenLocal(APort, 512);
   if GTpcListen < 0 then
@@ -538,12 +538,12 @@ end;
 
 var
   Port: UInt16;
-  Ks: array[0..5] of Integer;
-  I, R, Workers, SoftLimit, NLevels: Integer;
+  Ks: array[0..5] of Int32;
+  I, R, Workers, SoftLimit, NLevels: Int;
 
 begin
   IgnoreSigPipe();
-  SoftLimit := Integer(RaiseFdLimit(200000));
+  SoftLimit := Int32(RaiseFdLimit(200000));
   Workers := GetCPUCount();
 
   WriteLn('=== Blaise fiber-networking GO/NO-GO benchmark ===');

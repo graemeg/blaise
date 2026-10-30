@@ -69,7 +69,7 @@ end;
 procedure TStringIndexingRule.CheckTokens(AContext: TRuleContext;
   ATokens: TList<TToken>);
 var
-  I: Integer;
+  I: Int;
 begin
   { Window: IDENT '[' 1 ']'.  Stop 3 before the end so the window fits. }
   for I := 0 to ATokens.Count - 4 do

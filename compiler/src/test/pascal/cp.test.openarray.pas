@@ -887,7 +887,7 @@ const
     ''';
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   Arg: TASTExpr;
 begin
   Prog := Analyse(Src);
@@ -954,7 +954,7 @@ const
     ''';
 var
   X, Body: string;
-  P: Integer;
+  P: Int;
 begin
   X := GenAsm(Src, TargetX86_64);
   P := Pos('SI:', X);

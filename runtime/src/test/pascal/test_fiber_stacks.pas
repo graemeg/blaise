@@ -62,10 +62,10 @@ begin
   AssertTrue('base not nil', Base <> nil);
   P := Base + FiberPageSize;        { first usable byte, just above guard }
   P^ := 170;
-  AssertEquals('low end readable', 170, Integer(P^));
+  AssertEquals('low end readable', 170, Int32(P^));
   P := Base + Total - 1;            { last usable byte }
   P^ := 85;
-  AssertEquals('high end readable', 85, Integer(P^));
+  AssertEquals('high end readable', 85, Int32(P^));
   FiberStackReturn(Base, Total);
   Result := '';
 end;
@@ -74,7 +74,7 @@ function TestPool_ReusesReturnedStack: string;
 var
   B1, B2: Pointer;
   T1, T2: Int64;
-  CountBefore: Integer;
+  CountBefore: Int;
 begin
   B1 := FiberStackAcquire(FiberDefaultStackSize, T1);
   CountBefore := FiberStackPoolCount();

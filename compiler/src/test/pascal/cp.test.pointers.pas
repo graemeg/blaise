@@ -351,7 +351,7 @@ const
 var
   Prog: TProgram;
   Decl: TVarDecl;
-  I:    Integer;
+  I:    Int;
 begin
   Prog := AnalyseSrc(Src);
   try

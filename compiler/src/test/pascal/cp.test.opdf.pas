@@ -229,7 +229,7 @@ end;
 procedure TOPDFTests.TestOPDF_Primitive_Int8_Signed;
 var
   IR: string;
-  P:  Integer;
+  P:  Int;
   Rec: string;
 begin
   IR := GenOPDF('program P; var X: Int8; begin X := -1 end.');
@@ -248,7 +248,7 @@ procedure TOPDFTests.TestOPDF_Primitive_Double_SubKindFloat;
   (Category=tcFloat, keyed off SubKind in [skFloat, skCurrency]) renders it. }
 var
   IR: string;
-  P:  Integer;
+  P:  Int;
 begin
   IR := GenOPDF('program P; var D: Double; begin D := 1.5 end.');
   AssertTrue('recPrimitive Double comment', Contains(IR, '# recPrimitive: Double'));
@@ -266,7 +266,7 @@ procedure TOPDFTests.TestOPDF_Primitive_Single_SubKindFloat;
 { Single is the 4-byte float counterpart; same recPrimitive shape, size 4. }
 var
   IR: string;
-  P:  Integer;
+  P:  Int;
 begin
   IR := GenOPDF('program P; var S: Single; begin S := 1.5 end.');
   AssertTrue('recPrimitive Single comment', Contains(IR, '# recPrimitive: Single'));
@@ -1153,7 +1153,7 @@ var
   { the text of the recFunctionScope record for ASym }
   function ScopeRec(const ASym: string): string;
   var
-    S: Integer;
+    S: Int;
   begin
     S := Pos('# recFunctionScope: ' + ASym + #10, O);
     AssertTrue('scope record for ' + ASym, S > 0);

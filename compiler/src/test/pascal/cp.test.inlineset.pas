@@ -23,7 +23,7 @@ type
   TInlineSetTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function VarType(P: TProgram; AIndex: Integer): TTypeDesc;
+    function VarType(P: TProgram; AIndex: Int): TTypeDesc;
   published
     procedure TestSemantic_NamedEnumSet_ResolvesToSet;
     procedure TestSemantic_AnonEnumSet_ResolvesToSet;
@@ -53,7 +53,7 @@ begin
   end;
 end;
 
-function TInlineSetTests.VarType(P: TProgram; AIndex: Integer): TTypeDesc;
+function TInlineSetTests.VarType(P: TProgram; AIndex: Int): TTypeDesc;
 begin
   Result := TVarDecl(P.Block.Decls.Items[AIndex]).ResolvedType;
 end;

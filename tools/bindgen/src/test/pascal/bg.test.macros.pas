@@ -78,7 +78,7 @@ end;
 
 function TMacroTests.FindMacro(const AName: string): TCMacro;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to FMacros.Count - 1 do
@@ -141,7 +141,7 @@ var
 begin
   M := Self.FindMacro('SAMPLE_A');
   AssertTrue('has value', M.HasValue);
-  AssertEquals(2, Integer(M.Value));
+  AssertEquals(2, Int32(M.Value));
 end;
 
 procedure TMacroTests.TestHarvest_ShiftExpression;
@@ -150,7 +150,7 @@ var
 begin
   M := Self.FindMacro('SAMPLE_MASK');
   AssertTrue('has value', M.HasValue);
-  AssertEquals(32768, Integer(M.Value));
+  AssertEquals(32768, Int32(M.Value));
 end;
 
 procedure TMacroTests.TestHarvest_NegativeAndComplement;
@@ -159,7 +159,7 @@ var
 begin
   M := Self.FindMacro('SAMPLE_NEG');
   AssertTrue('neg has value', M.HasValue);
-  AssertEquals(-5, Integer(M.Value));
+  AssertEquals(-5, Int32(M.Value));
   M := Self.FindMacro('SAMPLE_ALL');
   AssertTrue('all has value', M.HasValue);
   AssertEquals('~0L folds to -1', Int64(-1), M.Value);
@@ -171,7 +171,7 @@ var
 begin
   M := Self.FindMacro('SAMPLE_COMBO');
   AssertTrue('has value', M.HasValue);
-  AssertEquals(32770, Integer(M.Value));
+  AssertEquals(32770, Int32(M.Value));
 end;
 
 procedure TMacroTests.TestHarvest_TypeMacro_NoValue;

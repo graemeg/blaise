@@ -593,7 +593,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_InstantNow();
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcInstantNow, Output, RCode));
@@ -604,7 +604,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeDate_ToString;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcMakeDateToString, Output, RCode));
@@ -615,7 +615,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeTime_ToString;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcMakeTimeToString, Output, RCode));
@@ -626,7 +626,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeTimeNano_ToString;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcMakeTimeNanoToString, Output, RCode));
@@ -637,7 +637,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeDateTime_ToString;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcMakeDateTimeToString, Output, RCode));
@@ -648,7 +648,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeOffset_ToString;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -668,7 +668,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeOffset_UTC;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -688,7 +688,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeInstantUtc_RoundTrip;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -711,7 +711,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_ToUnixSeconds;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -730,7 +730,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_AddDuration;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -750,7 +750,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_SubtractDuration;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -769,7 +769,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_Subtract;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcInstantSubtract, Output, RCode));
@@ -780,7 +780,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_IsAfter_IsBefore;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -800,7 +800,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_Equals;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -819,7 +819,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_ToStringOffset;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -838,7 +838,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Instant_ToLocalDateTime;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -858,7 +858,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Duration_TotalAccessors;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -879,7 +879,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Duration_ToString;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -900,7 +900,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_Duration_Negative;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -920,7 +920,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_DurationAdd_Subtract;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -940,7 +940,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_ParseDate;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -961,7 +961,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_ParseTime;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -982,7 +982,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_ParseDateTime;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1006,7 +1006,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_ParseInstant_UTC;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1030,7 +1030,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_ParseInstant_Offset;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcParseInstantOffset, Output, RCode));
@@ -1041,7 +1041,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_ParseDuration;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1062,7 +1062,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_ParseOffset;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1082,7 +1082,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_IsLeapYear;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1103,7 +1103,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_DaysInMonth;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1124,7 +1124,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_DayOfWeek;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1144,7 +1144,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_DateAddDays;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1168,7 +1168,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_DateAddMonths_Clamp;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1188,7 +1188,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_DateAddYears;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1207,7 +1207,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_DateDiffDays;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1226,7 +1226,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_SystemOffset;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -1245,7 +1245,7 @@ end;
 procedure TE2EDateUtilsTests.TestRun_MakeInstantLocal;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
   Lines:  TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;

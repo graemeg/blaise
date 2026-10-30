@@ -62,9 +62,9 @@ type
   { First place a given fingerprint was seen. }
   TWindowRef = class
   public
-    FileIdx: Integer;
-    Start:   Integer;
-    constructor Create(AFileIdx, AStart: Integer);
+    FileIdx: Int;
+    Start:   Int;
+    constructor Create(AFileIdx, AStart: Int);
   end;
 
   TDuplicateCodeBlockRule = class(TTokenRuleBase)
@@ -72,9 +72,9 @@ type
     FFiles: TList<TDupFile>;
     function TokenHash(AKind: TTokenKind; const AValue: string;
                        AIgnoreNames: Boolean): Int64;
-    function WindowsEqual(ATokensA: TList<TToken>; AStartA: Integer;
-                          ATokensB: TList<TToken>; AStartB: Integer;
-                          AK: Integer; AIgnoreNames: Boolean): Boolean;
+    function WindowsEqual(ATokensA: TList<TToken>; AStartA: Int;
+                          ATokensB: TList<TToken>; AStartB: Int;
+                          AK: Int; AIgnoreNames: Boolean): Boolean;
   protected
     procedure CheckTokens(AContext: TRuleContext;
                           ATokens: TList<TToken>); override;
@@ -93,7 +93,7 @@ begin
   Tokens   := ATokens;
 end;
 
-constructor TWindowRef.Create(AFileIdx, AStart: Integer);
+constructor TWindowRef.Create(AFileIdx, AStart: Int);
 begin
   inherited Create();
   FileIdx := AFileIdx;
@@ -127,7 +127,7 @@ function TDuplicateCodeBlockRule.TokenHash(AKind: TTokenKind;
   const AValue: string; AIgnoreNames: Boolean): Int64;
 var
   S: string;
-  J: Integer;
+  J: Int;
   H: Int64;
 begin
   S := IntToStr(Ord(AKind)) + '#';
@@ -140,11 +140,11 @@ begin
 end;
 
 function TDuplicateCodeBlockRule.WindowsEqual(
-  ATokensA: TList<TToken>; AStartA: Integer;
-  ATokensB: TList<TToken>; AStartB: Integer;
-  AK: Integer; AIgnoreNames: Boolean): Boolean;
+  ATokensA: TList<TToken>; AStartA: Int;
+  ATokensB: TList<TToken>; AStartB: Int;
+  AK: Int; AIgnoreNames: Boolean): Boolean;
 var
-  J: Integer;
+  J: Int;
   A, B: TToken;
 begin
   for J := 0 to AK - 1 do
@@ -162,17 +162,17 @@ end;
 
 procedure TDuplicateCodeBlockRule.Finalize(AContext: TRuleContext);
 var
-  K:            Integer;
+  K:            Int;
   IgnoreNames:  Boolean;
   Map:          TDictionary<Int64, TWindowRef>;
   PowK:         Int64;
-  J, Fi, I, N:  Integer;
+  J, Fi, I, N:  Int;
   F:            TDupFile;
   T:            TList<TToken>;
   Th:           array of Int64;
   H, Tmp:       Int64;
   Ref:          TWindowRef;
-  LastEmitEnd:  Integer;
+  LastEmitEnd:  Int;
   RefFile:      TDupFile;
   Matched:      Boolean;
 begin

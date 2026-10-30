@@ -1096,7 +1096,7 @@ const
     'program P; var R: Integer; begin if R = 0 then with R do R := 2; end.',
     'program P; var R: Integer; begin begin with R.X.Y do ; end; end.');
 var
-  I: Integer;
+  I: Int;
   Msg: string;
 begin
   for I := 0 to High(Shapes) do

@@ -1417,7 +1417,7 @@ const
     ''';
 var
   BinFile, ToolOut: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   Rc := CompileNativeCLI(Src, False, '', BinFile, ToolOut);

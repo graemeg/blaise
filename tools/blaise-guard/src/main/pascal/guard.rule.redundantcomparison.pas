@@ -48,7 +48,7 @@ type
   public
     constructor Create;
     procedure VisitExpr(AExpr: TASTExpr); override;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
   end;
 
 { The identifier text of a bare identifier expression, or '' otherwise. }
@@ -112,7 +112,7 @@ begin
     hit is a genuine new slip rather than a disagreement about style. }
 end;
 
-procedure TRedundantComparisonRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TRedundantComparisonRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
   A: TAssignment;
 begin

@@ -350,7 +350,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ParamStr_PrintsArg;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run',
@@ -359,7 +359,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ParamCount_WithArgs;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run',
@@ -368,7 +368,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ReadWriteFile_RoundTrip;
-var Output: string; RCode: Integer; TmpFile: string;
+var Output: string; RCode: Int; TmpFile: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   TmpFile := GetTempFileName('', 'blaise_rwtest');
@@ -384,7 +384,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_FileExists_TrueAndFalse;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   TmpFile: string;
   Lines: TStringList;
 begin
@@ -411,7 +411,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_GetEnvVar_Path;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcGetEnvVarTest, Output, RCode));
@@ -420,7 +420,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_Halt_ExitCode;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   CompileAndRun(SrcHaltTest, Output, RCode);
@@ -429,7 +429,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ChangeFileExt_ChangesExtension;
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcChangeFileExtTest, Output, RCode));
@@ -445,7 +445,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ExtractFileName_ReturnsName;
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcExtractFileNameTest, Output, RCode));
@@ -460,7 +460,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ExtractFilePath_ReturnsDir;
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcExtractFilePathTest, Output, RCode));
@@ -475,7 +475,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_IncludeTrailingPathDelimiter_AppendsSlash;
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run',
@@ -491,7 +491,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_GetProcessID_ReturnsNonZero;
-var Output: string; RCode: Integer; PID: Integer;
+var Output: string; RCode: Int; PID: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcGetProcessID, Output, RCode));
@@ -501,7 +501,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_DirectoryExists_TrueAndFalse;
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcDirectoryExists, Output, RCode));
@@ -517,7 +517,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_GetTempDir_ReturnsPath;
-var Output: string; RCode: Integer; Dir: string;
+var Output: string; RCode: Int; Dir: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcGetTempDir, Output, RCode));
@@ -530,7 +530,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_ForceDirectories_CreatesTree;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
   Dir: string;
 begin
@@ -563,7 +563,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_ForceDirectories_Statement_CreatesTree;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Dir: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -585,7 +585,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_BuiltinFunctions_AsStatements;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Dir: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -609,7 +609,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_Sleep_DoesNotCrash;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSleepTest, Output, RCode));
@@ -618,7 +618,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ProcessBuiltins_CapturesOutput;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcProcessBuiltinsCapture, Output, RCode));
@@ -627,7 +627,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ProcessBuiltins_ExitCode;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcProcessBuiltinsExitCode, Output, RCode));
@@ -731,7 +731,7 @@ const
 procedure TE2ESysUtilsTests.TestRun_RenameFile_Works;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   OldFile, NewFile: string;
   Lines: TStringList;
 begin
@@ -758,7 +758,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_RenameFile_MissingSource_ReturnsFalse;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcRenameFileMissing, Output, RCode));
@@ -769,7 +769,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_SetCurrentDir_ChangesDir;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -788,7 +788,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_ExtractFileExt_ReturnsExt;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -808,7 +808,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_BoolToStr_TrueAndFalse;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -827,7 +827,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_SameFileName_ExactMatch;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -846,7 +846,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_PlatformConstants;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -864,7 +864,7 @@ begin
 end;
 
 procedure TE2ESysUtilsTests.TestRun_GetCurrentDir_ReturnsNonEmpty;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcGetCurrentDir, Output, RCode));
@@ -875,7 +875,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_FileAge_ReturnsTimestamp;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   TmpFile: string;
   Lines: TStringList;
 begin
@@ -917,7 +917,7 @@ const
         ''';
 var
   Output, StatOut, Content: string;
-  RCode, I: Integer;
+  RCode, I: Int;
   Dir, TmpFile: string;
   Lines: TStringList;
 begin
@@ -979,7 +979,7 @@ const
 procedure TE2ESysUtilsTests.TestRun_StrToIntDef_ValidAndInvalid;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -1000,7 +1000,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_StrToInt64Def_ValidAndInvalid;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -1078,7 +1078,7 @@ const
 procedure TE2ESysUtilsTests.TestRun_StrToInt_RaisesOnInvalid;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -1100,7 +1100,7 @@ end;
 procedure TE2ESysUtilsTests.TestRun_StrToInt64_RaisesOnInvalid;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;

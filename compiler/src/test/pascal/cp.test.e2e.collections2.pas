@@ -292,7 +292,7 @@ const
         ''';
 
 procedure TE2ECollections2Tests.TestRun_TObjectList_AddGetCount;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTObjectListAddGetCount, Output, RCode));
@@ -300,7 +300,7 @@ begin
 end;
 
 procedure TE2ECollections2Tests.TestRun_TObjectList_Delete;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTObjectListDelete, Output, RCode));
@@ -370,7 +370,7 @@ const
       h.Free()
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+link+run',
@@ -439,7 +439,7 @@ const
     ''';
 
 procedure TE2ECollections2Tests.TestRun_DictLookup_BorrowedConstKey_NoDoubleFree;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+link+run',
@@ -517,7 +517,7 @@ const
       L.Free()
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+link+run',
@@ -554,7 +554,7 @@ const
       OL.Free()
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { CompileAndRunWithRTL runs on BOTH backends and asserts parity, and puts the

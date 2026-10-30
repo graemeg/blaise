@@ -823,7 +823,7 @@ end;
 procedure TSetTests.TestSemantic_Set_ProcFieldArgLiteralRetypedToSet;
 var
   Prog: TProgram;
-  I: Integer;
+  I: Int;
   S: TObject;
   Args: TObjectList;
 begin

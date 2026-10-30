@@ -36,7 +36,7 @@ interface
   terminal drain of every mailbox.  Returns the number of integrity
   failures (0 = clean); returns -1 if a worker thread could not be
   created. }
-function RunMemStress(NThreads, Iters: Integer): Int64;
+function RunMemStress(NThreads, Iters: Int): Int64;
 
 { Phase-5 worker-churn stress (concurrent-allocator-design.adoc,
   §Teardown): Gens generations of ring workers are spawned and joined
@@ -47,7 +47,7 @@ function RunMemStress(NThreads, Iters: Integer): Int64;
   generation ends with the mailbox terminal drain and a reclamation
   sweep.  Returns the number of integrity failures (0 = clean);
   -1 if a worker thread could not be created. }
-function RunChurnStress(NThreads, Iters, Gens: Integer): Int64;
+function RunChurnStress(NThreads, Iters, Gens: Int): Int64;
 
 { Counters from the most recent RunMemStress / RunChurnStress call. }
 function StressAllocTotal: Int64;
@@ -70,12 +70,12 @@ type
 
 var
   GMail: array[0..15] of TMailRow;
-  GIdx: array[0..15] of Integer;
-  GNThreads: Integer;
-  GIters: Integer;
+  GIdx: array[0..15] of Int32;
+  GNThreads: Int;
+  GIters: Int;
   { Per-worker iteration counts — uniform for RunMemStress, staggered
     for RunChurnStress so some workers exit mid-generation. }
-  GItersOf: array[0..15] of Integer;
+  GItersOf: array[0..15] of Int32;
   GBad: Int64;
   GAllocFail: Int64;
   GAllocTotal: Int64;
@@ -84,7 +84,7 @@ var
 { Size schedule: every small class in rotation, with a periodic large
   block (4096..36864 bytes) so the large foreign-free path is hammered
   alongside the small remote-free queue. }
-function PickSize(I: Integer): Integer;
+function PickSize(I: Int): Int;
 begin
   if (I mod 61) = 0 then
     Result := 4096 + (I mod 5) * 8192
@@ -95,10 +95,10 @@ end;
 { Self-describing fill: bytes 0..3 hold the size, 4..7 the seed, the
   body up to 256 bytes holds (Seed + J) mod 256, and the final byte is
   patterned too when it lies beyond the checked prefix. }
-procedure FillBlock(P: PChar; Sz, Seed: Integer);
+procedure FillBlock(P: PChar; Sz, Seed: Int);
 var
-  IP: ^Integer;
-  J, Limit: Integer;
+  IP: ^Int32;
+  J, Limit: Int;
 begin
   IP := Pointer(P);
   IP^ := Sz;
@@ -114,8 +114,8 @@ end;
 
 function CheckBlock(P: PChar): Boolean;
 var
-  IP: ^Integer;
-  Sz, Seed, J, Limit: Integer;
+  IP: ^Int32;
+  Sz, Seed, J, Limit: Int;
 begin
   IP := Pointer(P);
   Sz := IP^;
@@ -127,16 +127,16 @@ begin
   Limit := Sz;
   if Limit > 256 then Limit := 256;
   for J := 8 to Limit - 1 do
-    if Integer(P[J]) <> ((Seed + J) and $FF) then Exit(False);
+    if Int32(P[J]) <> ((Seed + J) and $FF) then Exit(False);
   if Sz - 1 >= Limit then
-    if Integer(P[Sz - 1]) <> ((Seed + Sz - 1) and $FF) then Exit(False);
+    if Int32(P[Sz - 1]) <> ((Seed + Sz - 1) and $FF) then Exit(False);
   Result := True;
 end;
 
 procedure StressWorker(Arg: Pointer);
 var
-  IdxP: ^Integer;
-  Idx, Target, I, S, Sz, Seed: Integer;
+  IdxP: ^Int32;
+  Idx, Target, I, S, Sz, Seed: Int;
   P: PChar;
   Q: Pointer;
 begin
@@ -183,7 +183,7 @@ end;
   allocated = freed or the run leaked. }
 procedure DrainMailboxes;
 var
-  I, S: Integer;
+  I, S: Int;
   Q: Pointer;
 begin
   for I := 0 to GNThreads - 1 do
@@ -200,9 +200,9 @@ begin
     end;
 end;
 
-procedure ResetCounters(NThreads: Integer);
+procedure ResetCounters(NThreads: Int);
 var
-  I, S: Integer;
+  I, S: Int;
 begin
   GNThreads := NThreads;
   GBad := 0;
@@ -214,10 +214,10 @@ begin
       GMail[I][S] := nil;
 end;
 
-function RunMemStress(NThreads, Iters: Integer): Int64;
+function RunMemStress(NThreads, Iters: Int): Int64;
 var
   H: array[0..15] of Int64;
-  I, Rc: Integer;
+  I, Rc: Int;
   Fn: TThreadProc;
 begin
   if NThreads > MAXT then NThreads := MAXT;
@@ -241,10 +241,10 @@ begin
   Result := GBad;
 end;
 
-function RunChurnStress(NThreads, Iters, Gens: Integer): Int64;
+function RunChurnStress(NThreads, Iters, Gens: Int): Int64;
 var
   H: array[0..15] of Int64;
-  G, I, Rc, S: Integer;
+  G, I, Rc, S: Int;
   Fn: TThreadProc;
   P: PChar;
   MainBuf: array[0..31] of Pointer;

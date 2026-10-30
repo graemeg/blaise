@@ -84,7 +84,7 @@ end;
 function TUnaryNegTests.AssignedExpr(AProg: TProgram;
   const AName: string): TASTExpr;
 var
-  I: Integer;
+  I: Int;
   S: TObject;
 begin
   Result := nil;

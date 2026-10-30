@@ -139,7 +139,7 @@ begin
   end;
 end;
 
-function ComputeExitCode(AReport: TReport; AFailOn: TFailOn): Integer;
+function ComputeExitCode(AReport: TReport; AFailOn: TFailOn): Int;
 begin
   Result := 0;
   case AFailOn of

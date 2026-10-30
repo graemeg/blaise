@@ -80,7 +80,7 @@ const
     'end.';
 
 procedure TE2ETextBlockTests.TestRun_TextBlock_BasicContent;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTextBlockBasic, Output, RCode));
@@ -91,7 +91,7 @@ begin
 end;
 
 procedure TE2ETextBlockTests.TestRun_TextBlock_IndentStripped;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTextBlockIndent, Output, RCode));

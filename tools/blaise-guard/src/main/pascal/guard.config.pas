@@ -56,7 +56,7 @@ type
 
     { Typed reads.  Return ADefault when the param is absent or unparseable, so
       each rule owns the authoritative default for its own threshold. }
-    function GetInt(const AName: string; ADefault: Integer): Integer;
+    function GetInt(const AName: string; ADefault: Int): Int;
     function GetBool(const AName: string; ADefault: Boolean): Boolean;
     function GetStr(const AName, ADefault: string): string;
 
@@ -122,7 +122,7 @@ begin
   FParams.Add(AName, AValue);   { TDictionary.Add is an upsert }
 end;
 
-function TRuleConfig.GetInt(const AName: string; ADefault: Integer): Integer;
+function TRuleConfig.GetInt(const AName: string; ADefault: Int): Int;
 var
   Raw: string;
 begin
@@ -217,7 +217,7 @@ var
   ParamsObj: TJSONObject;
   Sev:      TSeverity;
   RC:       TRuleConfig;
-  I, P:     Integer;
+  I, P:     Int;
   RuleId:   string;
 begin
   Cfg := TGuardConfig.Default();

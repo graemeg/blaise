@@ -646,7 +646,7 @@ const
 var
   Text: string;
   Target: string;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 1 do
   begin
@@ -699,7 +699,7 @@ const
 var
   Text: string;
   Target: string;
-  I: Integer;
+  I: Int;
 begin
   AssertEquals('calls resolve', '', SemanticError(Src));
   for I := 0 to 1 do

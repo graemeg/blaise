@@ -268,7 +268,7 @@ const
     ''';
 var
   Output: string;
-  Code: Integer;
+  Code: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run: ' + Output,
@@ -570,7 +570,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_Pointer_GetMem_WriteRead_FreeMem;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcGetMemWriteRead, Output, RCode));
@@ -579,7 +579,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_Pointer_TypedPointer_Deref;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTypedPointerDeref, Output, RCode));
@@ -588,7 +588,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_Pointer_NilCheck;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcPointerNilCheck, Output, RCode));
@@ -597,7 +597,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_PCharSubscript_ChrAssignment;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcPCharSubscriptChr, Output, RCode));
@@ -606,7 +606,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_PCharSubscript_HashCharLiteralAssignment;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcPCharSubscriptHashChar, Output, RCode));
@@ -615,7 +615,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_StaticArrayOfPChar_ElementPreservesAllBits;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStaticArrayPChar, Output, RCode));
@@ -625,7 +625,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_DoublePointerWrite_PreservesValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcDoublePtrWriteE2E, Output, RCode));
@@ -635,7 +635,7 @@ begin
 end;
 
 procedure TE2EPointersTests.TestRun_SinglePointerWrite_NoAdjacentSlotClobber;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcSinglePtrAdjacentE2E, Output, RCode));

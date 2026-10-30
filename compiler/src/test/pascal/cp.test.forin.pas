@@ -1149,7 +1149,7 @@ const
     ''';
 var
   A: string;
-  P: Integer;
+  P: Int;
 begin
   A := GenAsm(Src, TargetX86_64);
   P := Pos(#9'callq F'#10, A);

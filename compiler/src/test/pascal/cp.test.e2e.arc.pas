@@ -363,7 +363,7 @@ const
     ''';
 
 procedure TE2EArcTests.TestRun_ClassArc_NoExplicitFree_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcClassArcNoFree, Output, RCode));
@@ -381,7 +381,7 @@ begin
 end;
 
 procedure TE2EArcTests.TestRun_InterfaceArc_CarriesLifetime_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcInterfaceArcLifetime, Output, RCode));
@@ -399,7 +399,7 @@ begin
 end;
 
 procedure TE2EArcTests.TestRun_WeakRef_BreaksCycle_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcWeakCycle, Output, RCode));
@@ -417,7 +417,7 @@ begin
 end;
 
 procedure TE2EArcTests.TestRun_ClassDestroy_FreesBuffer_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcDestroyFreesBuffer, Output, RCode));
@@ -435,7 +435,7 @@ begin
 end;
 
 procedure TE2EArcTests.TestRun_TListARC_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcTListARCValgrind, Output, RCode));
@@ -537,7 +537,7 @@ const
     ''';
 
 procedure TE2EArcTests.TestRun_IntfValueParam_Retained_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcIntfValueParamRetained, Output, RCode));
@@ -577,7 +577,7 @@ const
     ''';
 
 procedure TE2EArcTests.TestRun_ConstStringTemp_StaysAlive_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcConstStringTemp, Output, RCode));
@@ -623,7 +623,7 @@ const
     ''';
 
 procedure TE2EArcTests.TestRun_ConstStringParam_TransientRetained_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcConstStrTransient, Output, RCode));
@@ -641,7 +641,7 @@ begin
 end;
 
 procedure TE2EArcTests.TestRun_ThreeGenericInstances_AllWork;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcThreeGenericInstances, Output, RCode));
@@ -689,7 +689,7 @@ const
     ''';
 
 procedure TE2EArcTests.TestRun_PtrRvalueToClassLocal_PreservesLifetime;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcPtrRvalueClassLocal, Output, RCode));
@@ -719,7 +719,7 @@ const
     ''';
 
 procedure TE2EArcTests.TestRun_ClassVarAssignNil_Destroys;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcClassAssignNil, Output, RCode));
@@ -793,7 +793,7 @@ begin
 end;
 
 procedure TE2EArcTests.TestRun_FreeOnCallResult_NoLeak_Valgrind;
-var Output: string; RCode: Integer; Log: string; OK: Boolean;
+var Output: string; RCode: Int; Log: string; OK: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(SrcFreeOnCallResult, Output, RCode));
@@ -886,7 +886,7 @@ const
       WriteLn(Sum)
     end.
     ''';
-var Output: string; RCode: Integer; Log: string;
+var Output: string; RCode: Int; Log: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(Src, Output, RCode));
@@ -931,7 +931,7 @@ const
       WriteLn(Sum)
     end.
     ''';
-var Output: string; RCode: Integer; Log: string;
+var Output: string; RCode: Int; Log: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(Src, Output, RCode));
@@ -974,7 +974,7 @@ const
       WriteLn(B.Arr[0].V + B.Arr[1].V)
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(Src, Output, RCode));
@@ -1309,7 +1309,7 @@ const
       WriteLn('ok')
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(Src, Output, RCode));
@@ -1344,7 +1344,7 @@ const
       WriteLn(Take(X))
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(Src, Output, RCode));
@@ -1400,7 +1400,7 @@ const
       WriteLn(B.Item(2))
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(Src, Output, RCode));
@@ -1445,7 +1445,7 @@ const
       WriteLn(S.Len())
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue(CompileAndRun(Src, Output, RCode));

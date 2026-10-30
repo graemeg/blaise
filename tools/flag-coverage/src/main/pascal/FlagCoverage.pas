@@ -92,8 +92,8 @@ type
   public
     ClsName:   string;
     FieldName: string;
-    Counts:    array[0..1] of Integer;
-    Expected:  array[0..1] of Integer;   { -1 = 'unused' }
+    Counts:    array[0..1] of Int32;
+    Expected:  array[0..1] of Int32;   { -1 = 'unused' }
     HasStatus: Boolean;
   end;
 
@@ -109,7 +109,7 @@ var
 function FindProjectRoot(): string;
 var
   Dir, Parent: string;
-  I: Integer;
+  I: Int;
 begin
   Dir := GetCurrentDir();
   for I := 0 to 6 do
@@ -124,12 +124,12 @@ begin
   Result := '';
 end;
 
-function IsIdentStart(C: Integer): Boolean;
+function IsIdentStart(C: Int): Boolean;
 begin
   Result := ((C >= 65) and (C <= 90)) or ((C >= 97) and (C <= 122)) or (C = 95);
 end;
 
-function IsIdentCont(C: Integer): Boolean;
+function IsIdentCont(C: Int): Boolean;
 begin
   Result := IsIdentStart(C) or ((C >= 48) and (C <= 57));
 end;
@@ -143,7 +143,7 @@ end;
 function StripLine(const ALine: string; var InBlockComment: Boolean;
   var InParenComment: Boolean): string;
 var
-  I, N, C: Integer;
+  I, N, C: Int;
   InStr: Boolean;
 begin
   Result := '';
@@ -194,7 +194,7 @@ end;
 function LoadStripped(const APath: string): string;
 var
   L: TStringList;
-  I: Integer;
+  I: Int;
   InBlk, InPar: Boolean;
 begin
   Result := '';
@@ -212,10 +212,10 @@ end;
 
 { Count occurrences of `.AField` as a whole identifier.  The leading dot is
   what makes this a FIELD READ rather than a mention of a same-named local. }
-function CountFieldReads(const AHay, AField: string): Integer;
+function CountFieldReads(const AHay, AField: string): Int;
 var
   Needle: string;
-  P, NextCh: Integer;
+  P, NextCh: Int;
 begin
   Result := 0;
   Needle := '.' + AField;
@@ -239,7 +239,7 @@ end;
 
 function IsWatched(const AName: string): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   for I := 0 to WATCH_COUNT - 1 do
@@ -267,7 +267,7 @@ end;
 procedure CollectFields();
 var
   L: TStringList;
-  I, J, ColonP: Integer;
+  I, J, ColonP: Int;
   Line, Trimmed, CurCls, FldName, FldType: string;
   InBlk, InPar, InWatched: Boolean;
   Row: TFlagRow;
@@ -334,7 +334,7 @@ end;
 
 procedure CountAll();
 var
-  I, B: Integer;
+  I, B: Int;
   Row: TFlagRow;
 begin
   for I := 0 to Rows.Count - 1 do
@@ -351,7 +351,7 @@ end;
 
 function FindRow(const ACls, AFld: string): TFlagRow;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to Rows.Count - 1 do
@@ -363,7 +363,7 @@ end;
 procedure WriteStatus();
 var
   Outp: TStringList;
-  I, B: Integer;
+  I, B: Int;
   Row: TFlagRow;
   Line: string;
 begin
@@ -404,7 +404,7 @@ end;
 function ReadStatus(): Boolean;
 var
   L: TStringList;
-  I, B, P: Integer;
+  I, B, P: Int;
   Line, Key, Rest, Tok: string;
   Row: TFlagRow;
 begin
@@ -459,7 +459,7 @@ end;
 
 procedure PrintTable();
 var
-  I, B: Integer;
+  I, B: Int;
   Row: TFlagRow;
   Line: string;
 begin
@@ -488,7 +488,7 @@ begin
 end;
 
 var
-  I, B, Gaps, Missing: Integer;
+  I, B, Gaps, Missing: Int;
   Row: TFlagRow;
   Mode: string;
 begin

@@ -165,7 +165,7 @@ end;
 
 function VarInitOf(AProg: TProgram; const AName: string): TConstDecl;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to AProg.Block.Decls.Count - 1 do

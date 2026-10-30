@@ -43,9 +43,9 @@ type
     characters, 0 when only a point location is known. }
   TSourceLocation = record
     FileName: string;
-    Line:     Integer;
-    Col:      Integer;
-    Len:      Integer;
+    Line:     Int;
+    Col:      Int;
+    Len:      Int;
   end;
 
   { An optional, structured "how to fix it" attached to a diagnostic.  Title is
@@ -85,8 +85,8 @@ function SeverityToStr(ASeverity: TSeverity): string;
 function TryParseSeverity(const AText: string; out AOut: TSeverity): Boolean;
 
 { Convenience: build a point location (no length) in one call. }
-function SourceLoc(const AFileName: string; ALine, ACol: Integer): TSourceLocation; overload;
-function SourceLoc(const AFileName: string; ALine, ACol, ALen: Integer): TSourceLocation; overload;
+function SourceLoc(const AFileName: string; ALine, ACol: Int): TSourceLocation; overload;
+function SourceLoc(const AFileName: string; ALine, ACol, ALen: Int): TSourceLocation; overload;
 
 implementation
 
@@ -144,7 +144,7 @@ begin
     Result := False;
 end;
 
-function SourceLoc(const AFileName: string; ALine, ACol: Integer): TSourceLocation;
+function SourceLoc(const AFileName: string; ALine, ACol: Int): TSourceLocation;
 begin
   Result.FileName := AFileName;
   Result.Line     := ALine;
@@ -152,7 +152,7 @@ begin
   Result.Len      := 0;
 end;
 
-function SourceLoc(const AFileName: string; ALine, ACol, ALen: Integer): TSourceLocation;
+function SourceLoc(const AFileName: string; ALine, ACol, ALen: Int): TSourceLocation;
 begin
   Result.FileName := AFileName;
   Result.Line     := ALine;

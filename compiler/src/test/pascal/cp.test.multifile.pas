@@ -174,7 +174,7 @@ var
   Units: TObjectList;
   Prog:  TProgram;
   SA:    TSemanticAnalyser;
-  I:     Integer;
+  I:     Int;
 begin
   Result := '';
   Units := TObjectList.Create(True);

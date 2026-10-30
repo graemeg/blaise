@@ -29,7 +29,7 @@ uses
 type
   TBackendDriverContractTests = class(TTestCase)
   private
-    FAgeCounter: Integer;   { unique scratch dir per NewestRTLSourceAge test }
+    FAgeCounter: Int;   { unique scratch dir per NewestRTLSourceAge test }
     function ListContains(AList: TStringList; const AName: string): Boolean;
   published
     { the RTL object cache is keyed by the CONTENT of the RTL sources, so
@@ -128,7 +128,7 @@ implementation
 function TBackendDriverContractTests.ListContains(AList: TStringList;
   const AName: string): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   for I := 0 to AList.Count - 1 do
@@ -450,7 +450,7 @@ end;
 procedure TBackendDriverContractTests.TestNative_DescribeOptions_MentionsAssembler;
 var
   Lines: TStringList;
-  I: Integer;
+  I: Int;
   Found: Boolean;
 begin
   Lines := TStringList.Create();
@@ -485,8 +485,8 @@ procedure TBackendDriverContractTests.TestRTLCacheDir_IsCompilerKeyed_NotTargetO
 var
   T: TTargetDesc;
   Dir, Leaf, Key: string;
-  I, Dash, Slash: Integer;
-  C: Integer;
+  I, Dash, Slash: Int;
+  C: Int;
 begin
   { The regression this pins: the directory used to end at the bare target name
     ('.../rtl/macos-arm64'), so two different compilers shared one cache and

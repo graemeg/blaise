@@ -10,7 +10,7 @@
 }
 program BenchFib;
 
-function Fib(N: Integer): Int64;
+function Fib(N: Int): Int64;
 begin
   if N < 2 then
     Result := N
@@ -19,7 +19,7 @@ begin
 end;
 
 var
-  i: Integer;
+  i: Int;
   sum: Int64;
 begin
   sum := 0;

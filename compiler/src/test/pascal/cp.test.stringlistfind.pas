@@ -34,7 +34,7 @@ uses
 type
   TStringListFindTests = class(TTestCase)
   private
-    function MakeList(ACaseSensitive: Boolean; ACount: Integer): TStringList;
+    function MakeList(ACaseSensitive: Boolean; ACount: Int): TStringList;
   published
     procedure TestIndexOf_HitAndMiss_LargeUnsorted;
     procedure TestIndexOf_CaseInsensitive_Matches;
@@ -53,9 +53,9 @@ type
 implementation
 
 function TStringListFindTests.MakeList(ACaseSensitive: Boolean;
-  ACount: Integer): TStringList;
+  ACount: Int): TStringList;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TStringList.Create();
   Result.CaseSensitive := ACaseSensitive;
@@ -108,7 +108,7 @@ end;
 procedure TStringListFindTests.TestIndexOf_DuplicateKeys_ReturnsFirstAdded;
 var
   L: TStringList;
-  I: Integer;
+  I: Int;
 begin
   { Mirrors FProcIndex overload registration: the same name added several
     times; IndexOf must return the first-added occurrence. }
@@ -210,7 +210,7 @@ end;
 procedure TStringListFindTests.TestObjects_FollowIndexOf;
 var
   L: TStringList;
-  I: Integer;
+  I: Int;
 begin
   L := TStringList.Create();
   L.CaseSensitive := False;
@@ -218,7 +218,7 @@ begin
     for I := 0 to 99 do
       L.AddObject('key_' + IntToStr(I), Pointer(I + 1000));
     I := L.IndexOf('key_77');
-    AssertEquals('object rides along', 1077, Integer(L.Objects[I]));
+    AssertEquals('object rides along', 1077, Int32(L.Objects[I]));
   finally
     L.Free();
   end;
@@ -241,7 +241,7 @@ end;
 procedure TStringListFindTests.TestSorted_FindStillWorks;
 var
   L: TStringList;
-  I: Integer;
+  I: Int;
 begin
   L := TStringList.Create();
   L.CaseSensitive := False;

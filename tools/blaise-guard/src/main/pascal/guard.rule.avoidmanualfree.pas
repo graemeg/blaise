@@ -38,7 +38,7 @@ type
   TAvoidManualFreeRule = class(TAstRuleBase)
   public
     constructor Create;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
   end;
 
 constructor TAvoidManualFreeRule.Create;
@@ -49,7 +49,7 @@ begin
   FSeverity := sevWarning;
 end;
 
-procedure TAvoidManualFreeRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TAvoidManualFreeRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
   Call:           TMethodCallStmt;
   IncludeDestroy: Boolean;

@@ -32,7 +32,7 @@ uses
 
 const
   VEC_COUNT = 188;
-  VecFn: array[0..187] of Integer = (
+  VecFn: array[0..187] of Int32 = (
     1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1,
     2, 2, 2, 2, 2, 2,
@@ -164,7 +164,7 @@ const
     4457293557087970531, -4616189618054759243, 4801805078135318253, 9155136748776909966, 4610417272575012562, 9218868437227405312,
     0, 4607182418800017408, 4607182418800017408, 9218868437227405312, 4607182418800017408, 9221120237041090560,
     -4503599627370496, 9221120237041090560);
-  VecTol: array[0..187] of Integer = (
+  VecTol: array[0..187] of Int32 = (
     2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2,
@@ -247,7 +247,7 @@ begin
     Result := OB - OA;
 end;
 
-function EvalVector(FnCode: Integer; A, B: Float64): Float64;
+function EvalVector(FnCode: Int; A, B: Float64): Float64;
 begin
   case FnCode of
     1: Result := _BlaiseSin(A);
@@ -277,12 +277,12 @@ begin
 end;
 
 { Run every vector row whose function id is AFnCode; returns '' on pass. }
-function RunVectors(AFnCode: Integer; const AName: string): string;
+function RunVectors(AFnCode: Int; const AName: string): string;
 var
-  I: Integer;
+  I: Int;
   R: Float64;
   RB, D: Int64;
-  Fails: Integer;
+  Fails: Int;
 begin
   Fails := 0;
   for I := 0 to VEC_COUNT - 1 do
@@ -431,7 +431,7 @@ end;
 
 function Test_SqrtExact: string;
 var
-  I: Integer;
+  I: Int;
   V: Float64;
 begin
   { sqrt of perfect squares must be exact }

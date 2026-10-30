@@ -26,8 +26,8 @@ type
   TReport = class
   private
     FItems: TList<TDiagnostic>;
-    function GetCount: Integer;
-    function GetItem(AIndex: Integer): TDiagnostic;
+    function GetCount: Int;
+    function GetItem(AIndex: Int): TDiagnostic;
   public
     constructor Create;
 
@@ -35,7 +35,7 @@ type
     procedure Add(ADiag: TDiagnostic);
 
     { Number of diagnostics at exactly the given severity. }
-    function CountOf(ASeverity: TSeverity): Integer;
+    function CountOf(ASeverity: TSeverity): Int;
 
     { The most severe level present, or sevInfo when the report is empty.
       AHasAny reports whether any diagnostic exists at all. }
@@ -49,8 +49,8 @@ type
       then rule id.  Formatters call this before emitting. }
     procedure SortForOutput;
 
-    property Count: Integer read GetCount;
-    property Items[AIndex: Integer]: TDiagnostic read GetItem; default;
+    property Count: Int read GetCount;
+    property Items[AIndex: Int]: TDiagnostic read GetItem; default;
   end;
 
 implementation
@@ -66,17 +66,17 @@ begin
   FItems.Add(ADiag);
 end;
 
-function TReport.GetCount: Integer;
+function TReport.GetCount: Int;
 begin
   Result := FItems.Count;
 end;
 
-function TReport.GetItem(AIndex: Integer): TDiagnostic;
+function TReport.GetItem(AIndex: Int): TDiagnostic;
 begin
   Result := FItems[AIndex];
 end;
 
-function TReport.CountOf(ASeverity: TSeverity): Integer;
+function TReport.CountOf(ASeverity: TSeverity): Int;
 var
   D: TDiagnostic;
 begin
@@ -120,7 +120,7 @@ end;
 
 procedure TReport.SortForOutput;
 var
-  I, J: Integer;
+  I, J: Int;
   Tmp:  TDiagnostic;
 begin
   { Insertion sort - report sizes are small, and it keeps the comparison

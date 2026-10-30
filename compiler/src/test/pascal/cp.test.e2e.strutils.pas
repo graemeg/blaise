@@ -135,7 +135,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_ContainsStr_Found;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -150,7 +150,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_ContainsStr_NotFound;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -165,7 +165,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_ContainsText_CaseInsensitive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -184,7 +184,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_StartsStr_Matches;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -198,7 +198,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_StartsStr_NoMatch;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -212,7 +212,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_StartsText_CaseInsensitive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -226,7 +226,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_EndsStr_Matches;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -240,7 +240,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_EndsStr_NoMatch;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -254,7 +254,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_EndsText_CaseInsensitive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -272,7 +272,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_LeftStr;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -284,7 +284,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_RightStr;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -296,7 +296,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_MidStr;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -308,7 +308,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_LeftStr_LongerThanString;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -324,7 +324,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_PosEx_Found;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -336,7 +336,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_PosEx_SkipsBeforeStart;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -348,7 +348,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_PosEx_NotFound;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -364,7 +364,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_IndexStr_Found;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -380,7 +380,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_IndexStr_NotFound;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -396,7 +396,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_IndexText_CaseInsensitive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -416,7 +416,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_Replace_FirstOnly;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -428,7 +428,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_Replace_NotFound;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -440,7 +440,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_ReplaceAll_SingleOccurrence;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -452,7 +452,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_ReplaceAll_MultipleOccurrences;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -464,7 +464,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_ReplaceAll_EmptyOld;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -476,7 +476,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_ReplaceAll_EmptyNew;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -492,7 +492,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_DupeString;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -504,7 +504,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_DupeString_ZeroCount;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -516,7 +516,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_ReverseString;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -528,7 +528,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_StuffString_InsertReplace;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -547,7 +547,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_TrimLeft;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -559,7 +559,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_TrimRight;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -571,7 +571,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_TrimLeft_NoLeadingSpace;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -587,7 +587,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_PadLeft_Default;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -599,7 +599,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_PadRight_Default;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -611,7 +611,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_PadLeft_AlreadyWide;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -623,7 +623,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_PadLeft_CustomPad;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -639,7 +639,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_CountOccurrences_Multiple;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -651,7 +651,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CountOccurrences_None;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -663,7 +663,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CountOccurrences_NonOverlapping;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -679,7 +679,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_RemovePrefix_Present;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -691,7 +691,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_RemovePrefix_Absent;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -703,7 +703,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_RemoveSuffix_Present;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -715,7 +715,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_RemoveSuffix_Absent;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -731,7 +731,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_IsEmptyOrWhitespace_Empty;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -745,7 +745,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_IsEmptyOrWhitespace_Spaces;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -759,7 +759,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_IsEmptyOrWhitespace_NonBlank;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -777,7 +777,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_JoinStr_Multiple;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -793,7 +793,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_JoinStr_Single;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -809,7 +809,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_JoinStr_EmptySep;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -829,7 +829,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStrUtilsTests.TestRun_TStringBuilder_AppendAndToString;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -849,7 +849,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_TStringBuilder_AppendLine;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -869,7 +869,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_TStringBuilder_Clear;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -889,7 +889,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_TStringBuilder_Length;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -907,7 +907,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_TStringBuilder_AppendByte;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -929,7 +929,7 @@ end;
 procedure TE2EStrUtilsTests.TestRun_TStringBuilder_SpeedVsConcat;
 { Verifies that TStringBuilder produces correct output for a non-trivial
   number of appends — exercises the Grow path. }
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -1094,7 +1094,7 @@ const
     ''';
 
 procedure TE2EStrUtilsTests.TestRun_CodePointSize;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointSize, Output, RCode));
@@ -1102,7 +1102,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointLength_ASCII;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointLengthASCII, Output, RCode));
@@ -1110,7 +1110,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointLength_Mixed;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointLengthMixed, Output, RCode));
@@ -1118,7 +1118,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointAt_MultibytePos;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointAtMultibyte, Output, RCode));
@@ -1126,7 +1126,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointCopy_Middle;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointCopyMiddle, Output, RCode));
@@ -1134,7 +1134,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointPos_Found;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointPosFound, Output, RCode));
@@ -1142,7 +1142,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointFromByteIndex;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointFromByteIndex, Output, RCode));
@@ -1150,7 +1150,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointByteIndex_Roundtrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointByteIndexRoundtrip, Output, RCode));
@@ -1158,7 +1158,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointToString_ASCII;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointToStringASCII, Output, RCode));
@@ -1166,7 +1166,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointToString_TwoByteBytes;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointToStringTwoByteBytes, Output, RCode));
@@ -1174,7 +1174,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointToString_Roundtrip;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointToStringRoundtrip, Output, RCode));
@@ -1183,7 +1183,7 @@ begin
 end;
 
 procedure TE2EStrUtilsTests.TestRun_CodePointToString_OutOfRange;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCodePointToStringOutOfRange, Output, RCode));

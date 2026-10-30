@@ -35,7 +35,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-1002';
 
-function RunML(const ASource: string; AMaxLines: Integer): TReport;
+function RunML(const ASource: string; AMaxLines: Int): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;

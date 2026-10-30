@@ -43,8 +43,8 @@ type
       and pop per-routine state (line spans, local-scope tables). }
     procedure VisitMethodEnter(AMethod: TMethodDecl); virtual;
     procedure VisitMethodExit(AMethod: TMethodDecl); virtual;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); virtual;
-    procedure VisitStmtExit(AStmt: TASTStmt; ADepth: Integer); virtual;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); virtual;
+    procedure VisitStmtExit(AStmt: TASTStmt; ADepth: Int); virtual;
     { Called (pre-order) for every expression node reachable from a statement,
       including the sub-expressions of calls, operators and subscripts. }
     procedure VisitExpr(AExpr: TASTExpr); virtual;
@@ -56,8 +56,8 @@ type
     procedure WalkTypeDecls(AList: TObjectList);
     procedure WalkMethods(AList: TObjectList);
     procedure WalkMethod(AMethod: TMethodDecl);
-    procedure WalkStmtList(AList: TObjectList; ADepth: Integer);
-    procedure WalkStmt(AStmt: TASTStmt; ADepth: Integer);
+    procedure WalkStmtList(AList: TObjectList; ADepth: Int);
+    procedure WalkStmt(AStmt: TASTStmt; ADepth: Int);
     procedure WalkStmtExprs(AStmt: TASTStmt);
     procedure WalkExpr(AExpr: TASTExpr);
     procedure WalkArgs(AList: TObjectList);
@@ -77,8 +77,8 @@ procedure TAstVisitor.VisitVarDecl(AVar: TVarDecl);                     begin en
 procedure TAstVisitor.VisitConstDecl(AConst: TConstDecl);              begin end;
 procedure TAstVisitor.VisitMethodEnter(AMethod: TMethodDecl);          begin end;
 procedure TAstVisitor.VisitMethodExit(AMethod: TMethodDecl);           begin end;
-procedure TAstVisitor.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); begin end;
-procedure TAstVisitor.VisitStmtExit(AStmt: TASTStmt; ADepth: Integer);  begin end;
+procedure TAstVisitor.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); begin end;
+procedure TAstVisitor.VisitStmtExit(AStmt: TASTStmt; ADepth: Int);  begin end;
 procedure TAstVisitor.VisitExpr(AExpr: TASTExpr);                       begin end;
 
 { ---- TAstWalker ---- }
@@ -91,7 +91,7 @@ end;
 
 procedure TAstWalker.Walk(ABlock: TBlock);
 var
-  I: Integer;
+  I: Int;
 begin
   if ABlock = nil then
     Exit;
@@ -111,7 +111,7 @@ end;
 
 procedure TAstWalker.WalkTypeDecls(AList: TObjectList);
 var
-  I:    Integer;
+  I:    Int;
   Decl: TTypeDecl;
 begin
   if AList = nil then
@@ -127,7 +127,7 @@ end;
 
 procedure TAstWalker.WalkMethods(AList: TObjectList);
 var
-  I: Integer;
+  I: Int;
 begin
   if AList = nil then
     Exit;
@@ -147,9 +147,9 @@ begin
   FVisitor.VisitMethodExit(AMethod);
 end;
 
-procedure TAstWalker.WalkStmtList(AList: TObjectList; ADepth: Integer);
+procedure TAstWalker.WalkStmtList(AList: TObjectList; ADepth: Int);
 var
-  I: Integer;
+  I: Int;
 begin
   if AList = nil then
     Exit;
@@ -157,9 +157,9 @@ begin
     WalkStmt(TASTStmt(AList[I]), ADepth);
 end;
 
-procedure TAstWalker.WalkStmt(AStmt: TASTStmt; ADepth: Integer);
+procedure TAstWalker.WalkStmt(AStmt: TASTStmt; ADepth: Int);
 var
-  J: Integer;
+  J: Int;
 begin
   if AStmt = nil then
     Exit;
@@ -226,7 +226,7 @@ end;
 
 procedure TAstWalker.WalkStmtExprs(AStmt: TASTStmt);
 var
-  J: Integer;
+  J: Int;
 begin
   if AStmt is TAssignment then
     WalkExpr(TAssignment(AStmt).Expr)
@@ -300,7 +300,7 @@ end;
 
 procedure TAstWalker.WalkArgs(AList: TObjectList);
 var
-  I: Integer;
+  I: Int;
 begin
   if AList = nil then
     Exit;

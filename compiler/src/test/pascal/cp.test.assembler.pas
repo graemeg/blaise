@@ -76,8 +76,8 @@ type
   { ---- ELF writer unit tests ---- }
   TElfWriterTests = class(TTestCase)
   private
-    function ReadU8(const ABuf: string; AOff: Integer): Integer;
-    function ReadU16(const ABuf: string; AOff: Integer): Integer;
+    function ReadU8(const ABuf: string; AOff: Int): Int;
+    function ReadU16(const ABuf: string; AOff: Int): Int;
   published
     procedure TestElfHeader_Magic;
     procedure TestElfHeader_Class64;
@@ -108,17 +108,17 @@ type
     FRTLPath: string;
     FStdlibPath: string;
     FScratch: string;
-    FCounter: Integer;
+    FCounter: Int;
     function ProjectRoot: string;
     function CompilerAvailable: Boolean;
     function RunProc(const AExe: string; const AArgs: array of string;
-      out AStdout: string): Integer;
-    function RunProcNoArgs(const AExe: string; out AStdout: string): Integer;
+      out AStdout: string): Int;
+    function RunProcNoArgs(const AExe: string; out AStdout: string): Int;
     function CompileAndRun(const ASrc: string;
-      out AStdout: string; out AExitCode: Integer): Boolean;
+      out AStdout: string; out AExitCode: Int): Boolean;
     function CompileAndRunArgs(const ASrc: string;
       const AArgs: array of string;
-      out AStdout: string; out AExitCode: Integer): Boolean;
+      out AStdout: string; out AExitCode: Int): Boolean;
   protected
     procedure SetUp; override;
   published
@@ -176,7 +176,7 @@ var
   cryptic failures.  Probe once and skip (not fail) on a bad probe.
   0 = not probed, 1 = good, 2 = bad. }
 var
-  GInternalAsmProbeState: Integer = 0;
+  GInternalAsmProbeState: Int32 = 0;
 
 { ---- TAsmEncodingTests ---- }
 
@@ -313,10 +313,10 @@ end;
 
 procedure TAsmEncodingTests.TestRdrandRdtsc_AndCarryAliases;
 
-  procedure Has(const AAsm: string; const ABytes: array of Integer);
+  procedure Has(const AAsm: string; const ABytes: array of Int32);
   var
     Obj, Want: string;
-    I: Integer;
+    I: Int;
   begin
     Obj := AssembleToBytes(AAsm + LineEnding);
     Want := '';
@@ -441,7 +441,7 @@ procedure TAsmEncodingTests.TestTbssSymbol_TypedSttTls;
 var
   Obj: string;
   Parsed: TElfObjectFile;
-  I: Integer;
+  I: Int;
   Found: Boolean;
 begin
   { A symbol defined in .tbss must carry STT_TLS (GNU as infers it from the
@@ -476,7 +476,7 @@ var
   Obj: string;
   Parsed: TElfObjectFile;
   Sec: TRdSection;
-  I: Integer;
+  I: Int;
   Found: Boolean;
 begin
   Obj := AssembleToBytes(
@@ -511,11 +511,11 @@ var
   Obj: string;
   Parsed: TElfObjectFile;
   Sec: TRdSection;
-  I: Integer;
+  I: Int;
 
   function SymValue(const AName: string): Int64;
   var
-    K: Integer;
+    K: Int;
   begin
     Result := -1;
     for K := 0 to Parsed.Symbols.Count - 1 do
@@ -717,12 +717,12 @@ end;
 
 { ---- ELF reader helpers ---- }
 
-function TElfWriterTests.ReadU8(const ABuf: string; AOff: Integer): Integer;
+function TElfWriterTests.ReadU8(const ABuf: string; AOff: Int): Int;
 begin
   Result := Ord(ABuf[AOff]) and $FF;
 end;
 
-function TElfWriterTests.ReadU16(const ABuf: string; AOff: Integer): Integer;
+function TElfWriterTests.ReadU16(const ABuf: string; AOff: Int): Int;
 begin
   Result := (Ord(ABuf[AOff]) and $FF)
          or ((Ord(ABuf[AOff + 1]) and $FF) shl 8);
@@ -734,7 +734,7 @@ procedure TElfWriterTests.TestContainerWriterSeam_ElfViaInterface;
 var
   W: IContainerWriter;
   Buf: string;
-  SymIdx: Integer;
+  SymIdx: Int;
 begin
   { Drive TElfObjectWriter purely through the IContainerWriter seam — the
     contract the internal assemblers hold a writer by (Bridge: one
@@ -834,7 +834,7 @@ end;
 procedure TElfWriterTests.TestAppend_TextSection;
 var
   W: TElfObjectWriter;
-  Off: Integer;
+  Off: Int;
 begin
   W := TElfObjectWriter.Create();
   try
@@ -849,7 +849,7 @@ end;
 procedure TElfWriterTests.TestAppend_DataSection;
 var
   W: TElfObjectWriter;
-  Off: Integer;
+  Off: Int;
 begin
   W := TElfObjectWriter.Create();
   try
@@ -880,7 +880,7 @@ end;
 procedure TElfWriterTests.TestDefineSymbol_FindsIt;
 var
   W: TElfObjectWriter;
-  Idx: Integer;
+  Idx: Int;
 begin
   W := TElfObjectWriter.Create();
   try
@@ -895,7 +895,7 @@ end;
 procedure TElfWriterTests.TestExternSymbol_FindsIt;
 var
   W: TElfObjectWriter;
-  Idx: Integer;
+  Idx: Int;
 begin
   W := TElfObjectWriter.Create();
   try
@@ -998,7 +998,7 @@ end;
 function TInternalAsmE2ETests.ProjectRoot: string;
 var
   Dir, Parent: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
   if Result <> '' then
@@ -1046,7 +1046,7 @@ end;
 function TInternalAsmE2ETests.CompilerAvailable: Boolean;
 var
   SrcFile, OutFile, CompOut, RunOut: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   { The compiler binary source-builds the RTL itself (no blaise_rtl.a); only
     the binary and the RTL source need to be present. }
@@ -1091,10 +1091,10 @@ begin
 end;
 
 function TInternalAsmE2ETests.RunProc(const AExe: string;
-  const AArgs: array of string; out AStdout: string): Integer;
+  const AArgs: array of string; out AStdout: string): Int;
 var
   Proc: TProcess;
-  I: Integer;
+  I: Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -1116,7 +1116,7 @@ begin
 end;
 
 function TInternalAsmE2ETests.RunProcNoArgs(const AExe: string;
-  out AStdout: string): Integer;
+  out AStdout: string): Int;
 var
   Proc: TProcess;
   Chunk: string;
@@ -1138,10 +1138,10 @@ begin
 end;
 
 function TInternalAsmE2ETests.CompileAndRun(const ASrc: string;
-  out AStdout: string; out AExitCode: Integer): Boolean;
+  out AStdout: string; out AExitCode: Int): Boolean;
 var
   SrcFile, OutFile, CompOut: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   Result := False;
   if not Self.CompilerAvailable() then Exit;
@@ -1173,10 +1173,10 @@ end;
   so argc/argv forwarding through the runtime's own _start is exercised. }
 function TInternalAsmE2ETests.CompileAndRunArgs(const ASrc: string;
   const AArgs: array of string;
-  out AStdout: string; out AExitCode: Integer): Boolean;
+  out AStdout: string; out AExitCode: Int): Boolean;
 var
   SrcFile, OutFile, CompOut: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   Result := False;
   if not Self.CompilerAvailable() then Exit;
@@ -1207,7 +1207,7 @@ end;
 procedure TInternalAsmE2ETests.TestSimpleAdd;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_add;' + LineEnding +
@@ -1226,7 +1226,7 @@ end;
 procedure TInternalAsmE2ETests.TestStringOutput;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_str;' + LineEnding +
@@ -1245,7 +1245,7 @@ end;
 procedure TInternalAsmE2ETests.TestForLoop;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_for;' + LineEnding +
@@ -1267,7 +1267,7 @@ end;
 procedure TInternalAsmE2ETests.TestFunctionCall;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_func;' + LineEnding +
@@ -1290,7 +1290,7 @@ end;
 procedure TInternalAsmE2ETests.TestIfElse;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_if;' + LineEnding +
@@ -1314,7 +1314,7 @@ end;
 procedure TInternalAsmE2ETests.TestWhileLoop;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_while;' + LineEnding +
@@ -1340,7 +1340,7 @@ end;
 procedure TInternalAsmE2ETests.TestBooleanExpr;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_bool;' + LineEnding +
@@ -1363,7 +1363,7 @@ end;
 procedure TInternalAsmE2ETests.TestNegativeNumbers;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_neg;' + LineEnding +
@@ -1384,7 +1384,7 @@ end;
 procedure TInternalAsmE2ETests.TestPromotedSubRegisterWidths;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_promo_widths;' + LineEnding +
@@ -1412,7 +1412,7 @@ end;
 procedure TInternalAsmE2ETests.TestMultipleVars;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_vars;' + LineEnding +
@@ -1435,7 +1435,7 @@ end;
 procedure TInternalAsmE2ETests.TestNestedCalls;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if not CompileAndRun(
     'program test_nested;' + LineEnding +
@@ -1462,7 +1462,7 @@ end;
 procedure TInternalAsmE2ETests.TestClassVirtualCall;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { Exercises .quad <symbol> vtable entries and bare (%reg) stores —
     both previously broken in the internal assembler. }
@@ -1494,7 +1494,7 @@ end;
 procedure TInternalAsmE2ETests.TestFloatArithmetic;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { Exercises SSE loads/stores with bare (%reg) operands (float
     spills) — previously unparseable in the internal assembler. }
@@ -1521,7 +1521,7 @@ end;
 procedure TInternalAsmE2ETests.TestFormatFloatArg;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { A float argument to Format() is boxed into the array-of-const via
     `movq %xmm0, %rax` (raw IEEE-754 bits).  The internal assembler used to
@@ -1547,7 +1547,7 @@ end;
 procedure TInternalAsmE2ETests.TestEntry_ExitCodePropagates;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { Halt(N): the runtime's own _start calls __libc_start_main(main, ...) and
     glibc exits with main's return value.  A broken entry sequence would crash
@@ -1570,7 +1570,7 @@ end;
 procedure TInternalAsmE2ETests.TestEntry_ArgsForwarded;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { argc/argv reach the program through _start -> __libc_start_main -> main ->
     _SetArgs.  ParamStr(0) is the program path; the passed args follow. }
@@ -1593,7 +1593,7 @@ end;
 procedure TInternalAsmE2ETests.TestInlineAsm_RdtscRdrand;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   if HostTarget().CPU <> cpuX86_64 then
   begin
@@ -1635,7 +1635,7 @@ end;
 procedure TInternalAsmE2ETests.TestInlineAsm_ReturnsValue;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { the asm body is x86-64, so the program only builds on an x86-64 host }
   if HostTarget().CPU <> cpuX86_64 then
@@ -1667,7 +1667,7 @@ end;
 procedure TInternalAsmE2ETests.TestInlineAsm_AddsTwoArgs;
 var
   Out_: string;
-  EC: Integer;
+  EC: Int;
 begin
   { the asm body is x86-64, so the program only builds on an x86-64 host }
   if HostTarget().CPU <> cpuX86_64 then
@@ -1700,7 +1700,7 @@ end;
 procedure TInternalAsmE2ETests.TestDebugOPDF_StringConstSpecialChars_AssemblesAndRuns;
 var
   SrcFile, OutFile, CompOut, RunOut: string;
-  Rc, EC: Integer;
+  Rc, EC: Int;
   Src: string;
 begin
   if not Self.CompilerAvailable() then

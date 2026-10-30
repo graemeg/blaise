@@ -16,16 +16,16 @@ type
   TTaskStatus = (tsTodo, tsInProgress, tsDone);
 
   TIntHolder = class
-    FValue: Integer;
+    FValue: Int;
   end;
 
   TTask = class
-    FId: Integer;
+    FId: Int;
     FTitle: string;
     FStatus: TTaskStatus;
     FCreated: string;
     FPriority: string;
-    property Id: Integer read FId;
+    property Id: Int read FId;
     property Title: string read FTitle write FTitle;
     property Status: TTaskStatus read FStatus write FStatus;
     property Created: string read FCreated;
@@ -34,31 +34,31 @@ type
 
   TBoard = class
     FTasks: TObjectList;
-    FNextId: Integer;
+    FNextId: Int;
     FFilePath: string;
     FLastMtime: Int64;
     FDeletedIds: TObjectList;
-    function GetCount: Integer;
+    function GetCount: Int;
     procedure ParseLine(const Line: string; CurrentStatus: TTaskStatus);
     function FormatTask(Task: TTask): string;
-    function IsDeleted(AId: Integer): Boolean;
+    function IsDeleted(AId: Int): Boolean;
   public
     constructor Create(const AFilePath: string);
     procedure Load;
     procedure Save;
     function AddTask(const ATitle: string; AStatus: TTaskStatus): TTask;
-    procedure DeleteTask(AId: Integer);
-    procedure MoveTask(AId: Integer; NewStatus: TTaskStatus);
-    function FindById(AId: Integer): TTask;
-    function CountByStatus(AStatus: TTaskStatus): Integer;
-    function GetByStatusAt(AStatus: TTaskStatus; Index: Integer): TTask;
-    function GetDetailPath(AId: Integer): string;
-    function HasDetail(AId: Integer): Boolean;
-    function LoadDetail(AId: Integer): string;
-    procedure SaveDetail(AId: Integer; const AContent: string);
+    procedure DeleteTask(AId: Int);
+    procedure MoveTask(AId: Int; NewStatus: TTaskStatus);
+    function FindById(AId: Int): TTask;
+    function CountByStatus(AStatus: TTaskStatus): Int;
+    function GetByStatusAt(AStatus: TTaskStatus; Index: Int): TTask;
+    function GetDetailPath(AId: Int): string;
+    function HasDetail(AId: Int): Boolean;
+    function LoadDetail(AId: Int): string;
+    procedure SaveDetail(AId: Int; const AContent: string);
     function HasExternalChanges: Boolean;
-    function MergeFromDisk: Integer;
-    property Count: Integer read GetCount;
+    function MergeFromDisk: Int;
+    property Count: Int read GetCount;
     property FilePath: string read FFilePath;
   end;
 
@@ -76,7 +76,7 @@ begin
   FLastMtime := -1
 end;
 
-function TBoard.GetCount: Integer;
+function TBoard.GetCount: Int;
 begin
   Result := FTasks.Count
 end;
@@ -85,7 +85,7 @@ procedure TBoard.ParseLine(const Line: string; CurrentStatus: TTaskStatus);
 var
   S, Part, Key, Val: string;
   Task: TTask;
-  PipePos, EqPos, TaskId: Integer;
+  PipePos, EqPos, TaskId: Int;
 begin
   S := Trim(Line);
   if Length(S) < 4 then Exit;
@@ -181,7 +181,7 @@ end;
 procedure TBoard.Load;
 var
   Lines: TStringList;
-  I: Integer;
+  I: Int;
   Line: string;
   CurrentStatus: TTaskStatus;
   IdLine: string;
@@ -216,7 +216,7 @@ end;
 procedure TBoard.Save;
 var
   Lines: TStringList;
-  I: Integer;
+  I: Int;
   Task: TTask;
 begin
   if Self.HasExternalChanges() then
@@ -277,9 +277,9 @@ begin
   FTasks.Add(Result)
 end;
 
-function TBoard.IsDeleted(AId: Integer): Boolean;
+function TBoard.IsDeleted(AId: Int): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < FDeletedIds.Count do
@@ -291,9 +291,9 @@ begin
   Result := False
 end;
 
-procedure TBoard.DeleteTask(AId: Integer);
+procedure TBoard.DeleteTask(AId: Int);
 var
-  I: Integer;
+  I: Int;
   Task: TTask;
   DetailPath: string;
   Holder: TIntHolder;
@@ -317,7 +317,7 @@ begin
   end
 end;
 
-procedure TBoard.MoveTask(AId: Integer; NewStatus: TTaskStatus);
+procedure TBoard.MoveTask(AId: Int; NewStatus: TTaskStatus);
 var
   Task: TTask;
 begin
@@ -326,9 +326,9 @@ begin
     Task.FStatus := NewStatus
 end;
 
-function TBoard.FindById(AId: Integer): TTask;
+function TBoard.FindById(AId: Int): TTask;
 var
-  I: Integer;
+  I: Int;
   Task: TTask;
 begin
   I := 0;
@@ -342,9 +342,9 @@ begin
   Result := nil
 end;
 
-function TBoard.CountByStatus(AStatus: TTaskStatus): Integer;
+function TBoard.CountByStatus(AStatus: TTaskStatus): Int;
 var
-  I: Integer;
+  I: Int;
   Task: TTask;
 begin
   Result := 0;
@@ -358,9 +358,9 @@ begin
   end
 end;
 
-function TBoard.GetByStatusAt(AStatus: TTaskStatus; Index: Integer): TTask;
+function TBoard.GetByStatusAt(AStatus: TTaskStatus; Index: Int): TTask;
 var
-  I, Cnt: Integer;
+  I, Cnt: Int;
   Task: TTask;
 begin
   Cnt := 0;
@@ -379,7 +379,7 @@ begin
   Result := nil
 end;
 
-function TBoard.GetDetailPath(AId: Integer): string;
+function TBoard.GetDetailPath(AId: Int): string;
 var
   DirPath: string;
 begin
@@ -387,12 +387,12 @@ begin
   Result := DirPath + '/' + IntToStr(AId) + '.txt'
 end;
 
-function TBoard.HasDetail(AId: Integer): Boolean;
+function TBoard.HasDetail(AId: Int): Boolean;
 begin
   Result := FileExists(Self.GetDetailPath(AId))
 end;
 
-function TBoard.LoadDetail(AId: Integer): string;
+function TBoard.LoadDetail(AId: Int): string;
 var
   Path: string;
 begin
@@ -403,7 +403,7 @@ begin
     Result := ''
 end;
 
-procedure TBoard.SaveDetail(AId: Integer; const AContent: string);
+procedure TBoard.SaveDetail(AId: Int; const AContent: string);
 var
   DirPath: string;
 begin
@@ -421,10 +421,10 @@ begin
   Result := (CurrentMtime <> -1) and (CurrentMtime <> FLastMtime)
 end;
 
-function TBoard.MergeFromDisk: Integer;
+function TBoard.MergeFromDisk: Int;
 var
   DiskBoard: TBoard;
-  I, Merged, MaxId: Integer;
+  I, Merged, MaxId: Int;
   DiskTask, MemTask, NewTask: TTask;
 begin
   Merged := 0;

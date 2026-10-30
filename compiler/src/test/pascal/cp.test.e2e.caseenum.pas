@@ -166,7 +166,7 @@ begin
 end;
 
 procedure TE2ECaseEnumTests.TestRun_Enum_OrdinalValues;
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcEnumOrdinal, Output, RCode));
@@ -235,7 +235,7 @@ const
 procedure TE2ECaseEnumTests.TestRun_Enum_ExplicitOrdinals;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -254,7 +254,7 @@ end;
 procedure TE2ECaseEnumTests.TestRun_Enum_AutoContinueAfterExplicit;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
@@ -273,7 +273,7 @@ end;
 procedure TE2ECaseEnumTests.TestRun_Enum_ExplicitInCase;
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcExplicitInCase, Output, RCode));
@@ -298,7 +298,7 @@ const
           WriteLn(Ord(TColorB.Blue))
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -340,7 +340,7 @@ const
           end
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -370,7 +370,7 @@ const
           WriteLn(Ord(Red))
         end.
         ''';
-var Output: string; RCode: Integer; Rejected: Boolean;
+var Output: string; RCode: Int; Rejected: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   Rejected := False;
@@ -404,7 +404,7 @@ const
           TakeB(Blue)
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -435,7 +435,7 @@ const
             WriteLn(Ord(b))
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -466,7 +466,7 @@ const
           WriteLn(Ord(r.c))
         end.
         ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -496,7 +496,7 @@ const
           f.Free()
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -528,7 +528,7 @@ const
           WriteLn(Ord(arr[1]))
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -562,7 +562,7 @@ const
           WriteLn(Ord(b))
         end.
         ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -589,7 +589,7 @@ const
           cb(Blue)
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -622,7 +622,7 @@ const
           WriteLn(Ord(ViaExit()))
         end.
         ''';
-var Output: string; RCode: Integer; Lines: TStringList;
+var Output: string; RCode: Int; Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));

@@ -33,8 +33,8 @@ type
   private
     function BlaisePath(): string;
     function RunBlaise(const AArgs: array of string;
-                       out AStdout: string): Integer;
-    function RunBinary(const AExe: string; out AStdout: string): Integer;
+                       out AStdout: string): Int;
+    function RunBinary(const AExe: string; out AStdout: string): Int;
   protected
     procedure SetUp; override;
   published
@@ -110,10 +110,10 @@ begin
 end;
 
 function TErrnoE2ETests.RunBlaise(const AArgs: array of string;
-                                  out AStdout: string): Integer;
+                                  out AStdout: string): Int;
 var
   Proc: TProcess;
-  I: Integer;
+  I: Int;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
@@ -135,7 +135,7 @@ begin
 end;
 
 function TErrnoE2ETests.RunBinary(const AExe: string;
-                                  out AStdout: string): Integer;
+                                  out AStdout: string): Int;
 var
   Proc: TProcess;
   Chunk: string;
@@ -167,7 +167,7 @@ procedure TErrnoE2ETests.TestWouldBlock_StaticProfile_RawNegativeErrno;
 var
   ProgPas, ProgBin: string;
   Captured, Output: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   { --static is the Linux freestanding profile; macOS binaries are always
     dynamic against libSystem and the compiler rejects --static there. }

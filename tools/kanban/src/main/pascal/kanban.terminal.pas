@@ -109,16 +109,16 @@ type
   end;
 {$ELSE}
   TTermios = record
-    IFlag:  Integer;
-    OFlag:  Integer;
-    CFlag:  Integer;
-    LFlag:  Integer;
+    IFlag:  Int32;
+    OFlag:  Int32;
+    CFlag:  Int32;
+    LFlag:  Int32;
 {$IFDEF LINUX}
     Line:   Byte;
 {$ENDIF}
     CC:     array[0..NCCS_SIZE - 1] of Byte;
-    ISpeed: Integer;
-    OSpeed: Integer;
+    ISpeed: Int32;
+    OSpeed: Int32;
   end;
 {$ENDIF}
   PTermios = ^TTermios;
@@ -134,47 +134,47 @@ type
 {$IFDEF DARWIN}
 { libSystem's ioctl is C-variadic: on Apple arm64 the argument after the
   request travels on the stack, so it must be declared varargs. }
-function sys_ioctl(Fd: Integer; Request: Int64): Integer; varargs;
+function sys_ioctl(Fd: Int32; Request: Int64): Int32; varargs;
   external name 'ioctl';
 {$ELSE}
 { ioctl is a direct syscall provided by the runtime. }
-function sys_ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+function sys_ioctl(Fd: Int32; Request: Int64; Arg: Pointer): Int32;
   external name 'ioctl';
 {$ENDIF}
-function libc_read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
+function libc_read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   external name 'read';
 
 { tcgetattr / tcsetattr implemented as ioctl wrappers (see implementation). }
-function tcgetattr(Fd: Integer; T: PTermios): Integer;
-function tcsetattr(Fd: Integer; Action: Integer; T: PTermios): Integer;
-function term_ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+function tcgetattr(Fd: Int; T: PTermios): Int;
+function tcsetattr(Fd: Int; Action: Int; T: PTermios): Int;
+function term_ioctl(Fd: Int; Request: Int64; Arg: Pointer): Int;
 
 type
   TTerminal = class
-    FRows: Integer;
-    FCols: Integer;
+    FRows: Int32;
+    FCols: Int32;
     FBuf: string;
     FSaved: Boolean;
     procedure EnableRawMode;
     procedure DisableRawMode;
     procedure QuerySize;
-    function ReadByte: Integer;
-    function ReadKey: Integer;
+    function ReadByte: Int;
+    function ReadKey: Int;
     procedure BufClear;
     procedure BufWrite(const S: string);
     procedure BufFlush;
     procedure HideCursor;
     procedure ShowCursor;
-    procedure MoveTo(Row, Col: Integer);
+    procedure MoveTo(Row, Col: Int);
     procedure ClearScreen;
-    procedure SetFg(Color: Integer);
-    procedure SetBg(Color: Integer);
+    procedure SetFg(Color: Int);
+    procedure SetBg(Color: Int);
     procedure SetBold;
     procedure ResetAttr;
-    procedure DrawBox(Row, Col, Width, Height, Color: Integer; const Title: string);
-    procedure DrawHLine(Row, Col, Width: Integer);
-    property Rows: Integer read FRows;
-    property Cols: Integer read FCols;
+    procedure DrawBox(Row, Col, Width, Height, Color: Int; const Title: string);
+    procedure DrawHLine(Row, Col, Width: Int);
+    property Rows: Int32 read FRows;
+    property Cols: Int32 read FCols;
   end;
 
 implementation
@@ -182,7 +182,7 @@ implementation
 uses StrUtils;
 
 { tcgetattr: get terminal attributes via ioctl. }
-function tcgetattr(Fd: Integer; T: PTermios): Integer;
+function tcgetattr(Fd: Int; T: PTermios): Int;
 begin
 {$IFDEF FREEBSD}
   Result := sys_ioctl(Fd, TIOCGETA, T);
@@ -199,7 +199,7 @@ end;
   Action is ignored — we always use TCSAFLUSH (the only mode the kanban app
   needs).  If other modes are needed later, map Action 0/1/2 to the
   corresponding platform ioctl. }
-function tcsetattr(Fd: Integer; Action: Integer; T: PTermios): Integer;
+function tcsetattr(Fd: Int; Action: Int; T: PTermios): Int;
 begin
 {$IFDEF FREEBSD}
   Result := sys_ioctl(Fd, TIOCSETAF, T);
@@ -213,7 +213,7 @@ begin
 end;
 
 { Thin wrapper so the TTerminal class can call ioctl for TIOCGWINSZ. }
-function term_ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+function term_ioctl(Fd: Int; Request: Int64; Arg: Pointer): Int;
 begin
   Result := sys_ioctl(Fd, Request, Arg);
 end;
@@ -262,7 +262,7 @@ begin
   end
 end;
 
-function TTerminal.ReadByte: Integer;
+function TTerminal.ReadByte: Int;
 var
   Ch: Byte;
   N: Int64;
@@ -274,9 +274,9 @@ begin
     Result := Ch
 end;
 
-function TTerminal.ReadKey: Integer;
+function TTerminal.ReadKey: Int;
 var
-  B1, B2, B3: Integer;
+  B1, B2, B3: Int;
 begin
   B1 := Self.ReadByte();
   if B1 = KEY_NONE then Exit(KEY_NONE);
@@ -327,7 +327,7 @@ begin
   Self.BufWrite(Chr(27) + '[?25h')
 end;
 
-procedure TTerminal.MoveTo(Row, Col: Integer);
+procedure TTerminal.MoveTo(Row, Col: Int);
 begin
   Self.BufWrite(Chr(27) + '[' + IntToStr(Row) + ';' + IntToStr(Col) + 'H')
 end;
@@ -338,12 +338,12 @@ begin
   Self.BufWrite(Chr(27) + '[H')
 end;
 
-procedure TTerminal.SetFg(Color: Integer);
+procedure TTerminal.SetFg(Color: Int);
 begin
   Self.BufWrite(Chr(27) + '[' + IntToStr(Color) + 'm')
 end;
 
-procedure TTerminal.SetBg(Color: Integer);
+procedure TTerminal.SetBg(Color: Int);
 begin
   Self.BufWrite(Chr(27) + '[' + IntToStr(Color + 10) + 'm')
 end;
@@ -358,9 +358,9 @@ begin
   Self.BufWrite(Chr(27) + '[0m')
 end;
 
-procedure TTerminal.DrawBox(Row, Col, Width, Height, Color: Integer; const Title: string);
+procedure TTerminal.DrawBox(Row, Col, Width, Height, Color: Int; const Title: string);
 var
-  I: Integer;
+  I: Int;
   TitleStr: string;
 begin
   Self.SetFg(Color);
@@ -406,9 +406,9 @@ begin
   Self.ResetAttr()
 end;
 
-procedure TTerminal.DrawHLine(Row, Col, Width: Integer);
+procedure TTerminal.DrawHLine(Row, Col, Width: Int);
 var
-  I: Integer;
+  I: Int;
 begin
   Self.MoveTo(Row, Col);
   I := 0;

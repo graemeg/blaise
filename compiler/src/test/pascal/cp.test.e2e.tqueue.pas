@@ -164,7 +164,7 @@ end;
 procedure TE2EQueueTests.TestRun_TQueue_EnqueueDequeueFIFO;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcFIFO, Output, RCode));
@@ -177,7 +177,7 @@ end;
 procedure TE2EQueueTests.TestRun_TQueue_PeekDoesNotRemove;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcPeekNoRemove, Output, RCode));
@@ -189,7 +189,7 @@ end;
 procedure TE2EQueueTests.TestRun_TQueue_CountTracking;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcCountTracking, Output, RCode));
@@ -201,7 +201,7 @@ end;
 procedure TE2EQueueTests.TestRun_TQueue_GrowBeyondInitialCapacity;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcGrowBeyond, Output, RCode));

@@ -4564,7 +4564,7 @@ end;
 procedure TE2ENativeTests.TestRun_Native_MultiUnit_PlainFunction;
 var
   UnitSrc, ProgSrc, NOut, QOut: string;
-  NCode, QCode: Integer;
+  NCode, QCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   UnitSrc := '''
@@ -4593,7 +4593,7 @@ end;
 procedure TE2ENativeTests.TestRun_Native_MultiUnit_StringFunction;
 var
   UnitSrc, ProgSrc, NOut, QOut: string;
-  NCode, QCode: Integer;
+  NCode, QCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   UnitSrc := '''
@@ -4622,7 +4622,7 @@ end;
 procedure TE2ENativeTests.TestRun_Native_MultiUnit_Class;
 var
   UnitSrc, ProgSrc, NOut, QOut: string;
-  NCode, QCode: Integer;
+  NCode, QCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   UnitSrc := '''
@@ -4667,7 +4667,7 @@ end;
 procedure TE2ENativeTests.TestRun_Native_MultiUnit_Interface;
 var
   UnitSrc, ProgSrc, NOut, QOut: string;
-  NCode, QCode: Integer;
+  NCode, QCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   UnitSrc := '''
@@ -4705,7 +4705,7 @@ end;
 procedure TE2ENativeTests.TestRun_Native_MultiUnit_GlobalsAndInit;
 var
   UnitSrc, ProgSrc, NOut, QOut: string;
-  NCode, QCode: Integer;
+  NCode, QCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   UnitSrc := '''
@@ -8019,7 +8019,7 @@ end;
 procedure TE2ENativeTests.TestRun_Native_MultiUnit_Metaclass;
 var
   UnitSrc, ProgSrc, NOut, QOut: string;
-  NCode, QCode: Integer;
+  NCode, QCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { Mirrors the RegisterTest pattern in blaise.testing: the unit holds a

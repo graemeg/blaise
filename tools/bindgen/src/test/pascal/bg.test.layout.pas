@@ -74,7 +74,7 @@ end;
 
 procedure TLayoutTests.TestSize_Builtins;
 var
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   AssertTrue(CTypeSizeAlign(FModel, 'int', Size, Align));
   AssertEquals('int size', 4, Size);
@@ -89,7 +89,7 @@ end;
 
 procedure TLayoutTests.TestSize_Pointer;
 var
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   AssertTrue(CTypeSizeAlign(FModel, 'const char *', Size, Align));
   AssertEquals(8, Size);
@@ -99,7 +99,7 @@ end;
 
 procedure TLayoutTests.TestSize_FixedArray;
 var
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   AssertTrue(CTypeSizeAlign(FModel, 'long[24]', Size, Align));
   AssertEquals('array size', 192, Size);
@@ -110,7 +110,7 @@ end;
 
 procedure TLayoutTests.TestSize_TypedefChain;
 var
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   AssertTrue(CTypeSizeAlign(FModel, 'Window', Size, Align));
   AssertEquals('Window → XID → unsigned long', 8, Size);
@@ -118,7 +118,7 @@ end;
 
 procedure TLayoutTests.TestSize_Struct_WithPadding;
 var
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   AssertTrue(CTypeSizeAlign(FModel, 'struct XPoint', Size, Align));
   AssertEquals('padded struct size', 24, Size);
@@ -127,7 +127,7 @@ end;
 
 procedure TLayoutTests.TestSize_Union_MaxMember;
 var
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   AssertTrue(CTypeSizeAlign(FModel, 'union _XSampleEvent', Size, Align));
   AssertEquals('union size = max member', 192, Size);
@@ -136,7 +136,7 @@ end;
 
 procedure TLayoutTests.TestSize_Unknown_ReturnsFalse;
 var
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   AssertTrue(not CTypeSizeAlign(FModel, 'struct never_declared', Size, Align));
 end;
@@ -144,7 +144,7 @@ end;
 procedure TLayoutTests.TestSize_BitfieldStruct_MatchesC;
 var
   R: TCRecord;
-  Size, Align: Integer;
+  Size, Align: Int;
 begin
   { After loader collapsing, the bitfield struct is uint + int + ushort:
     4 + 4 + 2 (+2 pad) = 12, align 4 — matches C sizeof. }

@@ -40,7 +40,7 @@ end;
 
 function Test_Vectors: string;
 var
-  Fails: Integer;
+  Fails: Int;
   R: Float64;
 begin
   Fails := 0;

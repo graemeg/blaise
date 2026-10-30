@@ -265,7 +265,7 @@ const
     ''';
 var
   Outp: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compiles and runs',
@@ -323,7 +323,7 @@ const
     ''';
 var
   Outp: string;
-  Rc: Integer;
+  Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compiles and runs',

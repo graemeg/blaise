@@ -15,9 +15,9 @@ program bench_libc_malloc;
 
 function _TimeNow: Int64; external name '_TimeNow';
 
-function  _libc_malloc(Size: Integer): Pointer;             external name 'malloc';
+function  _libc_malloc(Size: Int32): Pointer;             external name 'malloc';
 procedure _libc_free(Ptr: Pointer);                         external name 'free';
-function  _libc_realloc(Ptr: Pointer; Size: Integer): Pointer; external name 'realloc';
+function  _libc_realloc(Ptr: Pointer; Size: Int32): Pointer; external name 'realloc';
 
 var
   T0: Int64;
@@ -27,15 +27,15 @@ begin
   T0 := _TimeNow();
 end;
 
-function BenchElapsedMs: Integer;
+function BenchElapsedMs: Int;
 var
   Diff: Int64;
 begin
   Diff := _TimeNow() - T0;
-  Result := Integer(Diff div 1000000);
+  Result := Int32(Diff div 1000000);
 end;
 
-procedure PrintResult(Name: string; Ms: Integer);
+procedure PrintResult(Name: string; Ms: Int);
 begin
   WriteLn('  ' + Name + ': ' + IntToStr(Ms) + ' ms');
 end;
@@ -48,9 +48,9 @@ const
   RETAIN_COUNT  = 100000;
 
 var
-  I, J, Elapsed: Integer;
+  I, J, Elapsed: Int;
   P: Pointer;
-  Sizes: array[0..4] of Integer;
+  Sizes: array[0..4] of Int32;
   Blocks: array[0..99999] of Pointer;
 
 begin

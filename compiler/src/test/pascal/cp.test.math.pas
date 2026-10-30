@@ -175,7 +175,7 @@ var
   Loader:      TUnitLoader;
   Units:       TObjectList;
   SearchPaths: TStringList;
-  I:           Integer;
+  I:           Int;
 begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;
@@ -759,7 +759,7 @@ var
   Units:       TObjectList;
   SearchPaths: TStringList;
   Assign:      TAssignment;
-  I:           Integer;
+  I:           Int;
 begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;
@@ -797,7 +797,7 @@ var
   Units:       TObjectList;
   SearchPaths: TStringList;
   Assign:      TAssignment;
-  I:           Integer;
+  I:           Int;
 begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;
@@ -859,7 +859,7 @@ var
   Units:       TObjectList;
   SearchPaths: TStringList;
   Assign:      TAssignment;
-  I:           Integer;
+  I:           Int;
 begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;
@@ -935,7 +935,7 @@ var
   Units:       TObjectList;
   SearchPaths: TStringList;
   Assign:      TAssignment;
-  I:           Integer;
+  I:           Int;
 begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;
@@ -997,7 +997,7 @@ var
   Units:       TObjectList;
   SearchPaths: TStringList;
   Assign:      TAssignment;
-  I:           Integer;
+  I:           Int;
 begin
   Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil;
   Loader := nil; Units  := nil; SearchPaths := nil;

@@ -589,7 +589,7 @@ end;
 function ClassOfVarType(AProg: TProgram; const AName: string;
   const ATarget: TTargetDesc): TRecReturnClass;
 var
-  I: Integer;
+  I: Int;
   VD: TVarDecl;
 begin
   Result := rcWin64Agg;

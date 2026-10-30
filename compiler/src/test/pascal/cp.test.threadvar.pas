@@ -197,7 +197,7 @@ const
     ''';
 var
   X86, A64: string;
-  Tbss: Integer;
+  Tbss: Int;
 begin
   { threadvars live in thread-local storage at their full size; an
     ordinary global stays in ordinary data.  Per-thread isolation itself is

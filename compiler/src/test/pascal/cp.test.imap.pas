@@ -449,7 +449,7 @@ var
   Prog:  TProgram;
   GID:   TGenericInterfaceDef;
   Found: Boolean;
-  I:     Integer;
+  I:     Int;
 begin
   Prog := ParseSrc(SrcIMapVarDecl);
   try
@@ -469,7 +469,7 @@ var
   Prog:  TProgram;
   GID:   TGenericInterfaceDef;
   Found: Boolean;
-  I:     Integer;
+  I:     Int;
 begin
   Prog := ParseSrc(SrcIMapVarDecl);
   try
@@ -489,7 +489,7 @@ var
   Prog:  TProgram;
   GID:   TGenericInterfaceDef;
   Found: Boolean;
-  I:     Integer;
+  I:     Int;
 begin
   { IMap exposes Count via GetCount method — interface bodies do not yet
     support property declarations, so Count is accessed as GetCount() }

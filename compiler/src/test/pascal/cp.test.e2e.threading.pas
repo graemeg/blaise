@@ -373,7 +373,7 @@ const
 { ------------------------------------------------------------------ }
 
 procedure TE2EThreadingTests.TestRun_Thread_BasicExecute;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcBasicExecute, Output, RCode));
@@ -382,7 +382,7 @@ begin
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_WaitForBlocksUntilDone;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcWaitForBlocks, Output, RCode));
@@ -391,7 +391,7 @@ begin
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_Terminate_Flag;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcTerminateFlag, Output, RCode));
@@ -400,7 +400,7 @@ begin
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_FinishedAfterExecute;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcFinishedFlag, Output, RCode));
@@ -409,7 +409,7 @@ begin
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_MultipleThreads;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcMultipleThreads, Output, RCode));
@@ -418,7 +418,7 @@ begin
 end;
 
 procedure TE2EThreadingTests.TestRun_CriticalSection_MutexProtectsCounter;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCriticalSection, Output, RCode));
@@ -427,7 +427,7 @@ begin
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_InheritedDestroy_CleanExit;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcDestroyCleanExit, Output, RCode));
@@ -450,7 +450,7 @@ const
 procedure TE2EThreadingTests.TestRun_ThreadVar_MainThread_ReadWrite;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcThreadVarMain, Output, RCode));
@@ -476,7 +476,7 @@ const
 procedure TE2EThreadingTests.TestRun_ThreadVar_MixedWithGlobalVar;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcThreadVarMixed, Output, RCode));
@@ -546,7 +546,7 @@ const
 procedure TE2EThreadingTests.TestRun_ThreadVar_RecordField_PerThreadIsolation;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcThreadVarRecordIsolation, Output, RCode));
@@ -624,7 +624,7 @@ const
 procedure TE2EThreadingTests.TestRun_ThreadVar_RecordMethod_PerThreadIsolation;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcThreadVarRecordMethod, Output, RCode));
@@ -706,7 +706,7 @@ const
 procedure TE2EThreadingTests.TestRun_ThreadVar_AddressOf_PerThreadIsolation;
 var
   Output: string;
-  RCode:  Integer;
+  RCode:  Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcThreadVarAddressOf, Output, RCode));
@@ -760,7 +760,7 @@ const
     ''';
 
 procedure TE2EThreadingTests.TestRun_PerThreadAllocator_IndependentAllocs;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcPerThreadAlloc, Output, RCode));
@@ -821,7 +821,7 @@ const
     ''';
 
 procedure TE2EThreadingTests.TestRun_AtomicARC_SharedObject_NoCorruption;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcAtomicARC, Output, RCode));

@@ -32,7 +32,7 @@ type
   TArm64BackendTests = class(TTestCase)
   private
     { last (rightmost) 0-based index of ASub in AStr, or -1 if absent }
-    function RPos(const ASub, AStr: string): Integer;
+    function RPos(const ASub, AStr: string): Int;
   published
     { records by value to a C routine follow AAPCS64: a mixed int/float
       record of at most 16 bytes is its memory image in x registers (no
@@ -604,9 +604,9 @@ const
     end.
     ''';
 
-function TArm64BackendTests.RPos(const ASub, AStr: string): Integer;
+function TArm64BackendTests.RPos(const ASub, AStr: string): Int;
 var
-  P, Next: Integer;
+  P, Next: Int;
 begin
   Result := -1;
   P := PosEx(ASub, AStr, 0);
@@ -987,7 +987,7 @@ end;
 procedure TArm64BackendTests.TestString_ConcatOwnedTransientReleased;
 var
   AsmT: string;
-  ConcatPos, AddRefAfter: Integer;
+  ConcatPos, AddRefAfter: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -1476,7 +1476,7 @@ end;
 procedure TArm64BackendTests.TestRecordMethod_RecordFieldReceiverIsAddress;
 var
   AsmT: string;
-  PCall: Integer;
+  PCall: Int;
 begin
   { A record-typed FIELD as a method receiver -- Self.X.Sum() inside a record
     method (DateUtils' TDateTime.ToString calls Self.Date.ToString()), and
@@ -1527,7 +1527,7 @@ end;
 procedure TArm64BackendTests.TestRecordMethod_ManagedCallResultReceiverReleased;
 var
   AsmT: string;
-  PShow, PRel, PWrite: Integer;
+  PShow, PRel, PWrite: Int;
 begin
   { A MANAGED record returned by a call, used as a method receiver
     (MoneyFromStr(..).ToString()).  The result is moved into a receiver temp
@@ -1570,7 +1570,7 @@ end;
 procedure TArm64BackendTests.TestVariadicIntArgs_EightByteStackSlots;
 var
   AsmT, Main: string;
-  P, N: Integer;
+  P, N: Int;
 begin
   { Apple arm64 passes every anonymous variadic argument on the stack in its
     own 8-byte slot.  An Integer was sized at its natural 4 bytes, so two
@@ -1747,7 +1747,7 @@ end;
 procedure TArm64BackendTests.TestJumboSetTypedConst_IsBitmapAddress;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
 begin
   { A typed jumbo-set constant (`const C: set of Byte = [1, 2, 3]`) has its
     bitmap in a data blob; as a value it is that blob's ADDRESS, like every
@@ -1830,7 +1830,7 @@ end;
 procedure TArm64BackendTests.TestCall_IntArgToFloatParamIsFloatClass;
 var
   AsmT: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   { An INTEGER argument bound to a Single/Double parameter -- F(1, 7) against
     (A: Single; N: Integer; B: Double) -- is converted and passed float-class.
@@ -1861,7 +1861,7 @@ end;
 procedure TArm64BackendTests.TestIntfCall_ScalarContextSuppliesSret;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
 begin
   { An interface-returning call whose obj half is used as a scalar -- here
     downcast and dereferenced, TGreet(MakeI()).N.  The callee stores its
@@ -1901,7 +1901,7 @@ end;
 procedure TArm64BackendTests.TestRecordMethod_StmtOnSelfRecordFieldPassesAddress;
 var
   AsmT, Body: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   { FC.Inc(); as a STATEMENT inside a class method, FC a record field of
     Self.  A record method's Self is the field's ADDRESS (Self + 8); the
@@ -2100,7 +2100,7 @@ end;
 procedure TArm64BackendTests.TestManagedRecord_CopyAndFieldStore;
 var
   AsmT: string;
-  PosRetain, PosRelease, PosCpy: Integer;
+  PosRetain, PosRelease, PosCpy: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -2302,7 +2302,7 @@ end;
 procedure TArm64BackendTests.TestUnit_ImplGlobalFromMethod_SingleEmit;
 var
   AsmT: string;
-  PosFirst: Integer;
+  PosFirst: Int;
 begin
   { A unit class method that reads an implementation-section unit global must be
     emitted ONCE — in unit context, where the impl-private global resolves to
@@ -2350,7 +2350,7 @@ end;
 procedure TArm64BackendTests.TestStringParams_ValueRetainsConstBorrows;
 var
   AsmT: string;
-  PosGreet, PosShow, PosNext: Integer;
+  PosGreet, PosShow, PosNext: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -2789,7 +2789,7 @@ end;
 procedure TArm64BackendTests.TestClass_ChainedReceivers;
 var
   AsmT: string;
-  PosCall, PosRel: Integer;
+  PosCall, PosRel: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -3134,7 +3134,7 @@ end;
 procedure TArm64BackendTests.TestConstStringParam_NoCalleeARC;
 var
   AsmT: string;
-  P, E: Integer;
+  P, E: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -3174,7 +3174,7 @@ end;
 procedure TArm64BackendTests.TestUnitGenericInstance_BodyEmittedOnce;
 var
   AsmT: string;
-  P, N: Integer;
+  P, N: Int;
 begin
   AsmT := GenAsmWithUnit(
     '''
@@ -3332,7 +3332,7 @@ end;
 procedure TArm64BackendTests.TestClassTypeinfo_InstanceSizeCoversAllFields;
 var
   AsmT: string;
-  P, Q, K: Integer;
+  P, Q, K: Int;
   SizeSlot: string;
 begin
   { The 5th quad of a class typeinfo block is the INSTANCE size — the byte
@@ -3381,7 +3381,7 @@ end;
 procedure TArm64BackendTests.TestSmallRecordParam_FieldReadUsesInlineSlot;
 var
   AsmT: string;
-  P, Q: Integer;
+  P, Q: Int;
   Body: string;
 begin
   { Reading a field of a BY-VALUE small (<=16B) record param must take the
@@ -3497,7 +3497,7 @@ end;
 procedure TArm64BackendTests.TestReceiverCall_NestedArcArg_ReceiverNotClobbered;
 var
   AsmT: string;
-  P, Q: Integer;
+  P, Q: Int;
   Body: string;
 begin
   { A method call on a RECEIVER whose argument is itself a call returning an
@@ -3558,10 +3558,10 @@ end;
 procedure TArm64BackendTests.TestLargeManagedArray_ElemOffsetBeyondImm12;
 var
   AsmT, Obj: string;
-  I, Bad: Integer;
+  I, Bad: Int;
   Line, ImmS: string;
   L: TStringList;
-  P: Integer;
+  P: Int;
 begin
   { An ARC walk over a large array of managed elements derives each element as
     base + byteOffset.  That offset is unbounded (600 strings = 4800 bytes),
@@ -3612,7 +3612,7 @@ end;
 procedure TArm64BackendTests.TestSetLengthString_LengthArgNotClobberedByX19Save;
 var
   AsmT: string;
-  P, Q: Integer;
+  P, Q: Int;
   Body: string;
 begin
   { SetLength(S, N) on a string lowers to S := __StringSetLength(S, N), with the
@@ -3658,7 +3658,7 @@ end;
 procedure TArm64BackendTests.TestNestedRecordFieldOfSelf_StoreAddsContainingOffset;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { `Self.FRec.SubField := V` resolves FieldInfo to SubField, whose Offset is
@@ -3741,7 +3741,7 @@ end;
 procedure TArm64BackendTests.TestClassFieldOfSelf_DerefsNotAdds;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { Self.FClassField.Member: when the intermediate field is a CLASS reference
@@ -3803,7 +3803,7 @@ end;
 procedure TArm64BackendTests.TestIndexedPropGetterThroughClassField_DerefsReceiver;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { Self.FClassField.Prop[I] lowers to a getter call FClassField.Getter(I).
@@ -3865,7 +3865,7 @@ end;
 procedure TArm64BackendTests.TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { Chr(N) is typed tyString by the semantic pass, so in a VALUE context it
@@ -3911,9 +3911,9 @@ end;
 procedure TArm64BackendTests.TestVarParam_NotRetainedInPrologue;
 var
   AsmT: string;
-  P, Q: Integer;
+  P, Q: Int;
   Body: string;
-  N: Integer;
+  N: Int;
 begin
   { A var/out parameter is a BORROWED reference and its slot holds the ADDRESS
     of the caller's variable, not a value.  The prologue must not retain it:
@@ -3963,7 +3963,7 @@ end;
 procedure TArm64BackendTests.TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest;
 var
   AsmT: string;
-  P, Q, StoreP, LdrP: Integer;
+  P, Q, StoreP, LdrP: Int;
   Body: string;
 begin
   { Storing an interface value returned by a call into a GLOBAL writes the
@@ -4029,7 +4029,7 @@ end;
 procedure TArm64BackendTests.TestRecordElemOfDynArrayField_ReadDerefsAndIndexes;
 var
   AsmT: string;
-  P, DerefP, MulP, MemcpyP: Integer;
+  P, DerefP, MulP, MemcpyP: Int;
   Body: string;
 begin
   { Reading a record-typed ELEMENT of a DYNAMIC-ARRAY FIELD of a class object
@@ -4105,7 +4105,7 @@ end;
 procedure TArm64BackendTests.TestByteVsCharLiteralCompare_FoldsToOrdinal;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { Blaise has no Char type, so a single-character literal like '/' is a
@@ -4155,7 +4155,7 @@ end;
 procedure TArm64BackendTests.TestLengthOfEmptyString_NilGuarded;
 var
   AsmT: string;
-  P, LdurP, CbzP: Integer;
+  P, LdurP, CbzP: Int;
   Body: string;
 begin
   { In Blaise a nil pointer IS the empty string, so Length(S) — lowered as a
@@ -4195,7 +4195,7 @@ end;
 procedure TArm64BackendTests.TestUpCaseString_ConvertsToCharCodeFirst;
 var
   AsmT: string;
-  P, OrdP, UpP: Integer;
+  P, OrdP, UpP: Int;
   Body: string;
 begin
   { __UpCase takes an INTEGER char code.  A STRING argument — UpCase(Chr(C)),
@@ -4235,7 +4235,7 @@ end;
 procedure TArm64BackendTests.TestDefaultPropReadOnClassField_LoadsFieldReceiver;
 var
   AsmT: string;
-  P, RecvP, GetP: Integer;
+  P, RecvP, GetP: Int;
   Body: string;
 begin
   { Reading a default indexed property of a CLASS-typed FIELD as a value —
@@ -4302,7 +4302,7 @@ end;
 procedure TArm64BackendTests.TestNarrowIntCompareUsesWReg_HighBitConst;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { A 32-bit Integer occupies only the low half of its 64-bit register, and the
@@ -4337,7 +4337,7 @@ end;
 procedure TArm64BackendTests.TestInt64CompareStays64Bit;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { The 32-bit `w` comparison must NOT be applied to Int64 operands — a 64-bit
@@ -4366,7 +4366,7 @@ end;
 procedure TArm64BackendTests.TestImplicitSelfRecordReturnCall_LoadsSelf;
 var
   AsmT: string;
-  P, SelfP, CallP: Integer;
+  P, SelfP, CallP: Int;
   Body: string;
 begin
   { A bare method call on implicit Self that returns a RECORD by value
@@ -4419,7 +4419,7 @@ end;
 procedure TArm64BackendTests.TestDefaultPropReadOnPlainVar_DelegatesToGetter;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
   Body: string;
 begin
   { Reading the DEFAULT indexed property of a PLAIN variable as a value (L[0] on
@@ -4469,7 +4469,7 @@ end;
 procedure TArm64BackendTests.TestWriteLnInteger_PassesSignExtended;
 var
   AsmT: string;
-  P, WrP: Integer;
+  P, WrP: Int;
   Body: string;
 begin
   { WriteLn(Integer) passes the value to __SysWriteInt in x1.  EmitExprToX0
@@ -4505,7 +4505,7 @@ end;
 procedure TArm64BackendTests.TestOwnedStrTransientArgs_ParkedInStableSlots;
 var
   AsmT: string;
-  P, C1, C2, R1, R2, L1, L2, NL: Integer;
+  P, C1, C2, R1, R2, L1, L2, NL: Int;
   Body, Store1, Store2, Load1, Load2: string;
 begin
   { Owned string transients passed as call args are parked before the call and
@@ -4588,7 +4588,7 @@ end;
 procedure TArm64BackendTests.TestOwnedStrTransientArgs_NestedCallParksAbove;
 var
   AsmT, Body, Store1, Store2: string;
-  P, C1, C2, R1, R2, NL: Integer;
+  P, C1, C2, R1, R2, NL: Int;
 begin
   { F(A(K), G(A(K + 10))): the outer call parks A(K) in a __strtrans slot,
     then evaluates its second argument -- a call with an owned transient
@@ -4705,7 +4705,7 @@ end;
 procedure TArm64BackendTests.TestOwnedStringTransientArg_Released;
 var
   AsmT: string;
-  PosCall, PosRel: Integer;
+  PosCall, PosRel: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -5294,7 +5294,7 @@ end;
 procedure TArm64BackendTests.TestRecordCallResult_PerSiteScratch;
 var
   AsmT, P1, P2: string;
-  I, J: Integer;
+  I, J: Int;
 begin
   { two 40-byte record-call results in one expression land in two separate
     frame scratches (x8 points at different slots), each sized to the record
@@ -5580,7 +5580,7 @@ end;
 procedure TArm64BackendTests.TestInterfaceArg_OwnedCallResultReleased;
 var
   AsmT: string;
-  PosCall, PosRel: Integer;
+  PosCall, PosRel: Int;
 begin
   { Use(Make()): an interface argument from a call result is owned -- its
     obj half is released once after the call }
@@ -5676,7 +5676,7 @@ end;
 procedure TArm64BackendTests.TestCallResultRegs_SavedAcrossTransientRelease;
 var
   AsmT: string;
-  PosCall, PosSave, PosRel: Integer;
+  PosCall, PosSave, PosRel: Int;
 begin
   { after a call with an owned-transient string argument, x0:x1 and d0..d3
     are saved around the release (a 16-byte record result lives in x0:x1) }
@@ -5886,7 +5886,7 @@ end;
 procedure TArm64BackendTests.TestIntfCall_OwnedReceiverReleased;
 var
   AsmT: string;
-  PosCall, PosRel: Integer;
+  PosCall, PosRel: Int;
 begin
   { Make().Get(): the owned receiver is released after the itab call, with
     the result registers kept }
@@ -5992,7 +5992,7 @@ end;
 procedure TArm64BackendTests.TestManagedRecord_ParamsAndResults;
 var
   AsmT: string;
-  PosCall, PosRel: Integer;
+  PosCall, PosRel: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -6822,7 +6822,7 @@ end;
 procedure TArm64BackendTests.TestClosureGlobal_Sized16_LiteralStoredInline;
 var
   AsmT: string;
-  P: Integer;
+  P: Int;
 begin
   { A 'reference to' global is a 16-byte fat value (Code, Env).  It was
     emitted as .zero 8 -- a later generic size overwrote the 16 -- so the Env
@@ -6848,7 +6848,7 @@ end;
 procedure TArm64BackendTests.TestJumboSet_OpInLoopDoesNotGrowStack;
 var
   AsmT, Body: string;
-  LoopStart, LoopEnd: Integer;
+  LoopStart, LoopEnd: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -7331,7 +7331,7 @@ end;
 procedure TArm64BackendTests.TestClosure_OwnedTransientArg_Disposed;
 var
   AsmT: string;
-  PosCall, PosRel: Integer;
+  PosCall, PosRel: Int;
 begin
   { A closure call whose argument is an owned-transient string (a function
     result, rc=1) passes it borrowed and disposes it after the call — a bare
@@ -7361,7 +7361,7 @@ end;
 procedure TArm64BackendTests.TestStrArg_UnownedTransient_PinnedBeforeDirectCall;
 var
   AsmT: string;
-  PosCat, PosPin, PosCall, PosRel: Integer;
+  PosCat, PosPin, PosCall, PosRel: Int;
 begin
   { Direct call with an rc=0 concat argument.  Sink stores the parameter into a
     local, which retains on entry to the local and releases at scope exit — at
@@ -7398,7 +7398,7 @@ end;
 procedure TArm64BackendTests.TestBuiltinStrArg_UnownedTransient_PinnedBeforeCall;
 var
   AsmT: string;
-  PosCat, PosPin, PosCall, PosRel: Integer;
+  PosCat, PosPin, PosCall, PosRel: Int;
 begin
   { Same rule for a one-string-arg RTL builtin.  Any such builtin may store its
     const parameter into a local (ExpandFileName does, on its absolute-path
@@ -7433,7 +7433,7 @@ procedure TArm64BackendTests.TestChainedIndexedPropBase_StepsIntoTheField;
 var
   AsmT:   string;
   Region: string;
-  PosCall, PosBase, K, Derefs: Integer;
+  PosCall, PosBase, K, Derefs: Int;
 begin
   { T.Mid.Bag[3] — the getter's receiver is Bag, reached by TWO field steps
     from T (T.Mid, then .Bag).  arm64 applied the FieldInfo step only to the
@@ -7495,7 +7495,7 @@ end;
 procedure TArm64BackendTests.TestRecordParam_FieldRetainsFollowTheCopy;
 var
   AsmT, Body: string;
-  PosFn, PosCopy, PosRetain: Integer;
+  PosFn, PosCopy, PosRetain: Int;
 begin
   { A by-value record param owns its copy, so its managed fields are retained
     on entry — but the copy is a memcpy from the caller's record into the
@@ -7548,7 +7548,7 @@ end;
 procedure TArm64BackendTests.TestStringFieldSubscript_LoadsTheByte;
 var
   AsmT, Body: string;
-  P: Integer;
+  P: Int;
 begin
   { uSemantic folds a subscript on a STRING FIELD into the field access itself
     (IsCharAccess + PropIndexExpr) rather than building a TStringSubscriptExpr,
@@ -7584,7 +7584,7 @@ end;
 procedure TArm64BackendTests.TestVarParamStore_UsesDeclaredWidth;
 var
   AsmT, Body: string;
-  P: Integer;
+  P: Int;
 begin
   { A var/out param's slot holds the CALLER's address, and the caller's storage
     is exactly as wide as the declared type — not the 8-byte frame slot a local
@@ -7637,7 +7637,7 @@ end;
 procedure TArm64BackendTests.TestNarrowVarArg_SlotRewidenedAfterCall;
 var
   AsmT, Body: string;
-  P, PosCall, PosFix: Integer;
+  P, PosCall, PosFix: Int;
 begin
   { A callee writing through `var X: Integer` stores only 32 bits — it must,
     because the target could be a 4-byte record field.  But a VARIABLE's slot is
@@ -7677,7 +7677,7 @@ end;
 procedure TArm64BackendTests.TestFieldArrayElementRead_LoadsTheElement;
 var
   AsmT, Body: string;
-  P: Integer;
+  P: Int;
 begin
   { uSemantic folds a subscript on an array-typed FIELD into the field access
     (IsArrayAccess + PropIndexExpr).  The read path had no arm for it, so
@@ -7714,7 +7714,7 @@ end;
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;
 var
   AsmT: string;
-  PosCat, PosCall, PosExit: Integer;
+  PosCat, PosCall, PosExit: Int;
 begin
   { A closure call whose argument is an rc=0 UNOWNED string transient (a `+`
     concat) passed to a BY-VALUE string parameter.  Closure calls now go
@@ -7894,7 +7894,7 @@ var
   AsmT: string;
   Obj: string;
   F: TMachOFile;
-  CallPos, SxtwPos: Integer;
+  CallPos, SxtwPos: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -8023,7 +8023,7 @@ var
   AsmT: string;
   Obj: string;
   F: TMachOFile;
-  RelPos: Integer;
+  RelPos: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -8061,7 +8061,7 @@ var
   AsmT: string;
   Obj: string;
   F: TMachOFile;
-  DerefPos: Integer;
+  DerefPos: Int;
 begin
   AsmT := GenAsm(
     '''
@@ -8397,7 +8397,7 @@ var
   AsmT: string;
   Obj: string;
   F: TMachOFile;
-  GrabPos: Integer;
+  GrabPos: Int;
 begin
   { B.Grab().Free() — the getter result is an owned +1 temporary, so Free
     is a single __ClassRelease right after the call with NO slot nil (there
@@ -8547,7 +8547,7 @@ var
   AsmT: string;
   Obj: string;
   F: TMachOFile;
-  MakeEnd, RelInMake: Integer;
+  MakeEnd, RelInMake: Int;
 begin
   { function MakeArr: TArr — the dyn-array Result is an 8-byte pointer whose
     +1 transfers to the caller: MakeArr does NOT release Result, the caller's
@@ -9105,7 +9105,7 @@ end;
 procedure TArm64BackendTests.TestOwnedTransientStringPropertyValue;
 var
   AsmT: string;
-  PosCat, PosPin, PosSet, PosRel: Integer;
+  PosCat, PosPin, PosSet, PosRel: Int;
 begin
   { An owned-transient string value (a `+` concat, rc=0) written through a
     property setter is passed BORROWED — the setter retains its own copy — so
@@ -9813,7 +9813,7 @@ end;
 procedure TArm64BackendTests.TestStrArg_GlobalByValue_Pinned;
 var
   AsmT, Body: string;
-  CallPos, AddRefBefore: Integer;
+  CallPos, AddRefBefore: Int;
 begin
   { A global string handed to Look's BY-VALUE string param is aliasable: the
     caller must pin it (AddRef before / Release after) so the callee's own
@@ -9853,7 +9853,7 @@ end;
 procedure TArm64BackendTests.TestStrArg_PlainLocalByValue_NotPinned;
 var
   AsmT, Between: string;
-  LoadPos, CallPos: Integer;
+  LoadPos, CallPos: Int;
 begin
   { A PLAIN LOCAL string handed to a by-value string param needs NO pin: the
     caller frame owns a live reference across the call, and the callee's
@@ -9935,7 +9935,7 @@ const
     ''';
 var
   A, Seg: string;
-  P, Q: Integer;
+  P, Q: Int;
 begin
   A := GenAsm(Src, TargetArm64);
   P := Pos('_g_M8@PAGEOFF', A);

@@ -35,10 +35,10 @@ uses
   memstresscore, runtime.mem, runtime.str;
 
 var
-  Threads: Integer;
-  Iters: Integer;
-  Gens: Integer;
-  R0, R1, A1: Integer;
+  Threads: Int;
+  Iters: Int;
+  Gens: Int;
+  R0, R1, A1: Int;
   Bad: Int64;
   Failed: Boolean;
 begin

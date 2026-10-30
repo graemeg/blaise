@@ -76,7 +76,7 @@ function HexOf(const S: string): string;
 const
   Digits = '0123456789abcdef';
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   for I := 0 to Length(S) - 1 do
@@ -135,17 +135,17 @@ procedure TEntitlementsTests.TestSignature_EntitlementsInSpecialSlots;
 var
   W: TMachOExecWriter;
   Img, Xml: string;
-  SigOff, CdOff, HashOff, NSpecial, BlobOff, BlobLen, Off, N, I: Integer;
-  Slots: array[0..3] of Integer;
+  SigOff, CdOff, HashOff, NSpecial, BlobOff, BlobLen, Off, N, I: Int;
+  Slots: array[0..3] of Int32;
   Blobs: array[0..3] of string;
 
-  function BeU32(AOff: Integer): Integer;
+  function BeU32(AOff: Int): Int;
   begin
     Result := (StrAt(Img, AOff) shl 24) or (StrAt(Img, AOff + 1) shl 16)
       or (StrAt(Img, AOff + 2) shl 8) or StrAt(Img, AOff + 3);
   end;
 
-  function LeU32(AOff: Integer): Integer;
+  function LeU32(AOff: Int): Int;
   begin
     Result := StrAt(Img, AOff) or (StrAt(Img, AOff + 1) shl 8)
       or (StrAt(Img, AOff + 2) shl 16) or (StrAt(Img, AOff + 3) shl 24);
@@ -176,7 +176,7 @@ begin
     Off := Off + LeU32(Off + 4);
   end;
   AssertTrue('LC_CODE_SIGNATURE present', SigOff > 0);
-  AssertEquals('SuperBlob magic', Integer($FADE0CC0), BeU32(SigOff));
+  AssertEquals('SuperBlob magic', Int32($FADE0CC0), BeU32(SigOff));
   AssertEquals('SuperBlob length', Length(Img) - SigOff, BeU32(SigOff + 4));
   AssertEquals('four blobs', 4, BeU32(SigOff + 8));
   for I := 0 to 3 do

@@ -44,7 +44,7 @@ begin
   Result := 'aaaa' + NL + 'bbbbbbbbbbbbbbbb' + NL;
 end;
 
-function RunWithMax(AMax: Integer): TReport;
+function RunWithMax(AMax: Int): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;

@@ -173,7 +173,7 @@ end;
   the body is missing. }
 function TGenericFuncTests.ProbeBody(const AAsm: string): string;
 var
-  P, Q: Integer;
+  P, Q: Int;
 begin
   Result := '';
   P := Pos('TBox_string_Probe:', AAsm);
@@ -480,7 +480,7 @@ const
 procedure TGenericFuncTests.TestSemantic_GenericMethod_ConstParamFlagPreserved;
 var
   Prog: TProgram;
-  I, J: Integer;
+  I, J: Int;
   GI: TGenericInstance;
   MD: TMethodDecl;
   Found: Boolean;
@@ -546,7 +546,7 @@ end;
 procedure TGenericFuncTests.TestSemantic_GenericFunc_BodyConstructsGenericOfT;
 var
   Prog:    TProgram;
-  I:       Integer;
+  I:       Int;
   Names:   string;
 begin
   Prog := AnalyseSrc(

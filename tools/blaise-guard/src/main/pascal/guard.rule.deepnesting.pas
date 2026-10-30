@@ -39,7 +39,7 @@ type
   TDeepNestingRule = class(TAstRuleBase)
   public
     constructor Create;
-    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer); override;
+    procedure VisitStmtEnter(AStmt: TASTStmt; ADepth: Int); override;
   end;
 
 { True for the statements that constitute a level of control-flow nesting. }
@@ -60,9 +60,9 @@ begin
   FSeverity := sevWarning;
 end;
 
-procedure TDeepNestingRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
+procedure TDeepNestingRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Int);
 var
-  MaxDepth: Integer;
+  MaxDepth: Int;
 begin
   MaxDepth := FCtx.RuleCfg.GetInt('maxDepth', DEFAULT_MAXDEPTH);
   { Report at the first level that breaks the limit, and only for a genuine

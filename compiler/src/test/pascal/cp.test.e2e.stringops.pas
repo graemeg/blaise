@@ -448,7 +448,7 @@ const
     ''';
 
 procedure TE2EStringOpsTests.TestRun_StringOps_Length;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringLength, Output, RCode));
@@ -456,7 +456,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_Pos;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringPos, Output, RCode));
@@ -464,7 +464,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_Copy;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringCopy, Output, RCode));
@@ -472,7 +472,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_UpperCase;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringUpperCase, Output, RCode));
@@ -480,7 +480,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_SameText;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringSameText, Output, RCode));
@@ -488,7 +488,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_IntToStr;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringIntToStr, Output, RCode));
@@ -496,7 +496,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_StrToInt;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringStrToInt, Output, RCode));
@@ -504,7 +504,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_StrToInt_Hex;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringStrToIntHex, Output, RCode));
@@ -512,7 +512,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_Copy_MaxIntCount;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringCopyMaxIntCount, Output, RCode));
@@ -520,7 +520,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_Int64_PositiveAboveInt32_FormatsCorrectly;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInt64PositiveAboveInt32, Output, RCode));
@@ -529,7 +529,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_Format_IntArg;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcFormatIntArg, Output, RCode));
@@ -537,7 +537,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_Format_StrArg;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcFormatStrArg, Output, RCode));
@@ -545,7 +545,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringOps_Format_MixedArgs;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcFormatMixedArgs, Output, RCode));
@@ -593,7 +593,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringSubscript_ReadByte;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringSubscript, Output, RCode));
@@ -678,7 +678,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringConcat_TwoStrings;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringConcatStr, Output, RCode));
@@ -687,7 +687,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringConcat_WithInt;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run',
@@ -698,7 +698,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringDelete_Modifies;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringDelete, Output, RCode));
@@ -747,7 +747,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringSetLength_Truncates;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcStringSetLength, Output, RCode));
@@ -756,7 +756,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_Int64_ArithmeticOverInt32;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInt64Arith, Output, RCode));
@@ -765,7 +765,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_Int64_Comparison;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInt64Compare, Output, RCode));
@@ -774,7 +774,7 @@ begin
 end;
 
 procedure TE2EStringOpsTests.TestRun_Int64_ForLoop;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcInt64ForLoop, Output, RCode));

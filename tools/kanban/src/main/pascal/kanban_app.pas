@@ -28,7 +28,7 @@ var
   Term: TTerminal;
   Board: TBoard;
   UI: TKanbanUI;
-  I: Integer;
+  I: Int;
   AddTitle: string;
   DetailText: string;
   DetailFile: string;

@@ -750,7 +750,7 @@ var
   Prog: TProgram;
   TES: TTryExceptStmt;
 
-  function H(AIdx: Integer): TExceptHandlerClause;
+  function H(AIdx: Int): TExceptHandlerClause;
   begin
     Result := TExceptHandlerClause(TES.Handlers.Items[AIdx]);
   end;

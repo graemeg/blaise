@@ -364,7 +364,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStaticArrayTests.TestRun_AnonymousDecl_ReadWrite;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -380,7 +380,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_AnonymousDecl_NonZeroBase;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -395,7 +395,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_AnonymousDecl_LowHighLength;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -434,7 +434,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EStaticArrayTests.TestRun_TypeAlias_BasicReadWrite;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -450,7 +450,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_TypeAlias_NonZeroBase;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -465,7 +465,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_TypeAlias_AsParam_Length;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertTrue('compile+run', CompileAndRun(SrcAliasAsParam, Output, RCode));
@@ -474,7 +474,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_TypeAlias_MultipleVarsShareType;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -489,7 +489,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_TypeAlias_GlobalAndLocal;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -504,7 +504,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_NamedSubrange_AsArrayIndex;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -521,7 +521,7 @@ begin
 end;
 
 procedure TE2EStaticArrayTests.TestRun_NamedSubrange_NonZeroBase_AsArrayIndex;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -552,7 +552,7 @@ const
       WriteLn(Days[I])
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -580,7 +580,7 @@ const
       WriteLn(Primes[4])
     end.
     ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
@@ -688,7 +688,7 @@ const Src =
     WriteLn(High(ar));
   end.
   ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -707,7 +707,7 @@ const Src =
     WriteLn(Low(ar));
   end.
   ''';
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
@@ -1388,7 +1388,7 @@ const
     WriteLn(guard)
   end.
   ''';
-var Out_: string; Rc: Integer;
+var Out_: string; Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { Native reports a failed compile as Result=False with the diagnostic in
@@ -1411,7 +1411,7 @@ const
     WriteLn('done')
   end.
   ''';
-var Out_: string; Rc: Integer;
+var Out_: string; Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { This is the case that used to link cleanly and then SEGFAULT (exit 139). }
@@ -1460,7 +1460,7 @@ const
     WriteLn(v)
   end.
   ''';
-var Out_: string; Rc: Integer;
+var Out_: string; Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertFalse('v := 6 on a 1..5 subrange must not compile',
@@ -1486,7 +1486,7 @@ const
     t := TThing.Create(6)
   end.
   ''';
-var Out_: string; Rc: Integer;
+var Out_: string; Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { GH #175's reporter declared a nested subrange as a ctor param type
@@ -1658,7 +1658,7 @@ const
     WriteLn(TC.Names[7])
   end.
   ''';
-var Out_: string; Rc: Integer;
+var Out_: string; Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { Before the fix this compiled and printed garbage read from past the

@@ -757,7 +757,7 @@ var
 
   function InitOf(ABlock: TBlock; const AName: string): TConstDecl;
   var
-    I: Integer;
+    I: Int;
   begin
     Result := nil;
     for I := 0 to ABlock.Decls.Count - 1 do

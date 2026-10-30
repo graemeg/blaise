@@ -65,7 +65,7 @@ const
     ''';
 var
   JumboSrc, Target: string;
-  I: Integer;
+  I: Int;
 begin
   { A <=64 set must NOT use the jumbo _Set* helpers -- it stays a register
     bitmask.  The jumbo program is the control: the same shape over an
@@ -147,7 +147,7 @@ const
     ''';
 var
   A64, X86: string;
-  CallPos: Integer;
+  CallPos: Int;
 begin
   A64 := GenAsm(Src, TargetArm64);
   CallPos := Pos(#9'bl _TBase_Tri', A64);

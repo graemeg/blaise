@@ -84,7 +84,7 @@ end;
 
 function TClangLoadTests.FindTypedef(AModel: TCModel; const AName: string): TCTypedef;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to AModel.Typedefs.Count - 1 do
@@ -97,7 +97,7 @@ end;
 
 function TClangLoadTests.FindFunction(AModel: TCModel; const AName: string): TCFunction;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to AModel.Functions.Count - 1 do
@@ -159,9 +159,9 @@ begin
   AssertTrue('XOrientation found', E <> nil);
   AssertEquals('member count', 3, E.Members.Count);
   AssertEquals('XOrientVertical', E.Members[0].Name);
-  AssertEquals('implicit first value', 0, Integer(E.Members[0].Value));
-  AssertEquals('explicit value', 5, Integer(E.Members[1].Value));
-  AssertEquals('implicit follows explicit', 6, Integer(E.Members[2].Value));
+  AssertEquals('implicit first value', 0, Int32(E.Members[0].Value));
+  AssertEquals('explicit value', 5, Int32(E.Members[1].Value));
+  AssertEquals('implicit follows explicit', 6, Int32(E.Members[2].Value));
 end;
 
 procedure TClangLoadTests.TestLoad_AnonStruct_TakesTypedefName;
@@ -244,7 +244,7 @@ end;
 
 function TClangLoadTests.FindEnum(AModel: TCModel; const AName: string): TCEnum;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to AModel.Enums.Count - 1 do
@@ -265,7 +265,7 @@ begin
   E := Self.FindEnum(FModel, 'XSampleDirection');
   AssertTrue('enum named', E <> nil);
   AssertEquals('members', 2, E.Members.Count);
-  AssertEquals('explicit value', 10, Integer(E.Members[1].Value));
+  AssertEquals('explicit value', 10, Int32(E.Members[1].Value));
   AssertTrue('typedef dropped', Self.FindTypedef(FModel, 'XSampleDirection') = nil);
 end;
 
@@ -319,8 +319,8 @@ end;
 
 procedure TClangLoadTests.TestLoad_LiftedUnion_PrecedesOwnerInDecls;
 var
-  I: Integer;
-  LiftedIdx, OwnerIdx: Integer;
+  I: Int;
+  LiftedIdx, OwnerIdx: Int;
   D: TCDecl;
 begin
   { The emitter walks Decls in order; the owner's field references the

@@ -331,7 +331,7 @@ const
     ''';
 var
   Output: string;
-  RCode: Integer;
+  RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { the generic instance is materialised inside boxu (OwningUnit=boxu) — its

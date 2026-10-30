@@ -205,8 +205,8 @@ end;
   commas, respecting parenthesis depth. }
 function SplitTopLevelArgs(const AArgs: string): TList<String>;
 var
-  I, Depth, Start: Integer;
-  B: Integer;
+  I, Depth, Start: Int;
+  B: Int;
 begin
   Result := TList<String>.Create();
   Depth := 0;
@@ -229,10 +229,10 @@ end;
 function TTypeMapper.FnPtrDecl(const AQualType: string): string;
 var
   S, RetC, ArgsC: string;
-  StarPos: Integer;
+  StarPos: Int;
   Ret: string;
   Args: TList<String>;
-  I: Integer;
+  I: Int;
   Params: string;
   Mapped: string;
 begin
@@ -271,7 +271,7 @@ function TTypeMapper.MapCallback(const AQualType, AHint: string): string;
 var
   Decl: string;
   Name: string;
-  N: Integer;
+  N: Int;
 begin
   if Pos('(*)', AQualType) < 0 then
   begin
@@ -351,10 +351,10 @@ function TTypeMapper.Map(const AQualType: string): string;
 var
   S: string;
   Builtin: string;
-  BracketPos: Integer;
+  BracketPos: Int;
   Base: string;
   CountStr: string;
-  Count: Integer;
+  Count: Int;
 begin
   S := StripQualifiers(AQualType);
 

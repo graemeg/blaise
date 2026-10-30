@@ -217,7 +217,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Sqrt_PositiveDouble;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -234,7 +234,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Sqrt_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -255,7 +255,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Ceil_Positive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -272,7 +272,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Ceil_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -289,7 +289,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Floor_Positive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -306,7 +306,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Floor_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -418,7 +418,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Trunc_Positive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -435,7 +435,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Trunc_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -456,7 +456,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Ln_E;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -473,7 +473,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Log2_PowerOfTwo;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -490,7 +490,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Log10_Hundred;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -511,7 +511,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Power_Square;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -528,7 +528,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Power_Zero_Exp;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -549,7 +549,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Sin_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -566,7 +566,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Cos_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -583,7 +583,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Tan_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -600,7 +600,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_ArcTan_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -617,7 +617,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_ArcTan2_OneOne;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -639,7 +639,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_ArcSin_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -656,7 +656,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_ArcCos_One;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -673,7 +673,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Sinh_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -690,7 +690,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Cosh_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -707,7 +707,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Tanh_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -728,7 +728,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_IsNaN_NaN;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -745,7 +745,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_IsNaN_Normal;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -762,7 +762,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_IsInfinite_Inf;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -779,7 +779,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_IsInfinite_Normal;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -800,7 +800,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Min_Integer_Picks_Smaller;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -814,7 +814,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Max_Integer_Picks_Larger;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -828,7 +828,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Min_Integer_Equal;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -846,7 +846,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Min_Double_Picks_Smaller;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -865,7 +865,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Max_Double_Picks_Larger;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -888,7 +888,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Sign_Positive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -902,7 +902,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Sign_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -916,7 +916,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Sign_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -934,7 +934,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_DivMod_Basic;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -952,7 +952,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DivMod_Exact;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -974,7 +974,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_InRange_Inside;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -991,7 +991,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_InRange_AtBoundary;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -1008,7 +1008,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_InRange_Outside;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -1029,7 +1029,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_EnsureRange_Inside;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -1043,7 +1043,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_EnsureRange_ClampLow;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -1057,7 +1057,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_EnsureRange_ClampHigh;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -1075,7 +1075,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_Pi_Approx;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
@@ -1093,7 +1093,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Int64MulDouble_LargeValue;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1111,7 +1111,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_Pi;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1128,7 +1128,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_Zero;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1143,7 +1143,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1160,7 +1160,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_SmallFractions;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1178,7 +1178,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_ExponentialSmall;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1194,7 +1194,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_ExponentialLarge;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1210,7 +1210,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_LargeInteger;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1227,7 +1227,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_DoubleToStr_VerySmallPositive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1349,7 +1349,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_AbsInt_Positive;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1364,7 +1364,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_AbsInt_Negative;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1383,7 +1383,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_IntAssignDouble;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1400,7 +1400,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_IntAssignSingle;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1419,7 +1419,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_Int64AssignDouble;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1438,7 +1438,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_SingleMulDouble;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1457,7 +1457,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_SingleAddSingle;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1478,7 +1478,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_SingleCompareSingle;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1499,7 +1499,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_RealDiv_IntegerOperands_RoundTrunc;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1520,7 +1520,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_RealDiv_TenOverFour_Half;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1543,7 +1543,7 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TE2EMathTests.TestRun_WriteLn_Double_Direct;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1560,7 +1560,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_WriteLn_Single_Direct;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(
@@ -1704,7 +1704,7 @@ begin
 end;
 
 procedure TE2EMathTests.TestRun_SingleCast_RoundTripPrecision;
-var Output: string; RCode: Integer;
+var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { A Single(X)/Double(X) numeric cast must perform a REAL conversion, not a

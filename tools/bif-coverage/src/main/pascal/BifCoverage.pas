@@ -81,7 +81,7 @@ var
 function FindProjectRoot(): string;
 var
   Dir, Parent: string;
-  I: Integer;
+  I: Int;
 begin
   Dir := GetCurrentDir();
   for I := 0 to 6 do
@@ -102,8 +102,8 @@ type
     Name:   string;
     Parent: string;
     Fields:     TList<String>;    { field names }
-    FieldLines: TList<Integer>;   { parallel: source line per field, 0 if unknown }
-    LineNo: Integer;
+    FieldLines: TList<Int>;   { parallel: source line per field, 0 if unknown }
+    LineNo: Int;
     SrcName: string;   { basename of the source file the class came from,
                          for [new]/header location reporting }
     constructor Create;
@@ -123,7 +123,7 @@ var
   GEncodeObjs:  TObjectList;
   GDecodeNames: TStringList;
   GDecodeObjs:  TObjectList;
-  GErrors:      Integer;
+  GErrors:      Int;
 
   { Interface-container types from uUnitInterface.pas (parallel lists),
     plus the encoder-side and decoder-side text of uUnitInterfaceIO.pas
@@ -137,7 +137,7 @@ constructor TASTClass.Create;
 begin
   inherited Create();
   Fields     := TList<String>.Create;
-  FieldLines := TList<Integer>.Create;
+  FieldLines := TList<Int>.Create;
 end;
 
 constructor TIOBlock.Create;
@@ -145,19 +145,19 @@ begin
   inherited Create();
 end;
 
-function IsIdentStart(C: Integer): Boolean;
+function IsIdentStart(C: Int): Boolean;
 begin
   Result := ((C >= Ord('A')) and (C <= Ord('Z'))) or
             ((C >= Ord('a')) and (C <= Ord('z'))) or
             (C = Ord('_'));
 end;
 
-function IsIdentCont(C: Integer): Boolean;
+function IsIdentCont(C: Int): Boolean;
 begin
   Result := IsIdentStart(C) or ((C >= Ord('0')) and (C <= Ord('9')));
 end;
 
-function IsSpace(C: Integer): Boolean;
+function IsSpace(C: Int): Boolean;
 begin
   Result := (C = 32) or (C = 9) or (C = 13) or (C = 10);
 end;
@@ -168,7 +168,7 @@ end;
    comments the caller tracks state via InBlockComment. *)
 function StripLine(const ALine: string; var InBlockComment: Boolean): string;
 var
-  I, Len, C: Integer;
+  I, Len, C: Int;
   Tail: string;
 begin
   Result := '';
@@ -230,9 +230,9 @@ end;
 
 (* Read a Pascal identifier starting at APos in S, advancing APos past
    it. Returns empty string if APos is not on an identifier start. *)
-function ReadIdent(const S: string; var APos: Integer): string;
+function ReadIdent(const S: string; var APos: Int): string;
 var
-  Start, Len, C: Integer;
+  Start, Len, C: Int;
 begin
   Result := '';
   Len := Length(S);
@@ -245,7 +245,7 @@ begin
   Result := Copy(S, Start, APos - Start);
 end;
 
-function ASTAt(I: Integer): TASTClass;
+function ASTAt(I: Int): TASTClass;
 begin
   Result := TASTClass(GASTObjs.Get(I));
 end;
@@ -253,7 +253,7 @@ end;
 (* Line number for a field by index in Cls.Fields, recovered from the
    parallel Objects[] slot stamped by ScanAST(). Falls back to the class
    header line when zero. *)
-function FieldLineNo(ACls: TASTClass; AFieldIndex: Integer): Integer;
+function FieldLineNo(ACls: TASTClass; AFieldIndex: Int): Int;
 begin
   Result := ACls.FieldLines.Get(AFieldIndex);
   if Result = 0 then Result := ACls.LineNo;
@@ -261,7 +261,7 @@ end;
 
 function FindASTClass(const AName: string): TASTClass;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := GASTNames.IndexOf(AName);
   if Idx < 0 then Result := nil
@@ -271,7 +271,7 @@ end;
 function FindBlock(ANames: TStringList; AObjs: TObjectList;
   const AName: string): TIOBlock;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := ANames.IndexOf(AName);
   if Idx < 0 then Result := nil
@@ -285,7 +285,7 @@ end;
 function ParseClassHeader(const ALine: string;
   var AName, AParent: string; var AHasBody: Boolean): Boolean;
 var
-  P, Len: Integer;
+  P, Len: Int;
   Tok: string;
 begin
   Result := False;
@@ -323,7 +323,7 @@ end;
    (it's not a comment) but precedes the field name. *)
 function StripAttrs(const ALine: string): string;
 var
-  I, Len: Integer;
+  I, Len: Int;
 begin
   Result := ALine;
   Len := Length(Result);
@@ -346,7 +346,7 @@ end;
 function ParseFieldNames(const ALine: string): TList<String>;
 var
   Stripped, Tok: string;
-  P, Len: Integer;
+  P, Len: Int;
 begin
   Result := TList<String>.Create;
   Stripped := StripAttrs(ALine);
@@ -383,7 +383,7 @@ end;
 function IsStructuralLine(const ALine: string; var AInPublic: Boolean;
   var AIsEnd: Boolean): Boolean;
 var
-  P: Integer;
+  P: Int;
   Tok: string;
 begin
   AIsEnd := False;
@@ -422,7 +422,7 @@ procedure ScanClassFile(const APath: string;
 var
   Lines: TStringList;
   InBlockComment, InPublic, InClassBody, HasBody, IsEnd, Recording: Boolean;
-  I, J: Integer;
+  I, J: Int;
   Raw, Stripped, Trimmed, Name, Parent, SrcName: string;
   Cls: TASTClass;
   FieldNames: TList<String>;
@@ -508,7 +508,7 @@ end;
 procedure ScanInterfaceTypes();
 var
   Allow: TList<String>;
-  I: Integer;
+  I: Int;
 begin
   Allow := TList<String>.Create;
   for I := 0 to IFACE_TYPE_COUNT - 1 do
@@ -520,14 +520,14 @@ begin
   ScanClassFile(GAstFile, GIfaceNames, GIfaceObjs, Allow);
 end;
 
-function IfaceAt(I: Integer): TASTClass;
+function IfaceAt(I: Int): TASTClass;
 begin
   Result := TASTClass(GIfaceObjs.Get(I));
 end;
 
 function FindIfaceClass(const AName: string): TASTClass;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := GIfaceNames.IndexOf(AName);
   if Idx < 0 then Result := nil
@@ -540,7 +540,7 @@ end;
    counting on begin/case/record/try). *)
 function ExtractFunctionBody(ALines: TList<String>; const AFName: string): string;
 var
-  I, P, Depth: Integer;
+  I, P, Depth: Int;
   Line, Tok: string;
   InFn, InBody: Boolean;
   Header: string;
@@ -606,10 +606,10 @@ procedure CarveEncodeBlocks(const ABody: string;
 var
   MarkPositions: TList<String>;
   MarkNames: TList<String>;
-  P, Len, Save: Integer;
+  P, Len, Save: Int;
   Tok: string;
   Blk: TIOBlock;
-  I, EndPos, StartPos: Integer;
+  I, EndPos, StartPos: Int;
 begin
   MarkPositions := TList<String>.Create;
   MarkNames := TList<String>.Create;
@@ -658,7 +658,7 @@ procedure CarveDecodeBlocks(const ABody: string;
   ANames: TStringList; AObjs: TObjectList);
 var
   Starts: TList<String>;
-  P, Len, I, EndPos, J, Q, StartPos: Integer;
+  P, Len, I, EndPos, J, Q, StartPos: Int;
   Block, Tok: string;
   Blk: TIOBlock;
 begin
@@ -715,7 +715,7 @@ end;
    source order, so the first such line splits the file cleanly. *)
 function IsDecoderBoundary(const ALine: string): Boolean;
 var
-  P: Integer;
+  P: Int;
   Kw, Nm: string;
 begin
   Result := False;
@@ -735,7 +735,7 @@ procedure ScanIO();
 var
   Raw: TStringList;
   Cleaned: TList<String>;
-  I: Integer;
+  I: Int;
   InBlockComment, InImpl, InDecoder: Boolean;
   Body, Line, Trimmed: string;
   EncSB, DecSB: TStringBuilder;
@@ -794,7 +794,7 @@ end;
 function ReadProjectVersion(): string;
 var
   Lines: TStringList;
-  I, OpenP, CloseP: Integer;
+  I, OpenP, CloseP: Int;
   Line: string;
 begin
   Result := '';
@@ -822,7 +822,7 @@ end;
 function ReadCompilerId(): string;
 var
   Lines: TStringList;
-  I, Q1, Q2: Integer;
+  I, Q1, Q2: Int;
   Line: string;
 begin
   Result := '';
@@ -862,10 +862,10 @@ end;
    block is already scoped by AStartLine to the ReadExpr/ReadStmt
    region, where field names are unique enough to grep blindly. *)
 function FindIORefLine(const AClsName, AFieldName: string;
-  AStartLine: Integer; ARequireClassName: Boolean): Integer;
+  AStartLine: Int; ARequireClassName: Boolean): Int;
 var
   Lines: TStringList;
-  I: Integer;
+  I: Int;
   Line, Needle: string;
 begin
   Result := 0;
@@ -889,12 +889,12 @@ end;
    first non-forward `function ReadExpr(` declaration. Cached on first
    call. *)
 var
-  GDecoderStart: Integer;
+  GDecoderStart: Int;
 
-function DecoderStartLine(): Integer;
+function DecoderStartLine(): Int;
 var
   Lines: TStringList;
-  I: Integer;
+  I: Int;
   Line: string;
 begin
   if GDecoderStart >= 0 then
@@ -924,7 +924,7 @@ end;
 procedure CheckVersion();
 var
   ProjVer, CompId, Tail, BaseVer: string;
-  DashPos: Integer;
+  DashPos: Int;
 begin
   ProjVer := ReadProjectVersion();
   CompId := ReadCompilerId();
@@ -974,7 +974,7 @@ end;
 procedure WriteStatus();
 var
   Outp: TStringList;
-  I, J: Integer;
+  I, J: Int;
   Cls: TASTClass;
   Blk: TIOBlock;
   FieldName, State, Header: string;
@@ -1045,7 +1045,7 @@ end;
 procedure CheckAgainstStatus();
 var
   Status: TStringList;
-  I, J, SpacePos: Integer;
+  I, J, SpacePos: Int;
   Line, Key, State, ClsName, FieldName, Loc: string;
   Cls: TASTClass;
   Blk: TIOBlock;

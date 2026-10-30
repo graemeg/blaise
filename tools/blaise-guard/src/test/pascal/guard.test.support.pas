@@ -23,7 +23,7 @@ uses
 function IsolatedConfig(const ARuleId: string): TGuardConfig;
 
 { Number of diagnostics carrying the given rule id. }
-function CountForRule(AReport: TReport; const ARuleId: string): Integer;
+function CountForRule(AReport: TReport; const ARuleId: string): Int;
 
 { The first diagnostic for ARuleId, or nil. }
 function FirstForRule(AReport: TReport; const ARuleId: string): TDiagnostic;
@@ -37,9 +37,9 @@ begin
   Result.RuleConfig(ARuleId).Enabled := True;
 end;
 
-function CountForRule(AReport: TReport; const ARuleId: string): Integer;
+function CountForRule(AReport: TReport; const ARuleId: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := 0;
   for I := 0 to AReport.Count - 1 do
@@ -49,7 +49,7 @@ end;
 
 function FirstForRule(AReport: TReport; const ARuleId: string): TDiagnostic;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := nil;
   for I := 0 to AReport.Count - 1 do

@@ -68,7 +68,7 @@ end;
 
 procedure TAnalysisEngine.RunRulesOn(AModel: TSourceModel; AReport: TReport);
 var
-  I:    Integer;
+  I:    Int;
   Rule: IRule;
   Ctx:  TRuleContext;
   Sev:  TSeverity;
@@ -87,7 +87,7 @@ end;
 
 procedure TAnalysisEngine.ResetRules;
 var
-  I:    Integer;
+  I:    Int;
   Rule: IRule;
 begin
   for I := 0 to RegisteredRuleCount() - 1 do
@@ -100,7 +100,7 @@ end;
 
 procedure TAnalysisEngine.FinalizeRules(AReport: TReport);
 var
-  I:    Integer;
+  I:    Int;
   Rule: IRule;
   Ctx:  TRuleContext;
   Sev:  TSeverity;
@@ -164,7 +164,7 @@ end;
 function TAnalysisEngine.Run(AProvider: ISourceProvider): TReport;
 var
   Files: TList<string>;
-  I:     Integer;
+  I:     Int;
 begin
   Result := TReport.Create();
   ResetRules();
