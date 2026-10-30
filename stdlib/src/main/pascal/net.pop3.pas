@@ -62,15 +62,15 @@ type
     function Pass(const APass: string): Boolean;
 
     { STAT: sets ACount and ASize from the '+OK n size' status line. }
-    function Stat(out ACount: Integer; out ASize: Integer): Boolean;
+    function Stat(out ACount: Int; out ASize: Int): Boolean;
 
     { LIST: returns the raw multi-line listing ('n size' per line). }
     function List(out AListing: string): Boolean;
 
     { RETR n: returns the message (headers + body), dot-unstuffed. }
-    function Retr(AMsg: Integer; out AMessage: string): Boolean;
+    function Retr(AMsg: Int; out AMessage: string): Boolean;
 
-    function Dele(AMsg: Integer): Boolean;
+    function Dele(AMsg: Int): Boolean;
     function Quit: Boolean;
 
     { The last status line received (for diagnostics). }
@@ -82,9 +82,9 @@ implementation
 
 { Parse the leading run of ASCII digits in S into an integer.  Non-digit input
   yields 0 (POP3 status fields are always plain unsigned decimals). }
-function ParseUInt(const S: string): Integer;
+function ParseUInt(const S: string): Int;
 var
-  I, Len, V: Integer;
+  I, Len, V: Int;
   B: Byte;
 begin
   V := 0;
@@ -182,10 +182,10 @@ begin
   Result := Self.ReadStatus();
 end;
 
-function TPop3Client.Stat(out ACount: Integer; out ASize: Integer): Boolean;
+function TPop3Client.Stat(out ACount: Int; out ASize: Int): Boolean;
 var
   Rest, NumStr: string;
-  I, Len: Integer;
+  I, Len: Int;
 begin
   ACount := 0;
   ASize := 0;
@@ -231,7 +231,7 @@ begin
   Result := True;
 end;
 
-function TPop3Client.Retr(AMsg: Integer; out AMessage: string): Boolean;
+function TPop3Client.Retr(AMsg: Int; out AMessage: string): Boolean;
 begin
   AMessage := '';
   if not Self.SendLine('RETR ' + IntToStr(AMsg)) then
@@ -242,7 +242,7 @@ begin
   Result := True;
 end;
 
-function TPop3Client.Dele(AMsg: Integer): Boolean;
+function TPop3Client.Dele(AMsg: Int): Boolean;
 begin
   if not Self.SendLine('DELE ' + IntToStr(AMsg)) then
     Exit(False);

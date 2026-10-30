@@ -61,13 +61,13 @@ type
   private
     FSB: TStringBuilder;
     FPretty: Boolean;
-    FIndent: Integer;                     { spaces per level when pretty }
+    FIndent: Int;                     { spaces per level when pretty }
     { Parallel per-depth stacks for the open elements. }
     FNames: array of string;
     FHasContent: array of Boolean;        { any content written inside }
     FHasElemContent: array of Boolean;    { element/comment/PI content inside }
     FTagOpen: Boolean;                    { '<name' emitted, '>' still pending }
-    procedure NewlineIndent(ALevel: Integer);
+    procedure NewlineIndent(ALevel: Int);
     procedure CloseOpenTag;
     procedure MarkContent(AElementContent: Boolean);
     procedure RequireElement(const AWhat: string);
@@ -101,7 +101,7 @@ type
     procedure Reset;
 
     property Pretty: Boolean read FPretty write FPretty;
-    property Indent: Integer read FIndent write FIndent;
+    property Indent: Int read FIndent write FIndent;
   end;
 
 { Escape text content: & < > }
@@ -115,7 +115,7 @@ implementation
 function XMLEscapeText(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Integer;
+  I, N: Int;
   B: Byte;
 begin
   SB := TStringBuilder.Create();
@@ -138,7 +138,7 @@ end;
 function XMLEscapeAttr(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Integer;
+  I, N: Int;
   B: Byte;
 begin
   SB := TStringBuilder.Create();
@@ -176,9 +176,9 @@ begin
   inherited Destroy();
 end;
 
-procedure TXMLWriter.NewlineIndent(ALevel: Integer);
+procedure TXMLWriter.NewlineIndent(ALevel: Int);
 var
-  I: Integer;
+  I: Int;
 begin
   if not FPretty then
     Exit;
@@ -205,7 +205,7 @@ end;
   own line in pretty mode; plain text keeps the element on one line. }
 procedure TXMLWriter.MarkContent(AElementContent: Boolean);
 var
-  Top: Integer;
+  Top: Int;
 begin
   Top := Length(FNames) - 1;
   if Top < 0 then
@@ -255,7 +255,7 @@ end;
 
 procedure TXMLWriter.EndElement;
 var
-  Top: Integer;
+  Top: Int;
   Nm: string;
   HadElem: Boolean;
 begin
@@ -314,7 +314,7 @@ end;
 procedure TXMLWriter.WriteCData(const AText: string);
 var
   Rest: string;
-  P: Integer;
+  P: Int;
 begin
   RequireElement('WriteCData');
   CloseOpenTag();

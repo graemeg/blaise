@@ -56,7 +56,7 @@ type
     { IndexStr / IndexText }
     procedure TestSemantic_IndexStr_OK;
     procedure TestSemantic_IndexText_OK;
-    procedure TestSemantic_IndexStr_ReturnsInteger;
+    procedure TestSemantic_IndexStr_ReturnsInt;
 
     { Replace / ReplaceAll }
     procedure TestSemantic_Replace_OK;
@@ -80,7 +80,7 @@ type
 
     { CountOccurrences }
     procedure TestSemantic_CountOccurrences_OK;
-    procedure TestSemantic_CountOccurrences_ReturnsInteger;
+    procedure TestSemantic_CountOccurrences_ReturnsInt;
 
     { RemovePrefix / RemoveSuffix }
     procedure TestSemantic_RemovePrefix_OK;
@@ -451,7 +451,7 @@ begin
     ''');
 end;
 
-procedure TStrUtilsTests.TestSemantic_IndexStr_ReturnsInteger;
+procedure TStrUtilsTests.TestSemantic_IndexStr_ReturnsInt;
 var
   Lexer:       TLexer;
   Parser:      TParser;
@@ -480,8 +480,8 @@ begin
       Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts[3]);
-    AssertEquals('IndexStr returns Integer',
-      Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
+    AssertEquals('IndexStr returns Int',
+      Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();
@@ -720,7 +720,7 @@ begin
     ''');
 end;
 
-procedure TStrUtilsTests.TestSemantic_CountOccurrences_ReturnsInteger;
+procedure TStrUtilsTests.TestSemantic_CountOccurrences_ReturnsInt;
 var
   Lexer:       TLexer;
   Parser:      TParser;
@@ -748,8 +748,8 @@ begin
       Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts[0]);
-    AssertEquals('CountOccurrences returns Integer',
-      Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
+    AssertEquals('CountOccurrences returns Int',
+      Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();

@@ -115,8 +115,8 @@ type
     Return True to increment the magnitude (round away from zero), False to keep
     the truncated value. }
   IRoundingStrategy = interface
-    function RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;
-                            DiscardedCompareHalf: Integer;
+    function RoundIncrement(Negative: Boolean; LastKeptDigit: Int;
+                            DiscardedCompareHalf: Int;
                             AnyDiscarded: Boolean): Boolean;
   end;
 
@@ -126,8 +126,8 @@ type
   TStandardRounding = class(TObject, IRoundingStrategy)
     FMode: TRoundingMode;
     constructor Create(AMode: TRoundingMode);
-    function RoundIncrement(Negative: Boolean; LastKeptDigit: Integer;
-                            DiscardedCompareHalf: Integer;
+    function RoundIncrement(Negative: Boolean; LastKeptDigit: Int;
+                            DiscardedCompareHalf: Int;
                             AnyDiscarded: Boolean): Boolean;
   end;
 
@@ -147,7 +147,7 @@ type
     FMag:      TDigitMag;
     { Fraction-digit count.  SIGNED: a negative scale multiplies by 10^-Scale,
       e.g. unscaled 6 with scale -2 is the value 600.  value = unscaled*10^-Scale. }
-    FScale:    Integer;
+    FScale:    Int;
     { Sign of the magnitude when FInflated is True (FCompact carries its own
       sign on the compact path). }
     FNegative: Boolean;
@@ -156,7 +156,7 @@ type
 
     { Number of fraction digits (the stored scale).  May be negative.
       @returns the signed scale. }
-    function Scale: Integer;
+    function Scale: Int;
 
     { Tests whether this value is exactly zero (any scale).
       @returns True iff the numeric value is zero. }
@@ -164,7 +164,7 @@ type
 
     { Sign of the value.
       @returns -1 if negative, 0 if zero, +1 if positive. }
-    function Sign: Integer;
+    function Sign: Int;
 
     { Sum of Self and B.  The result scale is max(Self.Scale, B.Scale) — the
       exact-arithmetic rule (no rounding, no precision loss).  Addends are
@@ -210,7 +210,7 @@ type
       @returns           the quotient at TargetScale.
       @raises EDivByZero       if B is zero.
       @raises EDecimalRounding if Mode is rmUnnecessary and rounding was needed. }
-    function Divide(const B: TDecimal; TargetScale: Integer;
+    function Divide(const B: TDecimal; TargetScale: Int;
                     Mode: TRoundingMode): TDecimal; overload;
 
     { As above, but rounding is delegated to a custom strategy (the extension
@@ -219,7 +219,7 @@ type
       @param TargetScale fraction digits in the result.
       @param Strategy    the rounding strategy to apply.
       @returns           the quotient at TargetScale. }
-    function Divide(const B: TDecimal; TargetScale: Integer;
+    function Divide(const B: TDecimal; TargetScale: Int;
                     const Strategy: IRoundingStrategy): TDecimal; overload;
 
     { Returns Self rounded to NewScale fraction digits using Mode.  Increasing
@@ -228,20 +228,20 @@ type
       @param Mode     the rounding mode.
       @returns        Self at NewScale.
       @raises EDecimalRounding if Mode is rmUnnecessary and rounding was needed. }
-    function RoundTo(NewScale: Integer; Mode: TRoundingMode): TDecimal; overload;
+    function RoundTo(NewScale: Int; Mode: TRoundingMode): TDecimal; overload;
 
     { As above, with a custom rounding strategy.
       @param NewScale the target fraction-digit count.
       @param Strategy the rounding strategy.
       @returns        Self at NewScale. }
-    function RoundTo(NewScale: Integer;
+    function RoundTo(NewScale: Int;
                      const Strategy: IRoundingStrategy): TDecimal; overload;
 
     { Alias of RoundTo(NewScale, Mode), named for parity with .NET/Java setScale.
       @param NewScale the target fraction-digit count.
       @param Mode     the rounding mode.
       @returns        Self at NewScale. }
-    function SetScale(NewScale: Integer; Mode: TRoundingMode): TDecimal;
+    function SetScale(NewScale: Int; Mode: TRoundingMode): TDecimal;
 
     { Three-way VALUE comparison.  The two operands are aligned to a common
       scale before comparing, so 2.0 and 2.00 compare equal — the scale does NOT
@@ -249,7 +249,7 @@ type
       scale-sensitive equals/compareTo split).
       @param B the value to compare against.
       @returns -1 if Self < B, 0 if Self = B, +1 if Self > B. }
-    function Compare(const B: TDecimal): Integer;
+    function Compare(const B: TDecimal): Int32;
 
     { Value equality.  2.0 equals 2.00 (contrast Java, where they are unequal).
       @param B the value to compare against.
@@ -261,7 +261,7 @@ type
       trailing zeros removed.  This makes TDecimal safe as a dictionary key,
       unlike Java's BigDecimal whose hashCode folds in the scale.
       @returns a hash of the numeric value. }
-    function GetHashCode: Integer;
+    function GetHashCode: Int32;
 
     { Canonical decimal text, scale-preserving, NEVER in scientific notation.
       A value with scale 4 always renders with four fraction digits
@@ -301,8 +301,8 @@ type
     class operator Add(const A, B: TDecimal): TDecimal;
     class operator Subtract(const A, B: TDecimal): TDecimal;
     class operator Multiply(const A, B: TDecimal): TDecimal;
-    class operator Multiply(const A: TDecimal; B: Integer): TDecimal;
-    class operator Multiply(A: Integer; const B: TDecimal): TDecimal;
+    class operator Multiply(const A: TDecimal; B: Int): TDecimal;
+    class operator Multiply(A: Int; const B: TDecimal): TDecimal;
     class operator Negative(const A: TDecimal): TDecimal;
     class operator Equal(const A, B: TDecimal): Boolean;
     class operator NotEqual(const A, B: TDecimal): Boolean;
@@ -319,7 +319,7 @@ type
 { Builds a TDecimal from a 32-bit signed integer (scale 0).
   @param V the integer value.
   @returns the exact decimal V. }
-function DecFromInt(V: Integer): TDecimal;
+function DecFromInt(V: Int): TDecimal;
 
 { Builds a TDecimal from a 64-bit signed integer (scale 0).
   @param V the integer value.
@@ -376,7 +376,7 @@ const
     Declared as a typed Int64 constant (NOT the Int64(...) value-cast form, which
     the QBE backend mis-lowers for large literals). }
   cMaxInt64Div10: Int64 = 922337203685477580;    { High(Int64) div 10 }
-  cMaxInt64Mod10: Integer = 7;                    { High(Int64) mod 10 }
+  cMaxInt64Mod10: Int32 = 7;                    { High(Int64) mod 10 }
 
 { ------------------------------------------------------------------ }
 { Standard rounding strategy                                          }
@@ -388,8 +388,8 @@ begin
 end;
 
 function TStandardRounding.RoundIncrement(Negative: Boolean;
-                                          LastKeptDigit: Integer;
-                                          DiscardedCompareHalf: Integer;
+                                          LastKeptDigit: Int;
+                                          DiscardedCompareHalf: Int;
                                           AnyDiscarded: Boolean): Boolean;
 begin
   { No discarded digits => the result is exact, never round. }
@@ -449,13 +449,13 @@ end;
 { Renders a value given its magnitude digit string (no sign, no leading zeros),
   a sign, and a scale, as plain decimal text — scale-preserving, never
   scientific.  Shared by the compact and inflated paths. }
-function FormatValue(const Digits: string; Neg: Boolean; AScale: Integer): string;
+function FormatValue(const Digits: string; Neg: Boolean; AScale: Int): string;
 var
-  DLen:   Integer;
+  DLen:   Int;
   IntPart: string;
   FracPart: string;
-  PointPos: Integer;
-  I: Integer;
+  PointPos: Int;
+  I: Int;
   AllZero: Boolean;
 begin
   DLen := Length(Digits);
@@ -510,7 +510,7 @@ begin
 end;
 
 { Renders the compact-path value (FCompact, FScale) as plain decimal text. }
-function FormatCompact(AUnscaled: Int64; AScale: Integer): string;
+function FormatCompact(AUnscaled: Int64; AScale: Int): string;
 var
   Neg: Boolean;
   Mag: Int64;
@@ -524,7 +524,7 @@ end;
 { TDecimal methods                                                    }
 { ------------------------------------------------------------------ }
 
-function TDecimal.Scale: Integer;
+function TDecimal.Scale: Int;
 begin
   Result := FScale
 end;
@@ -537,7 +537,7 @@ begin
     Result := FCompact = 0
 end;
 
-function TDecimal.Sign: Integer;
+function TDecimal.Sign: Int;
 begin
   if FInflated then
   begin
@@ -560,7 +560,7 @@ begin
 end;
 
 { Builds a compact TDecimal from a signed unscaled value and scale. }
-function MakeCompact(AUnscaled: Int64; AScale: Integer): TDecimal;
+function MakeCompact(AUnscaled: Int64; AScale: Int): TDecimal;
 begin
   Result.FCompact := AUnscaled;
   Result.FScale := AScale;
@@ -593,7 +593,7 @@ end;
 
 { Strips trailing zero digits (most-significant end) so the magnitude is
   canonical; an all-zero magnitude becomes the empty array. }
-procedure NormaliseMag(var M: TDigitMag; var Len: Integer);
+procedure NormaliseMag(var M: TDigitMag; var Len: Int);
 begin
   while (Len > 0) and (M[Len - 1] = 0) do
     Len := Len - 1
@@ -603,7 +603,7 @@ end;
   first, as written).  Leading zeros are ignored.  Empty / all-zero -> zero. }
 function MagFromDigits(const S: string): TDigitMag;
 var
-  L, I, N: Integer;
+  L, I, N: Int;
 begin
   L := Length(S);
   SetLength(Result, L);
@@ -624,7 +624,7 @@ end;
   first), with no leading zeros.  The empty magnitude renders as '0'. }
 function MagToDigits(const M: TDigitMag): string;
 var
-  I: Integer;
+  I: Int;
 begin
   if Length(M) = 0 then
   begin
@@ -641,9 +641,9 @@ begin
 end;
 
 { Compares two digit magnitudes: -1 if A<B, 0 if equal, +1 if A>B. }
-function MagCompare(const A, B: TDigitMag): Integer;
+function MagCompare(const A, B: TDigitMag): Int32;
 var
-  I: Integer;
+  I: Int;
 begin
   if Length(A) <> Length(B) then
   begin
@@ -666,7 +666,7 @@ end;
 { Schoolbook addition of two digit magnitudes. }
 function MagAdd(const A, B: TDigitMag): TDigitMag;
 var
-  MaxLen, I, Carry, Da, Db, Sum: Integer;
+  MaxLen, I, Carry, Da, Db, Sum: Int;
 begin
   if Length(A) >= Length(B) then MaxLen := Length(A) else MaxLen := Length(B);
   SetLength(Result, MaxLen + 1);
@@ -690,7 +690,7 @@ end;
 { Schoolbook subtraction A - B, where A >= B is REQUIRED (caller guarantees). }
 function MagSub(const A, B: TDigitMag): TDigitMag;
 var
-  I, Borrow, Da, Db, Diff, Len: Integer;
+  I, Borrow, Da, Db, Diff, Len: Int;
 begin
   SetLength(Result, Length(A));
   Borrow := 0;
@@ -720,7 +720,7 @@ end;
   local `array of Integer`, which the native backend currently mis-compiles). }
 function MagMul(const A, B: TDigitMag): TDigitMag;
 var
-  I, J, Carry, Prod, Len: Integer;
+  I, J, Carry, Prod, Len: Int;
 begin
   if (Length(A) = 0) or (Length(B) = 0) then
   begin
@@ -754,7 +754,7 @@ end;
   arrays are reference types: `X := Y` aliases the same buffer, so any helper
   that would otherwise return one of its inputs directly must copy instead. }
 function MagCopy(const A: TDigitMag): TDigitMag;
-var I: Integer;
+var I: Int;
 begin
   SetLength(Result, Length(A));
   I := 0;
@@ -762,9 +762,9 @@ begin
 end;
 
 { Multiplies a digit magnitude by a single digit D (0..9). }
-function MagMulSmall(const A: TDigitMag; D: Integer): TDigitMag;
+function MagMulSmall(const A: TDigitMag; D: Int): TDigitMag;
 var
-  I, Carry, Prod, Len: Integer;
+  I, Carry, Prod, Len: Int;
 begin
   if (D = 0) or (Length(A) = 0) then
   begin
@@ -790,7 +790,7 @@ end;
 { Adds 1 to a digit magnitude. }
 function MagIncrement(const A: TDigitMag): TDigitMag;
 var
-  I, Carry, Sum: Integer;
+  I, Carry, Sum: Int;
 begin
   SetLength(Result, Length(A) + 1);
   Carry := 1;
@@ -813,13 +813,13 @@ end;
   dividend most-significant digit first, maintaining a running remainder. }
 function MagDivMod(const A, B: TDigitMag; out ARem: TDigitMag): TDigitMag;
 var
-  ALen, I, Q, Cmp: Integer;
+  ALen, I, Q, Cmp: Int;
   Cur: TDigitMag;     { running remainder (a magnitude) }
   Trial: TDigitMag;
   QDigits: TDigitMag; { quotient digits, most-significant first during build }
-  QLen: Integer;
+  QLen: Int;
   Shifted: TDigitMag;
-  J: Integer;
+  J: Int;
 begin
   ALen := Length(A);
   if ALen = 0 then
@@ -923,11 +923,11 @@ end;
   the compact representation when the unscaled value fits in Int64 and inflating
   otherwise.  Leading zeros in ADigits are tolerated. }
 function MakeFromMagDigits(const ADigits: string; ANeg: Boolean;
-                           AScale: Integer): TDecimal;
+                           AScale: Int): TDecimal;
 var
   Mag: TDigitMag;
   AsI64: Int64;
-  I, Ch, DLen: Integer;
+  I, Ch, DLen: Int;
   Overflow: Boolean;
 begin
   Mag := MagFromDigits(ADigits);
@@ -979,9 +979,9 @@ end;
 
 { Multiplies AValue by 10^APow without overflowing: returns False if the result
   would exceed Int64 range, True (with the product in AOut) otherwise. }
-function TryScaleUp(AValue: Int64; APow: Integer; out AOut: Int64): Boolean;
+function TryScaleUp(AValue: Int64; APow: Int; out AOut: Int64): Boolean;
 var
-  I: Integer;
+  I: Int;
   Neg: Boolean;
   Mag: Int64;
 begin
@@ -1015,9 +1015,9 @@ end;
   and a normalised magnitude for the string-fallback comparison. }
 function NormalisePlain(const S: string): string;
 var
-  L: Integer;
-  DotPos: Integer;
-  EndPos: Integer;
+  L: Int;
+  DotPos: Int;
+  EndPos: Int;
 begin
   Result := S;
   L := Length(Result);
@@ -1039,8 +1039,8 @@ end;
 
 { Returns the integer-part length (count of digits before any '.') of S starting
   at the 0-based cursor Start. }
-function IntPartLen(const S: string; Start: Integer): Integer;
-var P: Integer;
+function IntPartLen(const S: string; Start: Int): Int;
+var P: Int;
 begin
   P := Start;
   while (P < Length(S)) and (OrdAt(S, P) <> Ord('.')) do
@@ -1050,8 +1050,8 @@ end;
 
 { 0-based offset of the first fraction digit of S (after the '.'), or Length(S)
   if there is no fraction, scanning from cursor Start. }
-function FracStart(const S: string; Start: Integer): Integer;
-var P: Integer;
+function FracStart(const S: string; Start: Int): Int;
+var P: Int;
 begin
   P := Start;
   while (P < Length(S)) and (OrdAt(S, P) <> Ord('.')) do
@@ -1064,14 +1064,14 @@ end;
 
 { Compares the magnitudes (sign ignored) of two plain decimal strings, each from
   its own cursor (Xi / Yi point past any sign). }
-function CompareMagnitude(const X: string; Xi: Integer;
-                          const Y: string; Yi: Integer): Integer;
+function CompareMagnitude(const X: string; Xi: Int;
+                          const Y: string; Yi: Int): Int32;
 var
-  XiLen, YiLen: Integer;
-  XfStart, YfStart: Integer;
-  XfLen, YfLen: Integer;
-  K, MaxF: Integer;
-  Xd, Yd: Integer;
+  XiLen, YiLen: Int;
+  XfStart, YfStart: Int;
+  XfLen, YfLen: Int;
+  K, MaxF: Int;
+  Xd, Yd: Int;
 begin
   XiLen := IntPartLen(X, Xi);
   YiLen := IntPartLen(Y, Yi);
@@ -1117,11 +1117,11 @@ end;
 
 { Compares two plain decimal strings (which carry the SAME sign) by numeric
   value.  Used only on the overflow fallback path, so it need not be fast. }
-function CompareDecimalText(const A, B: string): Integer;
+function CompareDecimalText(const A, B: string): Int32;
 var
   NegA: Boolean;
-  Ai, Bi: Integer;
-  MagResult: Integer;
+  Ai, Bi: Int;
+  MagResult: Int;
 begin
   NegA := (Length(A) > 0) and (OrdAt(A, 0) = Ord('-'));
   if NegA then Ai := 1 else Ai := 0;
@@ -1138,10 +1138,10 @@ end;
 { Returns D's unscaled magnitude as a digit-array, scaled UP to ATargetScale
   (which must be >= D.Scale): i.e. the magnitude with (ATargetScale - D.Scale)
   zero digits appended at the least-significant end. }
-function ScaledMag(const D: TDecimal; ATargetScale: Integer): TDigitMag;
+function ScaledMag(const D: TDecimal; ATargetScale: Int): TDigitMag;
 var
   Base: TDigitMag;
-  Pad, I, BLen: Integer;
+  Pad, I, BLen: Int;
 begin
   Base := MagFromDigits(UnscaledDigits(D));
   Pad := ATargetScale - D.FScale;
@@ -1165,11 +1165,11 @@ end;
   fits, otherwise stays inflated. }
 function AddCore(const A, B: TDecimal; BNeg: Boolean): TDecimal;
 var
-  MaxScale: Integer;
+  MaxScale: Int;
   MA, MB, MR: TDigitMag;
-  SignA, SignB: Integer;
+  SignA, SignB: Int;
   ResNeg: Boolean;
-  Cmp: Integer;
+  Cmp: Int;
 begin
   if A.FScale >= B.FScale then MaxScale := A.FScale else MaxScale := B.FScale;
 
@@ -1257,9 +1257,9 @@ end;
 
 { Appends N zero digits at the least-significant end of a magnitude (multiply by
   10^N).  N must be >= 0.  An empty (zero) magnitude stays empty. }
-function MagShift(const A: TDigitMag; N: Integer): TDigitMag;
+function MagShift(const A: TDigitMag; N: Int): TDigitMag;
 var
-  I: Integer;
+  I: Int;
 begin
   if (Length(A) = 0) or (N <= 0) then
   begin
@@ -1275,9 +1275,9 @@ end;
 
 { Drops the N least-significant digits of a magnitude (integer divide by 10^N).
   Caller guarantees 0 <= N <= Length(A). }
-function MagShiftRightDrop(const A: TDigitMag; N: Integer): TDigitMag;
+function MagShiftRightDrop(const A: TDigitMag; N: Int): TDigitMag;
 var
-  I, Len: Integer;
+  I, Len: Int;
 begin
   if N >= Length(A) then
   begin
@@ -1292,13 +1292,13 @@ begin
   SetLength(Result, Len)
 end;
 
-function TDecimal.Divide(const B: TDecimal; TargetScale: Integer;
+function TDecimal.Divide(const B: TDecimal; TargetScale: Int;
                          const Strategy: IRoundingStrategy): TDecimal;
 var
   NumMag, DenMag, Dividend, Divisor, Q, R, TwoR: TDigitMag;
-  Shift: Integer;
+  Shift: Int;
   ResNeg: Boolean;
-  LastDigit, HalfCmp: Integer;
+  LastDigit, HalfCmp: Int;
   AnyDisc: Boolean;
 begin
   if B.IsZero() then
@@ -1347,17 +1347,17 @@ begin
   Result := MakeFromMagDigits(MagToDigits(Q), ResNeg, TargetScale)
 end;
 
-function TDecimal.Divide(const B: TDecimal; TargetScale: Integer;
+function TDecimal.Divide(const B: TDecimal; TargetScale: Int;
                          Mode: TRoundingMode): TDecimal;
 begin
   Result := Self.Divide(B, TargetScale, StandardRounding(Mode))
 end;
 
-function TDecimal.RoundTo(NewScale: Integer;
+function TDecimal.RoundTo(NewScale: Int;
                           const Strategy: IRoundingStrategy): TDecimal;
 var
   Mag, Keep, Drop, TwoDrop, DropBase: TDigitMag;
-  DropCount, I, LastDigit, HalfCmp: Integer;
+  DropCount, I, LastDigit, HalfCmp: Int;
   AnyDisc: Boolean;
 begin
   if NewScale >= Self.FScale then
@@ -1412,20 +1412,20 @@ begin
   Result := MakeFromMagDigits(MagToDigits(Keep), IsNeg(Self), NewScale)
 end;
 
-function TDecimal.RoundTo(NewScale: Integer; Mode: TRoundingMode): TDecimal;
+function TDecimal.RoundTo(NewScale: Int; Mode: TRoundingMode): TDecimal;
 begin
   Result := Self.RoundTo(NewScale, StandardRounding(Mode))
 end;
 
-function TDecimal.SetScale(NewScale: Integer; Mode: TRoundingMode): TDecimal;
+function TDecimal.SetScale(NewScale: Int; Mode: TRoundingMode): TDecimal;
 begin
   Result := Self.RoundTo(NewScale, Mode)
 end;
 
-function TDecimal.Compare(const B: TDecimal): Integer;
+function TDecimal.Compare(const B: TDecimal): Int32;
 var
-  SignA, SignB: Integer;
-  MaxScale: Integer;
+  SignA, SignB: Int;
+  MaxScale: Int;
   UA, UB: Int64;
   OkA, OkB: Boolean;
   PlainA, PlainB: string;
@@ -1487,11 +1487,11 @@ begin
   Result := Self.Compare(B) = 0
 end;
 
-function TDecimal.GetHashCode: Integer;
+function TDecimal.GetHashCode: Int32;
 var
   Norm: string;
-  I: Integer;
-  H: Integer;
+  I: Int;
+  H: Int;
 begin
   { Hash the scale-normalised text so value-equal decimals (2.0 / 2.00) hash
     identically.  Simple polynomial rolling hash over the canonical bytes. }
@@ -1522,7 +1522,7 @@ end;
 function TDecimal.StripTrailingZeros: TDecimal;
 var
   Mag: TDigitMag;
-  NewScale, Drop: Integer;
+  NewScale, Drop: Int;
 begin
   if Self.IsZero() then
   begin
@@ -1564,7 +1564,7 @@ end;
 { Construction                                                         }
 { ------------------------------------------------------------------ }
 
-function DecFromInt(V: Integer): TDecimal;
+function DecFromInt(V: Int): TDecimal;
 begin
   Result.FCompact := V;
   Result.FScale := 0;
@@ -1601,12 +1601,12 @@ end;
 
 function DecFromStr(const S: string): TDecimal;
 var
-  Pos:      Integer;
-  Len:      Integer;
+  Pos:      Int;
+  Len:      Int;
   Neg:      Boolean;
-  Ch:       Integer;
+  Ch:       Int;
   MagStr:   string;     { accumulated unscaled magnitude digits (any length) }
-  Scale:    Integer;
+  Scale:    Int;
   SeenDot:  Boolean;
   AnyDigit: Boolean;
 begin
@@ -1678,12 +1678,12 @@ begin
   Result := A.Multiply(B);
 end;
 
-class operator TDecimal.Multiply(const A: TDecimal; B: Integer): TDecimal;
+class operator TDecimal.Multiply(const A: TDecimal; B: Int): TDecimal;
 begin
   Result := A.Multiply(DecFromInt(B));
 end;
 
-class operator TDecimal.Multiply(A: Integer; const B: TDecimal): TDecimal;
+class operator TDecimal.Multiply(A: Int; const B: TDecimal): TDecimal;
 begin
   Result := DecFromInt(A).Multiply(B);
 end;

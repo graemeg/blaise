@@ -65,7 +65,7 @@ type
     procedure WriteTo(AWriter: TXMLWriter); virtual; abstract;
     function AsXML: string;                           { compact }
     function FormatXML: string; overload;             { pretty, 2-space indent }
-    function FormatXML(AIndent: Integer): string; overload;
+    function FormatXML(AIndent: Int): string; overload;
     property NodeType: TXMLNodeType read GetNodeType;
   end;
 
@@ -116,11 +116,11 @@ type
     FName: string;
     FAttrs: TOrderedDictionary<string, string>;   { insertion-ordered }
     FChildren: TList<TXMLNode>;                   { parent owns these (strong) }
-    function GetCount: Integer;
-    function GetItem(AIndex: Integer): TXMLNode;
+    function GetCount: Int;
+    function GetItem(AIndex: Int): TXMLNode;
     function GetText: string;
     procedure SetText(const AValue: string);
-    function GetAttributeCount: Integer;
+    function GetAttributeCount: Int;
   protected
     function GetNodeType: TXMLNodeType; override;
   public
@@ -133,15 +133,15 @@ type
     function HasAttribute(const AName: string): Boolean;
     { Remove an attribute; True if it existed. }
     function RemoveAttribute(const AName: string): Boolean;
-    function AttributeName(AIndex: Integer): string;
-    function AttributeValue(AIndex: Integer): string;
-    property AttributeCount: Integer read GetAttributeCount;
+    function AttributeName(AIndex: Int): string;
+    function AttributeValue(AIndex: Int): string;
+    property AttributeCount: Int read GetAttributeCount;
     property Attributes[AName: string]: string
       read GetAttribute write SetAttribute;
 
     { ---- children: building ---- }
     { Adopt ANode as the last child; returns its index. }
-    function Add(ANode: TXMLNode): Integer;
+    function Add(ANode: TXMLNode): Int;
     { Create a child element, adopt it and return it (chainable). }
     function AddElement(const AName: string): TXMLElement; overload;
     { Create a child element with text content: <name>text</name>. }
@@ -163,14 +163,14 @@ type
 
     { ---- children: mutation ---- }
     { Detach the child at AIndex and return it; the caller then owns it. }
-    function Extract(AIndex: Integer): TXMLNode;
+    function Extract(AIndex: Int): TXMLNode;
     { Detach and discard the child at AIndex (ARC frees it). }
-    procedure Delete(AIndex: Integer);
+    procedure Delete(AIndex: Int);
     procedure Clear;
 
     property Name: string read FName write FName;
-    property Count: Integer read GetCount;
-    property Items[AIndex: Integer]: TXMLNode read GetItem; default;
+    property Count: Int read GetCount;
+    property Items[AIndex: Int]: TXMLNode read GetItem; default;
     { Concatenated text of all descendant text/CDATA nodes (like XLinq's
       XElement.Value).  Assigning replaces all children with one text node. }
     property Text: string read GetText write SetText;
@@ -186,7 +186,7 @@ type
     constructor Create;
     function AsXML: string;                           { declaration + root }
     function FormatXML: string; overload;
-    function FormatXML(AIndent: Integer): string; overload;
+    function FormatXML(AIndent: Int): string; overload;
     { Assigning Root adopts the element. }
     property Root: TXMLElement read FRoot write FRoot;
     property Version: string read FVersion write FVersion;
@@ -202,7 +202,7 @@ implementation
 { Append the concatenated text/CDATA content of AElem's subtree to ASB. }
 procedure XTCollectText(AElem: TXMLElement; ASB: TStringBuilder);
 var
-  I: Integer;
+  I: Int;
   N: TXMLNode;
 begin
   I := 0;
@@ -239,7 +239,7 @@ begin
   Result := FormatXML(2);
 end;
 
-function TXMLNode.FormatXML(AIndent: Integer): string;
+function TXMLNode.FormatXML(AIndent: Int): string;
 var
   W: TXMLWriter;
 begin
@@ -346,7 +346,7 @@ end;
 
 procedure TXMLElement.WriteTo(AWriter: TXMLWriter);
 var
-  I: Integer;
+  I: Int;
 begin
   AWriter.BeginElement(FName);
   I := 0;
@@ -394,24 +394,24 @@ begin
     FAttrs.Remove(AName);
 end;
 
-function TXMLElement.GetAttributeCount: Integer;
+function TXMLElement.GetAttributeCount: Int;
 begin
   Result := FAttrs.Count;
 end;
 
-function TXMLElement.AttributeName(AIndex: Integer): string;
+function TXMLElement.AttributeName(AIndex: Int): string;
 begin
   Result := FAttrs.Keys[AIndex];
 end;
 
-function TXMLElement.AttributeValue(AIndex: Integer): string;
+function TXMLElement.AttributeValue(AIndex: Int): string;
 begin
   Result := FAttrs.Values[AIndex];
 end;
 
 { ---- children: building ---- }
 
-function TXMLElement.Add(ANode: TXMLNode): Integer;
+function TXMLElement.Add(ANode: TXMLNode): Int;
 begin
   FChildren.Add(ANode);
   Result := FChildren.Count - 1;
@@ -447,19 +447,19 @@ end;
 
 { ---- children: navigation ---- }
 
-function TXMLElement.GetCount: Integer;
+function TXMLElement.GetCount: Int;
 begin
   Result := FChildren.Count;
 end;
 
-function TXMLElement.GetItem(AIndex: Integer): TXMLNode;
+function TXMLElement.GetItem(AIndex: Int): TXMLNode;
 begin
   Result := FChildren[AIndex];
 end;
 
 function TXMLElement.Find(const AName: string): TXMLElement;
 var
-  I: Integer;
+  I: Int;
   N: TXMLNode;
 begin
   Result := nil;
@@ -490,7 +490,7 @@ end;
 
 function TXMLElement.Elements: TList<TXMLElement>;
 var
-  I: Integer;
+  I: Int;
   N: TXMLNode;
 begin
   Result := TList<TXMLElement>.Create();
@@ -506,7 +506,7 @@ end;
 
 function TXMLElement.Elements(const AName: string): TList<TXMLElement>;
 var
-  I: Integer;
+  I: Int;
   N: TXMLNode;
 begin
   Result := TList<TXMLElement>.Create();
@@ -523,13 +523,13 @@ end;
 
 { ---- children: mutation ---- }
 
-function TXMLElement.Extract(AIndex: Integer): TXMLNode;
+function TXMLElement.Extract(AIndex: Int): TXMLNode;
 begin
   Result := FChildren[AIndex];   { hold a ref so it survives the Delete }
   FChildren.Delete(AIndex);
 end;
 
-procedure TXMLElement.Delete(AIndex: Integer);
+procedure TXMLElement.Delete(AIndex: Int);
 begin
   FChildren.Delete(AIndex);
 end;
@@ -587,7 +587,7 @@ begin
   Result := FormatXML(2);
 end;
 
-function TXMLDocument.FormatXML(AIndent: Integer): string;
+function TXMLDocument.FormatXML(AIndent: Int): string;
 var
   W: TXMLWriter;
 begin

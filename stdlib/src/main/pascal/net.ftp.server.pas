@@ -108,7 +108,7 @@ end;
   space).  Returns '' when the command has no argument. }
 function CmdArg(const ALine: string): string;
 var
-  I, Len: Integer;
+  I, Len: Int;
 begin
   Result := '';
   Len := Length(ALine);
@@ -126,7 +126,7 @@ end;
   input yields an empty string. }
 function NamesToCrlf(const ANames: string): string;
 var
-  I, Len, Start: Integer;
+  I, Len, Start: Int;
   R, Name: string;
 begin
   R := '';
@@ -154,9 +154,9 @@ end;
   conn (caller owns / closes it) or nil on failure. }
 function OpenPassiveData(AConn: TTcpConn): TTcpConn;
 var
-  ListenFd, DataFd: Integer;
+  ListenFd, DataFd: Int;
   DataPort: UInt16;
-  P: Integer;
+  P: Int;
 begin
   Result := nil;
   ListenFd := TcpListenEphemeral(INADDR_LOOPBACK, 8, DataPort);

@@ -45,7 +45,7 @@ type
 
   { Three-way ordering closure: negative if ALeft < ARight, zero if equal,
     positive if ALeft > ARight. }
-  TComparison<T> = reference to function(ALeft, ARight: T): Integer;
+  TComparison<T> = reference to function(ALeft, ARight: T): Int32;
 
   { Adapter: present a TComparison<T> closure as an IComparer<T>.  The
     comparer holds a strong reference to the closure (and thus its captured
@@ -55,7 +55,7 @@ type
     FComparison: TComparison<T>;
   public
     constructor Create(AComparison: TComparison<T>);
-    function Compare(A, B: T): Integer;
+    function Compare(A, B: T): Int32;
   end;
 
 implementation
@@ -65,7 +65,7 @@ begin
   FComparison := AComparison
 end;
 
-function TDelegatedComparer<T>.Compare(A, B: T): Integer;
+function TDelegatedComparer<T>.Compare(A, B: T): Int32;
 begin
   Result := FComparison(A, B)
 end;

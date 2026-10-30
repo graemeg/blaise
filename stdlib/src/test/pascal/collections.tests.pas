@@ -235,7 +235,7 @@ end;
 procedure TCollectionsTests.TestSet_GrowsPastHashThreshold;
 var
   S: TSet<string>;
-  I: Integer;
+  I: Int;
 begin
   { Below 16 elements IndexOf scans linearly; at/after it the hash table
     engages.  Crossing the boundary is where a rebuild bug would show. }
@@ -252,7 +252,7 @@ end;
 procedure TCollectionsTests.TestSet_ExcludeAfterHashRebuild;
 var
   S: TSet<string>;
-  I: Integer;
+  I: Int;
 begin
   { Removal must keep the hash index consistent, or a later lookup finds a
     stale slot. }
@@ -269,9 +269,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestSet_IntegerElements;
-var S: TSet<Integer>;
+var S: TSet<Int>;
 begin
-  S := TSet<Integer>.Create();
+  S := TSet<Int>.Create();
   S.Include(1);
   S.Include(2);
   S.Include(1);
@@ -323,10 +323,10 @@ begin
 end;
 
 procedure TCollectionsTests.TestSet_From_IntegerElements;
-var S: TSet<Integer>;
+var S: TSet<Int>;
 begin
   { The factory is generic, not string-specific. }
-  S := TSet<Integer>.From([10, 20, 30]);
+  S := TSet<Int>.From([10, 20, 30]);
   AssertEquals('three members', 3, S.Count);
   AssertTrue('has 20', S.Contains(20));
   AssertFalse('no 40', S.Contains(40));
@@ -361,11 +361,11 @@ end;
 
 procedure TCollectionsTests.TestList_From_PreservesOrder;
 var
-  L: TList<Integer>;
-  I: Integer;
+  L: TList<Int>;
+  I: Int;
 begin
   { A list is ordered — unlike TSet, the literal's order is the contract. }
-  L := TList<Integer>.From([5, 3, 9, 1]);
+  L := TList<Int>.From([5, 3, 9, 1]);
   AssertEquals('count', 4, L.Count);
   AssertEquals('idx 0', 5, L[0]);
   AssertEquals('idx 1', 3, L[1]);
@@ -389,9 +389,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestList_From_IntegerElements;
-var L: TList<Integer>;
+var L: TList<Int>;
 begin
-  L := TList<Integer>.From([10, 20]);
+  L := TList<Int>.From([10, 20]);
   AssertEquals('count', 2, L.Count);
   AssertEquals('sum', 30, L[0] + L[1]);
 end;
@@ -410,9 +410,9 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TCollectionsTests.TestDict_From_BuildsFromParallelArrays;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
-  D := TDictionary<string, Integer>.From(['one', 'two'], [1, 2]);
+  D := TDictionary<string, Int>.From(['one', 'two'], [1, 2]);
   AssertEquals('two entries', 2, D.Count);
   AssertEquals('one', 1, D['one']);
   AssertEquals('two', 2, D['two']);
@@ -421,31 +421,31 @@ begin
 end;
 
 procedure TCollectionsTests.TestDict_From_EmptyLiteralsYieldEmptyDict;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
-  D := TDictionary<string, Integer>.From([], []);
+  D := TDictionary<string, Int>.From([], []);
   AssertEquals('empty', 0, D.Count);
   AssertFalse('no keys', D.ContainsKey('anything'));
 end;
 
 procedure TCollectionsTests.TestDict_From_LaterKeyWins;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
   { A repeated key is an overwrite, matching SetItem semantics rather than
     silently keeping two entries under one key. }
-  D := TDictionary<string, Integer>.From(['k', 'k'], [1, 2]);
+  D := TDictionary<string, Int>.From(['k', 'k'], [1, 2]);
   AssertEquals('one entry', 1, D.Count);
   AssertEquals('last value wins', 2, D['k']);
 end;
 
 procedure TCollectionsTests.TestDict_From_LengthMismatchPairsUpToShorter;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
   { generics.collections is deliberately exception-free (an out-of-range
     TList.Get simply reads past the end), so From does not raise on a
     mismatch — it pairs up to the shorter array and ignores the tail.
     Pinned here so the behaviour is a decision rather than an accident. }
-  D := TDictionary<string, Integer>.From(['a', 'b', 'c'], [1, 2]);
+  D := TDictionary<string, Int>.From(['a', 'b', 'c'], [1, 2]);
   AssertEquals('paired up to the shorter', 2, D.Count);
   AssertTrue('a paired',  D.ContainsKey('a'));
   AssertTrue('b paired',  D.ContainsKey('b'));
@@ -453,9 +453,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestDict_From_ResultIsMutable;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
-  D := TDictionary<string, Integer>.From(['a'], [1]);
+  D := TDictionary<string, Int>.From(['a'], [1]);
   D.Add('b', 2);
   AssertEquals('grew', 2, D.Count);
   AssertEquals('added', 2, D['b']);
@@ -529,12 +529,12 @@ end;
 
 procedure TCollectionsTests.TestList_GrowsPastInitialCapacity;
 var
-  L: TList<Integer>;
-  I: Integer;
+  L: TList<Int>;
+  I: Int;
 begin
   { Exercises Grow's realloc-and-copy repeatedly; a broken grow shows up as
     a wrong count or a corrupted early element. }
-  L := TList<Integer>.Create();
+  L := TList<Int>.Create();
   for I := 0 to 199 do
     L.Add(I);
   AssertEquals('all stored', 200, L.Count);
@@ -601,10 +601,10 @@ end;
 
 procedure TCollectionsTests.TestStack_GrowsPastInitialCapacity;
 var
-  S: TStack<Integer>;
-  I: Integer;
+  S: TStack<Int>;
+  I: Int;
 begin
-  S := TStack<Integer>.Create();
+  S := TStack<Int>.Create();
   for I := 0 to 199 do
     S.Push(I);
   AssertEquals('all pushed', 200, S.Count);
@@ -656,13 +656,13 @@ end;
 
 procedure TCollectionsTests.TestQueue_WrapsAroundCircularBuffer;
 var
-  Q: TQueue<Integer>;
-  I: Integer;
+  Q: TQueue<Int>;
+  I: Int;
 begin
   { The queue is a circular buffer: interleaving enqueue and dequeue walks
     the head past the tail and forces a wrap.  A wrap bug shows as values
     coming back out of order, which a simple fill-then-drain never catches. }
-  Q := TQueue<Integer>.Create();
+  Q := TQueue<Int>.Create();
   for I := 0 to 9 do
     Q.Enqueue(I);
   for I := 0 to 4 do
@@ -680,9 +680,9 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TCollectionsTests.TestDict_AddAndLookup;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
-  D := TDictionary<string, Integer>.Create();
+  D := TDictionary<string, Int>.Create();
   D.Add('a', 1);
   D.Add('b', 2);
   AssertEquals('count', 2, D.Count);
@@ -691,9 +691,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestDict_SetItemOverwrites;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
-  D := TDictionary<string, Integer>.Create();
+  D := TDictionary<string, Int>.Create();
   D.Add('k', 1);
   D['k'] := 99;
   AssertEquals('still one entry', 1, D.Count);
@@ -702,10 +702,10 @@ end;
 
 procedure TCollectionsTests.TestDict_TryGetValue_HitAndMiss;
 var
-  D: TDictionary<string, Integer>;
-  V: Integer;
+  D: TDictionary<string, Int>;
+  V: Int;
 begin
-  D := TDictionary<string, Integer>.From(['a'], [1]);
+  D := TDictionary<string, Int>.From(['a'], [1]);
   V := -1;
   AssertTrue('hit returns True', D.TryGetValue('a', V));
   AssertEquals('and yields the value', 1, V);
@@ -751,9 +751,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestDict_Remove_DropsTheKey;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
-  D := TDictionary<string, Integer>.From(['a', 'b'], [1, 2]);
+  D := TDictionary<string, Int>.From(['a', 'b'], [1, 2]);
   D.Remove('a');
   AssertEquals('count dropped', 1, D.Count);
   AssertFalse('key gone', D.ContainsKey('a'));
@@ -762,9 +762,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestDict_Clear_EmptiesTheDict;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
-  D := TDictionary<string, Integer>.From(['a'], [1]);
+  D := TDictionary<string, Int>.From(['a'], [1]);
   D.Clear();
   AssertEquals('empty', 0, D.Count);
   AssertFalse('key gone', D.ContainsKey('a'));
@@ -775,12 +775,12 @@ end;
 
 procedure TCollectionsTests.TestDict_GrowsPastHashThreshold;
 var
-  D: TDictionary<string, Integer>;
-  I: Integer;
+  D: TDictionary<string, Int>;
+  I: Int;
 begin
   { As with TSet, the hash index only engages at 16+ entries, so crossing
     the boundary is where a rebuild bug surfaces. }
-  D := TDictionary<string, Integer>.Create();
+  D := TDictionary<string, Int>.Create();
   for I := 0 to 49 do
     D.Add('key-' + IntToStr(I), I);
   AssertEquals('all stored', 50, D.Count);
@@ -791,10 +791,10 @@ begin
 end;
 
 procedure TCollectionsTests.TestDict_IntegerKeys;
-var D: TDictionary<Integer, string>;
+var D: TDictionary<Int, string>;
 begin
   { Key type other than string — hashing dispatches through GCHashOf. }
-  D := TDictionary<Integer, string>.Create();
+  D := TDictionary<Int, string>.Create();
   D.Add(1, 'one');
   D.Add(2, 'two');
   AssertEquals('count', 2, D.Count);
@@ -808,12 +808,12 @@ end;
 
 procedure TCollectionsTests.TestOrdDict_PreservesInsertionOrder;
 var
-  D: TOrderedDictionary<string, Integer>;
+  D: TOrderedDictionary<string, Int>;
 begin
   { The whole point of this type: iteration follows insertion order, which
     a plain TDictionary does not promise.  Inserted deliberately out of
     alphabetical order so a sorted implementation would fail. }
-  D := TOrderedDictionary<string, Integer>.Create();
+  D := TOrderedDictionary<string, Int>.Create();
   D.Add('zulu', 1);
   D.Add('alpha', 2);
   D.Add('mike', 3);
@@ -826,9 +826,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestOrdDict_AddAndLookup;
-var D: TOrderedDictionary<string, Integer>;
+var D: TOrderedDictionary<string, Int>;
 begin
-  D := TOrderedDictionary<string, Integer>.Create();
+  D := TOrderedDictionary<string, Int>.Create();
   D.Add('a', 1);
   AssertEquals('lookup by key', 1, D['a']);
   AssertTrue('contains', D.ContainsKey('a'));
@@ -836,11 +836,11 @@ begin
 end;
 
 procedure TCollectionsTests.TestOrdDict_SetItemOverwritesInPlace;
-var D: TOrderedDictionary<string, Integer>;
+var D: TOrderedDictionary<string, Int>;
 begin
   { Overwriting an existing key must update in place, NOT append a second
     slot — otherwise the ordering view grows a duplicate. }
-  D := TOrderedDictionary<string, Integer>.Create();
+  D := TOrderedDictionary<string, Int>.Create();
   D.Add('a', 1);
   D.Add('b', 2);
   D['a'] := 99;
@@ -850,9 +850,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestOrdDict_Remove_DropsTheKey;
-var D: TOrderedDictionary<string, Integer>;
+var D: TOrderedDictionary<string, Int>;
 begin
-  D := TOrderedDictionary<string, Integer>.Create();
+  D := TOrderedDictionary<string, Int>.Create();
   D.Add('a', 1);
   D.Add('b', 2);
   D.Add('c', 3);
@@ -869,9 +869,9 @@ begin
 end;
 
 procedure TCollectionsTests.TestOrdDict_From_BuildsFromParallelArrays;
-var D: TOrderedDictionary<string, Integer>;
+var D: TOrderedDictionary<string, Int>;
 begin
-  D := TOrderedDictionary<string, Integer>.From(['x', 'y'], [10, 20]);
+  D := TOrderedDictionary<string, Int>.From(['x', 'y'], [10, 20]);
   AssertEquals('count', 2, D.Count);
   AssertEquals('x', 10, D['x']);
   AssertEquals('y', 20, D['y']);
@@ -885,7 +885,7 @@ end;
 procedure TCollectionsTests.TestList_GrowWithManagedElements;
 var
   L: TList<string>;
-  I: Integer;
+  I: Int;
 begin
   { The growth tests above use Integer, so Grow's realloc-and-copy never runs
     with a REFERENCE-COUNTED element.  That is exactly where a bug is silent:
@@ -913,7 +913,7 @@ end;
 procedure TCollectionsTests.TestQueue_GrowWithManagedElements;
 var
   Q: TQueue<string>;
-  I: Integer;
+  I: Int;
 begin
   { TQueue.Grow linearises a wrapped circular buffer AND clears the vacated
     source slots -- the most intricate managed-element path in the unit. }
@@ -934,7 +934,7 @@ end;
 procedure TCollectionsTests.TestStack_GrowWithManagedElements;
 var
   S: TStack<string>;
-  I: Integer;
+  I: Int;
 begin
   S := TStack<string>.Create();
   for I := 0 to 99 do
@@ -956,15 +956,15 @@ var
   S: TStack<string>;
   Q: TQueue<string>;
   E: TSet<string>;
-  D: TDictionary<string, Integer>;
-  O: TOrderedDictionary<string, Integer>;
+  D: TDictionary<string, Int>;
+  O: TOrderedDictionary<string, Int>;
 begin
   L := TList<string>.Create();
   S := TStack<string>.Create();
   Q := TQueue<string>.Create();
   E := TSet<string>.Create();
-  D := TDictionary<string, Integer>.Create();
-  O := TOrderedDictionary<string, Integer>.Create();
+  D := TDictionary<string, Int>.Create();
+  O := TOrderedDictionary<string, Int>.Create();
   AssertTrue('list',  L.IsEmpty());
   AssertTrue('stack', S.IsEmpty());
   AssertTrue('queue', Q.IsEmpty());
@@ -979,13 +979,13 @@ var
   S: TStack<string>;
   Q: TQueue<string>;
   E: TSet<string>;
-  D: TDictionary<string, Integer>;
+  D: TDictionary<string, Int>;
 begin
   L := TList<string>.From(['a']);
   S := TStack<string>.Create();  S.Push('a');
   Q := TQueue<string>.Create();  Q.Enqueue('a');
   E := TSet<string>.From(['a']);
-  D := TDictionary<string, Integer>.From(['a'], [1]);
+  D := TDictionary<string, Int>.From(['a'], [1]);
   AssertFalse('list',  L.IsEmpty());
   AssertFalse('stack', S.IsEmpty());
   AssertFalse('queue', Q.IsEmpty());
@@ -1019,13 +1019,13 @@ end;
 
 procedure TCollectionsTests.TestStack_Pop_OnEmptyRaises;
 var
-  S:      TStack<Integer>;
+  S:      TStack<Int>;
   Raised: Boolean;
 begin
   { Was a SIGSEGV: Pop drove FCount to -1 and read FData[-1].  Removal from
     an empty container is a caller bug, so it raises rather than inventing a
     value (BUG-20260803-empty-container-pop-segfaults). }
-  S := TStack<Integer>.Create();
+  S := TStack<Int>.Create();
   Raised := False;
   try
     S.Pop();
@@ -1038,13 +1038,13 @@ end;
 
 procedure TCollectionsTests.TestStack_Peek_OnEmptyRaises;
 var
-  S:      TStack<Integer>;
+  S:      TStack<Int>;
   Raised: Boolean;
 begin
   { Peek raises too rather than returning Default(T): unlike Java's null,
     Default(T) is a legitimate element value here (0 / '') and would be
     indistinguishable from a real stored one. }
-  S := TStack<Integer>.Create();
+  S := TStack<Int>.Create();
   Raised := False;
   try
     S.Peek();
@@ -1057,12 +1057,12 @@ end;
 
 procedure TCollectionsTests.TestQueue_Dequeue_OnEmptyRaises;
 var
-  Q:      TQueue<Integer>;
+  Q:      TQueue<Int>;
   Raised: Boolean;
 begin
   { Was a SIGSEGV twice over on a never-used queue: nil FData deref, plus
     `mod FCapacity` with FCapacity still 0. }
-  Q := TQueue<Integer>.Create();
+  Q := TQueue<Int>.Create();
   Raised := False;
   try
     Q.Dequeue();
@@ -1075,10 +1075,10 @@ end;
 
 procedure TCollectionsTests.TestQueue_Peek_OnEmptyRaises;
 var
-  Q:      TQueue<Integer>;
+  Q:      TQueue<Int>;
   Raised: Boolean;
 begin
-  Q := TQueue<Integer>.Create();
+  Q := TQueue<Int>.Create();
   Raised := False;
   try
     Q.Peek();
@@ -1091,13 +1091,13 @@ end;
 
 procedure TCollectionsTests.TestStack_StaysUsableAfterEmptyPopRaised;
 var
-  S:      TStack<Integer>;
+  S:      TStack<Int>;
   Raised: Boolean;
 begin
   { The guard must return BEFORE mutating FCount.  The old code decremented
     first, so even a caught failure left the stack permanently corrupt —
     this asserts the container is still sound afterwards. }
-  S := TStack<Integer>.Create();
+  S := TStack<Int>.Create();
   Raised := False;
   try
     S.Pop();
@@ -1119,14 +1119,14 @@ end;
 
 procedure TCollectionsTests.TestDict_GetItem_MissingKeyRaises;
 var
-  D:      TDictionary<string, Integer>;
+  D:      TDictionary<string, Int>;
   Raised: Boolean;
-  V:      Integer;
+  V:      Int;
 begin
   { Was Halt(1) — a missing key terminated the whole PROCESS with no message
     and no chance to catch it.  A test could not even observe the old
     behaviour without taking the runner down with it. }
-  D := TDictionary<string, Integer>.From(['a'], [1]);
+  D := TDictionary<string, Int>.From(['a'], [1]);
   Raised := False;
   try
     V := D['nope'];
@@ -1139,11 +1139,11 @@ end;
 
 procedure TCollectionsTests.TestOrdDict_GetItem_MissingKeyRaises;
 var
-  D:      TOrderedDictionary<string, Integer>;
+  D:      TOrderedDictionary<string, Int>;
   Raised: Boolean;
-  V:      Integer;
+  V:      Int;
 begin
-  D := TOrderedDictionary<string, Integer>.From(['a'], [1]);
+  D := TOrderedDictionary<string, Int>.From(['a'], [1]);
   Raised := False;
   try
     V := D['nope'];
@@ -1155,11 +1155,11 @@ begin
 end;
 
 procedure TCollectionsTests.TestDict_GetItem_PresentKeyStillWorks;
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 begin
   { The guard must not cost the happy path — a fix that raised on everything
     would pass the two tests above. }
-  D := TDictionary<string, Integer>.From(['a', 'b'], [1, 2]);
+  D := TDictionary<string, Int>.From(['a', 'b'], [1, 2]);
   AssertEquals('a', 1, D['a']);
   AssertEquals('b', 2, D['b']);
   AssertTrue('and TryGetValue still branches instead of raising',
@@ -1265,13 +1265,13 @@ end;
 
 procedure TCollectionsTests.TestOrdDict_GetKey_OutOfRangeRaises;
 var
-  D:      TOrderedDictionary<string, Integer>;
+  D:      TOrderedDictionary<string, Int>;
   Raised: Boolean;
   Key:    string;
 begin
   { Keys[0] on an empty ordered dictionary dereferenced a nil FKeys -- the
     positional accessors were the last unguarded siblings of the same bug. }
-  D := TOrderedDictionary<string, Integer>.Create();
+  D := TOrderedDictionary<string, Int>.Create();
   Raised := False;
   try
     Key := D.Keys[0];
@@ -1284,11 +1284,11 @@ end;
 
 procedure TCollectionsTests.TestOrdDict_GetValue_OutOfRangeRaises;
 var
-  D:      TOrderedDictionary<string, Integer>;
+  D:      TOrderedDictionary<string, Int>;
   Raised: Boolean;
-  V:      Integer;
+  V:      Int;
 begin
-  D := TOrderedDictionary<string, Integer>.From(['a'], [1]);
+  D := TOrderedDictionary<string, Int>.From(['a'], [1]);
   Raised := False;
   try
     V := D.Values[5];
@@ -1300,10 +1300,10 @@ begin
 end;
 
 procedure TCollectionsTests.TestOrdDict_InRangePositionalAccessStillWorks;
-var D: TOrderedDictionary<string, Integer>;
+var D: TOrderedDictionary<string, Int>;
 begin
   { A guard that raised on everything would pass the two tests above. }
-  D := TOrderedDictionary<string, Integer>.From(['a', 'b'], [1, 2]);
+  D := TOrderedDictionary<string, Int>.From(['a', 'b'], [1, 2]);
   AssertEquals('key 0', 'a', D.Keys[0]);
   AssertEquals('key 1', 'b', D.Keys[1]);
   AssertEquals('value 0', 1, D.Values[0]);
@@ -1312,11 +1312,11 @@ end;
 
 procedure TCollectionsTests.TestDict_DoubleKeys_HashedLookup;
 var
-  D: TDictionary<Float64, Integer>;
-  I: Integer;
+  D: TDictionary<Float64, Int>;
+  I: Int;
   Z: Float64;
 begin
-  D := TDictionary<Float64, Integer>.Create();
+  D := TDictionary<Float64, Int>.Create();
   for I := 0 to 99 do
     D.Add(I * 0.5, I);
   AssertEquals('count', 100, D.Count);
@@ -1341,7 +1341,7 @@ end;
 procedure TCollectionsTests.TestSet_DoubleZeroSignsAreOneMember;
 var
   S: TSet<Float64>;
-  I: Integer;
+  I: Int;
   Z: Float64;
 begin
   S := TSet<Float64>.Create();

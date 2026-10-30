@@ -50,17 +50,17 @@ type
   private
     FConn: TTcpConn;
     FLastLine: string;
-    FLastCode: Integer;
+    FLastCode: Int;
     FCanPost: Boolean;
     { Read the single status line; sets FLastLine and FLastCode.  Returns the
       3-digit status code (or -1 on connection error). }
-    function ReadStatus: Integer;
+    function ReadStatus: Int;
     { Read a multi-line body (after a positive status) until the lone '.',
       un-dot-stuffing each line.  Returns the body with LF-joined lines. }
     function ReadMultiline: string;
     function SendLine(const ALine: string): Boolean;
     { Send ACmd, read one status line, return the code. }
-    function Command(const ACmd: string): Integer;
+    function Command(const ACmd: string): Int;
   public
     constructor Create;
     destructor Destroy; override;
@@ -85,8 +85,8 @@ type
 
     { GROUP <name>: select a group.  On 211 sets ACount/AFirst/ALast and returns
       True; otherwise False (e.g. 411 no such group). }
-    function SelectGroup(const AName: string; out ACount: Integer;
-      out AFirst: Integer; out ALast: Integer): Boolean;
+    function SelectGroup(const AName: string; out ACount: Int;
+      out AFirst: Int; out ALast: Int): Boolean;
 
     { ARTICLE / HEAD / BODY.  AWhich is the article number (as text) or a
       <message-id>; '' means the current article.  Returns the multi-line
@@ -110,7 +110,7 @@ type
     property CanPost: Boolean read FCanPost;
     { The last status line / code received (for diagnostics). }
     property LastLine: string read FLastLine;
-    property LastCode: Integer read FLastCode;
+    property LastCode: Int read FLastCode;
     property Conn: TTcpConn read FConn write FConn;
   end;
 
@@ -118,9 +118,9 @@ implementation
 
 { Parse the leading run of ASCII digits in S (from offset AStart) into an
   integer.  Non-digit input yields 0. }
-function ParseUIntAt(const S: string; AStart: Integer): Integer;
+function ParseUIntAt(const S: string; AStart: Int): Int;
 var
-  I, Len, V: Integer;
+  I, Len, V: Int;
   B: Byte;
 begin
   V := 0;
@@ -155,7 +155,7 @@ begin
   inherited Destroy();
 end;
 
-function TNntpClient.ReadStatus: Integer;
+function TNntpClient.ReadStatus: Int;
 begin
   if not FConn.ReadLine(FLastLine) then
   begin
@@ -196,7 +196,7 @@ begin
   Result := FConn.Write(ALine + CRLF);
 end;
 
-function TNntpClient.Command(const ACmd: string): Integer;
+function TNntpClient.Command(const ACmd: string): Int;
 begin
   if not Self.SendLine(ACmd) then
     Exit(-1);
@@ -207,7 +207,7 @@ function TNntpClient.Connect(const AHostIp: string; APort: UInt16): Boolean;
 var
   Cli: TTcpClient;
   C: TTcpConn;
-  Code: Integer;
+  Code: Int;
 begin
   Cli := TTcpClient.Create();
   C := Cli.Connect(AHostIp, APort);
@@ -227,7 +227,7 @@ end;
 
 function TNntpClient.ModeReader: Boolean;
 var
-  Code: Integer;
+  Code: Int;
 begin
   Code := Self.Command('MODE READER');
   Result := (Code >= 200) and (Code < 300);
@@ -246,7 +246,7 @@ end;
 function TNntpClient.ListGroups(out AGroups: TList<string>): Boolean;
 var
   Body: string;
-  I, Len, Start: Integer;
+  I, Len, Start: Int;
   Line: string;
 begin
   AGroups := TList<string>.Create();
@@ -273,10 +273,10 @@ begin
   Result := True;
 end;
 
-function TNntpClient.SelectGroup(const AName: string; out ACount: Integer;
-  out AFirst: Integer; out ALast: Integer): Boolean;
+function TNntpClient.SelectGroup(const AName: string; out ACount: Int;
+  out AFirst: Int; out ALast: Int): Boolean;
 var
-  Code, I, Len: Integer;
+  Code, I, Len: Int;
 begin
   ACount := 0;
   AFirst := 0;
@@ -310,7 +310,7 @@ function TNntpClient.FetchArticle(const AWhich: string;
   out AArticle: string): Boolean;
 var
   Cmd: string;
-  Code: Integer;
+  Code: Int;
 begin
   AArticle := '';
   Cmd := 'ARTICLE';
@@ -326,7 +326,7 @@ end;
 function TNntpClient.FetchHead(const AWhich: string; out AHead: string): Boolean;
 var
   Cmd: string;
-  Code: Integer;
+  Code: Int;
 begin
   AHead := '';
   Cmd := 'HEAD';
@@ -342,7 +342,7 @@ end;
 function TNntpClient.FetchBody(const AWhich: string; out ABody: string): Boolean;
 var
   Cmd: string;
-  Code: Integer;
+  Code: Int;
 begin
   ABody := '';
   Cmd := 'BODY';
@@ -367,7 +367,7 @@ end;
 
 function TNntpClient.Post(const AArticle: string): Boolean;
 var
-  Code: Integer;
+  Code: Int;
 begin
   Code := Self.Command('POST');
   if Code <> 340 then
@@ -381,7 +381,7 @@ end;
 
 function TNntpClient.Quit: Boolean;
 var
-  Code: Integer;
+  Code: Int;
 begin
   Code := Self.Command('QUIT');
   Result := (Code >= 200) and (Code < 300);

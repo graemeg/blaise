@@ -60,14 +60,14 @@ var
   GCaFile: string;
 
   { results captured by the client fiber }
-  GTrustedStatus: Integer;
+  GTrustedStatus: Int;
   GTrustedBody: string;
   GUntrustedRejected: Boolean;
-  GInsecureStatus: Integer;
+  GInsecureStatus: Int;
   GReuseBody1: string;
   GReuseBody2: string;
-  GConnCount: Integer;        { server-side accepted TLS connections }
-  GRedirStatus: Integer;      { status after following an http->https redirect }
+  GConnCount: Int;        { server-side accepted TLS connections }
+  GRedirStatus: Int;      { status after following an http->https redirect }
   GRedirBody: string;
 
 type
@@ -166,7 +166,7 @@ var
   R2: THttpClientResponse;
   Reuse: THttpClient;
   RA, RB: THttpClientResponse;
-  BaseCount: Integer;
+  BaseCount: Int;
 begin
   FiberSleep(3);
 

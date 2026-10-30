@@ -41,9 +41,9 @@ implementation
 uses
   SysUtils, Generics.Collections, Functional;
 
-function MakeInts(A, B, C: Integer): TList<Integer>;
+function MakeInts(A, B, C: Int): TList<Int>;
 begin
-  Result := TList<Integer>.Create();
+  Result := TList<Int>.Create();
   Result.Add(A);
   Result.Add(B);
   Result.Add(C)
@@ -51,7 +51,7 @@ end;
 
 procedure TListOpsTests.TestMap_ProducesNewListOfR;
 var
-  L: TList<Integer>;
+  L: TList<Int>;
   M: TList<string>;
 begin
   L := MakeInts(3, 1, 2);
@@ -65,22 +65,22 @@ end;
 
 procedure TListOpsTests.TestMap_DoubleMonomorphisation_TwoRs;
 var
-  L: TList<Integer>;
+  L: TList<Int>;
   S: TList<string>;
-  D: TList<Integer>;
+  D: TList<Int>;
 begin
   { The gate probe as a pinned test: TList<T>.Map<R> monomorphised at TWO
     different R's from the same T. }
   L := MakeInts(1, 2, 3);
   S := L.Map<string>(N -> IntToStr(N * 10));
-  D := L.Map<Integer>(N -> N * N);
+  D := L.Map<Int>(N -> N * N);
   AssertEquals('string inst', '20', S[1]);
   AssertEquals('integer inst', 9, D[2])
 end;
 
 procedure TListOpsTests.TestWhere_FiltersAndPreservesOrder;
 var
-  L, W: TList<Integer>;
+  L, W: TList<Int>;
 begin
   L := MakeInts(3, 1, 2);
   W := L.Where(N -> N >= 2);
@@ -91,16 +91,16 @@ end;
 
 procedure TListOpsTests.TestWhere_EmptySource_YieldsEmpty;
 var
-  L, W: TList<Integer>;
+  L, W: TList<Int>;
 begin
-  L := TList<Integer>.Create();
+  L := TList<Int>.Create();
   W := L.Where(N -> True);
   AssertEquals('empty in, empty out', 0, W.Count)
 end;
 
 procedure TListOpsTests.TestWhere_NoneMatch_YieldsEmpty;
 var
-  L, W: TList<Integer>;
+  L, W: TList<Int>;
 begin
   L := MakeInts(1, 2, 3);
   W := L.Where(N -> N > 100);
@@ -109,24 +109,24 @@ end;
 
 procedure TListOpsTests.TestReduce_SumsWithSeed;
 var
-  L, E: TList<Integer>;
+  L, E: TList<Int>;
 begin
   L := MakeInts(1, 2, 3);
   AssertEquals('sum with seed 10', 16,
-    L.Reduce<Integer>(10, (Acc, N) -> Acc + N));
-  E := TList<Integer>.Create();
+    L.Reduce<Int>(10, (Acc, N) -> Acc + N));
+  E := TList<Int>.Create();
   AssertEquals('empty list yields seed', 7,
-    E.Reduce<Integer>(7, (Acc, N) -> Acc + N))
+    E.Reduce<Int>(7, (Acc, N) -> Acc + N))
 end;
 
 procedure TListOpsTests.TestForEach_VisitsAllInOrder;
 var
-  L: TList<Integer>;
+  L: TList<Int>;
   Trace: string;
 begin
   L := MakeInts(3, 1, 2);
   Trace := '';
-  L.ForEach(procedure(N: Integer)
+  L.ForEach(procedure(N: Int)
     begin
       Trace := Trace + IntToStr(N)
     end);
@@ -135,10 +135,10 @@ end;
 
 procedure TListOpsTests.TestAnyAll_EdgeCases;
 var
-  L, E: TList<Integer>;
+  L, E: TList<Int>;
 begin
   L := MakeInts(1, 2, 3);
-  E := TList<Integer>.Create();
+  E := TList<Int>.Create();
   AssertTrue('any match', L.Any(N -> N = 2));
   AssertFalse('any no-match', L.Any(N -> N > 9));
   AssertFalse('any on empty', E.Any(N -> True));
@@ -149,8 +149,8 @@ end;
 
 procedure TListOpsTests.TestFind_FirstMatchAndMiss;
 var
-  L: TList<Integer>;
-  V: Integer;
+  L: TList<Int>;
+  V: Int;
 begin
   L := MakeInts(3, 1, 2);
   V := 0;
@@ -161,7 +161,7 @@ end;
 
 procedure TListOpsTests.TestSort_OrdersByComparison;
 var
-  L: TList<Integer>;
+  L: TList<Int>;
 begin
   L := MakeInts(3, 1, 2);
   L.Sort((A, B) -> A - B);
@@ -175,11 +175,11 @@ end;
 
 procedure TListOpsTests.TestSort_IsStable;
 var
-  L: TList<Integer>;
+  L: TList<Int>;
 begin
   { Sort by the TENS digit only: 31 and 32 compare equal, so their relative
     order (32 before 31 in the source) must survive the sort. }
-  L := TList<Integer>.Create();
+  L := TList<Int>.Create();
   L.Add(52);
   L.Add(32);
   L.Add(31);
@@ -193,7 +193,7 @@ end;
 
 procedure TListOpsTests.TestBinarySearch_HitAndMiss;
 var
-  L: TList<Integer>;
+  L: TList<Int>;
   Idx: Int;
 begin
   L := MakeInts(1, 2, 3);
@@ -207,13 +207,13 @@ end;
 
 procedure TListOpsTests.TestMap_CapturingClosure;
 var
-  L: TList<Integer>;
-  M: TList<Integer>;
-  Base: Integer;
+  L: TList<Int>;
+  M: TList<Int>;
+  Base: Int;
 begin
   Base := 100;
   L := MakeInts(1, 2, 3);
-  M := L.Map<Integer>(N -> N + Base);
+  M := L.Map<Int>(N -> N + Base);
   AssertEquals('captured base applied', 102, M[1])
 end;
 

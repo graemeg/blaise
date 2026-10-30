@@ -41,7 +41,7 @@ procedure TStrUtilsTests.TestSplitChar_Basic;
 var L: TList<String>;
 begin
   L := SplitChar('a,b,c', CH_COMMA);
-  AssertEquals('count', 3, Integer(L.Count));
+  AssertEquals('count', 3, Int32(L.Count));
   AssertEquals('0', 'a', L.Get(0));
   AssertEquals('1', 'b', L.Get(1));
   AssertEquals('2', 'c', L.Get(2));
@@ -52,7 +52,7 @@ var L: TList<String>;
 begin
   { leading, trailing and adjacent delimiters keep empty pieces }
   L := SplitChar(',a,,b,', CH_COMMA);
-  AssertEquals('count', 5, Integer(L.Count));
+  AssertEquals('count', 5, Int32(L.Count));
   AssertEquals('0', '', L.Get(0));
   AssertEquals('1', 'a', L.Get(1));
   AssertEquals('2', '', L.Get(2));
@@ -64,7 +64,7 @@ procedure TStrUtilsTests.TestSplitChar_NoDelim;
 var L: TList<String>;
 begin
   L := SplitChar('abc', CH_COMMA);
-  AssertEquals('count', 1, Integer(L.Count));
+  AssertEquals('count', 1, Int32(L.Count));
   AssertEquals('0', 'abc', L.Get(0));
 end;
 
@@ -72,7 +72,7 @@ procedure TStrUtilsTests.TestSplitChar_Empty;
 var L: TList<String>;
 begin
   L := SplitChar('', CH_COMMA);
-  AssertEquals('count', 1, Integer(L.Count));
+  AssertEquals('count', 1, Int32(L.Count));
   AssertEquals('0', '', L.Get(0));
 end;
 
@@ -80,7 +80,7 @@ procedure TStrUtilsTests.TestSplitLines_LF;
 var L: TList<String>;
 begin
   L := SplitLines('one'#10'two'#10'three');
-  AssertEquals('count', 3, Integer(L.Count));
+  AssertEquals('count', 3, Int32(L.Count));
   AssertEquals('0', 'one', L.Get(0));
   AssertEquals('2', 'three', L.Get(2));
 end;
@@ -90,7 +90,7 @@ var L: TList<String>;
 begin
   { CRLF lines: the trailing CR must be stripped }
   L := SplitLines('one'#13#10'two'#13#10'three');
-  AssertEquals('count', 3, Integer(L.Count));
+  AssertEquals('count', 3, Int32(L.Count));
   AssertEquals('0', 'one', L.Get(0));
   AssertEquals('1', 'two', L.Get(1));
   AssertEquals('2', 'three', L.Get(2));
@@ -101,7 +101,7 @@ var L: TList<String>;
 begin
   { a trailing LF yields a final empty line }
   L := SplitLines('a'#10'b'#10);
-  AssertEquals('count', 3, Integer(L.Count));
+  AssertEquals('count', 3, Int32(L.Count));
   AssertEquals('last', '', L.Get(2));
 end;
 

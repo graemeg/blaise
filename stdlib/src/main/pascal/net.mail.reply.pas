@@ -34,7 +34,7 @@ const
   an integer (-1 on protocol/connection error), and in AText the concatenated
   text of every line (each continuation joined with LF).  ARaw, if the caller
   passes it, receives every raw line joined by LF for diagnostics. }
-function ReadSmtpReply(AConn: TTcpConn; out ACode: Integer;
+function ReadSmtpReply(AConn: TTcpConn; out ACode: Int;
   out AText: string): Boolean;
 
 { Dot-stuff and frame a message body for SMTP DATA.  Every CRLF-or-LF-delimited
@@ -49,7 +49,7 @@ function UnDotStuff(const ALine: string): string;
 
 implementation
 
-function ReadSmtpReply(AConn: TTcpConn; out ACode: Integer;
+function ReadSmtpReply(AConn: TTcpConn; out ACode: Int;
   out AText: string): Boolean;
 var
   Line: string;
@@ -94,7 +94,7 @@ end;
 
 function DotStuffBody(const ABody: string): string;
 var
-  I, Start, Len: Integer;
+  I, Start, Len: Int;
   Line: string;
   R: string;
 begin

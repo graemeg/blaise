@@ -35,23 +35,23 @@ type
     accumulates until an LF (the trailing CR, if any, is stripped). }
   TTcpConn = class
   private
-    FFd: Integer;
+    FFd: Int;
     FClosed: Boolean;
     FPending: string;      { bytes read past a line boundary in ReadLine }
   public
     { Take ownership of an already-connected fd (set non-blocking here). }
-    constructor Create(AFd: Integer);
+    constructor Create(AFd: Int);
     destructor Destroy; override;
 
     { Read up to AMaxBytes into a fresh string.  Returns the bytes read; ''
       means the peer closed (EOF) or an error occurred (see Closed).  A short
       read is normal for a stream — callers wanting a fixed amount must loop
       (or use ReadFull). }
-    function Read(AMaxBytes: Integer): string;
+    function Read(AMaxBytes: Int): string;
 
     { Read exactly ACount bytes (looping over short reads).  Returns fewer than
       ACount only on EOF/error.  Returns '' for ACount <= 0. }
-    function ReadFull(ACount: Integer): string;
+    function ReadFull(ACount: Int): string;
 
     { Write the whole string, looping over short writes.  Returns True when
       every byte was accepted, False on peer close / error. }
@@ -72,7 +72,7 @@ type
     { Close the underlying fd (idempotent). }
     procedure Close;
 
-    property Fd: Integer read FFd;
+    property Fd: Int read FFd;
     property Closed: Boolean read FClosed;
   end;
 
@@ -98,7 +98,7 @@ type
     (it uses FiberAccept, which parks the calling fiber). }
   TTcpServer = class
   private
-    FListenFd: Integer;
+    FListenFd: Int;
     FPort: UInt16;
     FAddr: UInt32;
     FRunning: Boolean;
@@ -126,7 +126,7 @@ type
     procedure Stop;
 
     property Port: UInt16 read FPort;
-    property ListenFd: Integer read FListenFd;
+    property ListenFd: Int read FListenFd;
     property Running: Boolean read FRunning;
   end;
 
@@ -146,7 +146,7 @@ const
   TTcpConn
   --------------------------------------------------------------------------- }
 
-constructor TTcpConn.Create(AFd: Integer);
+constructor TTcpConn.Create(AFd: Int);
 begin
   FFd := AFd;
   FClosed := AFd < 0;
@@ -161,7 +161,7 @@ begin
   inherited Destroy();
 end;
 
-function TTcpConn.Read(AMaxBytes: Integer): string;
+function TTcpConn.Read(AMaxBytes: Int): string;
 var
   Buf: Pointer;
   N: Int64;
@@ -189,17 +189,17 @@ begin
   Buf := GetMem(AMaxBytes);
   N := FiberRecv(FFd, Buf, AMaxBytes);
   if N > 0 then
-    Result := BytesToString(Buf, Integer(N))
+    Result := BytesToString(Buf, Int32(N))
   else
     { 0 = peer EOF; negative = error/timeout.  Either way no more data. }
     FClosed := True;
   FreeMem(Buf);
 end;
 
-function TTcpConn.ReadFull(ACount: Integer): string;
+function TTcpConn.ReadFull(ACount: Int): string;
 var
   Chunk: string;
-  Got: Integer;
+  Got: Int;
 begin
   Result := '';
   if ACount <= 0 then
@@ -217,7 +217,7 @@ end;
 
 function TTcpConn.Write(const AData: string): Boolean;
 var
-  Total: Integer;
+  Total: Int;
   N: Int64;
   P: PChar;
 begin
@@ -236,14 +236,14 @@ begin
       Exit(False);
     end;
     P := P + N;
-    Total := Total - Integer(N);
+    Total := Total - Int32(N);
   end;
   Result := True;
 end;
 
 function TTcpConn.ReadLine(out ALine: string): Boolean;
 var
-  Nl, I: Integer;
+  Nl, I: Int;
   Chunk, Line: string;
   B: Byte;
 begin
@@ -313,7 +313,7 @@ end;
 
 function TTcpClient.Connect(const AHostIp: string; APort: UInt16): TTcpConn;
 var
-  Fd, Rc: Integer;
+  Fd, Rc: Int;
   Ip: UInt32;
   SA: TSockAddrIn;
 begin
@@ -383,7 +383,7 @@ end;
 type
   PConnFiberArg = ^TConnFiberArg;
   TConnFiberArg = record
-    Fd: Integer;
+    Fd: Int;
     Server: Pointer;      { TTcpServer, unretained — outlives the fiber }
   end;
 
@@ -391,7 +391,7 @@ procedure ConnFiberEntry(AArg: Pointer);
 var
   A: PConnFiberArg;
   Srv: TTcpServer;
-  Fd: Integer;
+  Fd: Int;
   Conn: TTcpConn;
 begin
   A := PConnFiberArg(AArg);
@@ -409,7 +409,7 @@ end;
 
 procedure TTcpServer.Serve(AHandler: IConnHandler);
 var
-  ConnFd: Integer;
+  ConnFd: Int;
   Arg: PConnFiberArg;
 begin
   FHandler := AHandler;

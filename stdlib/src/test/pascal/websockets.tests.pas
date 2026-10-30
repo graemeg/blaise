@@ -44,25 +44,25 @@ procedure TWebSocketsTests.TestEncodeShortText;
 var F: string;
 begin
   F := EncodeTextFrame('hi');
-  AssertEquals('len', 4, Integer(Length(F)));
-  AssertEquals('b0 fin+text', $81, Integer(Byte(F[0])));
-  AssertEquals('b1 len',      2,    Integer(Byte(F[1])));
-  AssertEquals('payload h',   104, Integer(Byte(F[2])));   { 'h' }
+  AssertEquals('len', 4, Int32(Length(F)));
+  AssertEquals('b0 fin+text', $81, Int32(Byte(F[0])));
+  AssertEquals('b1 len',      2,    Int32(Byte(F[1])));
+  AssertEquals('payload h',   104, Int32(Byte(F[2])));   { 'h' }
 end;
 
 procedure TWebSocketsTests.TestEncode126;
 var
   Payload, F: string;
-  I: Integer;
+  I: Int;
 begin
   { 200 bytes -> extended 16-bit length form (126 marker + 2 bytes). }
   Payload := '';
   for I := 1 to 200 do Payload := Payload + 'x';
   F := EncodeTextFrame(Payload);
-  AssertEquals('b1 marker', 126, Integer(Byte(F[1])));
-  AssertEquals('len hi', 0,   Integer(Byte(F[2])));
-  AssertEquals('len lo', 200, Integer(Byte(F[3])));
-  AssertEquals('total', 4 + 200, Integer(Length(F)));
+  AssertEquals('b1 marker', 126, Int32(Byte(F[1])));
+  AssertEquals('len hi', 0,   Int32(Byte(F[2])));
+  AssertEquals('len lo', 200, Int32(Byte(F[3])));
+  AssertEquals('total', 4 + 200, Int32(Length(F)));
 end;
 
 procedure TWebSocketsTests.TestRoundTripUnmasked;
@@ -86,7 +86,7 @@ var
   SB: TStringBuilder;
   Mask: array[0..3] of Byte;
   Plain: string;
-  I: Integer;
+  I: Int;
 begin
   { Hand-build a masked client text frame "ping" (clients must mask). }
   Plain := 'ping';
@@ -141,8 +141,8 @@ begin
     header must carry 4 mask bytes + payload (2 + 4 + 5 = 11 for "abcde"). }
   F := EncodeMaskedTextFrame('abcde');
   AssertTrue('mask bit set', (Byte(F[1]) and $80) <> 0);
-  AssertEquals('len field', 5, Integer(Byte(F[1]) and $7F));
-  AssertEquals('total len', 2 + 4 + 5, Integer(Length(F)));
+  AssertEquals('len field', 5, Int32(Byte(F[1]) and $7F));
+  AssertEquals('total len', 2 + 4 + 5, Int32(Length(F)));
 end;
 
 procedure TWebSocketsTests.TestEncodeMaskedKeysDiffer;

@@ -71,7 +71,7 @@ type
     unit never references libssl-bound types directly.  Read returns '' on
     EOF/close/error; Write returns True on full write; Close is idempotent. }
   IHttpTlsStream = interface
-    function Read(AMaxBytes: Integer): string;
+    function Read(AMaxBytes: Int): string;
     function Write(const AData: string): Boolean;
     procedure Close;
     function IsClosed: Boolean;
@@ -102,7 +102,7 @@ type
     FBuf: string;           { pushed-back / over-read bytes, consumed first }
     FClosed: Boolean;
     { Pull up to AMaxBytes straight from the underlying transport. }
-    function RawRead(AMaxBytes: Integer): string;
+    function RawRead(AMaxBytes: Int): string;
   public
     { Wrap a plaintext connection (takes ownership). }
     constructor CreateTcp(ATcp: TTcpConn);
@@ -111,9 +111,9 @@ type
     destructor Destroy; override;
 
     { Read up to AMaxBytes ('' on EOF/close).  Serves the pushback buffer first. }
-    function Read(AMaxBytes: Integer): string;
+    function Read(AMaxBytes: Int): string;
     { Read exactly ACount bytes (fewer only on premature EOF). }
-    function ReadFull(ACount: Integer): string;
+    function ReadFull(ACount: Int): string;
     { Read one CRLF/LF-terminated line (terminator stripped) into ALine; False on
       EOF with no data. }
     function ReadLine(out ALine: string): Boolean;
@@ -132,7 +132,7 @@ type
     lower-cased for case-insensitive lookup via Header(). }
   THttpClientResponse = class
   private
-    FStatus: Integer;
+    FStatus: Int;
     FStatusText: string;
     FBody: string;
     FHeaders: TOrderedDictionary<string, string>;
@@ -143,7 +143,7 @@ type
     { Value of header AName (any case), or '' if absent. }
     function Header(const AName: string): string;
     function HasHeader(const AName: string): Boolean;
-    property Status: Integer read FStatus write FStatus;
+    property Status: Int read FStatus write FStatus;
     property StatusText: string read FStatusText write FStatusText;
     property Body: string read FBody write FBody;
     property Headers: TOrderedDictionary<string, string> read FHeaders;
@@ -157,7 +157,7 @@ type
   THttpClient = class
   private
     FPool: TOrderedDictionary<string, THttpConn>;  { scheme:host:port -> idle conn }
-    FMaxRedirects: Integer;
+    FMaxRedirects: Int;
     FInsecureSkipVerify: Boolean;                  { loud opt-out of TLS verify }
     FTrustCaFile: string;                          { pinned private CA (PEM), or '' }
     function PoolKey(AUri: TUri): string;
@@ -181,7 +181,7 @@ type
     function Request(const AMethod, AUrl: string; AHeaders: TList<string>;
       const ABody: string): THttpClientResponse;
 
-    property MaxRedirects: Integer read FMaxRedirects write FMaxRedirects;
+    property MaxRedirects: Int read FMaxRedirects write FMaxRedirects;
 
     { When True, https requests skip peer certificate verification (dev/self-
       signed use).  Default False — verification is ON, the security default.
@@ -236,9 +236,9 @@ begin
 end;
 
 { Parse a decimal integer; return ADefault when empty or non-numeric. }
-function ParseDecimalDef(const S: string; ADefault: Integer): Integer;
+function ParseDecimalDef(const S: string; ADefault: Int): Int;
 var
-  I, N, V: Integer;
+  I, N, V: Int;
   T: string;
   B: Byte;
 begin
@@ -258,9 +258,9 @@ begin
 end;
 
 { Parse a hex chunk-size line (may carry ';ext'); return -1 on parse error. }
-function ParseHexSize(const S: string): Integer;
+function ParseHexSize(const S: string): Int;
 var
-  I, N, V, D: Integer;
+  I, N, V, D: Int;
   B: Byte;
   T: string;
 begin
@@ -289,7 +289,7 @@ end;
 { Split S on LF, stripping a trailing CR from each line. Caller owns the list. }
 function SplitLinesCRLF(const S: string): TList<string>;
 var
-  I, N, Start: Integer;
+  I, N, Start: Int;
   Line: string;
 begin
   Result := TList<string>.Create();
@@ -364,7 +364,7 @@ begin
   inherited Destroy();
 end;
 
-function THttpConn.RawRead(AMaxBytes: Integer): string;
+function THttpConn.RawRead(AMaxBytes: Int): string;
 begin
   if FTls <> nil then
     Result := FTls.Read(AMaxBytes)
@@ -374,9 +374,9 @@ begin
     Result := '';
 end;
 
-function THttpConn.Read(AMaxBytes: Integer): string;
+function THttpConn.Read(AMaxBytes: Int): string;
 var
-  Take: Integer;
+  Take: Int;
 begin
   if FBuf <> '' then
   begin
@@ -390,11 +390,11 @@ begin
   Result := Self.RawRead(AMaxBytes);
 end;
 
-function THttpConn.ReadFull(ACount: Integer): string;
+function THttpConn.ReadFull(ACount: Int): string;
 var
   SB: TStringBuilder;
   Chunk: string;
-  Got: Integer;
+  Got: Int;
 begin
   SB := TStringBuilder.Create();
   Got := 0;
@@ -414,7 +414,7 @@ function THttpConn.ReadLine(out ALine: string): Boolean;
 var
   SB: TStringBuilder;
   Acc, Chunk: string;
-  Nl: Integer;
+  Nl: Int;
 begin
   SB := TStringBuilder.Create();
   ALine := '';
@@ -520,7 +520,7 @@ procedure ParseHead(const ARawHead: string; AResp: THttpClientResponse);
 var
   Lines: TList<string>;
   StatusLine, Line, Name, Val, LName: string;
-  I, Sp1, Sp2, Colon: Integer;
+  I, Sp1, Sp2, Colon: Int;
 begin
   Lines := SplitLinesCRLF(ARawHead);
   if Lines.Count = 0 then
@@ -565,7 +565,7 @@ end;
 
 function ParseResponse(const ARaw: string): THttpClientResponse;
 var
-  Sep, HeadLen: Integer;
+  Sep, HeadLen: Int;
   Head: string;
   Resp: THttpClientResponse;
 begin
@@ -592,7 +592,7 @@ function ReadResponseHead(AConn: THttpConn; out AHead: string): Boolean;
 var
   SB: TStringBuilder;
   Chunk, Acc: string;
-  Sep: Integer;
+  Sep: Int;
 begin
   SB := TStringBuilder.Create();
   while True do
@@ -623,7 +623,7 @@ function ReadBodyChunked(AConn: THttpConn): string;
 var
   SB: TStringBuilder;
   SizeLine, Data, Crlf: string;
-  Size: Integer;
+  Size: Int;
 begin
   SB := TStringBuilder.Create();
   while True do
@@ -668,12 +668,12 @@ end;
 { ---- request-head building ------------------------------------------------ }
 
 function BuildRequestHead(const AMethod, ATarget, AHost: string;
-  APort, ADefaultPort: Integer; AHeaders: TList<string>;
+  APort, ADefaultPort: Int; AHeaders: TList<string>;
   const ABody: string): string;
 var
   SB: TStringBuilder;
   HostHdr: string;
-  I: Integer;
+  I: Int;
 begin
   SB := TStringBuilder.Create();
   SB.Append(AMethod);
@@ -721,7 +721,7 @@ end;
 
 destructor THttpClient.Destroy;
 var
-  I: Integer;
+  I: Int;
   Conn: THttpConn;
 begin
   for I := 0 to FPool.Count - 1 do
@@ -817,7 +817,7 @@ var
   Key, Head, Target, Te: string;
   Conn: THttpConn;
   Resp: THttpClientResponse;
-  ContentLen: Integer;
+  ContentLen: Int;
 begin
   Result := nil;
 
@@ -889,7 +889,7 @@ var
   Uri: TUri;
   Resp: THttpClientResponse;
   Method, CurUrl, Loc, Body: string;
-  Redirects: Integer;
+  Redirects: Int;
 begin
   Method := AMethod;
   CurUrl := AUrl;

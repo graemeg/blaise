@@ -57,17 +57,17 @@ type
 
   TJSONFrame = record
     Kind:  TJSONContainerKind;
-    Count: Integer;            { members/elements emitted so far }
+    Count: Int;            { members/elements emitted so far }
   end;
 
   TJSONWriter = class
   private
     FSB:      TStringBuilder;
     FPretty:  Boolean;
-    FIndent:  Integer;            { spaces per level when pretty }
+    FIndent:  Int;            { spaces per level when pretty }
     FStack:   array of TJSONFrame;
     FPending: Boolean;            { a key was written; the next value fills it }
-    procedure NewlineIndent(ALevel: Integer);
+    procedure NewlineIndent(ALevel: Int);
     procedure PreValue;           { emit element separator / newline as needed }
     procedure WriteEscaped(const S: string);
   public
@@ -107,7 +107,7 @@ type
     procedure Reset;
 
     property Pretty: Boolean read FPretty write FPretty;
-    property Indent: Integer read FIndent write FIndent;
+    property Indent: Int read FIndent write FIndent;
   end;
 
 { Escape a string's contents per RFC 8259 (no surrounding quotes added). }
@@ -118,7 +118,7 @@ implementation
 function JSONEscape(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Integer;
+  I, N: Int;
   B: Byte;
 const
   Hex = '0123456789abcdef';
@@ -165,9 +165,9 @@ begin
   inherited Destroy();
 end;
 
-procedure TJSONWriter.NewlineIndent(ALevel: Integer);
+procedure TJSONWriter.NewlineIndent(ALevel: Int);
 var
-  I: Integer;
+  I: Int;
 begin
   if not FPretty then
     Exit;
@@ -186,7 +186,7 @@ end;
   level nothing is needed. }
 procedure TJSONWriter.PreValue;
 var
-  Top: Integer;
+  Top: Int;
 begin
   if FPending then
   begin
@@ -221,7 +221,7 @@ end;
 
 procedure TJSONWriter.EndObject;
 var
-  Cnt: Integer;
+  Cnt: Int;
 begin
   Cnt := FStack[Length(FStack) - 1].Count;
   SetLength(FStack, Length(FStack) - 1);
@@ -241,7 +241,7 @@ end;
 
 procedure TJSONWriter.EndArray;
 var
-  Cnt: Integer;
+  Cnt: Int;
 begin
   Cnt := FStack[Length(FStack) - 1].Count;
   SetLength(FStack, Length(FStack) - 1);
@@ -252,7 +252,7 @@ end;
 
 procedure TJSONWriter.WriteKey(const AName: string);
 var
-  Top: Integer;
+  Top: Int;
 begin
   Top := Length(FStack) - 1;
   if (Top < 0) or (FStack[Top].Kind <> ckObject) then

@@ -91,7 +91,7 @@ type
 
     { Sign of the amount.
       @returns -1 if negative, 0 if zero, +1 if positive. }
-    function Sign: Integer;
+    function Sign: Int;
 
     { Sum of Self and B.  Both must be the same currency; the result is in that
       currency, normalised to its scale.  The no-mode form uses banker's
@@ -133,13 +133,13 @@ type
       needed.  The currency is preserved.
       @param Quantity the integer multiplier.
       @returns Self * Quantity. }
-    function MultiplyInt(Quantity: Integer): TMoney;
+    function MultiplyInt(Quantity: Int): TMoney;
 
     { Three-way comparison by amount.  Both must be the same currency.
       @param B the amount to compare against.
       @returns -1 if Self < B, 0 if equal, +1 if Self > B.
       @raises EMoneyMismatch if the currencies differ. }
-    function Compare(const B: TMoney): Integer;
+    function Compare(const B: TMoney): Int32;
 
     { Value equality: same currency AND equal amount.  Unlike Compare, this does
       NOT raise on a currency mismatch — two amounts in different currencies are
@@ -173,8 +173,8 @@ type
     class operator Negative(const A: TMoney): TMoney;
     class operator Multiply(const A: TMoney; const B: TDecimal): TMoney;
     class operator Multiply(const A: TDecimal; const B: TMoney): TMoney;
-    class operator Multiply(const A: TMoney; B: Integer): TMoney;
-    class operator Multiply(A: Integer; const B: TMoney): TMoney;
+    class operator Multiply(const A: TMoney; B: Int): TMoney;
+    class operator Multiply(A: Int; const B: TMoney): TMoney;
     class operator Equal(const A, B: TMoney): Boolean;
     class operator NotEqual(const A, B: TMoney): Boolean;
     class operator LessThan(const A, B: TMoney): Boolean;
@@ -223,7 +223,7 @@ function MoneyFromDecimal(const AAmount: TDecimal; const ACurrency: string;
   @param AAmount  the whole-unit integer amount.
   @param ACurrency the ISO-4217 code (case-insensitive; stored upper-case).
   @returns the money value. }
-function MoneyFromInt(AAmount: Integer; const ACurrency: string): TMoney;
+function MoneyFromInt(AAmount: Int; const ACurrency: string): TMoney;
 
 { A zero amount in the given currency, at the currency scale.
   @param ACurrency the ISO-4217 code (case-insensitive; stored upper-case).
@@ -239,7 +239,7 @@ function MoneyZero(const ACurrency: string): TMoney;
   return the fallback scale 2.  The lookup is case-insensitive.
   @param ACurrency the ISO-4217 code.
   @returns the default fraction-digit count for that currency. }
-function CurrencyScale(const ACurrency: string): Integer;
+function CurrencyScale(const ACurrency: string): Int;
 
 implementation
 
@@ -247,7 +247,7 @@ const
   { Fallback minor-unit scale for currencies the registry does not list. }
   cDefaultScale = 2;
 
-function CurrencyScale(const ACurrency: string): Integer;
+function CurrencyScale(const ACurrency: string): Int;
 var
   C: string;
 begin
@@ -328,7 +328,7 @@ begin
   Result := MakeMoneyS(AAmount, ACurrency, Strategy);
 end;
 
-function MoneyFromInt(AAmount: Integer; const ACurrency: string): TMoney;
+function MoneyFromInt(AAmount: Int; const ACurrency: string): TMoney;
 begin
   Result := MakeMoney(DecFromInt(AAmount), ACurrency);
 end;
@@ -362,7 +362,7 @@ begin
   Result := Self.FAmount.IsZero();
 end;
 
-function TMoney.Sign: Integer;
+function TMoney.Sign: Int;
 begin
   Result := Self.FAmount.Sign();
 end;
@@ -431,7 +431,7 @@ begin
   Result := Self.Multiply(Factor, StandardRounding(rmHalfEven));
 end;
 
-function TMoney.MultiplyInt(Quantity: Integer): TMoney;
+function TMoney.MultiplyInt(Quantity: Int): TMoney;
 var
   Prod: TDecimal;
 begin
@@ -439,7 +439,7 @@ begin
   Result := MakeMoney(Prod, Self.FCurrency);
 end;
 
-function TMoney.Compare(const B: TMoney): Integer;
+function TMoney.Compare(const B: TMoney): Int32;
 begin
   RequireSameCurrency(Self, B, 'compare');
   Result := Self.FAmount.Compare(B.FAmount);
@@ -492,12 +492,12 @@ begin
   Result := B.Multiply(A);
 end;
 
-class operator TMoney.Multiply(const A: TMoney; B: Integer): TMoney;
+class operator TMoney.Multiply(const A: TMoney; B: Int): TMoney;
 begin
   Result := A.MultiplyInt(B);
 end;
 
-class operator TMoney.Multiply(A: Integer; const B: TMoney): TMoney;
+class operator TMoney.Multiply(A: Int; const B: TMoney): TMoney;
 begin
   Result := B.MultiplyInt(A);
 end;

@@ -297,12 +297,12 @@ type
   straight to a lookup) that pair is AddRef(0->1)/Release(1->0) = FREE, and
   the caller's still-owned string dies under it.  The value-typed overloads
   carry no ARC and need no `const`. }
-function GCHashOf(const AValue: string): Integer; overload;
-function GCHashOf(AValue: Integer): Integer; overload;
-function GCHashOf(AValue: Int64): Integer; overload;
-function GCHashOf(AValue: Pointer): Integer; overload;
-function GCHashOf(AValue: Boolean): Integer; overload;
-function GCHashOf(AValue: Float64): Integer; overload;
+function GCHashOf(const AValue: string): Int32; overload;
+function GCHashOf(AValue: Int32): Int32; overload;
+function GCHashOf(AValue: Int64): Int32; overload;
+function GCHashOf(AValue: Pointer): Int32; overload;
+function GCHashOf(AValue: Boolean): Int32; overload;
+function GCHashOf(AValue: Float64): Int32; overload;
 
 const
   { Below this size a linear scan beats building a hash table.  Interface
@@ -316,7 +316,7 @@ implementation
 { GCHashOf — key hashing overloads                                     }
 { ------------------------------------------------------------------ }
 
-function GCHashOf(const AValue: string): Integer; overload;
+function GCHashOf(const AValue: string): Int32; overload;
 var
   I: Int;
 begin
@@ -326,23 +326,23 @@ begin
     Result := (Result xor Ord(AValue[I])) * 16777619;
 end;
 
-function GCHashOf(AValue: Integer): Integer; overload;
+function GCHashOf(AValue: Int32): Int32; overload;
 begin
   { Knuth multiplicative mix (2654435761 as signed 32-bit). }
   Result := AValue * -1640531527;
 end;
 
-function GCHashOf(AValue: Int64): Integer; overload;
+function GCHashOf(AValue: Int64): Int32; overload;
 begin
-  Result := Integer(AValue xor (AValue shr 32)) * -1640531527;
+  Result := Int32(AValue xor (AValue shr 32)) * -1640531527;
 end;
 
-function GCHashOf(AValue: Pointer): Integer; overload;
+function GCHashOf(AValue: Pointer): Int32; overload;
 begin
   Result := GCHashOf(Int64(AValue));
 end;
 
-function GCHashOf(AValue: Boolean): Integer; overload;
+function GCHashOf(AValue: Boolean): Int32; overload;
 begin
   if AValue then
     Result := 1
@@ -353,7 +353,7 @@ end;
 type
   PGCDoubleBits = ^Int64;
 
-function GCHashOf(AValue: Float64): Integer; overload;
+function GCHashOf(AValue: Float64): Int32; overload;
 begin
   { The containers compare keys with '=', under which +0.0 and -0.0 are
     equal although their bits differ, so both hash as zero.  Any other value
@@ -477,7 +477,7 @@ function TList<T>.BinarySearch(AItem: T; C: TComparison<T>;
                                out AIndex: Int): Boolean;
 var
   Lo, Hi, Mid: Int;
-  Cmp: Integer;
+  Cmp: Int;
 begin
   Result := False;
   Lo := 0;

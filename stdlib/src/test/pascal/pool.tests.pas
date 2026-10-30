@@ -52,8 +52,8 @@ uses
   runtime.atomic;
 
 { RTL / libc probes. }
-function _MemArenaCount: Integer; external name '_MemArenaCount';
-function _MemAbandonedArenaCount: Integer;
+function _MemArenaCount: Int32; external name '_MemArenaCount';
+function _MemAbandonedArenaCount: Int32;
   external name '_MemAbandonedArenaCount';
 { pthread_self: the opaque thread id of the calling OS thread.  Used only to
   prove peer-thread identity is REUSED across batches (no pthread_create on
@@ -61,10 +61,10 @@ function _MemAbandonedArenaCount: Integer;
 function pthread_self: Int64; external name 'pthread_self';
 
 var
-  GPoolCounter: Integer;
-  GPoolSum: Integer;
-  GPoolFinallyRan: Integer;
-  GPoolCancelObserved: Integer;
+  GPoolCounter: Int;
+  GPoolSum: Int;
+  GPoolFinallyRan: Int;
+  GPoolCancelObserved: Int;
 
 { --- basic: one batch on the pool ------------------------------------------ }
 
@@ -72,14 +72,14 @@ procedure PoolTally(Arg: Pointer);
 begin
   FiberYield();
   _AtomicAddInt32(@GPoolCounter, 1);
-  _AtomicAddInt32(@GPoolSum, Integer(Arg));
+  _AtomicAddInt32(@GPoolSum, Int32(Arg));
 end;
 
 procedure TPoolTests.TestPool_BasicRunToCompletion;
 const
   K = 400;
 var
-  I, ExpectedSum: Integer;
+  I, ExpectedSum: Int;
 begin
   GPoolCounter := 0;
   GPoolSum := 0;
@@ -108,7 +108,7 @@ end;
   claimed-but-unwritten slot that skews the count). }
 var
   GTidSlots: array[0..63] of Int64;
-  GTidCount: Integer;
+  GTidCount: Int;
   GTidLock: Int64;              { 0 = free, 1 = held (spinlock word) }
 
 procedure TidLockAcquire;
@@ -126,7 +126,7 @@ end;
 procedure RecordTidWorker(Arg: Pointer);
 var
   Tid: Int64;
-  I: Integer;
+  I: Int;
   Seen: Boolean;
 begin
   Tid := pthread_self();
@@ -147,7 +147,7 @@ begin
   _AtomicAddInt32(@GPoolCounter, 1);
 end;
 
-function DistinctTids: Integer;
+function DistinctTids: Int;
 begin
   Result := GTidCount;          { the set is already deduplicated on insert }
 end;
@@ -157,8 +157,8 @@ const
   BATCHES = 3;
   PER = 300;
 var
-  B, I: Integer;
-  AfterBatch1: Integer;
+  B, I: Int;
+  AfterBatch1: Int;
 begin
   GTidCount := 0;
   GTidLock := 0;
@@ -209,12 +209,12 @@ end;
 { --- work stealing + channels under the pool ------------------------------- }
 
 var
-  GPoolChannel: TChannel<Integer>;
-  GPoolChSum: Integer;
+  GPoolChannel: TChannel<Int>;
+  GPoolChSum: Int;
 
 procedure BurstSpawnPool(Arg: Pointer);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 799 do
     SpawnFiber(@PoolTally, Pointer(1));
@@ -222,11 +222,11 @@ end;
 
 procedure ChanSendWorker(Arg: Pointer);
 var
-  L: TList<Integer>;
-  V: Integer;
+  L: TList<Int>;
+  V: Int;
 begin
-  L := TList<Integer>.Create();
-  L.Add(Integer(Arg));
+  L := TList<Int>.Create();
+  L.Add(Int32(Arg));
   FiberYield();
   V := L[0];
   L.Free();
@@ -236,10 +236,10 @@ end;
 
 procedure ChanDrainWorker(Arg: Pointer);
 var
-  V, Got: Integer;
+  V, Got: Int;
 begin
   Got := 0;
-  while Got < Integer(Arg) do
+  while Got < Int32(Arg) do
   begin
     if GPoolChannel.Recv(V) then
     begin
@@ -255,7 +255,7 @@ procedure TPoolTests.TestPool_WorkStealingAndChannels;
 const
   NCH = 2000;
 var
-  I: Integer;
+  I: Int;
 begin
   FiberPoolStart(4);
 
@@ -270,7 +270,7 @@ begin
   { Batch 2 on the SAME pool: channel hand-off under contention. }
   GPoolCounter := 0;
   GPoolChSum := 0;
-  GPoolChannel := TChannel<Integer>.Create(256);
+  GPoolChannel := TChannel<Int>.Create(256);
   SpawnFiber(@ChanDrainWorker, Pointer(NCH));
   for I := 0 to NCH - 1 do
     SpawnFiber(@ChanSendWorker, Pointer(1));
@@ -293,7 +293,7 @@ end;
 procedure TgDriver(Arg: Pointer);
 var
   Group: TTaskGroup;
-  I: Integer;
+  I: Int;
 begin
   Group := TTaskGroup.Create();
   try
@@ -341,13 +341,13 @@ end;
 
 procedure PoolSleepTally(Arg: Pointer);
 begin
-  FiberSleep(Integer(Arg));
+  FiberSleep(Int32(Arg));
   _AtomicAddInt32(@GPoolCounter, 1);
 end;
 
 procedure TPoolTests.TestPool_CancellationUnderPool;
 var
-  I: Integer;
+  I: Int;
   Started, Elapsed: Int64;
 begin
   FiberPoolStart(4);
@@ -383,11 +383,11 @@ end;
 
 procedure PlateauWorker(Arg: Pointer);
 var
-  L: TList<Integer>;
-  V: Integer;
+  L: TList<Int>;
+  V: Int;
 begin
-  L := TList<Integer>.Create();
-  L.Add(Integer(Arg));
+  L := TList<Int>.Create();
+  L.Add(Int32(Arg));
   FiberYield();               { provoke stealing/migration }
   V := L[0];
   L.Free();                   { may be freed on a different worker }
@@ -397,10 +397,10 @@ end;
 
 procedure PlateauDrain(Arg: Pointer);
 var
-  V, Got: Integer;
+  V, Got: Int;
 begin
   Got := 0;
-  while Got < Integer(Arg) do
+  while Got < Int32(Arg) do
     if GPoolChannel.Recv(V) then
       Got := Got + 1
     else
@@ -412,7 +412,7 @@ const
   ROUNDS = 20;
   PER = 3000;
 var
-  R, I, C, First, Last, PerRound: Integer;
+  R, I, C, First, Last, PerRound: Int;
 begin
   { What this test asserts (and what it deliberately does NOT):
 
@@ -438,7 +438,7 @@ begin
   for R := 0 to ROUNDS - 1 do
   begin
     GPoolCounter := 0;
-    GPoolChannel := TChannel<Integer>.Create(256);
+    GPoolChannel := TChannel<Int>.Create(256);
     SpawnFiber(@PlateauDrain, Pointer(PER));
     for I := 0 to PER - 1 do
       SpawnFiber(@PlateauWorker, Pointer(1));
@@ -476,7 +476,7 @@ procedure TPoolTests.TestPool_RunSchedulerMcBackCompat;
 const
   K = 300;
 var
-  I, ExpectedSum: Integer;
+  I, ExpectedSum: Int;
 begin
   { The classic create-run-teardown-per-call path must be unchanged. }
   GPoolCounter := 0;

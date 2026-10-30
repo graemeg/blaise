@@ -54,7 +54,7 @@ type
     FSsl: Pointer;         { SSL* }
     FRbio: Pointer;        { BIO* memory bio, ciphertext IN  (peer -> us) }
     FWbio: Pointer;        { BIO* memory bio, ciphertext OUT (us   -> peer) }
-    FFd: Integer;          { transport socket fd, unretained }
+    FFd: Int;          { transport socket fd, unretained }
     FClosed: Boolean;
     FServer: Boolean;
     { Drain wbio to the socket (FiberSend all pending ciphertext). }
@@ -65,11 +65,11 @@ type
     { Retry loop shared by Handshake/Read/Write: given the SSL_get_error code
       after an SSL op, pump the BIOs and return True to retry, False to stop
       (fatal / EOF). }
-    function DriveIo(AErr: Integer): Boolean;
+    function DriveIo(AErr: Int): Boolean;
   public
     { Wrap an SSL object (already created + configured by the context) around
       the transport fd.  Creates the two memory BIOs and attaches them. }
-    constructor Create(ASsl: Pointer; AFd: Integer; AIsServer: Boolean);
+    constructor Create(ASsl: Pointer; AFd: Int; AIsServer: Boolean);
     destructor Destroy; override;
 
     { Complete the TLS handshake (parking the fiber while the network round-trip
@@ -79,7 +79,7 @@ type
 
     { Read up to AMaxBytes of PLAINTEXT.  Returns the bytes read; '' on clean
       close-notify / EOF / error (see Closed). }
-    function Read(AMaxBytes: Integer): string;
+    function Read(AMaxBytes: Int): string;
 
     { Write all of ADATA as plaintext (encrypted on the wire).  Returns True
       when every byte was accepted, False on error / peer close. }
@@ -89,7 +89,7 @@ type
       Does NOT close the transport fd. }
     procedure Close;
 
-    property Fd: Integer read FFd;
+    property Fd: Int read FFd;
     property Closed: Boolean read FClosed;
   end;
 
@@ -108,7 +108,7 @@ type
       hostname-verification check (pass '' to skip SNI/host-match — only sensible
       when the context was created with verification off).  For a server,
       AHostName is ignored. }
-    function NewConn(AFd: Integer; const AHostName: string): TTlsConn;
+    function NewConn(AFd: Int; const AHostName: string): TTlsConn;
 
     { Trust the CA certificate(s) in APemPath for peer verification (client
       contexts).  Use to pin a private/self-signed CA in addition to (or instead
@@ -189,7 +189,7 @@ const
   OPENSSL_INIT_DEFAULT = 0;
 
 { --- libssl --- }
-function c_OPENSSL_init_ssl(AOpts: UInt64; ASettings: Pointer): Integer;
+function c_OPENSSL_init_ssl(AOpts: UInt64; ASettings: Pointer): Int32;
   external 'ssl' name 'OPENSSL_init_ssl';
 function c_TLS_client_method: Pointer;
   external 'ssl' name 'TLS_client_method';
@@ -199,17 +199,17 @@ function c_SSL_CTX_new(AMethod: Pointer): Pointer;
   external 'ssl' name 'SSL_CTX_new';
 procedure c_SSL_CTX_free(ACtx: Pointer);
   external 'ssl' name 'SSL_CTX_free';
-procedure c_SSL_CTX_set_verify(ACtx: Pointer; AMode: Integer; ACb: Pointer);
+procedure c_SSL_CTX_set_verify(ACtx: Pointer; AMode: Int32; ACb: Pointer);
   external 'ssl' name 'SSL_CTX_set_verify';
-function c_SSL_CTX_set_default_verify_paths(ACtx: Pointer): Integer;
+function c_SSL_CTX_set_default_verify_paths(ACtx: Pointer): Int32;
   external 'ssl' name 'SSL_CTX_set_default_verify_paths';
-function c_SSL_CTX_load_verify_locations(ACtx: Pointer; ACAFile, ACAPath: PChar): Integer;
+function c_SSL_CTX_load_verify_locations(ACtx: Pointer; ACAFile, ACAPath: PChar): Int32;
   external 'ssl' name 'SSL_CTX_load_verify_locations';
-function c_SSL_CTX_use_certificate_file(ACtx: Pointer; AFile: PChar; AType: Integer): Integer;
+function c_SSL_CTX_use_certificate_file(ACtx: Pointer; AFile: PChar; AType: Int32): Int32;
   external 'ssl' name 'SSL_CTX_use_certificate_file';
-function c_SSL_CTX_use_certificate_chain_file(ACtx: Pointer; AFile: PChar): Integer;
+function c_SSL_CTX_use_certificate_chain_file(ACtx: Pointer; AFile: PChar): Int32;
   external 'ssl' name 'SSL_CTX_use_certificate_chain_file';
-function c_SSL_CTX_use_PrivateKey_file(ACtx: Pointer; AFile: PChar; AType: Integer): Integer;
+function c_SSL_CTX_use_PrivateKey_file(ACtx: Pointer; AFile: PChar; AType: Int32): Int32;
   external 'ssl' name 'SSL_CTX_use_PrivateKey_file';
 function c_SSL_new(ACtx: Pointer): Pointer;
   external 'ssl' name 'SSL_new';
@@ -217,23 +217,23 @@ procedure c_SSL_free(ASsl: Pointer);
   external 'ssl' name 'SSL_free';
 procedure c_SSL_set_bio(ASsl: Pointer; ARbio, AWbio: Pointer);
   external 'ssl' name 'SSL_set_bio';
-function c_SSL_ctrl(ASsl: Pointer; ACmd: Integer; ALarg: Int64; AParg: Pointer): Int64;
+function c_SSL_ctrl(ASsl: Pointer; ACmd: Int32; ALarg: Int64; AParg: Pointer): Int64;
   external 'ssl' name 'SSL_ctrl';
-function c_SSL_set1_host(ASsl: Pointer; AHostName: PChar): Integer;
+function c_SSL_set1_host(ASsl: Pointer; AHostName: PChar): Int32;
   external 'ssl' name 'SSL_set1_host';
 procedure c_SSL_set_connect_state(ASsl: Pointer);
   external 'ssl' name 'SSL_set_connect_state';
 procedure c_SSL_set_accept_state(ASsl: Pointer);
   external 'ssl' name 'SSL_set_accept_state';
-function c_SSL_do_handshake(ASsl: Pointer): Integer;
+function c_SSL_do_handshake(ASsl: Pointer): Int32;
   external 'ssl' name 'SSL_do_handshake';
-function c_SSL_read(ASsl: Pointer; ABuf: Pointer; ANum: Integer): Integer;
+function c_SSL_read(ASsl: Pointer; ABuf: Pointer; ANum: Int32): Int32;
   external 'ssl' name 'SSL_read';
-function c_SSL_write(ASsl: Pointer; ABuf: Pointer; ANum: Integer): Integer;
+function c_SSL_write(ASsl: Pointer; ABuf: Pointer; ANum: Int32): Int32;
   external 'ssl' name 'SSL_write';
-function c_SSL_get_error(ASsl: Pointer; ARet: Integer): Integer;
+function c_SSL_get_error(ASsl: Pointer; ARet: Int32): Int32;
   external 'ssl' name 'SSL_get_error';
-function c_SSL_shutdown(ASsl: Pointer): Integer;
+function c_SSL_shutdown(ASsl: Pointer): Int32;
   external 'ssl' name 'SSL_shutdown';
 function c_SSL_get_verify_result(ASsl: Pointer): Int64;
   external 'ssl' name 'SSL_get_verify_result';
@@ -243,9 +243,9 @@ function c_BIO_new(AType: Pointer): Pointer;
   external 'crypto' name 'BIO_new';
 function c_BIO_s_mem: Pointer;
   external 'crypto' name 'BIO_s_mem';
-function c_BIO_read(ABio: Pointer; ABuf: Pointer; ALen: Integer): Integer;
+function c_BIO_read(ABio: Pointer; ABuf: Pointer; ALen: Int32): Int32;
   external 'crypto' name 'BIO_read';
-function c_BIO_write(ABio: Pointer; ABuf: Pointer; ALen: Integer): Integer;
+function c_BIO_write(ABio: Pointer; ABuf: Pointer; ALen: Int32): Int32;
   external 'crypto' name 'BIO_write';
 
 { SSL_set_tlsext_host_name(s, name) macro, replicated over SSL_ctrl.  The name
@@ -276,7 +276,7 @@ const
   { Ciphertext pump chunk (bytes drained from/into a memory BIO per iteration). }
   PUMP_CHUNK = 16384;
 
-constructor TTlsConn.Create(ASsl: Pointer; AFd: Integer; AIsServer: Boolean);
+constructor TTlsConn.Create(ASsl: Pointer; AFd: Int; AIsServer: Boolean);
 begin
   FSsl := ASsl;
   FFd := AFd;
@@ -297,8 +297,8 @@ end;
 function TTlsConn.FlushOut: Boolean;
 var
   Buf: Pointer;
-  N: Integer;
-  Off, Total: Integer;
+  N: Int;
+  Off, Total: Int;
   P: PChar;
   Sent: Int64;
 begin
@@ -322,7 +322,7 @@ begin
           Result := False;
           Exit;
         end;
-        Off := Off + Integer(Sent);
+        Off := Off + Int32(Sent);
       end;
     end;
   finally
@@ -334,7 +334,7 @@ function TTlsConn.PumpIn: Int64;
 var
   Buf: Pointer;
   N: Int64;
-  W: Integer;
+  W: Int;
 begin
   Buf := GetMem(PUMP_CHUNK);
   try
@@ -342,8 +342,8 @@ begin
     if N > 0 then
     begin
       { Feed the ciphertext into rbio for OpenSSL to consume. }
-      W := c_BIO_write(FRbio, Buf, Integer(N));
-      if W <> Integer(N) then
+      W := c_BIO_write(FRbio, Buf, Int32(N));
+      if W <> Int32(N) then
         Exit(-1);                 { rbio should never short-write a mem bio }
     end;
     Result := N;                  { >0 progress, 0 EOF, <0 error/timeout }
@@ -352,7 +352,7 @@ begin
   end;
 end;
 
-function TTlsConn.DriveIo(AErr: Integer): Boolean;
+function TTlsConn.DriveIo(AErr: Int): Boolean;
 var
   N: Int64;
 begin
@@ -382,7 +382,7 @@ end;
 
 function TTlsConn.Handshake: Boolean;
 var
-  Rc, Err: Integer;
+  Rc, Err: Int;
 begin
   if FServer then
     c_SSL_set_accept_state(FSsl)
@@ -407,10 +407,10 @@ begin
   end;
 end;
 
-function TTlsConn.Read(AMaxBytes: Integer): string;
+function TTlsConn.Read(AMaxBytes: Int): string;
 var
   Buf: Pointer;
-  Rc, Err: Integer;
+  Rc, Err: Int;
 begin
   Result := '';
   if (AMaxBytes <= 0) or FClosed then
@@ -445,8 +445,8 @@ end;
 
 function TTlsConn.Write(const AData: string): Boolean;
 var
-  Total, Off: Integer;
-  Rc, Err: Integer;
+  Total, Off: Int;
+  Rc, Err: Int;
   P: PChar;
 begin
   Total := Length(AData);
@@ -518,7 +518,7 @@ begin
   inherited Destroy();
 end;
 
-function TTlsContext.NewConn(AFd: Integer; const AHostName: string): TTlsConn;
+function TTlsContext.NewConn(AFd: Int; const AHostName: string): TTlsConn;
 var
   Ssl: Pointer;
 begin

@@ -45,11 +45,11 @@ type
   TXMLParser = class
   private
     FText: string;
-    FPos: Integer;
-    FLen: Integer;
+    FPos: Int;
+    FLen: Int;
     FPreserveWhitespace: Boolean;
     procedure Fail(const AMsg: string);
-    function Peek: Integer;                   { current byte, or -1 at end }
+    function Peek: Int;                   { current byte, or -1 at end }
     function Match(const S: string): Boolean; { does S start at FPos? }
     procedure Expect(const S: string);        { Match + consume, or Fail }
     procedure SkipWhitespace;
@@ -80,12 +80,12 @@ implementation
 { helpers                                                             }
 { ------------------------------------------------------------------ }
 
-function XPIsWhitespace(C: Integer): Boolean;
+function XPIsWhitespace(C: Int): Boolean;
 begin
   Result := (C = 32) or (C = 9) or (C = 10) or (C = 13);
 end;
 
-function XPIsNameStart(C: Integer): Boolean;
+function XPIsNameStart(C: Int): Boolean;
 begin
   Result := ((C >= Ord('a')) and (C <= Ord('z')))
     or ((C >= Ord('A')) and (C <= Ord('Z')))
@@ -93,7 +93,7 @@ begin
     or (C >= 128);   { multi-byte UTF-8 name characters pass through }
 end;
 
-function XPIsNameChar(C: Integer): Boolean;
+function XPIsNameChar(C: Int): Boolean;
 begin
   Result := XPIsNameStart(C)
     or ((C >= Ord('0')) and (C <= Ord('9')))
@@ -102,7 +102,7 @@ end;
 
 function XPIsAllWhitespace(const S: string): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := True;
   I := 0;
@@ -117,7 +117,7 @@ begin
   end;
 end;
 
-function XPHexVal(AByte: Integer): Integer;
+function XPHexVal(AByte: Int): Int;
 begin
   if (AByte >= Ord('0')) and (AByte <= Ord('9')) then
     Result := AByte - Ord('0')
@@ -146,7 +146,7 @@ begin
   raise EXMLParseError.Create(AMsg + ' at offset ' + IntToStr(FPos));
 end;
 
-function TXMLParser.Peek: Integer;
+function TXMLParser.Peek: Int;
 begin
   if FPos < FLen then
     Result := Byte(FText[FPos])
@@ -176,7 +176,7 @@ end;
 
 procedure TXMLParser.SkipDoctype;
 var
-  C, Depth: Integer;
+  C, Depth: Int;
 begin
   FPos := FPos + 9;          { consume '<!DOCTYPE' }
   Depth := 0;
@@ -220,7 +220,7 @@ end;
 
 function TXMLParser.ParseName: string;
 var
-  Start: Integer;
+  Start: Int;
 begin
   Result := '';
   if not XPIsNameStart(Peek()) then
@@ -233,7 +233,7 @@ end;
 
 function TXMLParser.DecodeEntity: string;
 var
-  C, CP, D, Start: Integer;
+  C, CP, D, Start: Int;
   IsHex, GotDigit: Boolean;
   Name: string;
 begin
@@ -300,7 +300,7 @@ end;
 
 function TXMLParser.ParseAttrValue: string;
 var
-  Q, C: Integer;
+  Q, C: Int;
   SB: TStringBuilder;
 begin
   Result := '';
@@ -335,7 +335,7 @@ end;
 
 function TXMLParser.ParseTextRun: string;
 var
-  C: Integer;
+  C: Int;
   SB: TStringBuilder;
 begin
   SB := TStringBuilder.Create();
@@ -358,7 +358,7 @@ end;
 
 function TXMLParser.ParseComment: string;
 var
-  Start: Integer;
+  Start: Int;
 begin
   Result := '';
   Start := FPos;
@@ -372,7 +372,7 @@ end;
 
 function TXMLParser.ParseCData: string;
 var
-  Start: Integer;
+  Start: Int;
 begin
   Result := '';
   Start := FPos;
@@ -386,7 +386,7 @@ end;
 
 procedure TXMLParser.ParsePI(var ATarget, AContent: string);
 var
-  Start: Integer;
+  Start: Int;
 begin
   ATarget := ParseName();
   SkipWhitespace();
@@ -401,7 +401,7 @@ end;
 
 procedure TXMLParser.ParseDeclaration(ADoc: TXMLDocument);
 var
-  AfterXml: Integer;
+  AfterXml: Int;
   AttrName, AttrVal: string;
 begin
   if not Match('<?xml') then
@@ -441,7 +441,7 @@ function TXMLParser.ParseElement: TXMLElement;
 var
   Elem: TXMLElement;
   AttrName, AttrVal: string;
-  C: Integer;
+  C: Int;
 begin
   Result := nil;
   Expect('<');

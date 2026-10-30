@@ -35,9 +35,9 @@ uses
 
 procedure TFunctionalTests.TestFunc_AliasResolvesAndInvokes;
 var
-  F: TFunc<Integer, string>;
+  F: TFunc<Int, string>;
 begin
-  F := function(AArg: Integer): string
+  F := function(AArg: Int): string
     begin
       Result := 'v' + IntToStr(AArg)
     end;
@@ -46,9 +46,9 @@ end;
 
 procedure TFunctionalTests.TestPredicate_AliasResolvesAndInvokes;
 var
-  P: TPredicate<Integer>;
+  P: TPredicate<Int>;
 begin
-  P := function(AValue: Integer): Boolean
+  P := function(AValue: Int): Boolean
     begin
       Result := AValue > 10
     end;
@@ -58,11 +58,11 @@ end;
 
 procedure TFunctionalTests.TestAction_AliasResolvesAndInvokes;
 var
-  A: TAction<Integer>;
-  Sum: Integer;
+  A: TAction<Int>;
+  Sum: Int;
 begin
   Sum := 0;
-  A := procedure(AValue: Integer)
+  A := procedure(AValue: Int)
     begin
       Sum := Sum + AValue
     end;
@@ -73,9 +73,9 @@ end;
 
 procedure TFunctionalTests.TestComparison_AliasResolvesAndInvokes;
 var
-  C: TComparison<Integer>;
+  C: TComparison<Int>;
 begin
-  C := function(ALeft, ARight: Integer): Integer
+  C := function(ALeft, ARight: Int): Int32
     begin
       Result := ALeft - ARight
     end;
@@ -86,10 +86,10 @@ end;
 
 procedure TFunctionalTests.TestDelegatedComparer_RoundTrip;
 var
-  Cmp: IComparer<Integer>;
+  Cmp: IComparer<Int>;
 begin
-  Cmp := TDelegatedComparer<Integer>.Create(
-    function(ALeft, ARight: Integer): Integer
+  Cmp := TDelegatedComparer<Int>.Create(
+    function(ALeft, ARight: Int): Int32
       begin
         Result := ALeft - ARight
       end);
@@ -100,14 +100,14 @@ end;
 
 procedure TFunctionalTests.TestDelegatedComparer_CapturingClosure;
 var
-  Cmp: IComparer<Integer>;
+  Cmp: IComparer<Int>;
   Descending: Boolean;
 begin
   { The comparison closure captures a local — the comparer must keep the
     environment alive for its own lifetime. }
   Descending := True;
-  Cmp := TDelegatedComparer<Integer>.Create(
-    function(ALeft, ARight: Integer): Integer
+  Cmp := TDelegatedComparer<Int>.Create(
+    function(ALeft, ARight: Int): Int32
       begin
         if Descending then
           Result := ARight - ALeft

@@ -48,11 +48,11 @@ type
   { A response to send.  Body may be binary (treated as raw bytes). }
   THttpResponse = class
   public
-    Status:      Integer;
+    Status:      Int;
     ContentType: string;
     Body:        string;
     constructor Create;
-    procedure SetText(AStatus: Integer; const AContentType, ABody: string);
+    procedure SetText(AStatus: Int; const AContentType, ABody: string);
   end;
 
   { The application implements this; the server calls Handle per request. }
@@ -62,17 +62,17 @@ type
 
   THttpServer = class
   private
-    FListenFd: Integer;
-    FPort:     Integer;
+    FListenFd: Int;
+    FPort:     Int;
     FRunning:  Boolean;
     { Connected WebSocket fds (upgraded connections kept open). }
-    FWsClients: TList<Integer>;
-    function ReadRequest(AConnFd: Integer): string;
-    procedure SendResponse(AConnFd: Integer; AResp: THttpResponse);
-    procedure DoWebSocketHandshake(AConnFd: Integer; const AKey: string);
-    procedure ServeConn(AConnFd: Integer; AHandler: IRequestHandler);
+    FWsClients: TList<Int>;
+    function ReadRequest(AConnFd: Int): string;
+    procedure SendResponse(AConnFd: Int; AResp: THttpResponse);
+    procedure DoWebSocketHandshake(AConnFd: Int; const AKey: string);
+    procedure ServeConn(AConnFd: Int; AHandler: IRequestHandler);
   public
-    constructor Create(APort: Integer);
+    constructor Create(APort: Int);
     destructor Destroy; override;
     { Bind + listen on 127.0.0.1:Port.  Returns False on failure. }
     function Start: Boolean;
@@ -97,7 +97,7 @@ type
     { Push a WebSocket text frame to every connected upgrade socket.  Dead
       sockets are dropped.  Use this for live-reload / push channels. }
     procedure Broadcast(const APayload: string);
-    property Port: Integer read FPort;
+    property Port: Int read FPort;
   end;
 
   { A fiber-per-connection HTTP/1.1 server (design [#components], the rewritten
@@ -117,12 +117,12 @@ type
     NATIVE BACKEND ONLY (pulls in Net.Tcp -> async.io -> async.fibers). }
   THttpFiberServer = class
   private
-    FPort: Integer;
+    FPort: Int;
     FReusePort: Boolean;
     FServer: TTcpServer;       { ARC-owned; freed in Destroy }
-    FMaxKeepAlive: Integer;    { max requests served per connection (0 = no cap) }
+    FMaxKeepAlive: Int;    { max requests served per connection (0 = no cap) }
   public
-    constructor Create(APort: Integer; AReusePort: Boolean = False);
+    constructor Create(APort: Int; AReusePort: Boolean = False);
     destructor Destroy; override;
     { Bind + listen on 127.0.0.1:Port.  Returns False on failure. }
     function Start: Boolean;
@@ -133,8 +133,8 @@ type
     procedure Serve(AHandler: IRequestHandler);
     { Stop the accept loop and close the listen socket. }
     procedure Stop;
-    property Port: Integer read FPort;
-    property MaxKeepAlive: Integer read FMaxKeepAlive write FMaxKeepAlive;
+    property Port: Int read FPort;
+    property MaxKeepAlive: Int read FMaxKeepAlive write FMaxKeepAlive;
   end;
 
 { Parse a raw request head into a THttpRequest (caller owns the result). }
@@ -170,7 +170,7 @@ end;
   work).  Caller owns the returned list. }
 function HttpSplitLines(const S: string): TList<string>;
 var
-  I, N, Start: Integer;
+  I, N, Start: Int;
 begin
   Result := TList<string>.Create();
   N := Length(S);
@@ -191,7 +191,7 @@ end;
 { Split S on a single delimiter byte.  Caller owns the returned list. }
 function HttpSplitChar(const S: string; ADelim: Byte): TList<string>;
 var
-  I, N, Start: Integer;
+  I, N, Start: Int;
 begin
   Result := TList<string>.Create();
   N := Length(S);
@@ -247,7 +247,7 @@ begin
   Body := '';
 end;
 
-procedure THttpResponse.SetText(AStatus: Integer; const AContentType, ABody: string);
+procedure THttpResponse.SetText(AStatus: Int; const AContentType, ABody: string);
 begin
   Status := AStatus;
   ContentType := AContentType;
@@ -256,7 +256,7 @@ end;
 
 { ---- parsing ---- }
 
-function HexVal(AByte: Byte): Integer;
+function HexVal(AByte: Byte): Int;
 begin
   if (AByte >= 48) and (AByte <= 57) then Result := AByte - 48
   else if (AByte >= 65) and (AByte <= 70) then Result := AByte - 55
@@ -267,7 +267,7 @@ end;
 function UrlDecode(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Integer;
+  I, N: Int;
   B: Byte;
 begin
   SB := TStringBuilder.Create();
@@ -299,7 +299,7 @@ end;
 procedure ParseQuery(const AQueryStr: string; ADest: TOrderedDictionary<string, string>);
 var
   Pairs: TList<string>;
-  I, Eq: Integer;
+  I, Eq: Int;
   Pair, Key, Val: string;
 begin
   Pairs := HttpSplitChar(AQueryStr, 38);   { '&' }
@@ -330,7 +330,7 @@ var
   Lines: TList<string>;
   ReqLine, Target, PathPart, QueryPart, Hdr, HdrLower: string;
   Parts: TList<string>;
-  I, Q, Colon: Integer;
+  I, Q, Colon: Int;
 begin
   Result := THttpRequest.Create();
   Lines := HttpSplitLines(ARaw);
@@ -385,12 +385,12 @@ end;
 
 { ---- THttpServer ---- }
 
-constructor THttpServer.Create(APort: Integer);
+constructor THttpServer.Create(APort: Int);
 begin
   FPort := APort;
   FListenFd := -1;
   FRunning := False;
-  FWsClients := TList<Integer>.Create();
+  FWsClients := TList<Int>.Create();
 end;
 
 destructor THttpServer.Destroy;
@@ -421,7 +421,7 @@ begin
   Result := Self.StartOn(INADDR_ANY);
 end;
 
-function THttpServer.ReadRequest(AConnFd: Integer): string;
+function THttpServer.ReadRequest(AConnFd: Int): string;
 var
   Chunk, Acc: string;
   SB: TStringBuilder;
@@ -445,7 +445,7 @@ begin
   SB.Free();
 end;
 
-function StatusText(AStatus: Integer): string;
+function StatusText(AStatus: Int): string;
 begin
   if AStatus = 200 then Result := 'OK'
   else if AStatus = 400 then Result := 'Bad Request'
@@ -454,7 +454,7 @@ begin
   else Result := 'OK';
 end;
 
-procedure THttpServer.SendResponse(AConnFd: Integer; AResp: THttpResponse);
+procedure THttpServer.SendResponse(AConnFd: Int; AResp: THttpResponse);
 var
   Head: string;
 begin
@@ -471,7 +471,7 @@ begin
     SendAll(AConnFd, AResp.Body);
 end;
 
-procedure THttpServer.DoWebSocketHandshake(AConnFd: Integer; const AKey: string);
+procedure THttpServer.DoWebSocketHandshake(AConnFd: Int; const AKey: string);
 var
   Head: string;
 begin
@@ -492,7 +492,7 @@ begin
     MakeNonBlocking(FListenFd);
 end;
 
-procedure THttpServer.ServeConn(AConnFd: Integer; AHandler: IRequestHandler);
+procedure THttpServer.ServeConn(AConnFd: Int; AHandler: IRequestHandler);
 var
   Raw: string;
   Req: THttpRequest;
@@ -519,7 +519,7 @@ end;
 
 procedure THttpServer.ServeOnce(AHandler: IRequestHandler);
 var
-  ConnFd: Integer;
+  ConnFd: Int;
 begin
   ConnFd := AcceptConn(FListenFd);
   if ConnFd < 0 then
@@ -529,7 +529,7 @@ end;
 
 function THttpServer.PollOnce(AHandler: IRequestHandler): Boolean;
 var
-  ConnFd: Integer;
+  ConnFd: Int;
 begin
   ConnFd := AcceptConn(FListenFd);
   if ConnFd < 0 then
@@ -543,12 +543,12 @@ end;
 
 procedure THttpServer.Broadcast(const APayload: string);
 var
-  I, Fd: Integer;
-  Dead: TList<Integer>;
+  I, Fd: Int;
+  Dead: TList<Int>;
   Frame: string;
 begin
   Frame := EncodeTextFrame(APayload);
-  Dead := TList<Integer>.Create();
+  Dead := TList<Int>.Create();
   for I := 0 to FWsClients.Count - 1 do
   begin
     Fd := FWsClients.Get(I);
@@ -597,7 +597,7 @@ end;
   connection alive. }
 function WantsKeepAlive(AReq: THttpRequest): Boolean;
 var
-  I: Integer;
+  I: Int;
   H: string;
 begin
   { HTTP/1.1 default is keep-alive unless "Connection: close" is present.  We
@@ -642,13 +642,13 @@ type
   THttpKeepAliveHandler = class(IConnHandler)
   private
     FApp: IRequestHandler;
-    FMaxKeepAlive: Integer;
+    FMaxKeepAlive: Int;
   public
-    constructor Create(AApp: IRequestHandler; AMaxKeepAlive: Integer);
+    constructor Create(AApp: IRequestHandler; AMaxKeepAlive: Int);
     procedure Handle(AConn: TTcpConn);
   end;
 
-constructor THttpKeepAliveHandler.Create(AApp: IRequestHandler; AMaxKeepAlive: Integer);
+constructor THttpKeepAliveHandler.Create(AApp: IRequestHandler; AMaxKeepAlive: Int);
 begin
   FApp := AApp;
   FMaxKeepAlive := AMaxKeepAlive;
@@ -660,7 +660,7 @@ var
   Req: THttpRequest;
   Resp: THttpResponse;
   KeepAlive: Boolean;
-  Served: Integer;
+  Served: Int;
 begin
   Served := 0;
   while True do
@@ -688,7 +688,7 @@ begin
   { The TCP server's connection trampoline closes+frees AConn after we return. }
 end;
 
-constructor THttpFiberServer.Create(APort: Integer; AReusePort: Boolean = False);
+constructor THttpFiberServer.Create(APort: Int; AReusePort: Boolean = False);
 begin
   FPort := APort;
   FReusePort := AReusePort;

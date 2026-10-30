@@ -50,13 +50,13 @@ type
   TImapClient = class
   private
     FConn: TTcpConn;
-    FTagSeq: Integer;
+    FTagSeq: Int;
     FLastTag: string;
     FLastStatus: TImapStatus;
     FLastText: string;               { text after the tagged status word }
     FUntagged: TList<string>;        { untagged '*' data lines of the last cmd }
-    FExists: Integer;
-    FRecent: Integer;
+    FExists: Int;
+    FRecent: Int;
     function NextTag: string;
     // Read one physical response line, resolving a trailing literal octet-count
     // marker by appending the literal octets + the continuation.  False on EOF.
@@ -83,15 +83,15 @@ type
 
     { FETCH n item (e.g. 'RFC822', 'BODY[]').  On OK, ABody holds the literal
       octets of the fetched item (empty if the item was not a literal). }
-    function Fetch(AMsg: Integer; const AItem: string; out ABody: string): Boolean;
+    function Fetch(AMsg: Int; const AItem: string; out ABody: string): Boolean;
 
     { SEARCH criteria: fills AIds with the returned message numbers. }
-    function Search(const ACriteria: string; AIds: TList<Integer>): Boolean;
+    function Search(const ACriteria: string; AIds: TList<Int>): Boolean;
 
     function Logout: Boolean;
 
-    property Exists: Integer read FExists;
-    property Recent: Integer read FRecent;
+    property Exists: Int read FExists;
+    property Recent: Int read FRecent;
     property LastStatus: TImapStatus read FLastStatus;
     property LastText: string read FLastText;
     property Untagged: TList<string> read FUntagged;
@@ -102,9 +102,9 @@ implementation
 
 { Parse the leading run of ASCII digits in S (from offset AStart) into an
   integer; stops at the first non-digit.  Returns 0 for no digits. }
-function ParseIntAt(const S: string; AStart: Integer): Integer;
+function ParseIntAt(const S: string; AStart: Int): Int;
 var
-  I, Len, V: Integer;
+  I, Len, V: Int;
   B: Byte;
 begin
   V := 0;
@@ -123,9 +123,9 @@ end;
 
 // If ALine ends in a literal octet-count marker (an open brace, digits, a close
 // brace), return the count via ACount and True; otherwise False.
-function ParseLiteralMarker(const ALine: string; out ACount: Integer): Boolean;
+function ParseLiteralMarker(const ALine: string; out ACount: Int): Boolean;
 var
-  Len, I: Integer;
+  Len, I: Int;
 begin
   ACount := 0;
   Len := Length(ALine);
@@ -179,7 +179,7 @@ end;
 function TImapClient.ReadResponseLine(out ALine: string): Boolean;
 var
   Line, Cont: string;
-  Lit: Integer;
+  Lit: Int;
 begin
   if not FConn.ReadLine(Line) then
   begin
@@ -221,7 +221,7 @@ end;
 function TImapClient.RunCommand(const ACmd: string): TImapStatus;
 var
   Tag, Line, Rest, Word2: string;
-  Len, I, SpacePos: Integer;
+  Len, I, SpacePos: Int;
 begin
   FUntagged.Clear();
   FLastStatus := isNone;
@@ -299,7 +299,7 @@ end;
 
 function TImapClient.Select(const AMailbox: string): Boolean;
 var
-  I: Integer;
+  I: Int;
   U, DataLine: string;
 begin
   FExists := 0;
@@ -324,10 +324,10 @@ begin
   Result := Self.RunCommand('LIST "' + ARef + '" "' + APattern + '"') = isOk;
 end;
 
-function TImapClient.Fetch(AMsg: Integer; const AItem: string;
+function TImapClient.Fetch(AMsg: Int; const AItem: string;
   out ABody: string): Boolean;
 var
-  I, NlPos: Integer;
+  I, NlPos: Int;
   DataLine: string;
 begin
   ABody := '';
@@ -358,12 +358,12 @@ begin
 end;
 
 function TImapClient.Search(const ACriteria: string;
-  AIds: TList<Integer>): Boolean;
+  AIds: TList<Int>): Boolean;
 var
-  I, J, Len: Integer;
+  I, J, Len: Int;
   DataLine, U: string;
   B: Byte;
-  Cur, Have: Integer;
+  Cur, Have: Int;
 begin
   AIds.Clear();
   Result := Self.RunCommand('SEARCH ' + ACriteria) = isOk;

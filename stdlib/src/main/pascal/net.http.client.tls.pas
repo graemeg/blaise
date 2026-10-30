@@ -47,7 +47,7 @@ type
   public
     constructor Create(AStream: TTlsStream);
     destructor Destroy; override;
-    function Read(AMaxBytes: Integer): string;
+    function Read(AMaxBytes: Int): string;
     function Write(const AData: string): Boolean;
     procedure Close;
     function IsClosed: Boolean;
@@ -77,7 +77,7 @@ begin
   inherited Destroy();
 end;
 
-function THttpTlsStreamAdapter.Read(AMaxBytes: Integer): string;
+function THttpTlsStreamAdapter.Read(AMaxBytes: Int): string;
 begin
   if FStream = nil then
     Exit('');

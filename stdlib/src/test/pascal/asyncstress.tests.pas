@@ -49,15 +49,15 @@ procedure _LeakTrackerEnable; external name '_LeakTrackerEnable';
 function _LeakTrackerSuspend: Boolean; external name '_LeakTrackerSuspend';
 procedure _LeakTrackerResume(APrev: Boolean); external name '_LeakTrackerResume';
 function _LeakTrackerIsEnabled: Boolean; external name '_LeakTrackerIsEnabled';
-function _MemArenaCount: Integer; external name '_MemArenaCount';
-function _MemAbandonedArenaCount: Integer;
+function _MemArenaCount: Int32; external name '_MemArenaCount';
+function _MemAbandonedArenaCount: Int32;
   external name '_MemAbandonedArenaCount';
 
 { --- leak-guard proof ----------------------------------------------------- }
 
 var
-  GLgEnabledDuringRun: Integer;   { 1 if a fiber saw the tracker disabled }
-  GLgSampled: Integer;
+  GLgEnabledDuringRun: Int;   { 1 if a fiber saw the tracker disabled }
+  GLgSampled: Int;
 
 procedure LeakProbeWorker(Arg: Pointer);
 begin
@@ -70,7 +70,7 @@ end;
 procedure TAsyncStressTests.TestLeakGuard_SuspendedUnderMulticore;
 var
   WasEnabled, StillEnabled: Boolean;
-  I: Integer;
+  I: Int;
 begin
   { Turn the tracker on for this test (idempotent; normally a --debug build). }
   _LeakTrackerEnable();
@@ -99,22 +99,22 @@ end;
 { --- 100k-fibre joint stress ---------------------------------------------- }
 
 var
-  GStCompleted: Integer;
-  GStChannel: TChannel<Integer>;
-  GStSum: Integer;
+  GStCompleted: Int;
+  GStChannel: TChannel<Int>;
+  GStSum: Int;
 
 { Each worker fiber allocates a small object (heap traffic that may be freed on
   a different worker after migration), yields (to encourage stealing/
   migration), hands a value through the shared channel, and tallies. }
 procedure StressWorker(Arg: Pointer);
 var
-  L: TList<Integer>;
-  V: Integer;
+  L: TList<Int>;
+  V: Int;
 begin
   { Allocation + a yield: the object may be released on a different OS thread
     than the one that allocated it (the cross-thread-free path). }
-  L := TList<Integer>.Create();
-  L.Add(Integer(Arg));
+  L := TList<Int>.Create();
+  L.Add(Int32(Arg));
   FiberYield();
   V := L[0];
   L.Free();
@@ -128,10 +128,10 @@ end;
   not wedge the producers on backpressure. }
 procedure StressDrainWorker(Arg: Pointer);
 var
-  V, Got: Integer;
+  V, Got: Int;
 begin
   Got := 0;
-  while Got < Integer(Arg) do
+  while Got < Int32(Arg) do
   begin
     if GStChannel.Recv(V) then
     begin
@@ -147,8 +147,8 @@ procedure TAsyncStressTests.TestStress_100kFibersCompleteAndBaselineReturns;
 const
   NFIBERS = 100000;
 var
-  I: Integer;
-  Abandoned: Integer;
+  I: Int;
+  Abandoned: Int;
 begin
   { 100 000 fibers across GetCPUCount workers, each allocating (heap traffic
     that may be freed on a different worker after migration), yielding (to
@@ -156,7 +156,7 @@ begin
     to a single drain fiber. }
   GStCompleted := 0;
   GStSum := 0;
-  GStChannel := TChannel<Integer>.Create(256);
+  GStChannel := TChannel<Int>.Create(256);
   SpawnFiber(@StressDrainWorker, Pointer(NFIBERS));
   for I := 0 to NFIBERS - 1 do
     SpawnFiber(@StressWorker, Pointer(1));
@@ -189,8 +189,8 @@ const
   ROUNDS = 6;
   PER_ROUND = 2000;
 var
-  R, I: Integer;
-  AfterWarm, AfterLast: Integer;
+  R, I: Int;
+  AfterWarm, AfterLast: Int;
 begin
   { Before the SchedFiberEntry fix each fiber leaked one TFiberTask (the
     CurrentWorker().Current call-result-field-read leaked its transient on

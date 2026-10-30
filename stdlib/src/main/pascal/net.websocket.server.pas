@@ -73,7 +73,7 @@ type
     { Send a PING with an optional payload. }
     function SendPing(const AData: string): Boolean;
     { Send a raw frame with an explicit opcode (unmasked). }
-    function SendFrame(AOpcode: Integer; const AData: string): Boolean;
+    function SendFrame(AOpcode: Int; const AData: string): Boolean;
 
     { Read the next complete application message, transparently answering PING
       with PONG and honouring a CLOSE (which returns False after echoing the
@@ -91,9 +91,9 @@ type
   TWebSocketServer = class
   private
     FServer: TTcpServer;    { ARC-owned; freed in Destroy }
-    FPort: Integer;
+    FPort: Int;
   public
-    constructor Create(APort: Integer; AReusePort: Boolean = False);
+    constructor Create(APort: Int; AReusePort: Boolean = False);
     destructor Destroy; override;
     { Bind + listen on 127.0.0.1:Port.  Returns False on failure. }
     function Start: Boolean;
@@ -102,7 +102,7 @@ type
     procedure Serve(AHandler: IWebSocketHandler);
     { Stop the accept loop and close the listen socket. }
     procedure Stop;
-    property Port: Integer read FPort;
+    property Port: Int read FPort;
   end;
 
 { Perform the server side of the RFC 6455 handshake on an already-connected
@@ -212,7 +212,7 @@ begin
   end;
 end;
 
-function TWebSocketConn.SendFrame(AOpcode: Integer; const AData: string): Boolean;
+function TWebSocketConn.SendFrame(AOpcode: Int; const AData: string): Boolean;
 begin
   if FClosed then
     Exit(False);
@@ -238,7 +238,7 @@ function TWebSocketConn.ReadMessage(out AData: string; out AIsBinary: Boolean): 
 var
   Frame: TWsFrame;
   Msg: string;
-  MsgOpcode: Integer;
+  MsgOpcode: Int;
   InMessage: Boolean;
 begin
   AData := '';
@@ -339,7 +339,7 @@ end;
 
 { ---- TWebSocketServer ---- }
 
-constructor TWebSocketServer.Create(APort: Integer; AReusePort: Boolean = False);
+constructor TWebSocketServer.Create(APort: Int; AReusePort: Boolean = False);
 begin
   FPort := APort;
   FServer := TTcpServer.Create(UInt16(APort), AReusePort);

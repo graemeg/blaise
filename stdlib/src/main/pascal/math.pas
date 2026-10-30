@@ -34,8 +34,8 @@ const
 { Min / Max                                                            }
 { ------------------------------------------------------------------ }
 
-function Min(A, B: Integer): Integer; overload;
-function Max(A, B: Integer): Integer; overload;
+function Min(A, B: Int32): Int32; overload;
+function Max(A, B: Int32): Int32; overload;
 
 function Min(A, B: Int64): Int64; overload;
 function Max(A, B: Int64): Int64; overload;
@@ -48,23 +48,23 @@ function Max(A, B: Float64): Float64; overload;
 { ------------------------------------------------------------------ }
 
 { Returns -1, 0, or 1 depending on the sign of the argument. }
-function Sign(X: Integer): Integer; overload;
-function Sign(X: Int64): Integer; overload;
-function Sign(X: Float64): Integer; overload;
+function Sign(X: Int32): Int32; overload;
+function Sign(X: Int64): Int32; overload;
+function Sign(X: Float64): Int; overload;
 
 { ------------------------------------------------------------------ }
 { DivMod                                                               }
 { ------------------------------------------------------------------ }
 
 { Computes quotient and remainder of integer division in one call. }
-procedure DivMod(Dividend, Divisor: Integer; out Quotient, Remainder: Integer);
+procedure DivMod(Dividend, Divisor: Int; out Quotient, Remainder: Int);
 
 { ------------------------------------------------------------------ }
 { InRange                                                              }
 { ------------------------------------------------------------------ }
 
 { Returns True when Value lies within [Low..High] (both inclusive). }
-function InRange(Value, Low, High: Integer): Boolean; overload;
+function InRange(Value, Low, High: Int): Boolean; overload;
 function InRange(Value, Low, High: Float64): Boolean; overload;
 
 { ------------------------------------------------------------------ }
@@ -72,7 +72,7 @@ function InRange(Value, Low, High: Float64): Boolean; overload;
 { ------------------------------------------------------------------ }
 
 { Returns Value clamped to [Low..High] (both inclusive). }
-function EnsureRange(Value, Low, High: Integer): Integer; overload;
+function EnsureRange(Value, Low, High: Int): Int; overload;
 function EnsureRange(Value, Low, High: Float64): Float64; overload;
 
 implementation
@@ -81,12 +81,12 @@ implementation
 { Min / Max                                                            }
 { ------------------------------------------------------------------ }
 
-function Min(A, B: Integer): Integer;
+function Min(A, B: Int32): Int32;
 begin
   if A < B then Result := A else Result := B
 end;
 
-function Max(A, B: Integer): Integer;
+function Max(A, B: Int32): Int32;
 begin
   if A > B then Result := A else Result := B
 end;
@@ -115,21 +115,21 @@ end;
 { Sign                                                                 }
 { ------------------------------------------------------------------ }
 
-function Sign(X: Integer): Integer;
+function Sign(X: Int32): Int32;
 begin
   if X > 0 then Result := 1
   else if X < 0 then Result := -1
   else Result := 0
 end;
 
-function Sign(X: Int64): Integer;
+function Sign(X: Int64): Int32;
 begin
   if X > 0 then Result := 1
   else if X < 0 then Result := -1
   else Result := 0
 end;
 
-function Sign(X: Float64): Integer;
+function Sign(X: Float64): Int;
 begin
   if X > 0.0 then Result := 1
   else if X < 0.0 then Result := -1
@@ -140,7 +140,7 @@ end;
 { DivMod                                                               }
 { ------------------------------------------------------------------ }
 
-procedure DivMod(Dividend, Divisor: Integer; out Quotient, Remainder: Integer);
+procedure DivMod(Dividend, Divisor: Int; out Quotient, Remainder: Int);
 begin
   Quotient := Dividend div Divisor;
   Remainder := Dividend mod Divisor
@@ -150,7 +150,7 @@ end;
 { InRange                                                              }
 { ------------------------------------------------------------------ }
 
-function InRange(Value, Low, High: Integer): Boolean;
+function InRange(Value, Low, High: Int): Boolean;
 begin
   Result := (Value >= Low) and (Value <= High)
 end;
@@ -164,7 +164,7 @@ end;
 { EnsureRange                                                          }
 { ------------------------------------------------------------------ }
 
-function EnsureRange(Value, Low, High: Integer): Integer;
+function EnsureRange(Value, Low, High: Int): Int;
 begin
   if Value < Low then Result := Low
   else if Value > High then Result := High

@@ -59,7 +59,7 @@ uses
 procedure TDequeSingleTests.TestPushPop_LifoOrder;
 var
   D: TWorkStealDeque;
-  I: Integer;
+  I: Int;
 begin
   D := TWorkStealDeque.Create();
   for I := 1 to 5 do
@@ -96,7 +96,7 @@ end;
 procedure TDequeSingleTests.TestSteal_FifoOrder;
 var
   D: TWorkStealDeque;
-  I: Integer;
+  I: Int;
 begin
   D := TWorkStealDeque.Create();
   for I := 1 to 5 do
@@ -111,7 +111,7 @@ end;
 procedure TDequeSingleTests.TestGrow_PastInitialCapacity;
 var
   D: TWorkStealDeque;
-  I: Integer;
+  I: Int;
 begin
   { Small initial capacity forces at least two growths. }
   D := TWorkStealDeque.Create(4);
@@ -156,11 +156,11 @@ type
   TClaimState = record
     Deque: TWorkStealDeque;
     Claims: Pointer;      { ^array[0..CC_NUM_TASKS-1] of Integer }
-    Done: Integer;        { set to 1 by the owner when it has pushed+popped all }
+    Done: Int;        { set to 1 by the owner when it has pushed+popped all }
   end;
 
   PIntArray = ^TIntArray;
-  TIntArray = array[0..0] of Integer;
+  TIntArray = array[0..0] of Int32;
 
 var
   GCC: TClaimState;
@@ -169,12 +169,12 @@ var
   owner never lose or double-count a claim. }
 procedure ClaimTask(AState: PClaimState; APtr: Pointer);
 var
-  Id: Integer;
+  Id: Int;
   Arr: PIntArray;
   Slot: Pointer;
 begin
   if APtr = nil then Exit;
-  Id := Integer(APtr) - 1;      { we stored Id+1 }
+  Id := Int32(APtr) - 1;      { we stored Id+1 }
   Arr := PIntArray(AState^.Claims);
   Slot := @Arr^[Id];
   _AtomicAddInt32(Slot, 1);
@@ -187,7 +187,7 @@ var
   State: PClaimState;
   D: TWorkStealDeque;
   Item: Pointer;
-  Idle: Integer;
+  Idle: Int;
 begin
   State := PClaimState(Arg);
   D := State^.Deque;
@@ -216,8 +216,8 @@ end;
 procedure TDequeConcurrentTests.TestConcurrent_EveryTaskTakenExactlyOnce;
 var
   Threads: array[0..CC_NUM_STEALERS - 1] of Int64;
-  Claims: array[0..CC_NUM_TASKS - 1] of Integer;
-  I, Taken, Missed, Doubled: Integer;
+  Claims: array[0..CC_NUM_TASKS - 1] of Int32;
+  I, Taken, Missed, Doubled: Int;
   Item: Pointer;
 begin
   for I := 0 to CC_NUM_TASKS - 1 do
@@ -286,8 +286,8 @@ const
   ROUND_TASKS = 4000;
 var
   Threads: array[0..CC_NUM_STEALERS - 1] of Int64;
-  Claims: array[0..ROUND_TASKS - 1] of Integer;
-  R, I, Missed, Doubled: Integer;
+  Claims: array[0..ROUND_TASKS - 1] of Int32;
+  R, I, Missed, Doubled: Int;
   Item: Pointer;
 begin
   Missed := 0;

@@ -129,15 +129,15 @@ function FiberStackAcquire(AUsable: Int64; out ATotal: Int64): Pointer;
 procedure FiberStackReturn(ABase: Pointer; ATotal: Int64);
 
 { Number of stacks currently parked in this thread's pool. }
-function FiberStackPoolCount: Integer;
+function FiberStackPoolCount: Int;
 
 implementation
 
-function _libc_mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
+function _libc_mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
   Offset: Int64): Pointer; external name 'mmap';
-function _libc_munmap(Addr: Pointer; Length: Int64): Integer;
+function _libc_munmap(Addr: Pointer; Length: Int64): Int32;
   external name 'munmap';
-function _libc_mprotect(Addr: Pointer; Length: Int64; Prot: Integer): Integer;
+function _libc_mprotect(Addr: Pointer; Length: Int64; Prot: Int32): Int32;
   external name 'mprotect';
 procedure _libc_abort; external name 'abort';
 
@@ -145,7 +145,7 @@ procedure _libc_abort; external name 'abort';
   time from rtl.platform.layout.<os> — the same seam runtime.mem uses.  The
   libc profile binds the real libc mmap, so the flag must be OS-correct here
   (the static-profile syscall leaf would translate, but libc does not). }
-function _MapAnonFlag: Integer; external name '_MapAnonFlag';
+function _MapAnonFlag: Int32; external name '_MapAnonFlag';
 
 { Exception-state snapshot hooks exported by runtime.exc (design P1). }
 function _ExcGetTop: Pointer; external name '_ExcGetTop';
@@ -175,7 +175,7 @@ type
 threadvar
   GCurrentFiber: PFiber;
   GStackPool: PStackNode;
-  GStackPoolCount: Integer;
+  GStackPoolCount: Int;
 
 { ---------------------------------------------------------------------------
   The context-switch leaf.  `nostackframe` so the body owns the frame,
@@ -316,7 +316,7 @@ begin
   GStackPoolCount := GStackPoolCount + 1;
 end;
 
-function FiberStackPoolCount: Integer;
+function FiberStackPoolCount: Int;
 begin
   Result := GStackPoolCount;
 end;
@@ -357,7 +357,7 @@ var
   Top: Pointer;
   SP: PPointer;
   Tramp: TPlainProc;
-  I: Integer;
+  I: Int;
 begin
   Base := FiberStackAcquire(AStackSize, Total);
   if Base = nil then

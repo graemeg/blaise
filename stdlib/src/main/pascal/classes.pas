@@ -38,7 +38,7 @@ uses
 type
   TDuplicates = (dupAccept, dupIgnore, dupError);
 
-  TStringListSortCompare = function(const A: string; const B: string): Integer;
+  TStringListSortCompare = function(const A: string; const B: string): Int32;
 
   { ------------------------------------------------------------------ }
   { TComponent                                                           }
@@ -175,9 +175,9 @@ type
     FHashCap:       Int;    { power of two; 0 = index not built }
     FHashUsed:      Int;    { occupied slots (excludes duplicate keys) }
     procedure Grow;
-    function  Compare(const S1: string; const S2: string): Integer;
+    function  Compare(const S1: string; const S2: string): Int32;
     function  FindSorted(const S: string; var Idx: Int): Boolean;
-    function  HashOf(const S: string): Integer;
+    function  HashOf(const S: string): Int32;
     function  KeyEquals(const S1: string; const S2: string): Boolean;
     procedure HashInvalidate;
     procedure HashInsertIdx(AIdx: Int);
@@ -227,7 +227,7 @@ type
     property Objects[Index: Int]: Pointer read GetObject write SetObject;
   end;
 
-procedure SplitIntoList(const S: string; ASep: Integer; AList: TStringList);
+procedure SplitIntoList(const S: string; ASep: Int; AList: TStringList);
 
 implementation
 
@@ -349,7 +349,7 @@ begin
     Self.FOwner.RemoveComponent(Self)
 end;
 
-procedure SplitIntoList(const S: string; ASep: Integer; AList: TStringList);
+procedure SplitIntoList(const S: string; ASep: Int; AList: TStringList);
 var
   I:     Int;
   Start: Int;
@@ -398,7 +398,7 @@ begin
   Self.FCapacity := NewCap
 end;
 
-function TStringList.Compare(const S1: string; const S2: string): Integer;
+function TStringList.Compare(const S1: string; const S2: string): Int32;
 begin
   if Self.FCaseSensitive then
     Result := CompareStr(S1, S2)
@@ -418,10 +418,10 @@ end;
 
 { FNV-1a over the string bytes, folding A..Z to a..z when the list is
   case-insensitive so equal-modulo-case keys land in the same bucket. }
-function TStringList.HashOf(const S: string): Integer;
+function TStringList.HashOf(const S: string): Int32;
 var
   I: Int;
-  C: Integer;
+  C: Int;
 begin
   Result := -2128831035;   { FNV offset basis 2166136261 as signed 32-bit }
   for I := 0 to Length(S) - 1 do
@@ -497,12 +497,12 @@ begin
     Self.HashInsertIdx(I);
 end;
 
-function SortCompareStr(const A: string; const B: string): Integer;
+function SortCompareStr(const A: string; const B: string): Int32;
 begin
   Result := CompareStr(A, B)
 end;
 
-function SortCompareText(const A: string; const B: string): Integer;
+function SortCompareText(const A: string; const B: string): Int32;
 begin
   Result := CompareText(A, B)
 end;
@@ -547,7 +547,7 @@ var
   Lo:   Int;
   Hi:   Int;
   Mid:  Int;
-  Cmp:  Integer;
+  Cmp:  Int;
   Ptr:  ^string;
 begin
   { Compare against the slot in place via the CompareStr/CompareText
@@ -1021,7 +1021,7 @@ var
   Item: string;
   Need: Boolean;
   J:    Int;
-  Ch:   Integer;
+  Ch:   Int;
 begin
   SB := TStringBuilder.Create();
   try
@@ -1078,7 +1078,7 @@ var
   N:    Int;
   Item: string;
   InQ:  Boolean;
-  Ch:   Integer;
+  Ch:   Int;
 begin
   Self.Clear();
   N    := Length(S);

@@ -45,12 +45,12 @@ var
   GPort: UInt16;
   GLoginOk: Boolean;
   GSelectOk: Boolean;
-  GExists: Integer;
+  GExists: Int;
   GFetchOk: Boolean;
   GFetchBody: string;
   GSearchOk: Boolean;
-  GSearchCount: Integer;
-  GSearchFirst: Integer;
+  GSearchCount: Int;
+  GSearchFirst: Int;
   GLogoutOk: Boolean;
 
 type
@@ -61,7 +61,7 @@ type
 { Extract the tag (first token) of an IMAP command line. }
 function TagOf(const ALine: string): string;
 var
-  I, Len: Integer;
+  I, Len: Int;
 begin
   Result := '';
   Len := Length(ALine);
@@ -122,11 +122,11 @@ end;
 procedure ClientFiber(AArg: Pointer);
 var
   Cli: TImapClient;
-  Ids: TList<Integer>;
+  Ids: TList<Int>;
 begin
   FiberSleep(2);
   Cli := TImapClient.Create();
-  Ids := TList<Integer>.Create();
+  Ids := TList<Int>.Create();
   if Cli.Connect('127.0.0.1', GPort) then
   begin
     GLoginOk := Cli.Login('alice', 'secret');

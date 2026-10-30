@@ -57,17 +57,17 @@ procedure TUuidTests.TestUuidFormat;
 var
   U: TUuid;
   S: string;
-  I: Integer;
+  I: Int;
   Ch: Byte;
 begin
   U := TUuid.RandomUuid();
   S := U.ToString();
-  AssertEquals('length', 36, Integer(Length(S)));
+  AssertEquals('length', 36, Int32(Length(S)));
   for I := 0 to 35 do
   begin
     Ch := Byte(S[I]);
     if (I = 8) or (I = 13) or (I = 18) or (I = 23) then
-      AssertEquals('hyphen at ' + IntToStr(I), 45, Integer(Ch))
+      AssertEquals('hyphen at ' + IntToStr(I), 45, Int32(Ch))
     else
       AssertTrue('hex at ' + IntToStr(I), IsHexLower(Ch));
   end;
@@ -80,7 +80,7 @@ var
 begin
   U := TUuid.RandomUuid();
   S := U.ToString();
-  AssertEquals('version 4', 52, Integer(Byte(S[14])));
+  AssertEquals('version 4', 52, Int32(Byte(S[14])));
   AssertTrue('variant 8/9/a/b',
     (Byte(S[19]) = 56) or (Byte(S[19]) = 57) or
     (Byte(S[19]) = 97) or (Byte(S[19]) = 98));
@@ -94,9 +94,9 @@ var
 begin
   U := TUuid.RandomUuid();
   R := U.ToBytes();
-  AssertEquals('16 bytes', 16, Integer(Length(R)));
-  AssertEquals('raw version', $40, Integer(Byte(R[6]) and $F0));
-  AssertEquals('raw variant', $80, Integer(Byte(R[8]) and $C0));
+  AssertEquals('16 bytes', 16, Int32(Length(R)));
+  AssertEquals('raw version', $40, Int32(Byte(R[6]) and $F0));
+  AssertEquals('raw variant', $80, Int32(Byte(R[8]) and $C0));
 end;
 
 procedure TUuidTests.TestUuidUnique;

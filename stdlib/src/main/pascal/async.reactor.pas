@@ -49,20 +49,20 @@ type
   TReactor = class
   public
     { Register interest in AFd; when AFd is ready, Wait delivers AToken. }
-    procedure Add(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); virtual; abstract;
+    procedure Add(AFd: Int; AInterest: TIoInterests; AToken: Pointer); virtual; abstract;
     { Change the interest (and token) for an already-registered AFd. }
-    procedure Modify(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); virtual; abstract;
+    procedure Modify(AFd: Int; AInterest: TIoInterests; AToken: Pointer); virtual; abstract;
     { Stop tracking AFd. }
-    procedure Remove(AFd: Integer); virtual; abstract;
+    procedure Remove(AFd: Int); virtual; abstract;
     { Block up to ATimeoutMs (negative = indefinite, 0 = poll) or until a Wake,
       then fill AReady with (token, events) pairs.  Returns the count. }
-    function Wait(ATimeoutMs: Integer; var AReady: TReadyList): Integer; virtual; abstract;
+    function Wait(ATimeoutMs: Int; var AReady: TReadyList): Int; virtual; abstract;
     { Interrupt a Wait blocked on another thread (or arm a pending wake so the
       next Wait returns promptly). }
     procedure Wake; virtual; abstract;
     { Number of caller fds currently registered (0 => scheduler may skip the
       reactor and use its plain idle-park). }
-    function FdCount: Integer; virtual; abstract;
+    function FdCount: Int; virtual; abstract;
   end;
 
 { The process-wide reactor, lazily created on first use (GetReactor).  Selected
@@ -71,7 +71,7 @@ function GetReactor: TReactor;
 
 { Number of fds currently registered with the global reactor.  0 when the
   reactor was never created, so a purely CPU-bound workload never pays for it. }
-function ReactorFdCount: Integer;
+function ReactorFdCount: Int;
 
 type
   { Set by the per-OS adapter unit's initialization block (the registration
@@ -97,7 +97,7 @@ begin
   Result := GReactor;
 end;
 
-function ReactorFdCount: Integer;
+function ReactorFdCount: Int;
 begin
   if GReactor = nil then
     Exit(0);

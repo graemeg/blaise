@@ -36,9 +36,9 @@ type
   { ------------------------------------------------------------------ }
 
   TTimeZoneOffset = record
-    TotalSeconds: Integer;  { signed; +05:30 = 19800, -08:00 = -28800 }
-    function Hours: Integer;
-    function Minutes: Integer;
+    TotalSeconds: Int;  { signed; +05:30 = 19800, -08:00 = -28800 }
+    function Hours: Int;
+    function Minutes: Int;
     function ToString: string;  { '+05:30', '-08:00', 'Z' }
   end;
 
@@ -47,12 +47,12 @@ type
   { ------------------------------------------------------------------ }
 
   TDate = record
-    Year:  Integer;
-    Month: Integer;  { 1..12 }
-    Day:   Integer;  { 1..31 }
-    function DayOfWeek: Integer;  { 1=Monday .. 7=Sunday (ISO 8601) }
+    Year:  Int;
+    Month: Int;  { 1..12 }
+    Day:   Int;  { 1..31 }
+    function DayOfWeek: Int;  { 1=Monday .. 7=Sunday (ISO 8601) }
     function IsLeapYear: Boolean;
-    function DaysInMonth: Integer;
+    function DaysInMonth: Int;
     function ToString: string;    { 'YYYY-MM-DD' }
   end;
 
@@ -61,10 +61,10 @@ type
   { ------------------------------------------------------------------ }
 
   TTime = record
-    Hour:       Integer;  { 0..23 }
-    Minute:     Integer;  { 0..59 }
-    Second:     Integer;  { 0..59 }
-    Nanosecond: Integer;  { 0..999999999 }
+    Hour:       Int;  { 0..23 }
+    Minute:     Int;  { 0..59 }
+    Second:     Int;  { 0..59 }
+    Nanosecond: Int;  { 0..999999999 }
     function ToString: string;     { 'HH:MM:SS' }
     function ToStringNano: string; { 'HH:MM:SS.nnnnnnnnn' }
   end;
@@ -121,27 +121,27 @@ type
 
 function  _TimeNow(): Int64;
   external name '_TimeNow';
-function  _TimeLocalOffsetSecs(): Integer;
+function  _TimeLocalOffsetSecs(): Int32;
   external name '_TimeLocalOffsetSecs';
 procedure _TimeSplit(Nanos: Int64;
                      out Year, Month, Day,
-                         Hour, Min, Sec, NSec: Integer);
+                         Hour, Min, Sec, NSec: Int32);
   external name '_TimeSplit';
 function  _TimeJoin(Year, Month, Day,
-                    Hour, Min, Sec, NSec: Integer): Int64;
+                    Hour, Min, Sec, NSec: Int32): Int64;
   external name '_TimeJoin';
-function  _TimeIsLeapYear(Year: Integer): Integer;
+function  _TimeIsLeapYear(Year: Int32): Int32;
   external name '_TimeIsLeapYear';
-function  _TimeDaysInMonth(Year, Month: Integer): Integer;
+function  _TimeDaysInMonth(Year, Month: Int32): Int32;
   external name '_TimeDaysInMonth';
 
 { ------------------------------------------------------------------ }
 { Construction                                                          }
 { ------------------------------------------------------------------ }
 
-function MakeDate(Year, Month, Day: Integer): TDate;
-function MakeTime(Hour, Minute, Second: Integer): TTime;
-function MakeTimeNano(Hour, Minute, Second, Nanosecond: Integer): TTime;
+function MakeDate(Year, Month, Day: Int): TDate;
+function MakeTime(Hour, Minute, Second: Int): TTime;
+function MakeTimeNano(Hour, Minute, Second, Nanosecond: Int): TTime;
 function MakeDateTime(ADate: TDate; ATime: TTime): TDateTime;
 function MakeDurationSeconds(Seconds: Int64): TDuration;
 function MakeDurationMillis(Millis: Int64): TDuration;
@@ -151,7 +151,7 @@ function MakeInstantUnixMillis(Millis: Int64): TInstant;
 function MakeInstantUtc(ADate: TDate; ATime: TTime): TInstant;
 function MakeInstantLocal(ADate: TDate; ATime: TTime;
                           Offset: TTimeZoneOffset): TInstant;
-function MakeOffset(Hours, Minutes: Integer): TTimeZoneOffset;
+function MakeOffset(Hours, Minutes: Int): TTimeZoneOffset;
 
 { ------------------------------------------------------------------ }
 { Current time                                                          }
@@ -176,10 +176,10 @@ function ParseOffset(const S: string): TTimeZoneOffset;
 { Date arithmetic                                                       }
 { ------------------------------------------------------------------ }
 
-function DateAddDays(D: TDate; Days: Integer): TDate;
-function DateAddMonths(D: TDate; Months: Integer): TDate;
-function DateAddYears(D: TDate; Years: Integer): TDate;
-function DateDiffDays(A, B: TDate): Integer;
+function DateAddDays(D: TDate; Days: Int): TDate;
+function DateAddMonths(D: TDate; Months: Int): TDate;
+function DateAddYears(D: TDate; Years: Int): TDate;
+function DateDiffDays(A, B: TDate): Int;
 
 { ------------------------------------------------------------------ }
 { Comparison free functions                                             }
@@ -196,9 +196,9 @@ function DurationNegate(D: TDuration): TDuration;
 { Utility                                                               }
 { ------------------------------------------------------------------ }
 
-function IsLeapYear(Year: Integer): Boolean;
-function DaysInMonth(Year, Month: Integer): Integer;
-function DayOfWeek(D: TDate): Integer;
+function IsLeapYear(Year: Int): Boolean;
+function DaysInMonth(Year, Month: Int): Int;
+function DayOfWeek(D: TDate): Int;
 
 implementation
 
@@ -213,7 +213,7 @@ const
 { Internal helpers                                                      }
 { ================================================================== }
 
-function Pad2(N: Integer): string;
+function Pad2(N: Int): string;
 var
   S: string;
 begin
@@ -224,7 +224,7 @@ begin
     Result := S
 end;
 
-function Pad4(N: Integer): string;
+function Pad4(N: Int): string;
 var
   S: string;
 begin
@@ -234,7 +234,7 @@ begin
   Result := S
 end;
 
-function Pad9(N: Integer): string;
+function Pad9(N: Int): string;
 var
   S: string;
 begin
@@ -246,10 +246,10 @@ end;
 
 { Parse a fixed-width decimal integer from S starting at Pos (0-based).
   Advances Pos by Width.  Raises EDateTimeError on non-digit. }
-function ScanInt(const S: string; var Pos: Integer; Width: Integer): Integer;
+function ScanInt(const S: string; var Pos: Int; Width: Int): Int;
 var
-  I: Integer;
-  Ch: Integer;
+  I: Int;
+  Ch: Int;
 begin
   Result := 0;
   I := 0;
@@ -267,7 +267,7 @@ begin
 end;
 
 { Expect a specific literal character at Pos; raise if not found. }
-procedure ScanChar(const S: string; var Pos: Integer; Expected: Integer);
+procedure ScanChar(const S: string; var Pos: Int; Expected: Int);
 begin
   if Pos >= Length(S) then
     raise EDateTimeError.Create('Date/time string too short');
@@ -277,10 +277,10 @@ begin
 end;
 
 { Parse optional decimal fraction (e.g. '.123') into nanoseconds. }
-function ScanFraction(const S: string; var Pos: Integer): Integer;
+function ScanFraction(const S: string; var Pos: Int): Int;
 var
-  Digits: Integer;
-  Ch:     Integer;
+  Digits: Int;
+  Ch:     Int;
 begin
   Result := 0;
   if (Pos >= Length(S)) or (OrdAt(S, Pos) <> Ord('.')) then Exit;
@@ -305,22 +305,22 @@ end;
 { IsLeapYear / DaysInMonth / DayOfWeek                                 }
 { ================================================================== }
 
-function IsLeapYear(Year: Integer): Boolean;
+function IsLeapYear(Year: Int): Boolean;
 begin
   Result := _TimeIsLeapYear(Year) <> 0
 end;
 
-function DaysInMonth(Year, Month: Integer): Integer;
+function DaysInMonth(Year, Month: Int): Int;
 begin
   Result := _TimeDaysInMonth(Year, Month)
 end;
 
 { Tomohiko Sakamoto algorithm — returns 0=Sunday .. 6=Saturday;
   we remap to ISO 8601: 1=Monday .. 7=Sunday. }
-function DayOfWeek(D: TDate): Integer;
+function DayOfWeek(D: TDate): Int;
 var
-  Y, M, Day, Dow: Integer;
-  T: array[0..11] of Integer;
+  Y, M, Day, Dow: Int;
+  T: array[0..11] of Int32;
 begin
   T[0]  := 0; T[1]  := 3; T[2]  := 2; T[3]  := 5;
   T[4]  := 0; T[5]  := 3; T[6]  := 5; T[7]  := 1;
@@ -341,18 +341,18 @@ end;
 { TTimeZoneOffset                                                       }
 { ================================================================== }
 
-function TTimeZoneOffset.Hours: Integer;
+function TTimeZoneOffset.Hours: Int;
 var
-  Abs: Integer;
+  Abs: Int;
 begin
   Abs := Self.TotalSeconds;
   if Abs < 0 then Abs := -Abs;
   Result := Abs div 3600
 end;
 
-function TTimeZoneOffset.Minutes: Integer;
+function TTimeZoneOffset.Minutes: Int;
 var
-  Abs: Integer;
+  Abs: Int;
 begin
   Abs := Self.TotalSeconds;
   if Abs < 0 then Abs := -Abs;
@@ -362,7 +362,7 @@ end;
 function TTimeZoneOffset.ToString: string;
 var
   Sign: string;
-  H, M: Integer;
+  H, M: Int;
 begin
   if Self.TotalSeconds = 0 then
   begin
@@ -382,10 +382,10 @@ end;
 { TDate                                                                 }
 { ================================================================== }
 
-function TDate.DayOfWeek: Integer;
+function TDate.DayOfWeek: Int;
 var
-  Y, M, Day, Dow: Integer;
-  T: array[0..11] of Integer;
+  Y, M, Day, Dow: Int;
+  T: array[0..11] of Int32;
 begin
   T[0] := 0; T[1] := 3; T[2] := 2; T[3] := 5;
   T[4] := 0; T[5] := 3; T[6] := 5; T[7] := 1;
@@ -401,7 +401,7 @@ begin
   Result := _TimeIsLeapYear(Self.Year) <> 0
 end;
 
-function TDate.DaysInMonth: Integer;
+function TDate.DaysInMonth: Int;
 begin
   Result := _TimeDaysInMonth(Self.Year, Self.Month)
 end;
@@ -512,7 +512,7 @@ end;
 
 function TInstant.ToUtcDateTime: TDateTime;
 var
-  Y, Mo, D, H, Mi, S, Ns: Integer;
+  Y, Mo, D, H, Mi, S, Ns: Int32;
 begin
   _TimeSplit(Self.Nanoseconds, Y, Mo, D, H, Mi, S, Ns);
   Result.Date.Year        := Y;
@@ -583,14 +583,14 @@ end;
 { Construction                                                          }
 { ================================================================== }
 
-function MakeDate(Year, Month, Day: Integer): TDate;
+function MakeDate(Year, Month, Day: Int): TDate;
 begin
   Result.Year  := Year;
   Result.Month := Month;
   Result.Day   := Day
 end;
 
-function MakeTime(Hour, Minute, Second: Integer): TTime;
+function MakeTime(Hour, Minute, Second: Int): TTime;
 begin
   Result.Hour       := Hour;
   Result.Minute     := Minute;
@@ -598,7 +598,7 @@ begin
   Result.Nanosecond := 0
 end;
 
-function MakeTimeNano(Hour, Minute, Second, Nanosecond: Integer): TTime;
+function MakeTimeNano(Hour, Minute, Second, Nanosecond: Int): TTime;
 begin
   Result.Hour       := Hour;
   Result.Minute     := Minute;
@@ -652,9 +652,9 @@ begin
                         Int64(Offset.TotalSeconds) * NS_PER_SEC
 end;
 
-function MakeOffset(Hours, Minutes: Integer): TTimeZoneOffset;
+function MakeOffset(Hours, Minutes: Int): TTimeZoneOffset;
 var
-  Sign: Integer;
+  Sign: Int;
 begin
   if Hours < 0 then
   begin
@@ -694,7 +694,7 @@ end;
 
 function ParseDate(const S: string): TDate;
 var
-  Pos: Integer;
+  Pos: Int;
 begin
   Pos           := 0;
   Result.Year   := ScanInt(S, Pos, 4);
@@ -706,7 +706,7 @@ end;
 
 function ParseTime(const S: string): TTime;
 var
-  Pos: Integer;
+  Pos: Int;
 begin
   Pos              := 0;
   Result.Hour      := ScanInt(S, Pos, 2);
@@ -719,7 +719,7 @@ end;
 
 function ParseDateTime(const S: string): TDateTime;
 var
-  Pos: Integer;
+  Pos: Int;
 begin
   Pos                    := 0;
   Result.Date.Year       := ScanInt(S, Pos, 4);
@@ -738,10 +738,10 @@ end;
 
 function ParseOffset(const S: string): TTimeZoneOffset;
 var
-  Pos:  Integer;
-  Sign: Integer;
-  H, M: Integer;
-  Ch:   Integer;
+  Pos:  Int;
+  Sign: Int;
+  H, M: Int;
+  Ch:   Int;
 begin
   Pos := 0;
   if Length(S) = 0 then
@@ -767,9 +767,9 @@ end;
 
 function ParseInstant(const S: string): TInstant;
 var
-  Pos:  Integer;
-  Y, Mo, D, H, Mi, Se, Ns: Integer;
-  Ch:   Integer;
+  Pos:  Int;
+  Y, Mo, D, H, Mi, Se, Ns: Int;
+  Ch:   Int;
   Off:  TTimeZoneOffset;
   OffStr: string;
 begin
@@ -803,10 +803,10 @@ end;
 
 function ParseDuration(const S: string): TDuration;
 var
-  Pos:    Integer;
-  Ch:     Integer;
+  Pos:    Int;
+  Ch:     Int;
   N:      Int64;
-  Digit:  Integer;
+  Digit:  Int;
   InTime: Boolean;
   Total:  Int64;
 begin
@@ -867,7 +867,7 @@ end;
 
 function InstantToDate(I: TInstant): TDate;
 var
-  Y, Mo, D, H, Mi, S, Ns: Integer;
+  Y, Mo, D, H, Mi, S, Ns: Int32;
 begin
   _TimeSplit(I.Nanoseconds, Y, Mo, D, H, Mi, S, Ns);
   Result.Year  := Y;
@@ -875,7 +875,7 @@ begin
   Result.Day   := D
 end;
 
-function DateAddDays(D: TDate; Days: Integer): TDate;
+function DateAddDays(D: TDate; Days: Int): TDate;
 var
   I: TInstant;
 begin
@@ -884,13 +884,13 @@ begin
   Result := InstantToDate(I)
 end;
 
-function DateAddMonths(D: TDate; Months: Integer): TDate;
+function DateAddMonths(D: TDate; Months: Int): TDate;
 var
-  TotalMonths: Integer;
-  NewYear:     Integer;
-  NewMonth:    Integer;
-  NewDay:      Integer;
-  MaxDay:      Integer;
+  TotalMonths: Int;
+  NewYear:     Int;
+  NewMonth:    Int;
+  NewDay:      Int;
+  MaxDay:      Int;
 begin
   TotalMonths := (D.Year * 12 + D.Month - 1) + Months;
   NewYear     := TotalMonths div 12;
@@ -904,18 +904,18 @@ begin
   Result.Day   := NewDay
 end;
 
-function DateAddYears(D: TDate; Years: Integer): TDate;
+function DateAddYears(D: TDate; Years: Int): TDate;
 begin
   Result := DateAddMonths(D, Years * 12)
 end;
 
-function DateDiffDays(A, B: TDate): Integer;
+function DateDiffDays(A, B: TDate): Int;
 var
   NsA, NsB: Int64;
 begin
   NsA    := _TimeJoin(A.Year, A.Month, A.Day, 0, 0, 0, 0);
   NsB    := _TimeJoin(B.Year, B.Month, B.Day, 0, 0, 0, 0);
-  Result := Integer((NsB - NsA) div NS_PER_DAY)
+  Result := Int32((NsB - NsA) div NS_PER_DAY)
 end;
 
 { ================================================================== }

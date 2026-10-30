@@ -402,7 +402,7 @@ procedure TXmlTests.TestParse_NumericCharRefs;
 var
   Doc: TXMLDocument;
   T: string;
-  B: Integer;
+  B: Int;
 begin
   Doc := GetXML('<a>&#65;&#x42;&#233;</a>');
   T := Doc.Root.Text;

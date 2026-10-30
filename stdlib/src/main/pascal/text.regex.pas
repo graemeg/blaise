@@ -198,10 +198,10 @@ type
     the pattern text, pointing at (or just past) the offending construct. }
   ERegexSyntaxError = class(Exception)
   private
-    FPosition: Integer;
+    FPosition: Int;
   public
-    constructor Create(const AMessage: string; APosition: Integer);
-    property Position: Integer read FPosition;
+    constructor Create(const AMessage: string; APosition: Int);
+    property Position: Int read FPosition;
   end;
 
   { Raised when a match exceeds the TRegex's StepLimit.  See the unit header:
@@ -213,8 +213,8 @@ type
   { One capture group's result.  Index is a 0-based BYTE offset, or -1 when
     the group did not participate in the match. }
   TGroup = record
-    Index: Integer;
-    Length: Integer;
+    Index: Int;
+    Length: Int;
     Value: string;
   end;
 
@@ -226,17 +226,17 @@ type
     FGroups: array of TGroup;
   public
     Success: Boolean;
-    Index: Integer;
-    Length: Integer;
+    Index: Int;
+    Length: Int;
     Value: string;
     { Number of groups including group 0, so a pattern with two capturing
       groups reports 3. }
-    function GroupCount: Integer;
+    function GroupCount: Int;
     { Group AIndex, or a group with Index = -1 when out of range or when the
       group did not participate.  Never raises. }
-    function Group(AIndex: Integer): TGroup;
+    function Group(AIndex: Int): TGroup;
     { Shorthand for Group(AIndex).Value; '' when absent. }
-    function GroupValue(AIndex: Integer): string;
+    function GroupValue(AIndex: Int): string;
   end;
 
   { Compiled-node opcodes.  The compiled form is a tree of TRegexNode rather
@@ -254,7 +254,7 @@ type
   TEscape = record
     IsClass: Boolean;      { True when Cls carries a shorthand class }
     Cls: TCharClass;
-    Value: Integer;        { literal byte, or -(group number) for a backref }
+    Value: Int;        { literal byte, or -(group number) for a backref }
   end;
 
   TRegexOp = (
@@ -284,13 +284,13 @@ type
     Cls: TCharClass;         { opClass }
     Negate: Boolean;         { opClass negation; lookaround negation }
     Kids: TList<TRegexNode>; { opConcat / opAlt children; [0] for wrappers }
-    RepMin: Integer;         { opRepeat lower bound }
-    RepMax: Integer;         { opRepeat upper bound; -1 = unbounded }
+    RepMin: Int;         { opRepeat lower bound }
+    RepMax: Int;         { opRepeat upper bound; -1 = unbounded }
     Lazy: Boolean;           { opRepeat }
     Possessive: Boolean;     { opRepeat; also set for atomic groups }
-    GroupNum: Integer;       { opGroup capture number, 0 = non-capturing }
+    GroupNum: Int;       { opGroup capture number, 0 = non-capturing }
     Atomic: Boolean;         { opGroup }
-    RefNum: Integer;         { opBackref }
+    RefNum: Int;         { opBackref }
     constructor Create(AOp: TRegexOp);
     destructor Destroy; override;
     procedure AddKid(ANode: TRegexNode);
@@ -301,15 +301,15 @@ type
     FPattern: string;
     FOptions: TRegexOptions;
     FRoot: TRegexNode;
-    FGroupCount: Integer;
-    FStepLimit: Integer;
+    FGroupCount: Int;
+    FStepLimit: Int;
     { --- pattern parsing (constructor only; never touched afterwards) --- }
     FPat: string;
-    FPos: Integer;
-    FLen: Integer;
+    FPos: Int;
+    FLen: Int;
     procedure Fail(const AMsg: string);
-    procedure FailAt(const AMsg: string; APos: Integer);
-    function PeekByte: Integer;
+    procedure FailAt(const AMsg: string; APos: Int);
+    function PeekByte: Int;
     function ParseAlternation: TRegexNode;
     function ParseConcat: TRegexNode;
     function ParseQuantified: TRegexNode;
@@ -318,10 +318,10 @@ type
     function ParseClass: TRegexNode;
     function ParseEscape(AInClass: Boolean): TEscape;
     procedure ApplyQuantifier(var ANode: TRegexNode);
-    function ParseBound(out AMin, AMax: Integer): Boolean;
+    function ParseBound(out AMin, AMax: Int): Boolean;
     function FoldClass(const ACls: TCharClass): TCharClass;
-    function GetStepLimit: Integer;
-    procedure SetStepLimit(AValue: Integer);
+    function GetStepLimit: Int;
+    procedure SetStepLimit(AValue: Int);
   public
     { Compile APattern.  Raises ERegexSyntaxError if it is malformed.
 
@@ -339,10 +339,10 @@ type
     { True when the pattern matches anywhere in AInput. }
     function IsMatch(const AInput: string): Boolean; overload;
     { True when the pattern matches at or after byte offset AStartAt. }
-    function IsMatch(const AInput: string; AStartAt: Integer): Boolean; overload;
+    function IsMatch(const AInput: string; AStartAt: Int): Boolean; overload;
     { Leftmost match, or Success = False / Index = -1 when there is none. }
     function Match(const AInput: string): TMatch; overload;
-    function Match(const AInput: string; AStartAt: Integer): TMatch; overload;
+    function Match(const AInput: string; AStartAt: Int): TMatch; overload;
     { All non-overlapping matches, left to right.  Never nil; the caller owns
       the returned list.  An empty match still advances one codepoint, so
       this always terminates. }
@@ -368,10 +368,10 @@ type
     property Pattern: string read FPattern;
     property Options: TRegexOptions read FOptions;
     { Number of CAPTURING groups, not counting group 0. }
-    property GroupCount: Integer read FGroupCount;
+    property GroupCount: Int read FGroupCount;
     { Backtracking-step allowance for a single match call.  See the unit
       header.  Read once per match, so changing it mid-flight is safe. }
-    property StepLimit: Integer read GetStepLimit write SetStepLimit;
+    property StepLimit: Int read GetStepLimit write SetStepLimit;
   end;
 
 { The empty option set, spelled out so call sites can read
@@ -457,7 +457,7 @@ end;
   materialised. }
 function ComplementClass(const ASet: TCharClass): TCharClass;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := [];
   for I := 0 to 255 do
@@ -469,12 +469,12 @@ end;
 { Byte predicates — all ASCII-only by design (see unit header).       }
 { ------------------------------------------------------------------ }
 
-function IsDigitByte(B: Integer): Boolean;
+function IsDigitByte(B: Int): Boolean;
 begin
   Result := (B >= CH_0) and (B <= CH_9);
 end;
 
-function IsWordByte(B: Integer): Boolean;
+function IsWordByte(B: Int): Boolean;
 begin
   Result := ((B >= CH_LC_A) and (B <= CH_LC_Z))
          or ((B >= CH_UC_A) and (B <= CH_UC_Z))
@@ -482,14 +482,14 @@ begin
          or (B = CH_UNDER);
 end;
 
-function IsSpaceByte(B: Integer): Boolean;
+function IsSpaceByte(B: Int): Boolean;
 begin
   Result := (B = CH_SPACE) or (B = CH_TAB) or (B = CH_LF)
          or (B = CH_CR) or (B = CH_FF) or (B = CH_VT);
 end;
 
 { ASCII-only lower/upper folding helpers. }
-function LowerByte(B: Integer): Integer;
+function LowerByte(B: Int): Int;
 begin
   if (B >= CH_UC_A) and (B <= CH_UC_Z) then
     Result := B + 32
@@ -497,7 +497,7 @@ begin
     Result := B;
 end;
 
-function UpperByte(B: Integer): Integer;
+function UpperByte(B: Int): Int;
 begin
   if (B >= CH_LC_A) and (B <= CH_LC_Z) then
     Result := B - 32
@@ -508,7 +508,7 @@ end;
 { Number of bytes in the UTF-8 sequence whose leading byte is B.  A stray
   continuation byte or an invalid lead is treated as a single byte, so the
   matcher always makes progress on malformed input rather than looping. }
-function Utf8SeqLen(B: Integer): Integer;
+function Utf8SeqLen(B: Int): Int;
 begin
   if B < $80 then
     Result := 1
@@ -526,7 +526,7 @@ end;
 { ERegexSyntaxError                                                   }
 { ------------------------------------------------------------------ }
 
-constructor ERegexSyntaxError.Create(const AMessage: string; APosition: Integer);
+constructor ERegexSyntaxError.Create(const AMessage: string; APosition: Int);
 begin
   inherited Create(AMessage + ' at pattern offset ' + IntToStr(APosition));
   FPosition := APosition;
@@ -536,12 +536,12 @@ end;
 { TMatch                                                              }
 { ------------------------------------------------------------------ }
 
-function TMatch.GroupCount: Integer;
+function TMatch.GroupCount: Int;
 begin
   Result := System.Length(FGroups);
 end;
 
-function TMatch.Group(AIndex: Integer): TGroup;
+function TMatch.Group(AIndex: Int): TGroup;
 begin
   if (AIndex < 0) or (AIndex >= System.Length(FGroups)) then
   begin
@@ -553,7 +553,7 @@ begin
     Result := FGroups[AIndex];
 end;
 
-function TMatch.GroupValue(AIndex: Integer): string;
+function TMatch.GroupValue(AIndex: Int): string;
 begin
   Result := Self.Group(AIndex).Value;
 end;
@@ -580,7 +580,7 @@ end;
 
 destructor TRegexNode.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Kids.Count - 1 do
     Kids.Get(I).Free();
@@ -636,12 +636,12 @@ begin
   Self.FailAt(AMsg, FPos);
 end;
 
-procedure TRegex.FailAt(const AMsg: string; APos: Integer);
+procedure TRegex.FailAt(const AMsg: string; APos: Int);
 begin
   raise ERegexSyntaxError.Create(AMsg, APos);
 end;
 
-function TRegex.PeekByte: Integer;
+function TRegex.PeekByte: Int;
 begin
   if FPos < FLen then
     Result := Byte(FPat[FPos])
@@ -649,12 +649,12 @@ begin
     Result := -1;
 end;
 
-function TRegex.GetStepLimit: Integer;
+function TRegex.GetStepLimit: Int;
 begin
   Result := FStepLimit;
 end;
 
-procedure TRegex.SetStepLimit(AValue: Integer);
+procedure TRegex.SetStepLimit(AValue: Int);
 begin
   if AValue < 1 then
     FStepLimit := 1
@@ -689,7 +689,7 @@ end;
 function TRegex.ParseConcat: TRegexNode;
 var
   Seq: TRegexNode;
-  B: Integer;
+  B: Int;
 begin
   Seq := TRegexNode.Create(opConcat);
   while True do
@@ -718,10 +718,10 @@ end;
 { Read a braced repetition bound starting at the opening brace.  Returns False (leaving FPos
   untouched) when what follows is not a well-formed bound, so a stray '{' can
   fall through and be treated as a literal — Perl and .NET both do this. }
-function TRegex.ParseBound(out AMin, AMax: Integer): Boolean;
+function TRegex.ParseBound(out AMin, AMax: Int): Boolean;
 var
-  Save: Integer;
-  B: Integer;
+  Save: Int;
+  B: Int;
   HasMin: Boolean;
   HasMax: Boolean;
 begin
@@ -801,10 +801,10 @@ end;
 { Wrap ANode in an opRepeat when a quantifier follows it. }
 procedure TRegex.ApplyQuantifier(var ANode: TRegexNode);
 var
-  B: Integer;
+  B: Int;
   Rep: TRegexNode;
-  Lo, Hi: Integer;
-  QPos: Integer;
+  Lo, Hi: Int;
+  QPos: Int;
 begin
   B := Self.PeekByte();
   QPos := FPos;
@@ -874,9 +874,9 @@ end;
   a character class. }
 function TRegex.ParseEscape(AInClass: Boolean): TEscape;
 var
-  B: Integer;
-  I: Integer;
-  EscPos: Integer;
+  B: Int;
+  I: Int;
+  EscPos: Int;
   Acc: TCharClass;
   { Distinct destination for every complement/fold: 'X := F(X)' on a jumbo set
     miscompiles on the native backend (BUG-20260720-native-jumbo-set-self-assign). }
@@ -983,11 +983,11 @@ end;
 function TRegex.ParseClass: TRegexNode;
 var
   Node: TRegexNode;
-  StartPos: Integer;
-  B: Integer;
-  Lo, Hi: Integer;
+  StartPos: Int;
+  B: Int;
+  Lo, Hi: Int;
   Esc: TEscape;
-  MemberPos: Integer;
+  MemberPos: Int;
   First: Boolean;
   Negated: Boolean;
   Acc: TCharClass;
@@ -1105,7 +1105,7 @@ end;
   always wants a new class, not an in-place edit. }
 function TRegex.FoldClass(const ACls: TCharClass): TCharClass;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := ACls;
   for I := CH_UC_A to CH_UC_Z do
@@ -1119,14 +1119,14 @@ end;
 { group := '(', an optional '?'-prefixed construct, alternation, ')' }
 function TRegex.ParseGroup: TRegexNode;
 var
-  StartPos: Integer;
+  StartPos: Int;
   Node: TRegexNode;
   Body: TRegexNode;
-  B: Integer;
+  B: Int;
   Capturing: Boolean;
   Atomic: Boolean;
   Marker: TRegexNode;
-  Look: Integer;      { 0 none, 1 ahead, 2 behind }
+  Look: Int;      { 0 none, 1 ahead, 2 behind }
   Neg: Boolean;
 begin
   StartPos := FPos;
@@ -1259,13 +1259,13 @@ end;
 
 function TRegex.ParseAtom: TRegexNode;
 var
-  B: Integer;
+  B: Int;
   Node: TRegexNode;
-  Lit: Integer;
+  Lit: Int;
   Esc: TEscape;
   FoldPair: TCharClass;
-  EscPos: Integer;
-  I: Integer;
+  EscPos: Int;
+  I: Int;
 begin
   B := Self.PeekByte();
   if B < 0 then
@@ -1404,7 +1404,7 @@ type
   PContinuation = ^TContinuation;
   TContinuation = record
     Nodes: TList<TRegexNode>;
-    Idx: Integer;
+    Idx: Int;
     Next: PContinuation;
   end;
 
@@ -1413,14 +1413,14 @@ type
     across fibers and threads — see the unit header. }
   TMatchState = record
     Input: string;
-    InLen: Integer;
+    InLen: Int;
     Options: TRegexOptions;
-    Steps: Integer;
-    StepLimit: Integer;
+    Steps: Int;
+    StepLimit: Int;
     { Capture registers, 1-based by group number; index 0 is unused.
       CapStart[g] = -1 means the group has not participated. }
-    CapStart: array of Integer;
-    CapEnd: array of Integer;
+    CapStart: array of Int32;
+    CapEnd: array of Int32;
   end;
 
 { Bump the step counter, raising when the budget is exhausted.  Every
@@ -1435,7 +1435,7 @@ begin
       ' exceeded; the pattern may be backtracking catastrophically');
 end;
 
-function InputByte(const AState: TMatchState; APos: Integer): Integer;
+function InputByte(const AState: TMatchState; APos: Int): Int;
 begin
   if (APos < 0) or (APos >= AState.InLen) then
     Result := -1
@@ -1443,9 +1443,9 @@ begin
     Result := Byte(AState.Input[APos]);
 end;
 
-function IsWordAt(const AState: TMatchState; APos: Integer): Boolean;
+function IsWordAt(const AState: TMatchState; APos: Int): Boolean;
 var
-  B: Integer;
+  B: Int;
 begin
   B := InputByte(AState, APos);
   Result := (B >= 0) and IsWordByte(B);
@@ -1454,19 +1454,19 @@ end;
 { Forward declarations: the matcher is mutually recursive through the
   continuation chain. }
 function MatchNodeList(var AState: TMatchState; ANodes: TList<TRegexNode>;
-                       AIdx, APos: Integer; ACont: PContinuation;
-                       out AEnd: Integer): Boolean; forward;
+                       AIdx, APos: Int; ACont: PContinuation;
+                       out AEnd: Int): Boolean; forward;
 
 { Match ANode at APos, then run ACont.  Threading the continuation through
   rather than returning after each node is what lets a quantifier give
   characters back and have the REST of the pattern retried. }
-function MatchNode(var AState: TMatchState; ANode: TRegexNode; APos: Integer;
-                   ACont: PContinuation; out AEnd: Integer): Boolean; forward;
+function MatchNode(var AState: TMatchState; ANode: TRegexNode; APos: Int;
+                   ACont: PContinuation; out AEnd: Int): Boolean; forward;
 
 { Run a continuation chain at APos.  An empty chain means the whole pattern
   has matched, so APos is the end of the match. }
 function MatchCont(var AState: TMatchState; ACont: PContinuation;
-  APos: Integer; out AEnd: Integer): Boolean;
+  APos: Int; out AEnd: Int): Boolean;
 begin
   if ACont = nil then
   begin
@@ -1481,7 +1481,7 @@ end;
 { Match the sequence ANodes[AIdx..] at APos; on running off the end, fall
   through to ACont. }
 function MatchNodeList(var AState: TMatchState; ANodes: TList<TRegexNode>;
-  AIdx, APos: Integer; ACont: PContinuation; out AEnd: Integer): Boolean;
+  AIdx, APos: Int; ACont: PContinuation; out AEnd: Int): Boolean;
 var
   Frame: TContinuation;
 begin
@@ -1502,22 +1502,22 @@ end;
   hand over to the optional tail.  Split out so Min and the optional part can
   share one recursion. }
 function MatchRepeat(var AState: TMatchState; ARep: TRegexNode;
-                     ADone, APos: Integer;
-                     ACont: PContinuation; out AEnd: Integer): Boolean; forward;
+                     ADone, APos: Int;
+                     ACont: PContinuation; out AEnd: Int): Boolean; forward;
 
-function MatchNode(var AState: TMatchState; ANode: TRegexNode; APos: Integer;
-  ACont: PContinuation; out AEnd: Integer): Boolean;
+function MatchNode(var AState: TMatchState; ANode: TRegexNode; APos: Int;
+  ACont: PContinuation; out AEnd: Int): Boolean;
 var
-  B: Integer;
-  I: Integer;
-  SeqLen: Integer;
+  B: Int;
+  I: Int;
+  SeqLen: Int;
   Sub: TRegexNode;
-  SaveStart, SaveEnd: Integer;
-  InnerEnd: Integer;
+  SaveStart, SaveEnd: Int;
+  InnerEnd: Int;
   Ok: Boolean;
-  RefLen: Integer;
-  RefStart: Integer;
-  Back: Integer;
+  RefLen: Int;
+  RefStart: Int;
+  Back: Int;
   Before, After: Boolean;
 begin
   Step(AState);
@@ -1719,13 +1719,13 @@ end;
   greedy/lazy/possessive differ only in the order (or existence) of the two
   alternatives. }
 function MatchRepeat(var AState: TMatchState; ARep: TRegexNode;
-  ADone, APos: Integer; ACont: PContinuation;
-  out AEnd: Integer): Boolean;
+  ADone, APos: Int; ACont: PContinuation;
+  out AEnd: Int): Boolean;
 var
   Sub: TRegexNode;
-  InnerEnd: Integer;
-  Pos2: Integer;
-  Count: Integer;
+  InnerEnd: Int;
+  Pos2: Int;
+  Count: Int;
 begin
   Step(AState);
   Sub := ARep.Kids.Get(0);
@@ -1809,15 +1809,15 @@ begin
   Result := Self.Match(AInput, 0);
 end;
 
-function TRegex.Match(const AInput: string; AStartAt: Integer): TMatch;
+function TRegex.Match(const AInput: string; AStartAt: Int): TMatch;
 var
   State: TMatchState;
-  Start: Integer;
-  MatchEnd: Integer;
-  I: Integer;
+  Start: Int;
+  MatchEnd: Int;
+  I: Int;
   G: TGroup;
-  B: Integer;
-  Adv: Integer;
+  B: Int;
+  Adv: Int;
 begin
   Result.Success := False;
   Result.Index := -1;
@@ -1893,7 +1893,7 @@ begin
   Result := Self.Match(AInput, 0).Success;
 end;
 
-function TRegex.IsMatch(const AInput: string; AStartAt: Integer): Boolean;
+function TRegex.IsMatch(const AInput: string; AStartAt: Int): Boolean;
 begin
   Result := Self.Match(AInput, AStartAt).Success;
 end;
@@ -1901,9 +1901,9 @@ end;
 function TRegex.Matches(const AInput: string): TList<TMatch>;
 var
   M: TMatch;
-  Pos: Integer;
-  InLen: Integer;
-  B: Integer;
+  Pos: Int;
+  InLen: Int;
+  B: Int;
 begin
   Result := TList<TMatch>.Create();
   Pos := 0;
@@ -1932,9 +1932,9 @@ end;
 function ExpandReplacement(const AReplacement: string; const AMatch: TMatch): string;
 var
   SB: TStringBuilder;
-  I: Integer;
-  N: Integer;
-  B: Integer;
+  I: Int;
+  N: Int;
+  B: Int;
   M: TMatch;
 begin
   M := AMatch;
@@ -1984,9 +1984,9 @@ function TRegex.Replace(const AInput, AReplacement: string): string;
 var
   SB: TStringBuilder;
   L: TList<TMatch>;
-  I: Integer;
+  I: Int;
   M: TMatch;
-  Cursor: Integer;
+  Cursor: Int;
 begin
   L := Self.Matches(AInput);
   try
@@ -2020,9 +2020,9 @@ end;
 function TRegex.Split(const AInput: string): TList<String>;
 var
   L: TList<TMatch>;
-  I: Integer;
+  I: Int;
   M: TMatch;
-  Cursor: Integer;
+  Cursor: Int;
 begin
   Result := TList<String>.Create();
   L := Self.Matches(AInput);

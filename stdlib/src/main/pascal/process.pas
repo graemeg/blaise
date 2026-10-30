@@ -40,7 +40,7 @@ type
     FExe: string;
     FParameters: TList<string>;
     function GetRunning: Boolean;
-    function GetExitCode: Integer;
+    function GetExitCode: Int;
     constructor Create(AOwner: TObject);
     destructor Destroy; override;
     procedure Execute;
@@ -49,7 +49,7 @@ type
     property Executable: string read FExe write FExe;
     property Parameters: TList<string> read FParameters;
     property Running: Boolean read GetRunning;
-    property ExitCode: Integer read GetExitCode;
+    property ExitCode: Int read GetExitCode;
   end;
 
 implementation
@@ -71,14 +71,14 @@ begin
   Result := ProcessRunning(Self.FHandle)
 end;
 
-function TProcess.GetExitCode: Integer;
+function TProcess.GetExitCode: Int;
 begin
   Result := ProcessExitCode(Self.FHandle)
 end;
 
 procedure TProcess.Execute;
 var
-  I: Integer;
+  I: Int;
 begin
   ProcessSetExe(Self.FHandle, Self.FExe);
   I := 0;

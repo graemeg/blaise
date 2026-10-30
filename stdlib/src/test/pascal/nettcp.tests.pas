@@ -71,8 +71,8 @@ var
   GHandler: IConnHandler;
   GPort: UInt16;
   GResult: string;
-  GDone: Integer;
-  GExpected: Integer;
+  GDone: Int;
+  GExpected: Int;
 
 procedure ServerFiber(AArg: Pointer);
 begin
@@ -86,10 +86,10 @@ procedure ClientFiber(AArg: Pointer);
 var
   Cli: TTcpClient;
   Conn: TTcpConn;
-  Id: Integer;
+  Id: Int;
   Line: string;
 begin
-  Id := Integer(AArg);
+  Id := Int32(AArg);
   FiberSleep(2);                    { let the server accept-park first }
   Cli := TTcpClient.Create();
   Conn := Cli.Connect('127.0.0.1', GPort);
@@ -139,7 +139,7 @@ const
   PORT = 29402;
   NCLIENTS = 8;
 var
-  I, Cnt: Integer;
+  I, Cnt: Int;
 begin
   GServer := TTcpServer.Create(PORT);
   AssertTrue('server start', GServer.Start());
@@ -205,7 +205,7 @@ end;
 
 function KiloChunk: string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   for I := 0 to 63 do
@@ -215,7 +215,7 @@ end;
 { Write until a write fails (or give up after ~1 s).  True if one failed. }
 function WriteUntilFail(AConn: TTcpConn): Boolean;
 var
-  I: Integer;
+  I: Int;
   Chunk: string;
 begin
   Chunk := KiloChunk();

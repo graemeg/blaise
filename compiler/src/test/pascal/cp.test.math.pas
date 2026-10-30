@@ -110,7 +110,7 @@ type
     { Sign }
     procedure TestSemantic_Sign_Integer_OK;
     procedure TestSemantic_Sign_Double_OK;
-    procedure TestSemantic_Sign_ReturnsInteger;
+    procedure TestSemantic_Sign_ReturnsInt;
 
     { DivMod }
     procedure TestSemantic_DivMod_OK;
@@ -123,7 +123,7 @@ type
     { EnsureRange }
     procedure TestSemantic_EnsureRange_Integer_OK;
     procedure TestSemantic_EnsureRange_Double_OK;
-    procedure TestSemantic_EnsureRange_Integer_ReturnsInteger;
+    procedure TestSemantic_EnsureRange_Int_ReturnsInt;
 
     { Pi constant }
     procedure TestSemantic_Pi_UsableInExpr;
@@ -849,7 +849,7 @@ begin
     ''');
 end;
 
-procedure TMathTests.TestSemantic_Sign_ReturnsInteger;
+procedure TMathTests.TestSemantic_Sign_ReturnsInt;
 var
   Lexer:       TLexer;
   Parser:      TParser;
@@ -879,7 +879,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Integer', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Int64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();
@@ -896,7 +896,7 @@ begin
   SemanticOK(
     '''
     program P; uses Math;
-    var D, V, Q, R: Integer;
+    var D, V, Q, R: Int;
     begin DivMod(D, V, Q, R) end.
     ''');
 end;
@@ -987,7 +987,7 @@ begin
     ''');
 end;
 
-procedure TMathTests.TestSemantic_EnsureRange_Integer_ReturnsInteger;
+procedure TMathTests.TestSemantic_EnsureRange_Int_ReturnsInt;
 var
   Lexer:       TLexer;
   Parser:      TParser;
@@ -1017,7 +1017,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Integer', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Int64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();

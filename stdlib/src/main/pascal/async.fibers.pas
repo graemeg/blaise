@@ -77,7 +77,7 @@ type
       few-thousand-fiber batch on a persistent pool. }
     [Unretained] NextReady: TFiberTask;
     Deadline: Int64;         { absolute CLOCK_MONOTONIC ns, when fsSleeping }
-    HeapIndex: Integer;      { slot in the timer heap; -1 when not queued }
+    HeapIndex: Int32;      { slot in the timer heap; -1 when not queued }
     Cancelled: Boolean;
     FailMessage: string;     { set by the root frame on fsFailed/fsCancelled }
     { Park handshake word (async.sync park/resume): PK_RUNNING/PK_PARKING/
@@ -100,11 +100,11 @@ type
       the task — the same non-owning-cursor discipline the injector uses. }
     FHead: Pointer;
     FTail: Pointer;
-    FCount: Integer;
+    FCount: Int32;
   public
     procedure Push(ATask: TFiberTask);
     function Pop: TFiberTask;
-    property Count: Integer read FCount;
+    property Count: Int32 read FCount;
   end;
 
   { 4-ary min-heap over TFiberTask.Deadline (absolute monotonic ns).  Serves
@@ -114,9 +114,9 @@ type
   TTimerHeap = class
   private
     FItems: TList<TFiberTask>;
-    procedure SiftUp(AIdx: Integer);
-    procedure SiftDown(AIdx: Integer);
-    function GetCount: Integer;
+    procedure SiftUp(AIdx: Int);
+    procedure SiftDown(AIdx: Int);
+    function GetCount: Int;
   public
     constructor Create;
     procedure Push(ATask: TFiberTask);
@@ -125,8 +125,8 @@ type
     procedure Remove(ATask: TFiberTask);
     { Raw heap-array access (unordered) — used by the multicore worker loop to
       scan for cancelled sleepers.  0 <= AIdx < Count. }
-    function HeapItem(AIdx: Integer): TFiberTask;
-    property Count: Integer read GetCount;
+    function HeapItem(AIdx: Int): TFiberTask;
+    property Count: Int32 read GetCount;
   end;
 
   { Per-worker scheduler state.  L1 has exactly one worker, driven by
@@ -140,14 +140,14 @@ type
     SchedFib: PFiber;         { the scheduler loop's own L0 context }
     Current: TFiberTask;      { task executing on this worker; nil in the loop }
     Tasks: TList<TFiberTask>; { every spawned task; keeps handles valid }
-    LiveCount: Integer;       { spawned and not yet finished }
+    LiveCount: Int32;       { spawned and not yet finished }
     Running: Boolean;         { re-entrancy guard for RunScheduler }
 
     { --- multicore fields (L1 multicore; single-worker path ignores them) --- }
-    Id: Integer;              { index into GWorkers }
+    Id: Int32;              { index into GWorkers }
     Deque: TWorkStealDeque;   { per-worker Chase-Lev run queue (owner = this) }
     Handoff: TFiberTask;      { LIFO hand-off slot for a just-woken fiber }
-    ParkWord: Integer;        { futex word: 0 = may sleep, 1 = wake pending }
+    ParkWord: Int32;        { futex word: 0 = may sleep, 1 = wake pending }
     constructor Create;
   end;
 
@@ -184,7 +184,7 @@ procedure FiberSleep(AMillis: Int64);
 procedure FiberCancel(ATask: TFiberTask);
 
 { Number of spawned fibers that have not yet finished. }
-function SchedulerLiveCount: Integer;
+function SchedulerLiveCount: Int;
 
 { Drop all task handles and the worker state so a fresh scheduling round
   starts clean.  Only legal when the scheduler is not running and no fiber
@@ -214,7 +214,7 @@ function MonotonicNowNs: Int64;
   run (N>1), then restored — running it under concurrent create/release would
   corrupt it (design <<rtl-prerequisites>>).  Existing single-worker
   RunScheduler is unchanged and does not touch the tracker. }
-procedure RunSchedulerMC(ANumWorkers: Integer = 0);
+procedure RunSchedulerMC(ANumWorkers: Int = 0);
 
 { True while a multicore run is active (RunSchedulerMC is on the stack). }
 function SchedulerIsMulticore: Boolean;
@@ -245,7 +245,7 @@ function SchedulerIsMulticore: Boolean;
   drives on the calling thread during each FiberPoolRun; workers 1..N-1 live on
   their own pthreads, parked until the first batch.  Raises if a pool or a
   per-call RunSchedulerMC is already active. }
-procedure FiberPoolStart(ANumWorkers: Integer = 0);
+procedure FiberPoolStart(ANumWorkers: Int = 0);
 
 { Drive the currently-spawned fibers to completion on the pool.  Returns when
   every fiber of THIS batch has finished; the peer threads then park, ready for
@@ -302,9 +302,9 @@ uses
   {$ENDIF}
 
 { Portable libc bindings — same names on Linux and FreeBSD. }
-function _libc_clock_gettime(AClockId: Integer; ATs: Pointer): Integer;
+function _libc_clock_gettime(AClockId: Int32; ATs: Pointer): Int32;
   external name 'clock_gettime';
-function _libc_nanosleep(AReq, ARem: Pointer): Integer;
+function _libc_nanosleep(AReq, ARem: Pointer): Int32;
   external name 'nanosleep';
 
 { Park/wake primitives for idle workers — the link-time per-OS seam from
@@ -312,13 +312,13 @@ function _libc_nanosleep(AReq, ARem: Pointer): Integer;
   _umtx_op(2)).  _ParkWait blocks while the 32-bit word at AAddr equals
   AExpected, bounded by the RELATIVE timespec at ATs (never nil).  Results
   are ignored by the scheduler (a spurious wake just re-checks the queues). }
-procedure _ParkWait(AAddr: Pointer; AExpected: Integer; ATs: Pointer);
+procedure _ParkWait(AAddr: Pointer; AExpected: Int32; ATs: Pointer);
   external name '_ParkWait';
-procedure _ParkWake(AAddr: Pointer; ACount: Integer);
+procedure _ParkWake(AAddr: Pointer; ACount: Int32);
   external name '_ParkWake';
 
 { The target's CLOCK_MONOTONIC clockid (Linux 1, FreeBSD 4) — same seam. }
-function _ClockMonotonicId: Integer; external name '_ClockMonotonicId';
+function _ClockMonotonicId: Int32; external name '_ClockMonotonicId';
 
 { Exception-state and leak-tracker hooks from the RTL. }
 function _LeakTrackerSuspend: Boolean; external name '_LeakTrackerSuspend';
@@ -416,21 +416,21 @@ begin
   Self.FItems := TList<TFiberTask>.Create();
 end;
 
-function TTimerHeap.GetCount: Integer;
+function TTimerHeap.GetCount: Int;
 begin
   Result := Self.FItems.Count;
 end;
 
-function TTimerHeap.HeapItem(AIdx: Integer): TFiberTask;
+function TTimerHeap.HeapItem(AIdx: Int): TFiberTask;
 begin
   Result := Self.FItems[AIdx];
 end;
 
-procedure TTimerHeap.SiftUp(AIdx: Integer);
+procedure TTimerHeap.SiftUp(AIdx: Int);
 var
   Item: TFiberTask;
   Parent: TFiberTask;
-  ParentIdx: Integer;
+  ParentIdx: Int;
 begin
   Item := Self.FItems[AIdx];
   while AIdx > 0 do
@@ -447,11 +447,11 @@ begin
   Item.HeapIndex := AIdx;
 end;
 
-procedure TTimerHeap.SiftDown(AIdx: Integer);
+procedure TTimerHeap.SiftDown(AIdx: Int);
 var
   Item: TFiberTask;
   Child: TFiberTask;
-  N, First, Best, I: Integer;
+  N, First, Best, I: Int;
 begin
   Item := Self.FItems[AIdx];
   N := Self.FItems.Count;
@@ -502,7 +502,7 @@ end;
 
 procedure TTimerHeap.Remove(ATask: TFiberTask);
 var
-  Idx, LastIdx: Integer;
+  Idx, LastIdx: Int;
   Last: TFiberTask;
 begin
   Idx := ATask.HeapIndex;
@@ -545,12 +545,12 @@ var
   { --- multicore global state (see the MULTICORE section below) --- }
   GMulticore: Boolean;
   GWorkers: TWorkerArray;
-  GNumWorkers: Integer;
-  GGlobalLive: Integer;        { atomic: fibers spawned and not yet finished }
-  GStop: Integer;              { atomic: 1 = current BATCH drained (worker 0's
+  GNumWorkers: Int;
+  GGlobalLive: Int;        { atomic: fibers spawned and not yet finished }
+  GStop: Int;              { atomic: 1 = current BATCH drained (worker 0's
                                  drive loop returns; peers PARK, they do NOT
                                  exit unless GPoolShutdown is also set) }
-  GPoolShutdown: Integer;      { atomic: 1 tells parked peer threads to actually
+  GPoolShutdown: Int;      { atomic: 1 tells parked peer threads to actually
                                  LEAVE their loop so they can be pthread_join'd.
                                  Only FiberPoolShutdown sets it. }
   GPoolActive: Boolean;        { a pool is live (FiberPoolStart..Shutdown) }
@@ -567,7 +567,7 @@ var
   GInjectorMtx: array[0..7] of Int64;  { guards the injector FIFO }
   GAllTasks: TList<TFiberTask>;{ keeps every handle alive; guarded by GTaskMtx }
   GTaskMtx: array[0..7] of Int64;   { pthread_mutex_t buffer }
-  GCancelGen: Integer;         { atomic: bumped on every FiberCancel }
+  GCancelGen: Int;         { atomic: bumped on every FiberCancel }
 
 var
   { Multicore reactor-poller flag (atomic, 0/1).  At most ONE worker blocks in
@@ -637,7 +637,7 @@ procedure McRequestCancelWake(ATask: TFiberTask); forward;
   fiber parked on every ready fd.  Returns the number of fibers resumed.  Used
   by the idle-park path of both schedulers when fds are registered.  Defined
   after FiberResume below. }
-function ServiceReactor(AMaxWaitNs: Int64): Integer; forward;
+function ServiceReactor(AMaxWaitNs: Int64): Int; forward;
 
 procedure SchedFiberEntry(AArg: Pointer);
 var
@@ -940,10 +940,10 @@ end;
   the token of every ready fd.  The token IS a TFiberTask (what L3 registered
   via CurrentFiberTask), so a readiness directly wakes the parked fiber.
   Returns the number of fibers resumed. }
-function ServiceReactor(AMaxWaitNs: Int64): Integer;
+function ServiceReactor(AMaxWaitNs: Int64): Int;
 var
   Ready: TReadyList;
-  N, I, TimeoutMs: Integer;
+  N, I, TimeoutMs: Int;
   R: TReactor;
 begin
   R := GReactor;
@@ -953,7 +953,7 @@ begin
     TimeoutMs := 0
   else
   begin
-    TimeoutMs := Integer((AMaxWaitNs + Int64(999999)) div Int64(1000000));
+    TimeoutMs := Int32((AMaxWaitNs + Int64(999999)) div Int64(1000000));
     if TimeoutMs <= 0 then
       TimeoutMs := 1;
   end;
@@ -1049,7 +1049,7 @@ begin
   end;
 end;
 
-function SchedulerLiveCount: Integer;
+function SchedulerLiveCount: Int;
 begin
   if GMulticore then
     Exit(_AtomicAddInt32(@GGlobalLive, 0));
@@ -1075,7 +1075,7 @@ end;
 
 { --- futex park / wake ----------------------------------------------------- }
 
-procedure FutexWait(AAddr: Pointer; AExpected: Integer; ATimeoutNs: Int64);
+procedure FutexWait(AAddr: Pointer; AExpected: Int; ATimeoutNs: Int64);
 var
   Ts: TTimeSpec;
 begin
@@ -1090,7 +1090,7 @@ begin
   _ParkWait(AAddr, AExpected, @Ts);
 end;
 
-procedure FutexWake(AAddr: Pointer; ACount: Integer);
+procedure FutexWake(AAddr: Pointer; ACount: Int);
 begin
   _ParkWake(AAddr, ACount);
 end;
@@ -1108,7 +1108,7 @@ end;
 
 procedure WakeAllWorkers;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to GNumWorkers - 1 do
     WakeWorker(GWorkers[I]);
@@ -1208,7 +1208,7 @@ end;
   runs when the cancel generation advanced. }
 procedure McSweepCancelled(AW: TWorker);
 var
-  I: Integer;
+  I: Int;
   Victims: TList<TFiberTask>;
   T: TFiberTask;
 begin
@@ -1265,7 +1265,7 @@ end;
 function McTakeNextRaw(AW: TWorker): Pointer;
 var
   P: Pointer;
-  Tries, Victim: Integer;
+  Tries, Victim: Int;
 begin
   { 1. LIFO hand-off slot (the just-woken fiber, kept hot on the waker). }
   if AW.Handoff <> nil then
@@ -1304,7 +1304,7 @@ procedure McWorkerLoop(AW: TWorker);
 var
   T: TFiberTask;
   NowNs, WaitNs: Int64;
-  LastCancelGen, Gen: Integer;
+  LastCancelGen, Gen: Int;
 begin
   GTLWorker := AW;
   { Create the scheduler's own L0 context once per THREAD, not once per batch:
@@ -1456,9 +1456,9 @@ end;
   multicore injector, returning the number moved.  This is the "spawn on the
   main thread, then run" carry-over; it runs at the start of every batch so a
   SECOND FiberPoolRun on the same pool picks up its freshly-spawned fibers. }
-function McMigratePending: Integer;
+function McMigratePending: Int;
 var
-  MigI, Moved: Integer;
+  MigI, Moved: Int;
 begin
   Moved := 0;
   if GWorker <> nil then
@@ -1485,9 +1485,9 @@ begin
   Result := GPoolActive;
 end;
 
-procedure FiberPoolStart(ANumWorkers: Integer);
+procedure FiberPoolStart(ANumWorkers: Int);
 var
-  N, I: Integer;
+  N, I: Int;
   W: TWorker;
 begin
   if GMulticore then
@@ -1592,7 +1592,7 @@ end;
 
 procedure FiberPoolShutdown;
 var
-  I: Integer;
+  I: Int;
 begin
   if not GPoolActive then
     raise Exception.Create('FiberPoolShutdown: no pool started');
@@ -1628,7 +1628,7 @@ end;
 { The per-call multicore run: create the pool, drive one batch, tear it down.
   Preserves the exact create-run-teardown-per-call semantics existing callers
   depend on, while reusing the same worker loop as the persistent pool. }
-procedure RunSchedulerMC(ANumWorkers: Integer);
+procedure RunSchedulerMC(ANumWorkers: Int);
 begin
   if GMulticore then
     raise Exception.Create('RunSchedulerMC: already running');

@@ -59,8 +59,8 @@ var
   GHandler: IWebSocketHandler;
   GPort: UInt16;
   GResult: string;
-  GDone: Integer;
-  GExpected: Integer;
+  GDone: Int;
+  GExpected: Int;
 
 procedure ServerFiber(AArg: Pointer);
 begin
@@ -69,7 +69,7 @@ end;
 
 function WsUrl: string;
 begin
-  Result := 'ws://127.0.0.1:' + IntToStr(Integer(GPort)) + '/';
+  Result := 'ws://127.0.0.1:' + IntToStr(Int32(GPort)) + '/';
 end;
 
 { --- TestTextEcho --- }
@@ -218,11 +218,11 @@ end;
 procedure ConcClientFiber(AArg: Pointer);
 var
   Cli: TWebSocketClient;
-  Id: Integer;
+  Id: Int;
   Msg, Data: string;
   IsBin: Boolean;
 begin
-  Id := Integer(AArg);
+  Id := Int32(AArg);
   FiberSleep(2);
   Cli := TWebSocketClient.Create();
   Msg := 'msg' + IntToStr(Id);
@@ -247,7 +247,7 @@ const
   PORT = 29604;
   NCLIENTS = 6;
 var
-  I: Integer;
+  I: Int;
 begin
   GServer := TWebSocketServer.Create(PORT);
   AssertTrue('server start', GServer.Start());

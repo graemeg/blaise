@@ -48,7 +48,7 @@ type
     destructor Destroy; override;
     procedure Push(ATask: TFiberTask);
     function Pop: TFiberTask;      { nil when empty }
-    function Count: Integer;
+    function Count: Int;
   end;
 
   { Fiber-aware mutual exclusion.  Lock parks the fiber when the mutex is held;
@@ -88,12 +88,12 @@ type
   TFiberWaitGroup = class
   private
     FMtx: array[0..7] of Int64;
-    FCount: Integer;
+    FCount: Int;
     FWaiters: TWaiterQueue;
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Add(ADelta: Integer);
+    procedure Add(ADelta: Int);
     procedure Done;
     procedure Wait;
   end;
@@ -141,7 +141,7 @@ type
     FMtx: array[0..7] of Int64;
     FChildren: TList<TFiberTask>;
     FBoxes: TList<TSpawnBox>;     { closure children's boxes — retained until Destroy }
-    FRemaining: Integer;          { real children not yet finished }
+    FRemaining: Int;          { real children not yet finished }
     FWaiter: TFiberTask;          { the fiber parked in Wait, or nil }
     FDeadlineMs: Int64;           { 0 = no deadline }
     FDeadlineTask: TFiberTask;    { the deadline watchdog fiber, or nil }
@@ -176,12 +176,12 @@ type
   private
     FMtx: array[0..7] of Int64;
     FBuf: TQueue<T>;
-    FCap: Integer;                { >= 0 bounded, < 0 unbounded }
+    FCap: Int;                { >= 0 bounded, < 0 unbounded }
     FClosed: Boolean;
     FSenders: TWaiterQueue;       { parked because full }
     FReceivers: TWaiterQueue;     { parked because empty }
   public
-    constructor Create(ACapacity: Integer = 0);
+    constructor Create(ACapacity: Int = 0);
     destructor Destroy; override;
     { Send AValue, parking while the channel is full.  Returns False if the
       channel is closed. }
@@ -192,7 +192,7 @@ type
     { Close the channel: wakes all parked senders/receivers.  Further Sends
       fail; Recv drains the buffer then fails. }
     procedure Close;
-    function Count: Integer;
+    function Count: Int;
   end;
 
 implementation
@@ -225,7 +225,7 @@ begin
   Result := Self.FItems.Dequeue();
 end;
 
-function TWaiterQueue.Count: Integer;
+function TWaiterQueue.Count: Int;
 begin
   Result := Self.FItems.Count;
 end;
@@ -337,7 +337,7 @@ procedure TFiberEvent.Signal;
 var
   Next: TFiberTask;
   Woken: TList<TFiberTask>;
-  I: Integer;
+  I: Int;
 begin
   pthread_mutex_lock(@Self.FMtx[0]);
   if Self.FAutoReset then
@@ -392,7 +392,7 @@ begin
   inherited Destroy();
 end;
 
-procedure TFiberWaitGroup.Add(ADelta: Integer);
+procedure TFiberWaitGroup.Add(ADelta: Int);
 begin
   pthread_mutex_lock(@Self.FMtx[0]);
   Self.FCount := Self.FCount + ADelta;
@@ -403,7 +403,7 @@ procedure TFiberWaitGroup.Done;
 var
   Next: TFiberTask;
   Woken: TList<TFiberTask>;
-  I: Integer;
+  I: Int;
 begin
   pthread_mutex_lock(@Self.FMtx[0]);
   Self.FCount := Self.FCount - 1;
@@ -612,7 +612,7 @@ end;
 
 procedure TTaskGroup.CancelAll;
 var
-  I: Integer;
+  I: Int;
   Snapshot: TList<TFiberTask>;
 begin
   pthread_mutex_lock(@Self.FMtx[0]);
@@ -723,7 +723,7 @@ end;
 
 { --- TChannel<T> ---------------------------------------------------------- }
 
-constructor TChannel<T>.Create(ACapacity: Integer);
+constructor TChannel<T>.Create(ACapacity: Int);
 begin
   pthread_mutex_init(@Self.FMtx[0], nil);
   Self.FBuf := TQueue<T>.Create();
@@ -824,7 +824,7 @@ procedure TChannel<T>.Close;
 var
   Woken: TList<TFiberTask>;
   Next: TFiberTask;
-  I: Integer;
+  I: Int;
 begin
   pthread_mutex_lock(@Self.FMtx[0]);
   Self.FClosed := True;
@@ -850,7 +850,7 @@ begin
   end;
 end;
 
-function TChannel<T>.Count: Integer;
+function TChannel<T>.Count: Int;
 begin
   pthread_mutex_lock(@Self.FMtx[0]);
   Result := Self.FBuf.Count;

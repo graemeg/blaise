@@ -115,8 +115,8 @@ function TWebSocketClient.Connect(const AUrl: string): Boolean;
 var
   Uri: TUri;
   Host, Path, Key, Req, RespHead, Chunk, ExpectedAccept, HdrLower: string;
-  Port, Colon: Integer;
-  I, LineStart, N: Integer;
+  Port, Colon: Int;
+  I, LineStart, N: Int;
   Line: string;
   GotAccept: Boolean;
 begin
@@ -258,7 +258,7 @@ function TWebSocketClient.ReadMessage(out AData: string; out AIsBinary: Boolean)
 var
   Frame: TWsFrame;
   Msg: string;
-  MsgOpcode: Integer;
+  MsgOpcode: Int;
   InMessage: Boolean;
 begin
   AData := '';

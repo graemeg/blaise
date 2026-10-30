@@ -41,11 +41,11 @@ type
   TWsFrame = record
     Valid:   Boolean;   { False if the buffer held no complete frame }
     Fin:     Boolean;   { final fragment of a message }
-    Opcode:  Integer;
+    Opcode:  Int;
     Payload: string;
     { Number of bytes consumed from the input buffer for this frame; callers
       streaming a socket advance their buffer by this much. }
-    Consumed: Integer;
+    Consumed: Int;
   end;
 
 { Compute Sec-WebSocket-Accept for a client's Sec-WebSocket-Key (the value
@@ -57,14 +57,14 @@ function EncodeTextFrame(const APayload: string): string;
 
 { Build an unmasked frame with an explicit opcode (e.g. WS_OP_BINARY,
   WS_OP_PING, WS_OP_CLOSE).  Server frames are never masked. }
-function EncodeFrame(AOpcode: Integer; const APayload: string): string;
+function EncodeFrame(AOpcode: Int; const APayload: string): string;
 
 { Build a MASKED frame with an explicit opcode (client->server).  RFC 6455 5.3
   requires every client frame to be masked: the MASK bit is set, a fresh 4-byte
   masking key is prepended, and the payload is XORed with it.  The key comes
   from the kernel CSPRNG (getrandom) so it varies per frame; the value is only
   used for framing, not confidentiality.  DecodeFrame reverses it. }
-function EncodeMaskedFrame(AOpcode: Integer; const APayload: string): string;
+function EncodeMaskedFrame(AOpcode: Int; const APayload: string): string;
 
 { Build a MASKED text frame (client->server) carrying APayload. }
 function EncodeMaskedTextFrame(const APayload: string): string;
@@ -90,10 +90,10 @@ const
 { macOS has no getrandom(2); getentropy(3) draws from the same kernel CSPRNG
   for up to 256 bytes per call (every caller here asks for 16 or fewer).
   Same contract as getrandom: the byte count on success, -1 on failure. }
-function c_getentropy(ABuf: Pointer; ALen: Int64): Integer;
+function c_getentropy(ABuf: Pointer; ALen: Int64): Int32;
   external name 'getentropy';
 
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
+function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
 begin
   if c_getentropy(ABuf, ALen) = 0 then
     Result := ALen
@@ -101,7 +101,7 @@ begin
     Result := -1;
 end;
 {$ELSE}
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
+function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
   external name 'getrandom';
 {$ENDIF}
 
@@ -116,10 +116,10 @@ begin
   Result := Base64Encode(Sha1(AKey + WS_GUID));
 end;
 
-function EncodeFrame(AOpcode: Integer; const APayload: string): string;
+function EncodeFrame(AOpcode: Int; const APayload: string): string;
 var
   SB: TStringBuilder;
-  Len: Integer;
+  Len: Int;
 begin
   SB := TStringBuilder.Create();
   SB.AppendByte($80 or (AOpcode and $0F));   { FIN + opcode, unmasked }
@@ -158,7 +158,7 @@ end;
 procedure NextMaskKey(var AMask: array of Byte);
 var
   Buf: array[0..3] of Byte;
-  I: Integer;
+  I: Int;
   Got: Int64;
 begin
   Got := c_getrandom(@Buf[0], 4, 0);
@@ -179,10 +179,10 @@ begin
     AMask[I] := Buf[I];
 end;
 
-function EncodeMaskedFrame(AOpcode: Integer; const APayload: string): string;
+function EncodeMaskedFrame(AOpcode: Int; const APayload: string): string;
 var
   SB: TStringBuilder;
-  Len, I: Integer;
+  Len, I: Int;
   Mask: array[0..3] of Byte;
 begin
   NextMaskKey(Mask);
@@ -223,7 +223,7 @@ end;
 
 function DecodeFrame(const ABuffer: string): TWsFrame;
 var
-  N, Pos, I: Integer;
+  N, Pos, I: Int;
   B0, B1: Byte;
   Masked: Boolean;
   PayLen: Int64;
@@ -272,7 +272,7 @@ begin
   if N < Pos + PayLen then Exit;   { payload not fully arrived }
 
   SB := TStringBuilder.Create();
-  for I := 0 to Integer(PayLen) - 1 do
+  for I := 0 to Int32(PayLen) - 1 do
   begin
     if Masked then
       SB.AppendByte(Byte(ABuffer[Pos + I]) xor Mask[I and 3])
@@ -282,7 +282,7 @@ begin
   Result.Payload := SB.ToString();
   SB.Free();
 
-  Result.Consumed := Pos + Integer(PayLen);
+  Result.Consumed := Pos + Int32(PayLen);
   Result.Valid := True;
 end;
 

@@ -49,8 +49,8 @@ const
 function Base64Encode(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Integer;
-  B0, B1, B2, Triple: Integer;
+  I, N: Int;
+  B0, B1, B2, Triple: Int;
 begin
   SB := TStringBuilder.Create();
   N := Length(S);
@@ -80,7 +80,7 @@ begin
 end;
 
 { Map a Base64 character to its 6-bit value, or -1 if not a Base64 char. }
-function DecodeChar(B: Byte): Integer;
+function DecodeChar(B: Byte): Int;
 begin
   if (B >= CH_UC_A) and (B <= CH_UC_Z) then Result := B - CH_UC_A
   else if (B >= CH_LC_A) and (B <= CH_LC_Z) then Result := B - CH_LC_A + 26
@@ -93,8 +93,8 @@ end;
 function Base64Decode(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N, Val, Bits, Acc: Integer;
-  B, V: Integer;
+  I, N, Val, Bits, Acc: Int;
+  B, V: Int;
 begin
   SB := TStringBuilder.Create();
   N := Length(S);

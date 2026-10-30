@@ -117,7 +117,7 @@ type
       (see the unit header for why this is unsigned, unlike Java's).
       @param AOther the value to compare against.
       @returns -1 if Self < AOther, 0 if equal, +1 if Self > AOther. }
-    function CompareTo(const AOther: TUuid): Integer;
+    function CompareTo(const AOther: TUuid): Int32;
 
     { Value equality.
       @param AOther the value to compare against.
@@ -126,7 +126,7 @@ type
 
     { Hash code consistent with Equals, safe for use as a dictionary key.
       @returns a hash of the 128-bit value. }
-    function GetHashCode: Integer;
+    function GetHashCode: Int32;
 
     { Tests whether this is the nil UUID (every bit zero), including a
       never-assigned (default zero-value) TUuid.
@@ -135,7 +135,7 @@ type
 
     { The RFC 4122 version nibble (from byte 6's high nibble).
       @returns 1-5 for a well-formed UUID, 0 if IsEmpty. }
-    function Version: Integer;
+    function Version: Int;
   end;
 
 implementation
@@ -156,10 +156,10 @@ uses
 { macOS has no getrandom(2); getentropy(3) draws from the same kernel CSPRNG
   for up to 256 bytes per call (every caller here asks for 16 or fewer).
   Same contract as getrandom: the byte count on success, -1 on failure. }
-function c_getentropy(ABuf: Pointer; ALen: Int64): Integer;
+function c_getentropy(ABuf: Pointer; ALen: Int64): Int32;
   external name 'getentropy';
 
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
+function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
 begin
   if c_getentropy(ABuf, ALen) = 0 then
     Result := ALen
@@ -167,11 +167,11 @@ begin
     Result := -1;
 end;
 {$ELSE}
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
+function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
   external name 'getrandom';
 {$ENDIF}
 
-function HexDigit(AValue: Integer): Byte;
+function HexDigit(AValue: Int): Byte;
 begin
   { 0-9 -> '0'..'9' (48..57), 10-15 -> 'a'..'f' (97..102) }
   if AValue < 10 then
@@ -181,7 +181,7 @@ begin
 end;
 
 { 0-15 for a hex digit (either case), -1 if ACh is not a hex digit. }
-function HexNibbleValue(ACh: Integer): Integer;
+function HexNibbleValue(ACh: Int): Int;
 begin
   if (ACh >= Ord('0')) and (ACh <= Ord('9')) then
     Result := ACh - Ord('0')
@@ -195,10 +195,10 @@ end;
 
 { Extracts byte AIndex (0..15, most-significant first) from a UUID's two
   Int64 halves: 0-7 come from AMsb, 8-15 from ALsb. }
-function ByteAt(AMsb, ALsb: Int64; AIndex: Integer): Integer;
+function ByteAt(AMsb, ALsb: Int64; AIndex: Int): Int;
 var
   V: Int64;
-  Shift: Integer;
+  Shift: Int;
 begin
   if AIndex < 8 then
   begin
@@ -210,7 +210,7 @@ begin
     V := ALsb;
     Shift := 15 - AIndex
   end;
-  Result := Integer((V shr (Shift * 8)) and Int64($FF))
+  Result := Int32((V shr (Shift * 8)) and Int64($FF))
 end;
 
 { Unsigned 64-bit comparison implemented with only signed Int64 operators:
@@ -218,7 +218,7 @@ end;
   differ, the non-negative one is the unsigned-SMALLER of the two (its top
   bit is 0, so its unsigned magnitude is below 2^63, while the "negative"
   one's top bit being 1 puts it at or above 2^63 unsigned). }
-function UnsignedCompareInt64(A, B: Int64): Integer;
+function UnsignedCompareInt64(A, B: Int64): Int32;
 begin
   if (A >= 0) = (B >= 0) then
   begin
@@ -240,7 +240,7 @@ static function TUuid.RandomUuid: TUuid;
 var
   Buf: array[0..15] of Byte;
   Msb, Lsb: Int64;
-  I: Integer;
+  I: Int;
 begin
   if c_getrandom(@Buf[0], 16, 0) <> 16 then
     raise EUuidRandomFailure.Create(
@@ -264,7 +264,7 @@ end;
 
 static function TUuid.TryParse(const S: string; out AUuid: TUuid): Boolean;
 var
-  I, Hi, Lo, B, ByteIdx: Integer;
+  I, Hi, Lo, B, ByteIdx: Int;
   Msb, Lsb: Int64;
 begin
   if Length(S) <> 36 then
@@ -331,7 +331,7 @@ end;
 
 static function TUuid.FromBytes(const ARaw: string): TUuid;
 var
-  I: Integer;
+  I: Int;
   Msb, Lsb: Int64;
 begin
   if Length(ARaw) <> 16 then
@@ -362,7 +362,7 @@ end;
 function TUuid.ToString: string;
 var
   SB: TStringBuilder;
-  I, B: Integer;
+  I, B: Int;
 begin
   SB := TStringBuilder.Create();
   for I := 0 to 15 do
@@ -381,7 +381,7 @@ end;
 function TUuid.ToBytes: string;
 var
   SB: TStringBuilder;
-  I: Integer;
+  I: Int;
 begin
   SB := TStringBuilder.Create();
   for I := 0 to 15 do
@@ -390,7 +390,7 @@ begin
   SB.Free()
 end;
 
-function TUuid.CompareTo(const AOther: TUuid): Integer;
+function TUuid.CompareTo(const AOther: TUuid): Int32;
 begin
   Result := UnsignedCompareInt64(FMostSigBits, AOther.FMostSigBits);
   if Result = 0 then
@@ -403,12 +403,12 @@ begin
             (FLeastSigBits = AOther.FLeastSigBits)
 end;
 
-function TUuid.GetHashCode: Integer;
+function TUuid.GetHashCode: Int32;
 var
   Hilo: Int64;
 begin
   Hilo := FMostSigBits xor FLeastSigBits;
-  Result := Integer(Hilo shr 32) xor Integer(Hilo)
+  Result := Int32(Hilo shr 32) xor Int32(Hilo)
 end;
 
 function TUuid.IsEmpty: Boolean;
@@ -416,7 +416,7 @@ begin
   Result := (FMostSigBits = 0) and (FLeastSigBits = 0)
 end;
 
-function TUuid.Version: Integer;
+function TUuid.Version: Int;
 begin
   Result := (ByteAt(FMostSigBits, FLeastSigBits, 6) shr 4) and $0F
 end;

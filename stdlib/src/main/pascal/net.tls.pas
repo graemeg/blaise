@@ -51,7 +51,7 @@ type
     destructor Destroy; override;
 
     { Read up to AMaxBytes of plaintext ('' on close/EOF/error). }
-    function Read(AMaxBytes: Integer): string;
+    function Read(AMaxBytes: Int): string;
     { Write all of ADATA as plaintext (encrypted on the wire). }
     function Write(const AData: string): Boolean;
     { Close TLS (close-notify) then the transport socket.  Idempotent. }
@@ -152,7 +152,7 @@ begin
   inherited Destroy();
 end;
 
-function TTlsStream.Read(AMaxBytes: Integer): string;
+function TTlsStream.Read(AMaxBytes: Int): string;
 begin
   if FClosed or (FTls = nil) then
     Exit('');

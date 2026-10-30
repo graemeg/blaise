@@ -76,7 +76,7 @@ type
   nil on failure. }
 function OpenDataConn(AConn: TTcpConn): TTcpConn;
 var
-  ListenFd, DataFd: Integer;
+  ListenFd, DataFd: Int;
 begin
   Result := nil;
   ListenFd := TcpListenLocal(DATA_PORT, 8);
@@ -301,7 +301,7 @@ end;
 
 function TMemStore.List(const ADir: string): string;
 var
-  I: Integer;
+  I: Int;
   R: string;
 begin
   R := '';

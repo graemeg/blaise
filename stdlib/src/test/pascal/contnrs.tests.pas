@@ -24,8 +24,8 @@ uses
 type
   { A trivial element type so we can put real class instances in the list. }
   TItem = class
-    Value: Integer;
-    constructor Create(AValue: Integer);
+    Value: Int;
+    constructor Create(AValue: Int);
   end;
 
   TContnrsTests = class(TTestCase)
@@ -38,7 +38,7 @@ type
 
 implementation
 
-constructor TItem.Create(AValue: Integer);
+constructor TItem.Create(AValue: Int);
 begin
   Self.Value := AValue
 end;
@@ -49,7 +49,7 @@ procedure TContnrsTests.TestRemove_PresentObject_ReturnsIndexAndRemoves;
 var
   L: TObjectList;
   A, B, C: TItem;
-  Idx: Integer;
+  Idx: Int;
 begin
   L := TObjectList.Create(True);   { owns objects }
   A := TItem.Create(1);
@@ -71,7 +71,7 @@ procedure TContnrsTests.TestRemove_AbsentObject_ReturnsMinusOne;
 var
   L: TObjectList;
   A, Stranger: TItem;
-  Idx: Integer;
+  Idx: Int;
 begin
   L := TObjectList.Create(True);
   A := TItem.Create(1);
@@ -113,7 +113,7 @@ procedure TContnrsTests.TestRemove_Unowned_DoesNotFreeButUnlists;
 var
   L: TObjectList;
   A: TItem;
-  Idx: Integer;
+  Idx: Int;
 begin
   L := TObjectList.Create(False);   { does NOT own objects }
   A := TItem.Create(42);

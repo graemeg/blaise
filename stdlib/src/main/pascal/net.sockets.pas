@@ -91,19 +91,19 @@ const
   rtl.platform.layout.<os> seam (e.g. SOL_SOCKET is 1 on Linux but $FFFF on
   FreeBSD).  Functions rather than consts so ONE compiled unit serves every
   target. }
-function SOL_SOCKET: Integer;   external name '_SolSocket';
-function SO_REUSEADDR: Integer; external name '_SoReuseAddr';
+function SOL_SOCKET: Int32;   external name '_SolSocket';
+function SO_REUSEADDR: Int32; external name '_SoReuseAddr';
 { SO_REUSEPORT lets several sockets bind the SAME address:port; the kernel
   load-balances incoming connections across them.  This is how NGINX/Envoy —
   and the fiber server's per-worker-listener path (design [#listener-scaling])
   — eliminate the single-acceptor bottleneck. }
-function SO_REUSEPORT: Integer; external name '_SoReusePort';
+function SO_REUSEPORT: Int32; external name '_SoReusePort';
 { send(2) flag: a write to a peer-closed socket returns EPIPE instead of
   raising SIGPIPE (whose default action terminates the process). }
-function MSG_NOSIGNAL: Integer; external name '_MsgNoSignal';
+function MSG_NOSIGNAL: Int32; external name '_MsgNoSignal';
 { Socket option with the same purpose, for the OS that has no MSG_NOSIGNAL:
   SO_NOSIGPIPE on macOS, 0 where MSG_NOSIGNAL already does the job. }
-function SO_NOSIGPIPE: Integer; external name '_SoNoSigPipe';
+function SO_NOSIGPIPE: Int32; external name '_SoNoSigPipe';
 
 type
   { struct sockaddr_in — exactly 16 bytes on Linux and FreeBSD.  The first two
@@ -119,31 +119,31 @@ type
 
 { --- raw libc bindings --- }
 
-function Socket(ADomain, AType, AProtocol: Integer): Integer;
+function Socket(ADomain, AType, AProtocol: Int32): Int32;
   external name 'socket';
-function Bind(AFd: Integer; AAddr: Pointer; AAddrLen: Integer): Integer;
+function Bind(AFd: Int32; AAddr: Pointer; AAddrLen: Int32): Int32;
   external name 'bind';
-function Listen(AFd, ABacklog: Integer): Integer;
+function Listen(AFd, ABacklog: Int32): Int32;
   external name 'listen';
-function Accept(AFd: Integer; AAddr: Pointer; AAddrLen: Pointer): Integer;
+function Accept(AFd: Int32; AAddr: Pointer; AAddrLen: Pointer): Int32;
   external name 'accept';
-function Connect(AFd: Integer; AAddr: Pointer; AAddrLen: Integer): Integer;
+function Connect(AFd: Int32; AAddr: Pointer; AAddrLen: Int32): Int32;
   external name 'connect';
-function SetSockOpt(AFd, ALevel, AOptName: Integer; AOptVal: Pointer; AOptLen: Integer): Integer;
+function SetSockOpt(AFd, ALevel, AOptName: Int32; AOptVal: Pointer; AOptLen: Int32): Int32;
   external name 'setsockopt';
-function Recv(AFd: Integer; ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
+function Recv(AFd: Int32; ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
   external name 'recv';
-function Send(AFd: Integer; ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
+function Send(AFd: Int32; ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
   external name 'send';
-function CloseSocket(AFd: Integer): Integer;
+function CloseSocket(AFd: Int32): Int32;
   external name 'close';
-function Shutdown(AFd, AHow: Integer): Integer;
+function Shutdown(AFd, AHow: Int32): Int32;
   external name 'shutdown';
 function Htons(AHostShort: UInt16): UInt16;
   external name 'htons';
 function Ntohs(ANetShort: UInt16): UInt16;
   external name 'ntohs';
-function GetSockName(AFd: Integer; AAddr: Pointer; AAddrLen: Pointer): Integer;
+function GetSockName(AFd: Int32; AAddr: Pointer; AAddrLen: Pointer): Int32;
   external name 'getsockname';
 
 { --- address helpers --- }
@@ -167,30 +167,30 @@ procedure FillSockAddr(var AAddr: TSockAddrIn; AIp: UInt32; APort: UInt16);
 { Open a listening TCP server socket on AAddr (network-order IPv4, e.g.
   INADDR_LOOPBACK, INADDR_ANY, or IPv4(...)) and APort.  Sets SO_REUSEADDR.
   Returns the listening fd, or -1 on failure. }
-function TcpListen(AAddr: UInt32; APort: UInt16; ABacklog: Integer): Integer;
+function TcpListen(AAddr: UInt32; APort: UInt16; ABacklog: Int): Int;
 
 { Convenience: TcpListen bound to 127.0.0.1 only (no external exposure). }
-function TcpListenLocal(APort: UInt16; ABacklog: Integer): Integer;
+function TcpListenLocal(APort: UInt16; ABacklog: Int): Int;
 
 { Like TcpListen but ALSO sets SO_REUSEPORT, so several workers may each open
   their own listening socket on the same AAddr:APort and let the kernel
   load-balance accepts across them (design [#listener-scaling]).  Returns the
   listening fd, or -1 on failure. }
-function TcpListenReusePort(AAddr: UInt32; APort: UInt16; ABacklog: Integer): Integer;
+function TcpListenReusePort(AAddr: UInt32; APort: UInt16; ABacklog: Int): Int;
 
 { Open a listening socket on AAddr with an OS-chosen ephemeral port (bind to
   port 0), then report the actual port the kernel assigned in APort (host byte
   order).  Used by the FTP server's PASV path: the server needs a fresh data
   port per transfer and must tell the client which one.  Returns the listening
   fd, or -1 on failure (APort then 0). }
-function TcpListenEphemeral(AAddr: UInt32; ABacklog: Integer; out APort: UInt16): Integer;
+function TcpListenEphemeral(AAddr: UInt32; ABacklog: Int; out APort: UInt16): Int;
 
 { Connect to AAddr:APort (AAddr is a network-order IPv4).  Returns the
   connected fd, or -1 on failure. }
-function TcpConnect(AAddr: UInt32; APort: UInt16): Integer;
+function TcpConnect(AAddr: UInt32; APort: UInt16): Int;
 
 { Convenience: connect to 127.0.0.1:APort. }
-function TcpConnectLocal(APort: UInt16): Integer;
+function TcpConnectLocal(APort: UInt16): Int;
 
 { Accept the next pending connection on a listening socket.  Returns the
   connected fd, or -1 (e.g. on a non-blocking socket with nothing waiting).
@@ -199,41 +199,41 @@ function TcpConnectLocal(APort: UInt16): Integer;
   does not, so without this a server that polls a non-blocking listener would
   get blocking connections on one OS and non-blocking ones on another.  Call
   MakeNonBlocking on the result if that is what you want. }
-function AcceptConn(AListenFd: Integer): Integer;
+function AcceptConn(AListenFd: Int): Int;
 
 { Receive up to AMaxBytes from AFd and return them as a string (raw bytes).
   Returns '' on EOF or error.  A short read is normal for a stream socket;
   callers needing a fixed amount must loop. }
-function RecvString(AFd: Integer; AMaxBytes: Integer): string;
+function RecvString(AFd: Int; AMaxBytes: Int): string;
 
 { Close a socket fd. }
-procedure Close(AFd: Integer);
+procedure Close(AFd: Int);
 
 { Make AFd non-blocking (accept/recv return immediately when nothing waits). }
-procedure MakeNonBlocking(AFd: Integer);
+procedure MakeNonBlocking(AFd: Int);
 
 { Make AFd blocking again (the inverse of MakeNonBlocking). }
-procedure MakeBlocking(AFd: Integer);
+procedure MakeBlocking(AFd: Int);
 
 { True if AFd is in non-blocking mode. }
-function IsNonBlocking(AFd: Integer): Boolean;
+function IsNonBlocking(AFd: Int): Boolean;
 
 { Send the whole string, looping until every byte is written.  Uses
   MSG_NOSIGNAL so a dead peer yields a False result rather than SIGPIPE.
   Works on a non-blocking socket too: when the send buffer is full it waits
   for room rather than failing, and leaves the socket's mode as it found it.
   Returns True on success. }
-function SendAll(AFd: Integer; const S: string): Boolean;
+function SendAll(AFd: Int; const S: string): Boolean;
 
 { Convert ACount bytes at ABuf into a Blaise string (raw bytes). }
-function BytesToString(ABuf: Pointer; ACount: Integer): string;
+function BytesToString(ABuf: Pointer; ACount: Int): string;
 
 { Make a write to AFd after the peer has gone fail with EPIPE rather than raise
   SIGPIPE.  Every socket this unit creates or accepts already has it; call it
   on a socket made with the raw Socket binding.  A no-op where MSG_NOSIGNAL
   covers each send (Linux, FreeBSD); sets SO_NOSIGPIPE on macOS, which has no
   MSG_NOSIGNAL. }
-procedure SuppressSigPipe(AFd: Integer);
+procedure SuppressSigPipe(AFd: Int);
 
 { Ignore SIGPIPE process-wide so a write to a closed socket cannot terminate
   the process.  Call once at startup. }
@@ -252,12 +252,12 @@ const
 
 { fcntl is C-VARIADIC: on Apple arm64 the third argument must travel the
   variadic way (on the stack), or F_SETFL never sees O_NONBLOCK. }
-function c_fcntl(AFd, ACmd: Integer): Integer; varargs; external name 'fcntl';
-function c_signal(ASignum: Integer; AHandler: Pointer): Pointer; external name 'signal';
+function c_fcntl(AFd, ACmd: Int32): Int32; varargs; external name 'fcntl';
+function c_signal(ASignum: Int32; AHandler: Pointer): Pointer; external name 'signal';
 
 { Per-OS layout seam: O_NONBLOCK (Linux $800, FreeBSD 4) and the sockaddr_in
   fill (the OS-divergent first two bytes). }
-function _ONonBlock: Integer; external name '_ONonBlock';
+function _ONonBlock: Int32; external name '_ONonBlock';
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
   external name '_SockAddrIn4Fill';
 
@@ -274,8 +274,8 @@ end;
 
 function ParseIPv4(const AText: string; out AAddr: UInt32): Boolean;
 var
-  Octets: array[0..3] of Integer;
-  OctIdx, Val, Digits, I, N: Integer;
+  Octets: array[0..3] of Int32;
+  OctIdx, Val, Digits, I, N: Int;
   Ch: Byte;
 begin
   Result := False;
@@ -315,9 +315,9 @@ begin
   _SockAddrIn4Fill(@AAddr, Htons(APort), AIp);
 end;
 
-function TcpListen(AAddr: UInt32; APort: UInt16; ABacklog: Integer): Integer;
+function TcpListen(AAddr: UInt32; APort: UInt16; ABacklog: Int): Int;
 var
-  Fd, One: Integer;
+  Fd, One: Int;
   SA: TSockAddrIn;
 begin
   Fd := Socket(AF_INET, SOCK_STREAM, 0);
@@ -347,14 +347,14 @@ begin
   Result := Fd;
 end;
 
-function TcpListenLocal(APort: UInt16; ABacklog: Integer): Integer;
+function TcpListenLocal(APort: UInt16; ABacklog: Int): Int;
 begin
   Result := TcpListen(INADDR_LOOPBACK, APort, ABacklog);
 end;
 
-function TcpListenReusePort(AAddr: UInt32; APort: UInt16; ABacklog: Integer): Integer;
+function TcpListenReusePort(AAddr: UInt32; APort: UInt16; ABacklog: Int): Int;
 var
-  Fd, One: Integer;
+  Fd, One: Int;
   SA: TSockAddrIn;
 begin
   Fd := Socket(AF_INET, SOCK_STREAM, 0);
@@ -385,12 +385,12 @@ begin
   Result := Fd;
 end;
 
-function TcpListenEphemeral(AAddr: UInt32; ABacklog: Integer; out APort: UInt16): Integer;
+function TcpListenEphemeral(AAddr: UInt32; ABacklog: Int; out APort: UInt16): Int;
 var
-  Fd, One: Integer;
+  Fd, One: Int;
   SA: TSockAddrIn;
   Bound: TSockAddrIn;
-  Len: Integer;
+  Len: Int;
 begin
   APort := 0;
   Fd := Socket(AF_INET, SOCK_STREAM, 0);
@@ -429,9 +429,9 @@ begin
   Result := Fd;
 end;
 
-function TcpConnect(AAddr: UInt32; APort: UInt16): Integer;
+function TcpConnect(AAddr: UInt32; APort: UInt16): Int;
 var
-  Fd: Integer;
+  Fd: Int;
   SA: TSockAddrIn;
 begin
   Fd := Socket(AF_INET, SOCK_STREAM, 0);
@@ -451,12 +451,12 @@ begin
   Result := Fd;
 end;
 
-function TcpConnectLocal(APort: UInt16): Integer;
+function TcpConnectLocal(APort: UInt16): Int;
 begin
   Result := TcpConnect(INADDR_LOOPBACK, APort);
 end;
 
-function AcceptConn(AListenFd: Integer): Integer;
+function AcceptConn(AListenFd: Int): Int;
 begin
   Result := Accept(AListenFd, nil, nil);
   if Result >= 0 then
@@ -466,7 +466,7 @@ begin
   end;
 end;
 
-function RecvString(AFd: Integer; AMaxBytes: Integer): string;
+function RecvString(AFd: Int; AMaxBytes: Int): string;
 var
   Buf: Pointer;
   N: Int64;
@@ -479,20 +479,20 @@ begin
   Buf := GetMem(AMaxBytes);
   N := Recv(AFd, Buf, AMaxBytes, 0);
   if N > 0 then
-    Result := BytesToString(Buf, Integer(N))
+    Result := BytesToString(Buf, Int32(N))
   else
     Result := '';
   FreeMem(Buf);
 end;
 
-procedure Close(AFd: Integer);
+procedure Close(AFd: Int);
 begin
   CloseSocket(AFd);
 end;
 
-procedure MakeNonBlocking(AFd: Integer);
+procedure MakeNonBlocking(AFd: Int);
 var
-  Flags: Integer;
+  Flags: Int;
 begin
   if AFd < 0 then
     Exit;
@@ -503,9 +503,9 @@ begin
   c_fcntl(AFd, F_SETFL, Flags or _ONonBlock());
 end;
 
-procedure MakeBlocking(AFd: Integer);
+procedure MakeBlocking(AFd: Int);
 var
-  Flags: Integer;
+  Flags: Int;
 begin
   if AFd < 0 then
     Exit;
@@ -514,17 +514,17 @@ begin
     c_fcntl(AFd, F_SETFL, Flags and (not _ONonBlock()));
 end;
 
-function IsNonBlocking(AFd: Integer): Boolean;
+function IsNonBlocking(AFd: Int): Boolean;
 var
-  Flags: Integer;
+  Flags: Int;
 begin
   Flags := c_fcntl(AFd, F_GETFL);
   Result := (Flags >= 0) and ((Flags and _ONonBlock()) <> 0);
 end;
 
-function SendAll(AFd: Integer; const S: string): Boolean;
+function SendAll(AFd: Int; const S: string): Boolean;
 var
-  Total: Integer;
+  Total: Int;
   N: Int64;
   P: PChar;
   Restore: Boolean;
@@ -544,7 +544,7 @@ begin
     if N > 0 then
     begin
       P := P + N;
-      Total := Total - Integer(N);
+      Total := Total - Int32(N);
     end
     else if Interrupted(N) then
       Continue
@@ -567,10 +567,10 @@ begin
     MakeNonBlocking(AFd);
 end;
 
-function BytesToString(ABuf: Pointer; ACount: Integer): string;
+function BytesToString(ABuf: Pointer; ACount: Int): string;
 var
   P: PChar;
-  I: Integer;
+  I: Int;
   SB: TStringBuilder;
 begin
   if ACount <= 0 then
@@ -586,9 +586,9 @@ begin
   SB.Free();
 end;
 
-procedure SuppressSigPipe(AFd: Integer);
+procedure SuppressSigPipe(AFd: Int);
 var
-  One: Integer;
+  One: Int;
 begin
   if (AFd >= 0) and (SO_NOSIGPIPE() <> 0) then
   begin

@@ -74,9 +74,9 @@ type
     RlimMax: UInt64;
   end;
 
-function c_setrlimit(AResource: Integer; ARlim: Pointer): Integer;
+function c_setrlimit(AResource: Int32; ARlim: Pointer): Int32;
   external name 'setrlimit';
-function c_getrlimit(AResource: Integer; ARlim: Pointer): Integer;
+function c_getrlimit(AResource: Int32; ARlim: Pointer): Int32;
   external name 'getrlimit';
 
 const
@@ -131,7 +131,7 @@ function HttpGetOnConn(AConn: TTcpConn; const APath: string; AKeepAlive: Boolean
 var
   Req, Head, Acc, Chunk, Lower, Line: string;
   ConnHdr: string;
-  Sep, ClPos, Eol, CLen, HeadLen, BodyHave: Integer;
+  Sep, ClPos, Eol, CLen, HeadLen, BodyHave: Int;
 begin
   Result := '';
   if AKeepAlive then
@@ -197,8 +197,8 @@ var
   GHandler: IRequestHandler;
   GPort: UInt16;
   GResult: string;
-  GDone: Integer;
-  GExpected: Integer;
+  GDone: Int;
+  GExpected: Int;
 
 procedure HttpServerFiber(AArg: Pointer);
 begin
@@ -209,10 +209,10 @@ procedure OneGetClientFiber(AArg: Pointer);
 var
   Cli: TTcpClient;
   Conn: TTcpConn;
-  Id: Integer;
+  Id: Int;
   Body: string;
 begin
-  Id := Integer(AArg);
+  Id := Int32(AArg);
   FiberSleep(2);
   Cli := TTcpClient.Create();
   Conn := Cli.Connect('127.0.0.1', GPort);
@@ -321,7 +321,7 @@ const
   PORT = 29413;
   NCLIENTS = 12;
 var
-  I, Cnt: Integer;
+  I, Cnt: Int;
 begin
   GHttpServer := THttpFiberServer.Create(PORT);
   AssertTrue('http server start', GHttpServer.Start());
@@ -387,14 +387,14 @@ const
   WANT_BODY        = 'path=/x';
 
 var
-  GHcOk: Integer;
+  GHcOk: Int;
 
 procedure HcClientFiber(AArg: Pointer);
 var
   Cli: TTcpClient;
   Conn: TTcpConn;
   Body: string;
-  Attempt: Integer;
+  Attempt: Int;
 begin
   FiberSleep(2);
   Body := '';
@@ -427,7 +427,7 @@ const
   FLOOR = 200;        { still a meaningful concurrency test below this }
   RESERVE = 40;       { listener + stdio + RTL fds held aside }
 var
-  I, NClients: Integer;
+  I, NClients: Int;
   SoftLimit, Budget: UInt64;
 begin
   { Each client holds ~2 fds concurrently (its own socket + the server-accepted
@@ -446,7 +446,7 @@ begin
   if Budget >= WANT then
     NClients := WANT
   else
-    NClients := Integer(Budget);
+    NClients := Int32(Budget);
   if NClients < FLOOR then
   begin
     Ignore('fd limit too low for a meaningful concurrency run (soft='
@@ -481,7 +481,7 @@ const
 var
   SB: TStringBuilder;
   Body: string;
-  I: Integer;
+  I: Int;
 begin
   SB := TStringBuilder.Create();
   for I := 0 to SIZE - 1 do

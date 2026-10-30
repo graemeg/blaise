@@ -75,7 +75,7 @@ uses
 { Imported from the RTL (rtl.platform.posix): 0 missing, 1 regular file,
   2 directory, 3 symbolic link, 4 other.  FollowLinks <> 0 stats the link's
   target; 0 reports the link itself. }
-function _PathKind(const Path: string; FollowLinks: Integer): Integer; external name '_PathKind';
+function _PathKind(const Path: string; FollowLinks: Int32): Int32; external name '_PathKind';
 
 const
   KIND_FILE    = 1;
@@ -91,9 +91,9 @@ const
   Linear in practice, and no recursion for a pattern of many stars. }
 function MatchGlob(const AName, APattern: string): Boolean;
 var
-  N, P: Integer;
-  StarP, StarN: Integer;
-  NLen, PLen: Integer;
+  N, P: Int;
+  StarP, StarN: Int;
+  NLen, PLen: Int;
 begin
   N := 0;
   P := 0;
@@ -136,7 +136,7 @@ function SortedEntries(const ADir: string): TList<string>;
 var
   Listing: string;
   Parts: TList<string>;
-  I: Integer;
+  I: Int;
 begin
   Result := TList<string>.Create();
   Listing := ListDir(ADir);
@@ -152,9 +152,9 @@ end;
 procedure Walk(const ADir: string; AMatch: TPredicate<string>; AFound: TList<string>);
 var
   Names: TList<string>;
-  I: Integer;
+  I: Int;
   Path: string;
-  Kind: Integer;
+  Kind: Int;
 begin
   { ADir is '' only for the file-system root, so that paths come out as
     '/name' rather than '//name'. }

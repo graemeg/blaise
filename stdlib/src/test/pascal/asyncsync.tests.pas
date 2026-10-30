@@ -41,13 +41,13 @@ uses
 
 var
   GMtx: TFiberMutex;
-  GShared: Integer;         { protected by GMtx; non-atomic on purpose }
-  GMaxConcurrent: Integer;
-  GInside: Integer;
+  GShared: Int;         { protected by GMtx; non-atomic on purpose }
+  GMaxConcurrent: Int;
+  GInside: Int;
 
 procedure MutexWorker(Arg: Pointer);
 var
-  I, V: Integer;
+  I, V: Int;
 begin
   for I := 0 to 49 do
   begin
@@ -66,7 +66,7 @@ const
   NF = 8;
   ITERS = 50;
 var
-  I: Integer;
+  I: Int;
 begin
   GMtx := TFiberMutex.Create();
   GShared := 0;
@@ -84,7 +84,7 @@ end;
 
 var
   GEvt: TFiberEvent;
-  GEvtWoken: Integer;
+  GEvtWoken: Int;
 
 procedure EventWaiterWorker(Arg: Pointer);
 begin
@@ -102,7 +102,7 @@ procedure TFiberSyncTests.TestEvent_SignalWakesAllWaiters;
 const
   NW = 10;
 var
-  I: Integer;
+  I: Int;
 begin
   GEvt := TFiberEvent.Create(False);   { manual reset }
   GEvtWoken := 0;
@@ -121,7 +121,7 @@ const
 
 var
   GAutoEvt: TFiberEvent;
-  GAutoWoken: Integer;
+  GAutoWoken: Int;
 
 { Baton relay: each waiter, once woken, re-signals so the NEXT waiter wakes.
   This wakes all N waiters with exactly one external Signal and no dependence
@@ -142,7 +142,7 @@ end;
 
 procedure TFiberSyncTests.TestEvent_AutoResetWakesOne;
 var
-  I: Integer;
+  I: Int;
 begin
   GAutoEvt := TFiberEvent.Create(True);    { auto reset }
   GAutoWoken := 0;
@@ -161,12 +161,12 @@ end;
 
 var
   GWg: TFiberWaitGroup;
-  GWgDone: Integer;
-  GWgAfterWait: Integer;
+  GWgDone: Int;
+  GWgAfterWait: Int;
 
 procedure WgChildWorker(Arg: Pointer);
 begin
-  FiberSleep(Integer(Arg));
+  FiberSleep(Int32(Arg));
   _AtomicAddInt32(@GWgDone, 1);
   GWg.Done();
 end;
@@ -182,7 +182,7 @@ procedure TFiberSyncTests.TestWaitGroup_JoinsAllWorkers;
 const
   NC = 6;
 var
-  I: Integer;
+  I: Int;
 begin
   GWg := TFiberWaitGroup.Create();
   GWgDone := 0;
@@ -200,13 +200,13 @@ end;
 { --- channel: ordering ---------------------------------------------------- }
 
 var
-  GCh: TChannel<Integer>;
-  GRecvSum: Integer;
-  GRecvOrdered: Integer;    { 1 if values came out in send order }
+  GCh: TChannel<Int>;
+  GRecvSum: Int;
+  GRecvOrdered: Int;    { 1 if values came out in send order }
 
 procedure ChSenderWorker(Arg: Pointer);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 1 to 100 do
     GCh.Send(I);
@@ -215,7 +215,7 @@ end;
 
 procedure ChReceiverWorker(Arg: Pointer);
 var
-  V, Prev: Integer;
+  V, Prev: Int;
 begin
   Prev := 0;
   GRecvOrdered := 1;
@@ -230,7 +230,7 @@ end;
 
 procedure TFiberSyncTests.TestChannel_SendRecvOrdering;
 begin
-  GCh := TChannel<Integer>.Create(4);     { small bounded buffer }
+  GCh := TChannel<Int>.Create(4);     { small bounded buffer }
   GRecvSum := 0;
   SpawnFiber(@ChSenderWorker, nil);
   SpawnFiber(@ChReceiverWorker, nil);
@@ -243,14 +243,14 @@ end;
 { --- channel: bounded backpressure ---------------------------------------- }
 
 var
-  GBpCh: TChannel<Integer>;
-  GBpSent: Integer;         { values the sender has finished pushing }
-  GBpReceived: Integer;
-  GBpOverflow: Integer;     { 1 if the sender ever got too far ahead }
+  GBpCh: TChannel<Int>;
+  GBpSent: Int;         { values the sender has finished pushing }
+  GBpReceived: Int;
+  GBpOverflow: Int;     { 1 if the sender ever got too far ahead }
 
 procedure BpSenderWorker(Arg: Pointer);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 1 to 50 do
   begin
@@ -268,7 +268,7 @@ end;
 
 procedure BpReceiverWorker(Arg: Pointer);
 var
-  V: Integer;
+  V: Int;
 begin
   while GBpCh.Recv(V) do
   begin
@@ -279,7 +279,7 @@ end;
 
 procedure TFiberSyncTests.TestChannel_BoundedBackpressure;
 begin
-  GBpCh := TChannel<Integer>.Create(3);    { capacity 3 }
+  GBpCh := TChannel<Int>.Create(3);    { capacity 3 }
   GBpSent := 0;
   GBpReceived := 0;
   GBpOverflow := 0;
@@ -295,12 +295,12 @@ end;
 { --- channel: close wakes receivers --------------------------------------- }
 
 var
-  GCloseCh: TChannel<Integer>;
-  GCloseWoken: Integer;
+  GCloseCh: TChannel<Int>;
+  GCloseWoken: Int;
 
 procedure CloseWaiterWorker(Arg: Pointer);
 var
-  V: Integer;
+  V: Int;
 begin
   { Blocks on an empty channel; Close must wake it with a False result. }
   if not GCloseCh.Recv(V) then
@@ -317,9 +317,9 @@ procedure TFiberSyncTests.TestChannel_CloseWakesReceivers;
 const
   NR = 5;
 var
-  I: Integer;
+  I: Int;
 begin
-  GCloseCh := TChannel<Integer>.Create(0);
+  GCloseCh := TChannel<Int>.Create(0);
   GCloseWoken := 0;
   for I := 0 to NR - 1 do
     SpawnFiber(@CloseWaiterWorker, nil);

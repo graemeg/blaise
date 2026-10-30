@@ -33,12 +33,12 @@ type
     kernel buffers without deadlocking the sending thread. }
   TDrainThread = class(TThread)
   private
-    FFd: Integer;
+    FFd: Int;
     FReceived: string;
   protected
     procedure Execute; override;
   public
-    constructor Create(AFd: Integer);
+    constructor Create(AFd: Int);
     property Received: string read FReceived;
   end;
 
@@ -81,7 +81,7 @@ const
   PORT = 28765;
   MSG  = 'hello over tcp';
 var
-  Srv, Cli, Conn: Integer;
+  Srv, Cli, Conn: Int;
   Received: string;
 begin
   Srv := TcpListenLocal(PORT, 8);
@@ -103,7 +103,7 @@ begin
   Close(Srv);
 end;
 
-constructor TDrainThread.Create(AFd: Integer);
+constructor TDrainThread.Create(AFd: Int);
 begin
   FFd := AFd;
   FReceived := '';
@@ -126,10 +126,10 @@ end;
 
 { A distinctive, non-repeating-at-a-glance payload: a truncated or reordered
   transfer cannot compare equal. }
-function PatternBytes(ACount: Integer): string;
+function PatternBytes(ACount: Int): string;
 var
   SB: TStringBuilder;
-  I: Integer;
+  I: Int;
 begin
   SB := TStringBuilder.Create();
   for I := 0 to ACount - 1 do
@@ -146,7 +146,7 @@ procedure TSocketsTests.TestAcceptConn_BlockingFromNonBlockingListener;
 const
   PORT = 28766;
 var
-  Srv, Cli, Conn, Tries: Integer;
+  Srv, Cli, Conn, Tries: Int;
 begin
   Srv := TcpListenLocal(PORT, 8);
   AssertTrue('listen', Srv >= 0);
@@ -182,7 +182,7 @@ const
   PORT = 28767;
   SIZE = 4 * 1024 * 1024;
 var
-  Srv, Cli, Conn: Integer;
+  Srv, Cli, Conn: Int;
   Payload: string;
   Drain: TDrainThread;
 begin
@@ -221,7 +221,7 @@ procedure TSocketsTests.TestSendAll_PeerClosed_NoSigPipe;
 const
   PORT = 28768;
 var
-  Srv, Cli, Conn, I: Integer;
+  Srv, Cli, Conn, I: Int;
   Ok: Boolean;
   Chunk: string;
 begin

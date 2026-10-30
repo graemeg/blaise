@@ -65,7 +65,7 @@ type
   private
     FStream: IMailStream;
     FConn: TTcpConn;               { the raw plaintext conn, for the TLS unit }
-    FLastCode: Integer;
+    FLastCode: Int;
     FLastText: string;
     FCaps: TList<string>;
     function ReadReply: Boolean;
@@ -112,7 +112,7 @@ type
     function SendMail(const AHostIp: string; APort: UInt16;
       const AFrom, ATo, ASubject, ABody: string): Boolean;
 
-    property LastCode: Integer read FLastCode;
+    property LastCode: Int read FLastCode;
     property LastText: string read FLastText;
     property Capabilities: TList<string> read FCaps;
     property Conn: TTcpConn read FConn;
@@ -238,7 +238,7 @@ end;
 
 function TSmtpClient.Ehlo(const ADomain: string): Boolean;
 var
-  I, Start, Len: Integer;
+  I, Start, Len: Int;
   Cap: string;
 begin
   FCaps.Clear();
@@ -330,7 +330,7 @@ end;
 
 function TSmtpClient.HasCapability(const ACap: string): Boolean;
 var
-  I: Integer;
+  I: Int;
   Want, Have: string;
 begin
   Want := UpperCase(ACap);

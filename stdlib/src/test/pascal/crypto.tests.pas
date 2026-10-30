@@ -119,7 +119,7 @@ end;
 procedure TCryptoTests.TestHmacSha256Hex_KnownVectors;
 var
   KeySB, DataSB: TStringBuilder;
-  I: Integer;
+  I: Int;
   Key1, Data1, Key3, Data3: string;
 begin
   { RFC 4231 Test Case 1: 20-byte key of 0x0b, data = "Hi There" }
@@ -162,7 +162,7 @@ end;
 procedure TCryptoTests.TestHmacSha256Hex_LongKey;
 var
   KeySB, DataSB: TStringBuilder;
-  I: Integer;
+  I: Int;
   LongKey, Data: string;
 begin
   { RFC 4231 Test Case 5: 131-byte key of 0xaa (> 64-byte block size),

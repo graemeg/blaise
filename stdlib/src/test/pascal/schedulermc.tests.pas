@@ -43,10 +43,10 @@ uses
   runtime.atomic;
 
 var
-  GMcCounter: Integer;      { atomic tally of completed fibers }
-  GMcSum: Integer;          { atomic sum of arguments, to prove identity }
-  GMcCancelObserved: Integer;
-  GMcFinallyRan: Integer;
+  GMcCounter: Int;      { atomic tally of completed fibers }
+  GMcSum: Int;          { atomic sum of arguments, to prove identity }
+  GMcCancelObserved: Int;
+  GMcFinallyRan: Int;
 
 { --- all fibers complete --------------------------------------------------- }
 
@@ -55,14 +55,14 @@ begin
   { A little cooperative yielding to force interleaving/migration. }
   FiberYield();
   _AtomicAddInt32(@GMcCounter, 1);
-  _AtomicAddInt32(@GMcSum, Integer(Arg));
+  _AtomicAddInt32(@GMcSum, Int32(Arg));
 end;
 
 procedure TSchedulerMcTests.TestMc_AllFibersRunToCompletion;
 const
   N = 500;
 var
-  I, ExpectedSum: Integer;
+  I, ExpectedSum: Int;
 begin
   GMcCounter := 0;
   GMcSum := 0;
@@ -85,7 +85,7 @@ end;
   other workers must steal them.  Each child just tallies. }
 procedure BurstSpawnerWorker(Arg: Pointer);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 999 do
     SpawnFiber(@TallyWorker, Pointer(1));
@@ -107,13 +107,13 @@ end;
 
 procedure SleepTallyWorker(Arg: Pointer);
 begin
-  FiberSleep(Integer(Arg));      { ms }
+  FiberSleep(Int32(Arg));      { ms }
   _AtomicAddInt32(@GMcCounter, 1);
 end;
 
 procedure TSchedulerMcTests.TestMc_TimersFireUnderMulticore;
 var
-  I: Integer;
+  I: Int;
   Started, Elapsed: Int64;
 begin
   GMcCounter := 0;
@@ -145,7 +145,7 @@ end;
 
 procedure CancelKickWorker(Arg: Pointer);
 var
-  I: Integer;
+  I: Int;
 begin
   { Give the victim time to park in its worker's timer heap. }
   FiberSleep(20);
@@ -188,7 +188,7 @@ end;
 
 procedure TSchedulerMcTests.TestMc_FailureContainedPerFiber;
 var
-  I: Integer;
+  I: Int;
   Boomer, Survivor: TFiberTask;
 begin
   GMcFinallyRan := 0;

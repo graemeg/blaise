@@ -940,7 +940,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var Q, R: Integer;
+    var Q, R: Int;
     begin
       DivMod(17, 5, Q, R);
       WriteLn(IntToStr(Q));
@@ -958,7 +958,7 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
     program P; uses Math;
-    var Q, R: Integer;
+    var Q, R: Int;
     begin
       DivMod(12, 4, Q, R);
       WriteLn(IntToStr(Q));

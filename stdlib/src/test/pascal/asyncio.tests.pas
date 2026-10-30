@@ -37,15 +37,15 @@ const
   AF_UNIX = 1;
   SOCK_STREAM_ = 1;
 
-function c_socketpair(ADomain, AType, AProtocol: Integer; ASv: Pointer): Integer;
+function c_socketpair(ADomain, AType, AProtocol: Int32; ASv: Pointer): Int32;
   external name 'socketpair';
-function c_close_fd(AFd: Integer): Integer; external name 'close';
-function c_write_fd(AFd: Integer; ABuf: Pointer; ACount: Int64): Int64;
+function c_close_fd(AFd: Int32): Int32; external name 'close';
+function c_write_fd(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64;
   external name 'write';
 
-function MakePair(out AFd0, AFd1: Integer): Boolean;
+function MakePair(out AFd0, AFd1: Int): Boolean;
 var
-  Sv: array[0..1] of Integer;
+  Sv: array[0..1] of Int32;
 begin
   Sv[0] := -1;
   Sv[1] := -1;
@@ -56,9 +56,9 @@ begin
   Result := True;
 end;
 
-function BufToStr(const ABuf: array of Byte; ALen: Integer): string;
+function BufToStr(const ABuf: array of Byte; ALen: Int): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   for I := 0 to ALen - 1 do
@@ -68,7 +68,7 @@ end;
 { --- socketpair send/recv round-trip --------------------------------------- }
 
 var
-  GPairA, GPairB: Integer;
+  GPairA, GPairB: Int;
   GIoLog: string;
 
 procedure PairSender(AArg: Pointer);
@@ -78,7 +78,7 @@ var
 begin
   Msg := 'ping';
   N := FiberSend(GPairB, PChar(Msg), 4);
-  GIoLog := GIoLog + 'sent' + IntToStr(Integer(N)) + ' ';
+  GIoLog := GIoLog + 'sent' + IntToStr(Int32(N)) + ' ';
 end;
 
 procedure PairReceiver(AArg: Pointer);
@@ -87,7 +87,7 @@ var
   N: Int64;
 begin
   N := FiberRecv(GPairA, @Buf[0], 16);
-  GIoLog := GIoLog + 'recv:' + BufToStr(Buf, Integer(N)) + ' ';
+  GIoLog := GIoLog + 'recv:' + BufToStr(Buf, Int32(N)) + ' ';
 end;
 
 procedure TAsyncIoTests.TestSocketPair_SendRecvRoundTrip;
@@ -114,11 +114,11 @@ const
   TEST_PORT = 29355;
 
 var
-  GListenFd: Integer;
+  GListenFd: Int;
 
 procedure LoopbackServer(AArg: Pointer);
 var
-  Conn: Integer;
+  Conn: Int;
   Buf: array[0..15] of Byte;
   N: Int64;
 begin
@@ -130,14 +130,14 @@ begin
   end;
   GIoLog := GIoLog + 'accepted ';
   N := FiberRecv(Conn, @Buf[0], 16);
-  GIoLog := GIoLog + 'srv:' + BufToStr(Buf, Integer(N)) + ' ';
+  GIoLog := GIoLog + 'srv:' + BufToStr(Buf, Int32(N)) + ' ';
   FiberSend(Conn, PChar('pong'), 4);
   c_close_fd(Conn);
 end;
 
 procedure LoopbackClient(AArg: Pointer);
 var
-  Fd, Rc: Integer;
+  Fd, Rc: Int;
   SA: TSockAddrIn;
   Buf: array[0..15] of Byte;
   N: Int64;
@@ -155,7 +155,7 @@ begin
   GIoLog := GIoLog + 'connected ';
   FiberSend(Fd, PChar('ping'), 4);
   N := FiberRecv(Fd, @Buf[0], 16);
-  GIoLog := GIoLog + 'cli:' + BufToStr(Buf, Integer(N)) + ' ';
+  GIoLog := GIoLog + 'cli:' + BufToStr(Buf, Int32(N)) + ' ';
   c_close_fd(Fd);
 end;
 
@@ -197,7 +197,7 @@ begin
   if N = IO_ETIMEDOUT then
     GIoLog := GIoLog + 'timedout '
   else
-    GIoLog := GIoLog + 'notimeout' + IntToStr(Integer(N)) + ' ';
+    GIoLog := GIoLog + 'notimeout' + IntToStr(Int32(N)) + ' ';
 end;
 
 procedure TAsyncIoTests.TestDeadline_Expires_ReturnsTimedOut;
@@ -224,7 +224,7 @@ end;
 
 procedure TAsyncIoTests.TestBlockingFallback_NoScheduler;
 var
-  A, B: Integer;
+  A, B: Int;
   Buf: array[0..3] of Byte;
   Byte1: Byte;
   N: Int64;
@@ -237,7 +237,7 @@ begin
   c_write_fd(B, @Byte1, 1);
   N := FiberRecv(A, @Buf[0], 4);
   AssertEquals('blocking-fallback recv returns the raw count', Int64(1), N);
-  AssertEquals('byte value round-trips', 90, Integer(Buf[0]));
+  AssertEquals('byte value round-trips', 90, Int32(Buf[0]));
   c_close_fd(A);
   c_close_fd(B);
 end;

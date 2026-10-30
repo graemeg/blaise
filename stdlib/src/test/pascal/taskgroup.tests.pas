@@ -35,22 +35,22 @@ uses
   runtime.atomic;
 
 var
-  GTgRan: Integer;          { children that completed their work }
-  GTgCancelled: Integer;    { children that observed cancellation }
-  GTgResult: Integer;       { 1 if Wait returned success, 0 failure, -1 unset }
+  GTgRan: Int;          { children that completed their work }
+  GTgCancelled: Int;    { children that observed cancellation }
+  GTgResult: Int;       { 1 if Wait returned success, 0 failure, -1 unset }
 
 { --- all children run and join -------------------------------------------- }
 
 procedure TgChildWorker(Arg: Pointer);
 begin
-  FiberSleep((Integer(Arg) mod 4) + 1);
+  FiberSleep((Int32(Arg) mod 4) + 1);
   _AtomicAddInt32(@GTgRan, 1);
 end;
 
 procedure TgAllRunnerWorker(Arg: Pointer);
 var
   G: TTaskGroup;
-  I: Integer;
+  I: Int;
 begin
   G := TTaskGroup.Create(0);          { no deadline }
   try
@@ -97,7 +97,7 @@ end;
 procedure TgFailRunnerWorker(Arg: Pointer);
 var
   G: TTaskGroup;
-  I: Integer;
+  I: Int;
 begin
   G := TTaskGroup.Create(0);
   try
@@ -147,7 +147,7 @@ end;
 procedure TgDeadlineRunnerWorker(Arg: Pointer);
 var
   G: TTaskGroup;
-  I: Integer;
+  I: Int;
 begin
   G := TTaskGroup.Create(20);         { 20 ms deadline }
   try

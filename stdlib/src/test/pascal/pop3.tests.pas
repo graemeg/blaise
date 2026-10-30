@@ -39,8 +39,8 @@ var
   GPort: UInt16;
   GUserOk: Boolean;
   GPassOk: Boolean;
-  GStatCount: Integer;
-  GStatSize: Integer;
+  GStatCount: Int;
+  GStatSize: Int;
   GRetr: string;
   GDeleOk: Boolean;
   GQuitOk: Boolean;

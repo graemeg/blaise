@@ -45,13 +45,13 @@ type
     function ListGroups: string;
     { Select AName: on success set ACount/AFirst/ALast and return True; False
       for an unknown group. }
-    function SelectGroup(const AName: string; out ACount: Integer;
-      out AFirst: Integer; out ALast: Integer): Boolean;
+    function SelectGroup(const AName: string; out ACount: Int;
+      out AFirst: Int; out ALast: Int): Boolean;
     { Fetch article ANumber in AGroup; True if it exists. }
-    function GetArticle(const AGroup: string; ANumber: Integer;
+    function GetArticle(const AGroup: string; ANumber: Int;
       out AArticle: string): Boolean;
     { Store a posted article; True on success, ANumber = its assigned number. }
-    function PostArticle(const AArticle: string; out ANumber: Integer): Boolean;
+    function PostArticle(const AArticle: string; out ANumber: Int): Boolean;
   end;
 
   { A fiber-per-connection NNTP server.  Start binds+listens; Serve runs the
@@ -105,7 +105,7 @@ end;
   spaces).  Returns '' when the command has no argument. }
 function CmdArg(const ALine: string): string;
 var
-  I, Len: Integer;
+  I, Len: Int;
 begin
   Result := '';
   Len := Length(ALine);
@@ -119,9 +119,9 @@ begin
 end;
 
 { Parse a leading run of ASCII digits into an integer (0 if none). }
-function ParseUInt(const S: string): Integer;
+function ParseUInt(const S: string): Int;
 var
-  I, Len, V: Integer;
+  I, Len, V: Int;
   B: Byte;
 begin
   V := 0;
@@ -151,7 +151,7 @@ end;
   A "blank line" is an empty line (LF LF, i.e. an empty segment). }
 function HeadOrBody(const AArticle: string; AWantHead: Boolean): string;
 var
-  I, Len, LineStart: Integer;
+  I, Len, LineStart: Int;
 begin
   Len := Length(AArticle);
   LineStart := 0;
@@ -208,7 +208,7 @@ end;
 procedure TNntpSessionHandler.Handle(AConn: TTcpConn);
 var
   Line, U, Arg, CurGroup, Article, Payload: string;
-  Num, Cnt, First, Last, PostNum: Integer;
+  Num, Cnt, First, Last, PostNum: Int;
 begin
   CurGroup := '';
   AConn.Write('200 Blaise NNTP server ready (posting allowed)' + CRLF);

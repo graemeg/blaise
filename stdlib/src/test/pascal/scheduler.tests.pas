@@ -99,7 +99,7 @@ var
   H: TTimerHeap;
   T: TFiberTask;
   Deadlines: array[0..8] of Int64;
-  I: Integer;
+  I: Int;
   Prev: Int64;
 begin
   { Shuffled deadlines; PopMin must return them ascending. }
@@ -116,7 +116,7 @@ begin
   for I := 0 to 8 do
     H.Push(MakeTask(Deadlines[I]));
   AssertEquals('heap count after 9 pushes', 9, H.Count);
-  AssertEquals('min is 10', 10, Integer(H.PeekMin().Deadline));
+  AssertEquals('min is 10', 10, Int32(H.PeekMin().Deadline));
   Prev := 0;
   for I := 0 to 8 do
   begin
@@ -130,14 +130,14 @@ end;
 procedure TTimerHeapTests.TestHeap_DuplicateDeadlines;
 var
   H: TTimerHeap;
-  I: Integer;
+  I: Int;
 begin
   H := TTimerHeap.Create();
   for I := 0 to 4 do
     H.Push(MakeTask(42));
   for I := 0 to 4 do
     AssertEquals('all duplicates pop with the same key',
-      42, Integer(H.PopMin().Deadline));
+      42, Int32(H.PopMin().Deadline));
   AssertEquals('heap drained', 0, H.Count);
 end;
 
@@ -146,7 +146,7 @@ var
   H: TTimerHeap;
   Victim: TFiberTask;
   T: TFiberTask;
-  I: Integer;
+  I: Int;
   Prev: Int64;
 begin
   H := TTimerHeap.Create();
@@ -182,18 +182,18 @@ begin
   H.Push(Last);
   H.Remove(First);
   AssertEquals('new min after removing the min',
-    5, Integer(H.PeekMin().Deadline));
+    5, Int32(H.PeekMin().Deadline));
   H.Remove(Last);
   AssertEquals('count after removing the max', 1, H.Count);
   AssertEquals('survivor is the middle key',
-    5, Integer(H.PopMin().Deadline));
+    5, Int32(H.PopMin().Deadline));
 end;
 
 procedure TTimerHeapTests.TestHeap_HeapIndexClearedOnPop;
 var
   H: TTimerHeap;
   T: TFiberTask;
-  I: Integer;
+  I: Int;
 begin
   { Push descending keys (each push sifts to the root) then verify every
     pop hands back a task with its heap slot cleared — the invariant
@@ -254,7 +254,7 @@ end;
 procedure TMonotonicClockTests.TestMonotonicNowNs_NonDecreasing;
 var
   T1, T2: Int64;
-  I: Integer;
+  I: Int;
 begin
   T1 := MonotonicNowNs();
   AssertTrue('clock returns a positive value', T1 > 0);
@@ -273,11 +273,11 @@ var
 
 procedure LogYieldWorker(AArg: Pointer);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 1 do
   begin
-    GLog := GLog + 'F' + IntToStr(Integer(AArg)) + IntToStr(I) + ' ';
+    GLog := GLog + 'F' + IntToStr(Int32(AArg)) + IntToStr(I) + ' ';
     FiberYield();
   end;
 end;
@@ -285,7 +285,7 @@ end;
 procedure LogSleepWorker(AArg: Pointer);
 begin
   FiberSleep(Int64(AArg));
-  GLog := GLog + 'S' + IntToStr(Integer(AArg)) + ' ';
+  GLog := GLog + 'S' + IntToStr(Int32(AArg)) + ' ';
 end;
 
 procedure LogChildWorker(AArg: Pointer);

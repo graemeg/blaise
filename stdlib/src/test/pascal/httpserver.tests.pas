@@ -88,7 +88,7 @@ end;
 
 procedure TPollServeThread.Execute;
 var
-  Tries: Integer;
+  Tries: Int;
 begin
   { Give up after ~10 s rather than hang the suite if no client arrives. }
   Tries := 0;
@@ -105,7 +105,7 @@ end;
 
 { Read the whole response until the server closes, in large chunks: a
   megabyte through a 1 KB string-concatenation loop would be quadratic. }
-function RecvAllLarge(AFd: Integer): string;
+function RecvAllLarge(AFd: Int): string;
 var
   SB: TStringBuilder;
   Chunk: string;
@@ -119,10 +119,10 @@ begin
   SB.Free();
 end;
 
-function PatternBody(ACount: Integer): string;
+function PatternBody(ACount: Int): string;
 var
   SB: TStringBuilder;
-  I: Integer;
+  I: Int;
 begin
   SB := TStringBuilder.Create();
   for I := 0 to ACount - 1 do
@@ -136,7 +136,7 @@ end;
   (FreeBSD under emulation in CI) the body can arrive after the first recv
   returns.  ServeOnce has already closed a plain HTTP connection, so this
   always terminates. }
-function RecvUntilClosed(AFd: Integer): string;
+function RecvUntilClosed(AFd: Int): string;
 var
   Chunk: string;
 begin
@@ -184,7 +184,7 @@ const
 var
   Srv: THttpServer;
   H: IRequestHandler;
-  Cli: Integer;
+  Cli: Int;
   Resp: string;
 begin
   Srv := THttpServer.Create(PORT);
@@ -218,7 +218,7 @@ const
 var
   Srv: THttpServer;
   H: IRequestHandler;
-  Cli: Integer;
+  Cli: Int;
   Resp: string;
 begin
   Srv := THttpServer.Create(PORT);
@@ -244,7 +244,7 @@ const
 var
   Srv: THttpServer;
   H: IRequestHandler;
-  Cli: Integer;
+  Cli: Int;
   Resp: string;
   D: TWsFrame;
 begin
@@ -287,7 +287,7 @@ var
   Srv: THttpServer;
   H: IRequestHandler;
   Body, Resp: string;
-  Cli, Sep: Integer;
+  Cli, Sep: Int;
   T: TPollServeThread;
 begin
   Body := PatternBody(SIZE);
@@ -326,7 +326,7 @@ var
   Srv: THttpServer;
   H: IRequestHandler;
   Resp: string;
-  Cli: Integer;
+  Cli: Int;
   T: TPollServeThread;
 begin
   Srv := THttpServer.Create(PORT);

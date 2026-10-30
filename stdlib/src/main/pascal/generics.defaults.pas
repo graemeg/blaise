@@ -21,39 +21,39 @@ type
     GetHashCode returns a hash suitable for use in hash tables. }
   IEqualityComparer<T> = interface
     function Equals(A, B: T): Boolean;
-    function GetHashCode(Value: T): Integer;
+    function GetHashCode(Value: T): Int32;
   end;
 
   { Ordering comparison: Compare returns negative if A < B,
     zero if A = B, positive if A > B. }
   IComparer<T> = interface
-    function Compare(A, B: T): Integer;
+    function Compare(A, B: T): Int32;
   end;
 
   { Concrete equality comparer for Integer }
-  TIntegerEqualityComparer = class(IEqualityComparer<Integer>)
-    function Equals(A, B: Integer): Boolean;
-    function GetHashCode(Value: Integer): Integer;
+  TIntegerEqualityComparer = class(IEqualityComparer<Int32>)
+    function Equals(A, B: Int32): Boolean;
+    function GetHashCode(Value: Int32): Int32;
   end;
 
   { Concrete ordering comparer for Integer }
-  TIntegerComparer = class(IComparer<Integer>)
-    function Compare(A, B: Integer): Integer;
+  TIntegerComparer = class(IComparer<Int32>)
+    function Compare(A, B: Int32): Int32;
   end;
 
 implementation
 
-function TIntegerEqualityComparer.Equals(A, B: Integer): Boolean;
+function TIntegerEqualityComparer.Equals(A, B: Int32): Boolean;
 begin
   Result := A = B
 end;
 
-function TIntegerEqualityComparer.GetHashCode(Value: Integer): Integer;
+function TIntegerEqualityComparer.GetHashCode(Value: Int32): Int32;
 begin
   Result := Value
 end;
 
-function TIntegerComparer.Compare(A, B: Integer): Integer;
+function TIntegerComparer.Compare(A, B: Int32): Int32;
 begin
   if A < B then
     Result := -1

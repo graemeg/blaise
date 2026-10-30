@@ -46,7 +46,7 @@ type
     FScheme: string;
     FUserInfo: string;
     FHost: string;
-    FPort: Integer;
+    FPort: Int;
     FPath: string;
     FQuery: string;
     FFragment: string;
@@ -74,7 +74,7 @@ type
     property Scheme: string read FScheme write FScheme;
     property UserInfo: string read FUserInfo write FUserInfo;
     property Host: string read FHost write FHost;
-    property Port: Integer read FPort write FPort;
+    property Port: Int read FPort write FPort;
     property Path: string read FPath write FPath;
     property Query: string read FQuery write FQuery;
     property Fragment: string read FFragment write FFragment;
@@ -82,7 +82,7 @@ type
 
 { Default TCP port for a scheme (lower-cased): http=80, https=443, ws=80,
   wss=443.  Returns 0 for an unknown scheme. }
-function DefaultPortForScheme(const AScheme: string): Integer;
+function DefaultPortForScheme(const AScheme: string): Int;
 
 { RFC-3986 percent-encode a single URI component.  Unreserved characters
   (A-Z a-z 0-9 - _ . ~) pass through; every other byte becomes %XX (uppercase
@@ -113,9 +113,9 @@ begin
 end;
 
 { Parse a decimal port string; return ADefault when empty or non-numeric. }
-function ParsePortDef(const S: string; ADefault: Integer): Integer;
+function ParsePortDef(const S: string; ADefault: Int): Int;
 var
-  I, N, V: Integer;
+  I, N, V: Int;
   B: Byte;
 begin
   N := Length(S);
@@ -132,7 +132,7 @@ begin
   Result := V;
 end;
 
-function HexDigitVal(AByte: Byte): Integer;
+function HexDigitVal(AByte: Byte): Int;
 begin
   if (AByte >= 48) and (AByte <= 57) then
     Result := AByte - 48
@@ -147,7 +147,7 @@ end;
 function EncodeComponent(const S: string): string;
 var
   SB: TStringBuilder;
-  I: Integer;
+  I: Int;
   B: Byte;
 begin
   SB := TStringBuilder.Create();
@@ -170,7 +170,7 @@ end;
 function DecodeComponent(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Integer;
+  I, N: Int;
   B: Byte;
 begin
   SB := TStringBuilder.Create();
@@ -196,7 +196,7 @@ end;
 
 { ---- scheme defaults ------------------------------------------------------ }
 
-function DefaultPortForScheme(const AScheme: string): Integer;
+function DefaultPortForScheme(const AScheme: string): Int;
 var
   S: string;
 begin
@@ -238,7 +238,7 @@ static function TUri.Parse(const AUrl: string): TUri;
 var
   U: TUri;
   Rest, Authority, HostPort, PortStr: string;
-  SchemeSep, Slash, Q, Hash, At, Colon: Integer;
+  SchemeSep, Slash, Q, Hash, At, Colon: Int;
 begin
   U := TUri.Create();
   Rest := AUrl;
@@ -335,7 +335,7 @@ end;
 procedure TUri.EnsureParams;
 var
   Pairs: TList<string>;
-  I, Eq, Start, N: Integer;
+  I, Eq, Start, N: Int;
   Pair, Key, Val: string;
   B: Byte;
 begin

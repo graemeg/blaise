@@ -76,7 +76,7 @@ type
     (Result < Count) is permitted and does not imply EOF; callers that need
     a fixed-size read must loop. }
   IInputStream = interface(ICloseable)
-    function Read(Buf: Pointer; Count: Integer): Integer;
+    function Read(Buf: Pointer; Count: Int): Int;
   end;
 
   { IOutputStream — capability interface for byte sinks.
@@ -86,7 +86,7 @@ type
     short writes are reserved for non-blocking sinks (not used in v1).
     Flush forces any buffered data to the underlying device. }
   IOutputStream = interface(ICloseable)
-    function Write(Buf: Pointer; Count: Integer): Integer;
+    function Write(Buf: Pointer; Count: Int): Int;
     procedure Flush;
   end;
 
@@ -110,24 +110,24 @@ type
     The abstract bases cannot, because the interface vtable needs concrete
     method implementations and the base's are `virtual; abstract`. }
   TInputStream = class
-    function Read(Buf: Pointer; Count: Integer): Integer; virtual; abstract;
+    function Read(Buf: Pointer; Count: Int): Int; virtual; abstract;
     procedure Close; virtual; abstract;
   end;
 
   { TOutputStream — abstract base class for byte sinks. }
   TOutputStream = class
-    function Write(Buf: Pointer; Count: Integer): Integer; virtual; abstract;
+    function Write(Buf: Pointer; Count: Int): Int; virtual; abstract;
     procedure Flush; virtual; abstract;
     procedure Close; virtual; abstract;
   end;
 
   { TFileInputStream — reads bytes from a file on disk. }
   TFileInputStream = class(TInputStream, IInputStream, ICloseable, ISeekable)
-    FFd:     Integer;     // file descriptor; -1 once closed
+    FFd:     Int32;     // file descriptor; -1 once closed
     FClosed: Boolean;
     constructor Create(const APath: string);
     destructor Destroy; override;
-    function Read(Buf: Pointer; Count: Integer): Integer; override;
+    function Read(Buf: Pointer; Count: Int): Int; override;
     procedure Close; override;
     function Seek(Offset: Int64; Origin: TSeekOrigin): Int64;
     function Size: Int64;
@@ -136,12 +136,12 @@ type
 
   { TFileOutputStream — writes bytes to a file on disk. }
   TFileOutputStream = class(TOutputStream, IOutputStream, ICloseable, ISeekable)
-    FFd:     Integer;
+    FFd:     Int32;
     FClosed: Boolean;
     constructor Create(const APath: string); overload;
     constructor Create(const APath: string; AMode: TFileMode); overload;
     destructor Destroy; override;
-    function Write(Buf: Pointer; Count: Integer): Integer; override;
+    function Write(Buf: Pointer; Count: Int): Int; override;
     procedure Flush; override;
     procedure Close; override;
     function Seek(Offset: Int64; Origin: TSeekOrigin): Int64;
@@ -154,7 +154,7 @@ type
     FData: string;
     FPos:  Int64;
     constructor Create(const AData: string);
-    function Read(Buf: Pointer; Count: Integer): Integer; override;
+    function Read(Buf: Pointer; Count: Int): Int; override;
     procedure Close; override;
     function Seek(Offset: Int64; Origin: TSeekOrigin): Int64;
     function Size: Int64;
@@ -166,12 +166,12 @@ type
     Use ToString to snapshot the accumulated bytes as a Blaise string. }
   TMemoryOutputStream = class(TOutputStream, IOutputStream, ICloseable, ISeekable)
     FBuf:      Pointer;   // raw byte buffer
-    FCapacity: Integer;
-    FSize:     Integer;
-    FPos:      Integer;
+    FCapacity: Int;
+    FSize:     Int;
+    FPos:      Int;
     constructor Create;
     destructor Destroy; override;
-    function Write(Buf: Pointer; Count: Integer): Integer; override;
+    function Write(Buf: Pointer; Count: Int): Int; override;
     procedure Flush; override;
     procedure Close; override;
     function ToString: string; override;
@@ -191,16 +191,16 @@ type
     FInner:     TInputStream;
     FOwnsInner: Boolean;
     FBuf:       Pointer;
-    FBufSize:   Integer;
-    FBufPos:    Integer;   // next byte to return
-    FBufEnd:    Integer;   // one past last valid byte (FBufEnd >= FBufPos)
+    FBufSize:   Int;
+    FBufPos:    Int;   // next byte to return
+    FBufEnd:    Int;   // one past last valid byte (FBufEnd >= FBufPos)
     FClosed:    Boolean;
     constructor Create(AInner: TInputStream); overload;
-    constructor Create(AInner: TInputStream; ABufSize: Integer); overload;
-    constructor Create(AInner: TInputStream; ABufSize: Integer;
+    constructor Create(AInner: TInputStream; ABufSize: Int); overload;
+    constructor Create(AInner: TInputStream; ABufSize: Int;
                        AOwnsInner: Boolean); overload;
     destructor Destroy; override;
-    function Read(Buf: Pointer; Count: Integer): Integer; override;
+    function Read(Buf: Pointer; Count: Int): Int; override;
     procedure Close; override;
   end;
 
@@ -230,7 +230,7 @@ type
     constructor Create(AInner: TInputStream); overload;
     constructor Create(AInner: TInputStream; AOwnsInner: Boolean); overload;
     destructor Destroy; override;
-    function Read(Buf: Pointer; Count: Integer): Integer; override;
+    function Read(Buf: Pointer; Count: Int): Int; override;
     procedure Close; override;
     function ReadLine: string;
     function ReadAll: string;
@@ -251,7 +251,7 @@ type
     constructor Create(AInner: TOutputStream); overload;
     constructor Create(AInner: TOutputStream; AOwnsInner: Boolean); overload;
     destructor Destroy; override;
-    function Write(Buf: Pointer; Count: Integer): Integer; override;
+    function Write(Buf: Pointer; Count: Int): Int; override;
     procedure Flush; override;
     procedure Close; override;
     procedure WriteString(const S: string);
@@ -304,8 +304,8 @@ type
     that time. }
   TBufferSegment = class
     FData:  Pointer;     { 8 KiB raw bytes; owned by the pool }
-    FPos:   Integer;     { next byte to return on Read }
-    FLimit: Integer;     { one past last written byte (FLimit >= FPos) }
+    FPos:   Int;     { next byte to return on Read }
+    FLimit: Int;     { one past last written byte (FLimit >= FPos) }
     FNext:  TBufferSegment;
   end;
 
@@ -316,8 +316,8 @@ type
     FClosed: Boolean;
     constructor Create;
     destructor Destroy; override;
-    function Read(Buf: Pointer; Count: Integer): Integer;
-    function Write(Buf: Pointer; Count: Integer): Integer;
+    function Read(Buf: Pointer; Count: Int): Int;
+    function Write(Buf: Pointer; Count: Int): Int;
     procedure Flush;
     procedure Close;
     function Size: Int64;
@@ -343,15 +343,15 @@ type
     FInner:     TOutputStream;
     FOwnsInner: Boolean;
     FBuf:       Pointer;
-    FBufSize:   Integer;
-    FBufFill:   Integer;
+    FBufSize:   Int;
+    FBufFill:   Int;
     FClosed:    Boolean;
     constructor Create(AInner: TOutputStream); overload;
-    constructor Create(AInner: TOutputStream; ABufSize: Integer); overload;
-    constructor Create(AInner: TOutputStream; ABufSize: Integer;
+    constructor Create(AInner: TOutputStream; ABufSize: Int); overload;
+    constructor Create(AInner: TOutputStream; ABufSize: Int;
                        AOwnsInner: Boolean); overload;
     destructor Destroy; override;
-    function Write(Buf: Pointer; Count: Integer): Integer; override;
+    function Write(Buf: Pointer; Count: Int): Int; override;
     procedure Flush; override;
     procedure Close; override;
   end;
@@ -360,17 +360,17 @@ type
 
   Declared in the interface section per Blaise convention (declaring
   externals in implementation crashes the codegen for unit consumers). }
-function _FdOpenRead(Path: Pointer): Integer; external name '_FdOpenRead';
-function _FdOpenWrite(Path: Pointer): Integer; external name '_FdOpenWrite';
-function _FdOpenAppend(Path: Pointer): Integer; external name '_FdOpenAppend';
+function _FdOpenRead(Path: Pointer): Int32; external name '_FdOpenRead';
+function _FdOpenWrite(Path: Pointer): Int32; external name '_FdOpenWrite';
+function _FdOpenAppend(Path: Pointer): Int32; external name '_FdOpenAppend';
 function _FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int;
   external name '_FdRead';
 function _FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int;
   external name '_FdWrite';
-function _FdSeek(Fd: Integer; Offset: Int64; Origin: Integer): Int64;
+function _FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64;
   external name '_FdSeek';
-function _FdSize(Fd: Integer): Int64; external name '_FdSize';
-procedure _FdClose(Fd: Integer); external name '_FdClose';
+function _FdSize(Fd: Int32): Int64; external name '_FdSize';
+procedure _FdClose(Fd: Int32); external name '_FdClose';
 
 { Raw memory helpers used by the memory streams.  memcpy is the C name (libc, or
   runtime.cstub under --static).  malloc/free/realloc bind to the RTL's own
@@ -429,8 +429,8 @@ begin
   end
 end;
 
-function TFileInputStream.Read(Buf: Pointer; Count: Integer): Integer;
-var N: Integer;
+function TFileInputStream.Read(Buf: Pointer; Count: Int): Int;
+var N: Int;
 begin
   if Self.FClosed then
   begin
@@ -454,7 +454,7 @@ end;
 
 function TFileInputStream.Seek(Offset: Int64; Origin: TSeekOrigin): Int64;
 begin
-  Result := _FdSeek(Self.FFd, Offset, Integer(Origin))
+  Result := _FdSeek(Self.FFd, Offset, Int32(Origin))
 end;
 
 function TFileInputStream.Size: Int64;
@@ -464,7 +464,7 @@ end;
 
 function TFileInputStream.Position: Int64;
 begin
-  Result := _FdSeek(Self.FFd, 0, Integer(soCurrent))
+  Result := _FdSeek(Self.FFd, 0, Int32(soCurrent))
 end;
 
 { ------------------------------------------------------------------ }
@@ -500,8 +500,8 @@ begin
   end
 end;
 
-function TFileOutputStream.Write(Buf: Pointer; Count: Integer): Integer;
-var N: Integer;
+function TFileOutputStream.Write(Buf: Pointer; Count: Int): Int;
+var N: Int;
 begin
   if Self.FClosed then
   begin
@@ -532,7 +532,7 @@ end;
 
 function TFileOutputStream.Seek(Offset: Int64; Origin: TSeekOrigin): Int64;
 begin
-  Result := _FdSeek(Self.FFd, Offset, Integer(Origin))
+  Result := _FdSeek(Self.FFd, Offset, Int32(Origin))
 end;
 
 function TFileOutputStream.Size: Int64;
@@ -542,7 +542,7 @@ end;
 
 function TFileOutputStream.Position: Int64;
 begin
-  Result := _FdSeek(Self.FFd, 0, Integer(soCurrent))
+  Result := _FdSeek(Self.FFd, 0, Int32(soCurrent))
 end;
 
 { ------------------------------------------------------------------ }
@@ -555,10 +555,10 @@ begin
   Self.FPos := 0
 end;
 
-function TMemoryInputStream.Read(Buf: Pointer; Count: Integer): Integer;
+function TMemoryInputStream.Read(Buf: Pointer; Count: Int): Int;
 var
   Remaining: Int64;
-  N:         Integer;
+  N:         Int;
   Src:       Pointer;
 begin
   Remaining := Int64(Length(Self.FData)) - Self.FPos;
@@ -568,7 +568,7 @@ begin
     Exit
   end;
   if Count > Remaining then
-    N := Integer(Remaining)
+    N := Int32(Remaining)
   else
     N := Count;
   Src := Pointer(Int64(Pointer(Self.FData)) + Self.FPos);
@@ -632,10 +632,10 @@ begin
   end
 end;
 
-function TMemoryOutputStream.Write(Buf: Pointer; Count: Integer): Integer;
+function TMemoryOutputStream.Write(Buf: Pointer; Count: Int): Int;
 var
-  Needed: Integer;
-  NewCap: Integer;
+  Needed: Int;
+  NewCap: Int;
   Dst:    Pointer;
 begin
   if Count <= 0 then
@@ -700,7 +700,7 @@ begin
   end;
   if NewPos < 0 then NewPos := 0;
   if NewPos > Int64(Self.FSize) then NewPos := Self.FSize;
-  Self.FPos := Integer(NewPos);
+  Self.FPos := Int32(NewPos);
   Result := NewPos
 end;
 
@@ -726,12 +726,12 @@ begin
   Self.Create(AInner, kDefaultBufSize, True)
 end;
 
-constructor TBufferedInputStream.Create(AInner: TInputStream; ABufSize: Integer);
+constructor TBufferedInputStream.Create(AInner: TInputStream; ABufSize: Int);
 begin
   Self.Create(AInner, ABufSize, True)
 end;
 
-constructor TBufferedInputStream.Create(AInner: TInputStream; ABufSize: Integer;
+constructor TBufferedInputStream.Create(AInner: TInputStream; ABufSize: Int;
                                         AOwnsInner: Boolean);
 begin
   Self.FInner := AInner;
@@ -755,14 +755,14 @@ begin
   end
 end;
 
-function TBufferedInputStream.Read(Buf: Pointer; Count: Integer): Integer;
+function TBufferedInputStream.Read(Buf: Pointer; Count: Int): Int;
 var
-  Total:     Integer;
-  Available: Integer;
-  Take:      Integer;
+  Total:     Int;
+  Available: Int;
+  Take:      Int;
   Src:       Pointer;
   Dst:       Pointer;
-  N:         Integer;
+  N:         Int;
 begin
   if Self.FClosed or (Count <= 0) then
   begin
@@ -812,12 +812,12 @@ begin
   Self.Create(AInner, kDefaultBufSize, True)
 end;
 
-constructor TBufferedOutputStream.Create(AInner: TOutputStream; ABufSize: Integer);
+constructor TBufferedOutputStream.Create(AInner: TOutputStream; ABufSize: Int);
 begin
   Self.Create(AInner, ABufSize, True)
 end;
 
-constructor TBufferedOutputStream.Create(AInner: TOutputStream; ABufSize: Integer;
+constructor TBufferedOutputStream.Create(AInner: TOutputStream; ABufSize: Int;
                                          AOwnsInner: Boolean);
 begin
   Self.FInner := AInner;
@@ -851,14 +851,14 @@ begin
   end
 end;
 
-function TBufferedOutputStream.Write(Buf: Pointer; Count: Integer): Integer;
+function TBufferedOutputStream.Write(Buf: Pointer; Count: Int): Int;
 var
-  Remaining: Integer;
-  Space:     Integer;
-  Take:      Integer;
+  Remaining: Int;
+  Space:     Int;
+  Take:      Int;
   Src:       Pointer;
   Dst:       Pointer;
-  Offset:    Integer;
+  Offset:    Int;
 begin
   if Self.FClosed or (Count <= 0) then
   begin
@@ -933,11 +933,11 @@ begin
     Self.Close()
 end;
 
-function TStreamReader.Read(Buf: Pointer; Count: Integer): Integer;
+function TStreamReader.Read(Buf: Pointer; Count: Int): Int;
 var
-  N:    Integer;
+  N:    Int;
   Dst:  Pointer;
-  Rest: Integer;
+  Rest: Int;
   PB:   ^Byte;
 begin
   { Drain the pending lookahead byte first (left over from CR handling
@@ -986,10 +986,10 @@ function TStreamReader.ReadLine: string;
   Returns '' at EOF (use EndOfStream to disambiguate empty line vs end). }
 var
   B:       Byte;
-  N:       Integer;
+  N:       Int;
   Acc:     string;
   Peek:    Byte;
-  PN:      Integer;
+  PN:      Int;
 begin
   Acc := '';
   if Self.FClosed then begin Result := Acc; Exit end;
@@ -1033,9 +1033,9 @@ end;
 function TStreamReader.ReadAll: string;
 var
   Buf: array[0..4095] of Byte;
-  N:   Integer;
+  N:   Int;
   Acc: string;
-  I:   Integer;
+  I:   Int;
   Chunk: string;
 begin
   Acc := '';
@@ -1054,7 +1054,7 @@ end;
 function TStreamReader.EndOfStream: Boolean;
 var
   B: Byte;
-  N: Integer;
+  N: Int;
 begin
   if Self.FClosed then begin Result := True; Exit end;
   if Self.FHasPending then begin Result := False; Exit end;
@@ -1103,7 +1103,7 @@ begin
   end
 end;
 
-function TStreamWriter.Write(Buf: Pointer; Count: Integer): Integer;
+function TStreamWriter.Write(Buf: Pointer; Count: Int): Int;
 begin
   if Self.FClosed or (Count <= 0) then
   begin
@@ -1129,7 +1129,7 @@ end;
 
 procedure TStreamWriter.WriteString(const S: string);
 var
-  L: Integer;
+  L: Int;
 begin
   L := Length(S);
   if L > 0 then
@@ -1138,7 +1138,7 @@ end;
 
 procedure TStreamWriter.WriteLine(const S: string);
 var
-  L:  Integer;
+  L:  Int;
   LF: Byte;
 begin
   L := Length(S);
@@ -1240,14 +1240,14 @@ begin
   Result := Self.FSize
 end;
 
-function TBuffer.Write(Buf: Pointer; Count: Integer): Integer;
+function TBuffer.Write(Buf: Pointer; Count: Int): Int;
 var
-  Remaining: Integer;
-  Space:     Integer;
-  Take:      Integer;
+  Remaining: Int;
+  Space:     Int;
+  Take:      Int;
   Src:       Pointer;
   Dst:       Pointer;
-  Offset:    Integer;
+  Offset:    Int;
   Seg:       TBufferSegment;
 begin
   if Self.FClosed or (Count <= 0) then
@@ -1293,11 +1293,11 @@ begin
   Self.FClosed := True
 end;
 
-function TBuffer.Read(Buf: Pointer; Count: Integer): Integer;
+function TBuffer.Read(Buf: Pointer; Count: Int): Int;
 var
-  Total:     Integer;
-  Available: Integer;
-  Take:      Integer;
+  Total:     Int;
+  Available: Int;
+  Take:      Int;
   Src:       Pointer;
   Dst:       Pointer;
   Seg:       TBufferSegment;
@@ -1346,9 +1346,9 @@ procedure TBuffer.TransferTo(Dst: TBuffer; Count: Int64);
 var
   Want:      Int64;
   HeadAvail: Int64;
-  Take:      Integer;
+  Take:      Int;
   Seg:       TBufferSegment;
-  Space:     Integer;
+  Space:     Int;
   Src:       Pointer;
   DstP:      Pointer;
 begin
@@ -1388,8 +1388,8 @@ begin
       { Partial prefix move — memcpy into Dst's tail, then advance our
         FPos.  This is the "expensive" path; it only kicks in for
         unaligned slice boundaries (FPos > 0 or HeadAvail > Want). }
-      Take := Integer(Want);
-      if Int64(Take) > HeadAvail then Take := Integer(HeadAvail);
+      Take := Int32(Want);
+      if Int64(Take) > HeadAvail then Take := Int32(HeadAvail);
       if (Dst.FTail = nil) or (Dst.FTail.FLimit >= kSegmentSize) then
       begin
         Seg := AcquireSegment();
@@ -1416,7 +1416,7 @@ end;
 function CopyStream(Src: TInputStream; Dst: TOutputStream): Int64;
 var
   Buf:   array[0..8191] of Byte;
-  N:     Integer;
+  N:     Int;
   Total: Int64;
   RF:    IReaderFrom;
   WT:    IWriterTo;
@@ -1451,7 +1451,7 @@ function TBuffer.IndexOf(B: Byte): Int64;
   consume bytes. }
 var
   Seg:    TBufferSegment;
-  I:      Integer;
+  I:      Int;
   Base:   Int64;
   PB:     ^Byte;
   Addr:   Int64;

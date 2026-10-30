@@ -96,7 +96,7 @@ begin
   { Depth-first, each directory's entries in byte order: the result must not
     depend on the order the file system happens to list them in. }
   L := FindFiles(FRoot, '*.pas');
-  AssertEquals('count', 4, Integer(L.Count));
+  AssertEquals('count', 4, Int32(L.Count));
   AssertEquals('0', FRoot + '/a.pas', L[0]);
   AssertEquals('1', FRoot + '/b.pas', L[1]);
   AssertEquals('2', FRoot + '/sub/c.pas', L[2]);
@@ -108,7 +108,7 @@ var
   L: TList<string>;
 begin
   L := FindFiles(FRoot, '*.txt');
-  AssertEquals('count', 1, Integer(L.Count));
+  AssertEquals('count', 1, Int32(L.Count));
   AssertEquals('0', FRoot + '/notes.txt', L[0]);
 end;
 
@@ -118,14 +118,14 @@ var
 begin
   { Directories are walked, never returned. }
   L := FindFiles(FRoot, '*');
-  AssertEquals('count', 6, Integer(L.Count));
+  AssertEquals('count', 6, Int32(L.Count));
   AssertEquals('last', FRoot + '/z.inc', L[5]);
 end;
 
 procedure TIOFilesTests.TestGlob_QuestionMarkIsOneChar;
 begin
-  AssertEquals('?.pas', 4, Integer(FindFiles(FRoot, '?.pas').Count));
-  AssertEquals('??.pas', 0, Integer(FindFiles(FRoot, '??.pas').Count));
+  AssertEquals('?.pas', 4, Int32(FindFiles(FRoot, '?.pas').Count));
+  AssertEquals('??.pas', 0, Int32(FindFiles(FRoot, '??.pas').Count));
 end;
 
 procedure TIOFilesTests.TestGlob_NoMatchGivesEmptyList;
@@ -134,7 +134,7 @@ var
 begin
   L := FindFiles(FRoot, '*.pp');
   AssertNotNull('list', L);
-  AssertEquals('count', 0, Integer(L.Count));
+  AssertEquals('count', 0, Int32(L.Count));
 end;
 
 procedure TIOFilesTests.TestPredicate_ArrowLambda;
@@ -142,7 +142,7 @@ var
   L: TList<string>;
 begin
   L := FindFiles(FRoot, P -> Pos('/sub/', P) >= 0);
-  AssertEquals('count', 2, Integer(L.Count));
+  AssertEquals('count', 2, Int32(L.Count));
   AssertEquals('0', FRoot + '/sub/c.pas', L[0]);
   AssertEquals('1', FRoot + '/sub/deeper/d.pas', L[1]);
 end;
@@ -159,14 +159,14 @@ begin
       Seen.Add(P);
       Result := False;
     end);
-  AssertEquals('none accepted', 0, Integer(L.Count));
-  AssertEquals('every file offered', 6, Integer(Seen.Count));
+  AssertEquals('none accepted', 0, Int32(L.Count));
+  AssertEquals('every file offered', 6, Int32(Seen.Count));
   AssertEquals('first', FRoot + '/a.pas', Seen[0]);
 end;
 
 procedure TIOFilesTests.TestEmptyDirectoryGivesEmptyList;
 begin
-  AssertEquals('count', 0, Integer(FindFiles(FRoot + '/empty', '*').Count));
+  AssertEquals('count', 0, Int32(FindFiles(FRoot + '/empty', '*').Count));
 end;
 
 procedure TIOFilesTests.TestTrailingSlashOnRootIsIgnored;
@@ -174,7 +174,7 @@ var
   L: TList<string>;
 begin
   L := FindFiles(FRoot + '/', '*.txt');
-  AssertEquals('count', 1, Integer(L.Count));
+  AssertEquals('count', 1, Int32(L.Count));
   AssertEquals('0', FRoot + '/notes.txt', L[0]);
 end;
 
@@ -222,7 +222,7 @@ var
 begin
   SymLink(FRoot + '/sub', 'linked');
   L := FindFiles(FRoot, '*.pas');
-  AssertEquals('count', 4, Integer(L.Count));
+  AssertEquals('count', 4, Int32(L.Count));
 end;
 
 procedure TIOFilesTests.TestSymlinkCycleTerminates;
@@ -232,7 +232,7 @@ begin
   { Followed, this link would recurse forever. }
   SymLink(FRoot, 'sub/loop');
   L := FindFiles(FRoot, '*.pas');
-  AssertEquals('count', 4, Integer(L.Count));
+  AssertEquals('count', 4, Int32(L.Count));
 end;
 
 procedure TIOFilesTests.TestSymlinkedFileIsReturned;
@@ -241,7 +241,7 @@ var
 begin
   SymLink(FRoot + '/a.pas', 'alias.pas');
   L := FindFiles(FRoot, '*.pas');
-  AssertEquals('count', 5, Integer(L.Count));
+  AssertEquals('count', 5, Int32(L.Count));
   AssertEquals('1', FRoot + '/alias.pas', L[1]);
 end;
 

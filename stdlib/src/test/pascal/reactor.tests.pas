@@ -77,18 +77,18 @@ const
   AF_UNIX = 1;
   SOCK_STREAM = 1;
 
-function c_socketpair(ADomain, AType, AProtocol: Integer; ASv: Pointer): Integer;
+function c_socketpair(ADomain, AType, AProtocol: Int32; ASv: Pointer): Int32;
   external name 'socketpair';
-function c_close_fd(AFd: Integer): Integer; external name 'close';
-function c_write_fd(AFd: Integer; ABuf: Pointer; ACount: Int64): Int64;
+function c_close_fd(AFd: Int32): Int32; external name 'close';
+function c_write_fd(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64;
   external name 'write';
-function c_read_fd(AFd: Integer; ABuf: Pointer; ACount: Int64): Int64;
+function c_read_fd(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64;
   external name 'read';
 
 { Make a connected AF_UNIX stream socketpair; returns True on success. }
-function MakePair(out AFd0, AFd1: Integer): Boolean;
+function MakePair(out AFd0, AFd1: Int): Boolean;
 var
-  Sv: array[0..1] of Integer;
+  Sv: array[0..1] of Int32;
 begin
   Sv[0] := -1;
   Sv[1] := -1;
@@ -109,10 +109,10 @@ end;
 procedure TReactorTests.TestPoll_EmptyBeforeWrite;
 var
   R: TOsReactor;
-  A, B: Integer;
+  A, B: Int;
   Ready: TReadyList;
   RdOnly: TIoInterests;
-  N: Integer;
+  N: Int;
 begin
   AssertTrue('socketpair', MakePair(A, B));
   R := NewReactor();
@@ -129,11 +129,11 @@ end;
 procedure TReactorTests.TestWait_DeliversTokenWithRead;
 var
   R: TOsReactor;
-  A, B: Integer;
+  A, B: Int;
   Ready: TReadyList;
   RdOnly, Evs: TIoInterests;
   Tok: Pointer;
-  N: Integer;
+  N: Int;
   Byte1: Byte;
 begin
   AssertTrue('socketpair', MakePair(A, B));
@@ -156,10 +156,10 @@ end;
 procedure TReactorTests.TestModify_ToWritable;
 var
   R: TOsReactor;
-  A, B: Integer;
+  A, B: Int;
   Ready: TReadyList;
   RdOnly, WrOnly, Evs: TIoInterests;
-  N: Integer;
+  N: Int;
 begin
   AssertTrue('socketpair', MakePair(A, B));
   R := NewReactor();
@@ -182,7 +182,7 @@ end;
 procedure TReactorTests.TestRemove_DropsInterest;
 var
   R: TOsReactor;
-  A, B: Integer;
+  A, B: Int;
   Ready: TReadyList;
   RdOnly: TIoInterests;
   Byte1: Byte;
@@ -207,7 +207,7 @@ procedure TReactorTests.TestWake_InterruptsBlockedWait;
 var
   R: TOsReactor;
   Ready: TReadyList;
-  N: Integer;
+  N: Int;
 begin
   { No fds registered.  Arm a wake, then Wait with a generous timeout: the
     eventfd makes Wait return promptly with nothing delivered (rather than
@@ -225,11 +225,11 @@ end;
 procedure TReactorTests.TestWake_DrainNoSpuriousDelivery;
 var
   R: TOsReactor;
-  A, B: Integer;
+  A, B: Int;
   Ready: TReadyList;
   RdOnly, Evs: TIoInterests;
   Byte1: Byte;
-  N: Integer;
+  N: Int;
 begin
   { A real fd AND a wake pending together: Wait must deliver ONLY the real
     fd's token, never the internal wake fd (token nil). }
@@ -254,7 +254,7 @@ end;
 
 var
   GIntLog: string;
-  GRxA, GRxB: Integer;      { socketpair for the integration test }
+  GRxA, GRxB: Int;      { socketpair for the integration test }
 
 { Fiber: register read interest on GRxA, park; on resume, read the byte. }
 procedure ReaderFiber(AArg: Pointer);
@@ -272,7 +272,7 @@ begin
   R.Remove(GRxA);
   B := 0;
   if c_read_fd(GRxA, @B, 1) = 1 then
-    GIntLog := GIntLog + 'got' + IntToStr(Integer(B)) + ' ';
+    GIntLog := GIntLog + 'got' + IntToStr(Int32(B)) + ' ';
 end;
 
 { Fiber: sleep briefly (so the reader parks first), then write the byte that

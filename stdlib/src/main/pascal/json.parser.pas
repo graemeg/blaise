@@ -32,16 +32,16 @@ type
   TJSONParser = class
   private
     FText: string;
-    FPos:  Integer;
-    FLen:  Integer;
+    FPos:  Int;
+    FLen:  Int;
     procedure Fail(const AMsg: string);
     procedure SkipWhitespace;
-    function  Peek: Integer;                  { current byte, or -1 at end }
+    function  Peek: Int;                  { current byte, or -1 at end }
     function  ParseValue: TJSONData;
     function  ParseObject: TJSONObject;
     function  ParseArray: TJSONArray;
     function  ParseStringRaw: string;         { consumes a "..." token }
-    function  ParseHex4: Integer;             { reads 4 hex digits after \u }
+    function  ParseHex4: Int;             { reads 4 hex digits after \u }
     function  ParseNumber: TJSONData;
     function  ParseLiteral: TJSONData;        { true / false / null }
   public
@@ -64,7 +64,7 @@ begin
   raise EJSONParseError.Create(AMsg + ' at offset ' + IntToStr(FPos));
 end;
 
-function TJSONParser.Peek: Integer;
+function TJSONParser.Peek: Int;
 begin
   if FPos < FLen then
     Result := Byte(FText[FPos])
@@ -74,7 +74,7 @@ end;
 
 procedure TJSONParser.SkipWhitespace;
 var
-  C: Integer;
+  C: Int;
 begin
   while FPos < FLen do
   begin
@@ -97,7 +97,7 @@ end;
 
 function TJSONParser.ParseValue: TJSONData;
 var
-  C: Integer;
+  C: Int;
 begin
   SkipWhitespace();
   C := Peek();
@@ -191,7 +191,7 @@ begin
   Result := Arr;
 end;
 
-function JPHexVal(AByte: Integer): Integer;
+function JPHexVal(AByte: Int): Int;
 begin
   if (AByte >= Ord('0')) and (AByte <= Ord('9')) then
     Result := AByte - Ord('0')
@@ -204,7 +204,7 @@ begin
 end;
 
 { Append codepoint ACP to ASB as UTF-8 bytes. }
-procedure JPAppendUTF8(ASB: TStringBuilder; ACP: Integer);
+procedure JPAppendUTF8(ASB: TStringBuilder; ACP: Int);
 begin
   if ACP < $80 then
     ASB.AppendByte(ACP)
@@ -228,9 +228,9 @@ begin
   end;
 end;
 
-function TJSONParser.ParseHex4: Integer;
+function TJSONParser.ParseHex4: Int;
 var
-  K, D, V: Integer;
+  K, D, V: Int;
 begin
   V := 0;
   K := 0;
@@ -251,10 +251,10 @@ end;
 function TJSONParser.ParseStringRaw: string;
 var
   SB:  TStringBuilder;
-  C:   Integer;
-  Esc: Integer;
-  Hi:  Integer;
-  Lo:  Integer;
+  C:   Int;
+  Esc: Int;
+  Hi:  Int;
+  Lo:  Int;
 begin
   SB := TStringBuilder.Create();
   FPos := FPos + 1;          { consume opening '"' }
@@ -311,9 +311,9 @@ end;
 
 function TJSONParser.ParseNumber: TJSONData;
 var
-  Start: Integer;
+  Start: Int;
   IsInt: Boolean;
-  C:     Integer;
+  C:     Int;
   Lex:   string;
 begin
   Start := FPos;

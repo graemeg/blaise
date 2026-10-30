@@ -68,12 +68,12 @@ uses
 const
   MASK32 = $FFFFFFFF;
 
-function Rotl32(V: UInt32; ABits: Integer): UInt32;
+function Rotl32(V: UInt32; ABits: Int): UInt32;
 begin
   Result := ((V shl ABits) or (V shr (32 - ABits))) and MASK32;
 end;
 
-function Rotr32(V: UInt32; ABits: Integer): UInt32;
+function Rotr32(V: UInt32; ABits: Int): UInt32;
 begin
   Result := ((V shr ABits) or (V shl (32 - ABits))) and MASK32;
 end;
@@ -81,7 +81,7 @@ end;
 function DigestToHex(const ARaw: string): string;
 var
   SB: TStringBuilder;
-  I, B: Integer;
+  I, B: Int;
 const
   Hex = '0123456789abcdef';
 begin
@@ -100,7 +100,7 @@ function Sha1(const AData: string): string;
 var
   H0, H1, H2, H3, H4: UInt32;
   MsgLen, TotalBits: Int64;
-  PadLen, I, T, ChunkStart, NumChunks, C: Integer;
+  PadLen, I, T, ChunkStart, NumChunks, C: Int;
   Msg: array[0..63] of Byte;     { current 64-byte chunk }
   W: array[0..79] of UInt32;
   A, B, Cc, D, E, F, K, Temp: UInt32;
@@ -232,7 +232,7 @@ const
 var
   H0, H1, H2, H3, H4, H5, H6, H7: UInt32;
   MsgLen, TotalBits: Int64;
-  PadLen, I, T, ChunkStart, NumChunks, C: Integer;
+  PadLen, I, T, ChunkStart, NumChunks, C: Int;
   Msg: array[0..63] of Byte;
   W: array[0..63] of UInt32;
   A, B, Cc, D, E, F, G, Hh: UInt32;
@@ -364,7 +364,7 @@ const
     $6fa87e4f, $fe2ce6e0, $a3014314, $4e0811a1,
     $f7537e82, $bd3af235, $2ad7d2bb, $eb86d391
   );
-  S: array[0..63] of Integer = (
+  S: array[0..63] of Int32 = (
     7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
     5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
     4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
@@ -373,7 +373,7 @@ const
 var
   H0, H1, H2, H3: UInt32;
   MsgLen, TotalBits: Int64;
-  PadLen, I, J, Chunk, ChunkStart, NumChunks, G: Integer;
+  PadLen, I, J, Chunk, ChunkStart, NumChunks, G: Int;
   M: array[0..15] of UInt32;
   A, B, Cc, D, F, Tmp: UInt32;
   PData: string;
@@ -476,7 +476,7 @@ const
 var
   KeyBlock: string;
   IPad, OPad: TStringBuilder;
-  I: Integer;
+  I: Int;
   InnerHash: string;
 begin
   if Length(AKey) > BLOCK_SIZE then
@@ -516,7 +516,7 @@ end;
 
 function ConstantTimeEqual(const A, B: string): Boolean;
 var
-  Diff, I, MinLen: Integer;
+  Diff, I, MinLen: Int;
 begin
   Diff := Length(A) xor Length(B);
   MinLen := Length(A);

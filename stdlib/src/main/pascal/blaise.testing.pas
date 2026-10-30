@@ -73,10 +73,10 @@ type
     forward-class-declaration form that Blaise does not yet support. }
   TTestResult = class(TObject)
   private
-    FNumberOfTests:    Integer;
-    FNumberOfFailures: Integer;
-    FNumberOfErrors:   Integer;
-    FNumberOfIgnored:  Integer;
+    FNumberOfTests:    Int;
+    FNumberOfFailures: Int;
+    FNumberOfErrors:   Int;
+    FNumberOfIgnored:  Int;
     FFailureList:      TList<String>;
     FErrorList:        TList<String>;
     FVerbose:          Boolean;
@@ -94,10 +94,10 @@ type
 
     function  Summary: string;
 
-    property  NumberOfTests:    Integer read FNumberOfTests;
-    property  NumberOfFailures: Integer read FNumberOfFailures;
-    property  NumberOfErrors:   Integer read FNumberOfErrors;
-    property  NumberOfIgnored:  Integer read FNumberOfIgnored;
+    property  NumberOfTests:    Int read FNumberOfTests;
+    property  NumberOfFailures: Int read FNumberOfFailures;
+    property  NumberOfErrors:   Int read FNumberOfErrors;
+    property  NumberOfIgnored:  Int read FNumberOfIgnored;
     property  Failures:         TList<String> read FFailureList;
     property  Errors:           TList<String> read FErrorList;
     property  Verbose:          Boolean read FVerbose write FVerbose;
@@ -108,7 +108,7 @@ type
   TTest = class(TObject)
   public
     procedure Run(AResult: TTestResult); virtual;
-    function  CountTestCases: Integer; virtual;
+    function  CountTestCases: Int; virtual;
   end;
 
   { TAssert — assertion helpers.  Implemented as instance methods rather
@@ -123,8 +123,8 @@ type
     procedure AssertFalse(AMsg: string; ACondition: Boolean); overload;
     procedure AssertFalse(ACondition: Boolean); overload;
 
-    procedure AssertEquals(AMsg: string; AExpected, AActual: Integer); overload;
-    procedure AssertEquals(AExpected, AActual: Integer); overload;
+    procedure AssertEquals(AMsg: string; AExpected, AActual: Int32); overload;
+    procedure AssertEquals(AExpected, AActual: Int32); overload;
     procedure AssertEquals(AMsg: string; AExpected, AActual: Int64); overload;
     procedure AssertEquals(AExpected, AActual: Int64); overload;
     procedure AssertEquals(AMsg: string; AExpected, AActual: string); overload;
@@ -141,8 +141,8 @@ type
     procedure AssertEquals(AMsg: string; AExpected, AActual, ADelta: Float64); overload;
     procedure AssertEquals(AExpected, AActual, ADelta: Float64); overload;
 
-    procedure AssertNotEquals(AMsg: string; AExpected, AActual: Integer); overload;
-    procedure AssertNotEquals(AExpected, AActual: Integer); overload;
+    procedure AssertNotEquals(AMsg: string; AExpected, AActual: Int32); overload;
+    procedure AssertNotEquals(AExpected, AActual: Int32); overload;
     procedure AssertNotEquals(AMsg: string; AExpected, AActual: Int64); overload;
     procedure AssertNotEquals(AExpected, AActual: Int64); overload;
     procedure AssertNotEquals(AMsg: string; AExpected, AActual: string); overload;
@@ -213,7 +213,7 @@ type
     function    DisplayName: string;
     procedure   RunTest;            virtual;
     procedure   Run(AResult: TTestResult); override;
-    function    CountTestCases: Integer; override;
+    function    CountTestCases: Int; override;
     property    TestName:  string read FName;
     property    ClassName: string read FClassName;
     property    CaseName:  string read FCaseName;
@@ -276,10 +276,10 @@ type
     (Named Retry rather than Repeat: 'repeat' is a reserved word.) }
   RetryAttribute = class(TCustomAttribute)
   private
-    FCount: Integer;
+    FCount: Int;
   public
-    constructor Create(ACount: Integer);
-    property Count: Integer read FCount;
+    constructor Create(ACount: Int);
+    property Count: Int read FCount;
   end;
 
   { EAssertionFailed — raised by Fail / Assert* on failure.  Descends
@@ -307,8 +307,8 @@ type
   11e) iterates over them, walks each class's published-method table to
   build per-method TTestCase instances, and runs each one. }
 procedure RegisterTest(ATestClass: TTestCaseClass);
-function  GetRegisteredTestCount: Integer;
-function  GetRegisteredTest(AIndex: Integer): TTestCaseClass;
+function  GetRegisteredTestCount: Int;
+function  GetRegisteredTest(AIndex: Int): TTestCaseClass;
 
 implementation
 
@@ -328,7 +328,7 @@ begin
   { Abstract in spirit; concrete subclasses override. }
 end;
 
-function TTest.CountTestCases: Integer;
+function TTest.CountTestCases: Int;
 begin
   Result := 1;
 end;
@@ -361,14 +361,14 @@ begin
     Self.Fail('AssertFalse failed');
 end;
 
-procedure TAssert.AssertEquals(AMsg: string; AExpected, AActual: Integer);
+procedure TAssert.AssertEquals(AMsg: string; AExpected, AActual: Int32);
 begin
   if AExpected <> AActual then
     Self.Fail(AMsg + ' Expected: ' + IntToStr(AExpected)
                    + '  Actual: '  + IntToStr(AActual));
 end;
 
-procedure TAssert.AssertEquals(AExpected, AActual: Integer);
+procedure TAssert.AssertEquals(AExpected, AActual: Int32);
 begin
   if AExpected <> AActual then
     Self.Fail('Expected: ' + IntToStr(AExpected)
@@ -452,13 +452,13 @@ begin
   end;
 end;
 
-procedure TAssert.AssertNotEquals(AMsg: string; AExpected, AActual: Integer);
+procedure TAssert.AssertNotEquals(AMsg: string; AExpected, AActual: Int32);
 begin
   if AExpected = AActual then
     Self.Fail(AMsg + ' Expected values to differ, both are: ' + IntToStr(AActual));
 end;
 
-procedure TAssert.AssertNotEquals(AExpected, AActual: Integer);
+procedure TAssert.AssertNotEquals(AExpected, AActual: Int32);
 begin
   if AExpected = AActual then
     Self.Fail('Expected values to differ, both are: ' + IntToStr(AActual));
@@ -663,7 +663,7 @@ begin
   Self.FName := AName;
 end;
 
-constructor RetryAttribute.Create(ACount: Integer);
+constructor RetryAttribute.Create(ACount: Int);
 begin
   inherited Create();
   Self.FCount := ACount;
@@ -674,9 +674,9 @@ end;
   trimming.  No quoting: a string argument must not contain a comma.
   ----------------------------------------------------------------------- }
 
-function CaseArgCount(const AArgs: string): Integer;
+function CaseArgCount(const AArgs: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   if Length(AArgs) = 0 then Exit(0);
   Result := 1;
@@ -685,10 +685,10 @@ begin
       Result := Result + 1;
 end;
 
-function CaseArgAt(const AArgs: string; AIndex: Integer): string;
+function CaseArgAt(const AArgs: string; AIndex: Int): string;
 var
-  I, Start, Seen: Integer;
-  Lo, Hi:         Integer;
+  I, Start, Seen: Int;
+  Lo, Hi:         Int;
 begin
   Result := '';
   Start  := 0;
@@ -754,7 +754,7 @@ procedure TTestCase.TearDown;
 begin
 end;
 
-function TTestCase.CountTestCases: Integer;
+function TTestCase.CountTestCases: Int;
 begin
   Result := 1;
 end;
@@ -776,7 +776,7 @@ var
   CaseRun: TCaseMethod;
   Slots:   array[0..4] of UInt;
   Toks:    array[0..4] of string;
-  N, I:    Integer;
+  N, I:    Int;
 begin
   Code := MethodAddress(Self, Self.FName);
   if Code = nil then
@@ -941,7 +941,7 @@ begin
 end;
 
 procedure TTestResult.MergeFrom(ASource: TTestResult);
-var I: Integer;
+var I: Int;
 begin
   Self.FNumberOfTests    := Self.FNumberOfTests    + ASource.FNumberOfTests;
   Self.FNumberOfFailures := Self.FNumberOfFailures + ASource.FNumberOfFailures;
@@ -1000,7 +1000,7 @@ begin
   GTestRegistry.Add(ATestClass);
 end;
 
-function GetRegisteredTestCount: Integer;
+function GetRegisteredTestCount: Int;
 begin
   if GTestRegistry = nil then
     Result := 0
@@ -1008,7 +1008,7 @@ begin
     Result := GTestRegistry.Count;
 end;
 
-function GetRegisteredTest(AIndex: Integer): TTestCaseClass;
+function GetRegisteredTest(AIndex: Int): TTestCaseClass;
 begin
   Result := GTestRegistry.Get(AIndex);
 end;

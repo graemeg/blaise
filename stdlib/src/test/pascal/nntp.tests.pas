@@ -65,13 +65,13 @@ var
   GConnOk: Boolean;
   GModeOk: Boolean;
   GGroupOk: Boolean;
-  GGCount: Integer;
-  GGFirst: Integer;
-  GGLast: Integer;
+  GGCount: Int;
+  GGFirst: Int;
+  GGLast: Int;
   GArtOk: Boolean;
   GArt: string;
   GListOk: Boolean;
-  GListCount: Integer;
+  GListCount: Int;
   GListHas: Boolean;
   GPostOk: Boolean;
   GQuitOk: Boolean;
@@ -153,7 +153,7 @@ procedure ClientFiber(AArg: Pointer);
 var
   Cli: TNntpClient;
   Groups: TList<string>;
-  I: Integer;
+  I: Int;
 begin
   FiberSleep(2);
   Cli := TNntpClient.Create();
@@ -245,11 +245,11 @@ type
     constructor Create(const AGroup: string);
     destructor Destroy; override;
     function ListGroups: string;
-    function SelectGroup(const AName: string; out ACount: Integer;
-      out AFirst: Integer; out ALast: Integer): Boolean;
-    function GetArticle(const AGroup: string; ANumber: Integer;
+    function SelectGroup(const AName: string; out ACount: Int;
+      out AFirst: Int; out ALast: Int): Boolean;
+    function GetArticle(const AGroup: string; ANumber: Int;
       out AArticle: string): Boolean;
-    function PostArticle(const AArticle: string; out ANumber: Integer): Boolean;
+    function PostArticle(const AArticle: string; out ANumber: Int): Boolean;
   end;
 
 constructor TMemNntpStore.Create(const AGroup: string);
@@ -266,15 +266,15 @@ end;
 
 function TMemNntpStore.ListGroups: string;
 var
-  Cnt: Integer;
+  Cnt: Int;
 begin
   Cnt := FArticles.Count;
   { 'name last first flag' per RFC LIST ACTIVE }
   Result := FGroup + ' ' + IntToStr(Cnt) + ' 1 y';
 end;
 
-function TMemNntpStore.SelectGroup(const AName: string; out ACount: Integer;
-  out AFirst: Integer; out ALast: Integer): Boolean;
+function TMemNntpStore.SelectGroup(const AName: string; out ACount: Int;
+  out AFirst: Int; out ALast: Int): Boolean;
 begin
   if AName <> FGroup then
   begin
@@ -297,7 +297,7 @@ begin
   Result := True;
 end;
 
-function TMemNntpStore.GetArticle(const AGroup: string; ANumber: Integer;
+function TMemNntpStore.GetArticle(const AGroup: string; ANumber: Int;
   out AArticle: string): Boolean;
 begin
   if (ANumber < 1) or (ANumber > FArticles.Count) then
@@ -310,7 +310,7 @@ begin
 end;
 
 function TMemNntpStore.PostArticle(const AArticle: string;
-  out ANumber: Integer): Boolean;
+  out ANumber: Int): Boolean;
 begin
   FArticles.Add(AArticle);
   ANumber := FArticles.Count;
@@ -322,11 +322,11 @@ var
   GStore: INntpStore;
   GRtConnOk: Boolean;
   GRtGroupOk: Boolean;
-  GRtCount0: Integer;
+  GRtCount0: Int;
   GRtPostOk: Boolean;
   GRtGroupOk2: Boolean;
-  GRtCount1: Integer;
-  GRtLast1: Integer;
+  GRtCount1: Int;
+  GRtLast1: Int;
   GRtFetch: string;
   GRtFetchOk: Boolean;
   GRtList: string;
@@ -342,8 +342,8 @@ procedure RtClientFiber(AArg: Pointer);
 var
   Cli: TNntpClient;
   Groups: TList<string>;
-  Cnt, First, Last: Integer;
-  I: Integer;
+  Cnt, First, Last: Int;
+  I: Int;
 begin
   FiberSleep(2);
   Cli := TNntpClient.Create();

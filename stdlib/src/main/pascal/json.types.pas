@@ -54,7 +54,7 @@ type
   TJSONData = class
   protected
     function GetJSONType: TJSONType; virtual; abstract;
-    function GetCount: Integer; virtual;             { 0 for scalars }
+    function GetCount: Int; virtual;             { 0 for scalars }
     function GetAsString: string; virtual;
     function GetAsInt64: Int64; virtual;
     function GetAsFloat: Float64; virtual;
@@ -65,10 +65,10 @@ type
     function IsNull: Boolean;
     function AsJSON: string;                          { compact, no whitespace }
     function FormatJSON: string; overload;            { pretty, 2-space indent }
-    function FormatJSON(AIndent: Integer): string; overload;
+    function FormatJSON(AIndent: Int): string; overload;
 
     property JSONType: TJSONType read GetJSONType;
-    property Count: Integer read GetCount;
+    property Count: Int read GetCount;
     property AsString: string read GetAsString;
     property AsInt64: Int64 read GetAsInt64;
     property AsFloat: Float64 read GetAsFloat;
@@ -137,62 +137,62 @@ type
     FItems: array of TJSONData;   { parent owns these (strong) }
   protected
     function GetJSONType: TJSONType; override;
-    function GetCount: Integer; override;
+    function GetCount: Int; override;
     procedure WriteTo(AWriter: TJSONWriter); override;
   public
-    function Add(AValue: TJSONData): Integer; overload;        { TAKES OWNERSHIP }
-    function Add(const AValue: string): Integer; overload;     { wraps TJSONString }
-    function Add(AValue: Int64): Integer; overload;
-    function Add(AValue: Boolean): Integer; overload;
-    function Add(AValue: Float64): Integer; overload;
-    function AddNull: Integer;
+    function Add(AValue: TJSONData): Int; overload;        { TAKES OWNERSHIP }
+    function Add(const AValue: string): Int; overload;     { wraps TJSONString }
+    function Add(AValue: Int64): Int; overload;
+    function Add(AValue: Boolean): Int; overload;
+    function Add(AValue: Float64): Int; overload;
+    function AddNull: Int;
     { Detach the element at AIndex and return it; the caller then owns it. }
-    function Extract(AIndex: Integer): TJSONData;
+    function Extract(AIndex: Int): TJSONData;
     { Detach and discard the element at AIndex (ARC frees it). }
-    procedure Delete(AIndex: Integer);
+    procedure Delete(AIndex: Int);
     procedure Clear;
-    function GetItem(AIndex: Integer): TJSONData;
-    property Items[AIndex: Integer]: TJSONData read GetItem; default;
+    function GetItem(AIndex: Int): TJSONData;
+    property Items[AIndex: Int]: TJSONData read GetItem; default;
   end;
 
   TJSONObject = class(TJSONData)
   private
     FNames:  array of string;     { parallel arrays preserve insertion order }
     FValues: array of TJSONData;  { parent owns these (strong) }
-    function IndexOfName(const AName: string): Integer;
-    procedure RemoveIndex(AIndex: Integer);
+    function IndexOfName(const AName: string): Int;
+    procedure RemoveIndex(AIndex: Int);
   protected
     function GetJSONType: TJSONType; override;
-    function GetCount: Integer; override;
+    function GetCount: Int; override;
     procedure WriteTo(AWriter: TJSONWriter); override;
   public
-    function Add(const AName: string; AValue: TJSONData): Integer; overload;  { OWNS }
-    function Add(const AName: string; const AValue: string): Integer; overload;
-    function Add(const AName: string; AValue: Int64): Integer; overload;
-    function Add(const AName: string; AValue: Boolean): Integer; overload;
-    function Add(const AName: string; AValue: Float64): Integer; overload;
-    function AddNull(const AName: string): Integer;
+    function Add(const AName: string; AValue: TJSONData): Int; overload;  { OWNS }
+    function Add(const AName: string; const AValue: string): Int; overload;
+    function Add(const AName: string; AValue: Int64): Int; overload;
+    function Add(const AName: string; AValue: Boolean): Int; overload;
+    function Add(const AName: string; AValue: Float64): Int; overload;
+    function AddNull(const AName: string): Int;
     function Find(const AName: string): TJSONData;     { nil if absent }
     function Contains(const AName: string): Boolean;
     { Detach a member and return it (nil if absent).  Use to move a node. }
     function Extract(const AName: string): TJSONData;
     { Detach and discard a member (ARC frees it).  True if it existed. }
     function Remove(const AName: string): Boolean;
-    procedure Delete(AIndex: Integer);
+    procedure Delete(AIndex: Int);
     procedure Clear;
     function GetByName(const AName: string): TJSONData;
-    function GetName(AIndex: Integer): string;
-    function GetItem(AIndex: Integer): TJSONData;
+    function GetName(AIndex: Int): string;
+    function GetItem(AIndex: Int): TJSONData;
     property Values[AName: string]: TJSONData read GetByName; default;
-    property Names[AIndex: Integer]: string read GetName;
-    property ItemsByIndex[AIndex: Integer]: TJSONData read GetItem;
+    property Names[AIndex: Int]: string read GetName;
+    property ItemsByIndex[AIndex: Int]: TJSONData read GetItem;
   end;
 
 { Serialise a tree.  Equivalent to AData.AsJSON / AData.FormatJSON, offered as
   free functions for callers that prefer them. }
 function AsJSON(AData: TJSONData): string;
 function FormatJSON(AData: TJSONData): string; overload;
-function FormatJSON(AData: TJSONData; AIndent: Integer): string; overload;
+function FormatJSON(AData: TJSONData; AIndent: Int): string; overload;
 
 implementation
 
@@ -205,7 +205,7 @@ implementation
   config-sized inputs. }
 function StrToFloatJSON(const S: string): Float64;
 var
-  I, Len, ExpSign, ExpVal, K: Integer;
+  I, Len, ExpSign, ExpVal, K: Int;
   Sign, Acc, Scale: Float64;
 begin
   Len := Length(S);
@@ -259,7 +259,7 @@ end;
 { TJSONData                                                          }
 { ------------------------------------------------------------------ }
 
-function TJSONData.GetCount: Integer;
+function TJSONData.GetCount: Int;
 begin
   Result := 0;
 end;
@@ -305,7 +305,7 @@ begin
   Result := FormatJSON(2);
 end;
 
-function TJSONData.FormatJSON(AIndent: Integer): string;
+function TJSONData.FormatJSON(AIndent: Int): string;
 var
   W: TJSONWriter;
 begin
@@ -485,51 +485,51 @@ begin
   Result := jtArray;
 end;
 
-function TJSONArray.GetCount: Integer;
+function TJSONArray.GetCount: Int;
 begin
   Result := Length(FItems);
 end;
 
-function TJSONArray.GetItem(AIndex: Integer): TJSONData;
+function TJSONArray.GetItem(AIndex: Int): TJSONData;
 begin
   Result := FItems[AIndex];
 end;
 
-function TJSONArray.Add(AValue: TJSONData): Integer;
+function TJSONArray.Add(AValue: TJSONData): Int;
 begin
   SetLength(FItems, Length(FItems) + 1);
   FItems[Length(FItems) - 1] := AValue;
   Result := Length(FItems) - 1;
 end;
 
-function TJSONArray.Add(const AValue: string): Integer;
+function TJSONArray.Add(const AValue: string): Int;
 begin
   Result := Add(TJSONString.Create(AValue));
 end;
 
-function TJSONArray.Add(AValue: Int64): Integer;
+function TJSONArray.Add(AValue: Int64): Int;
 begin
   Result := Add(TJSONNumber.CreateInt(AValue));
 end;
 
-function TJSONArray.Add(AValue: Boolean): Integer;
+function TJSONArray.Add(AValue: Boolean): Int;
 begin
   Result := Add(TJSONBoolean.Create(AValue));
 end;
 
-function TJSONArray.Add(AValue: Float64): Integer;
+function TJSONArray.Add(AValue: Float64): Int;
 begin
   Result := Add(TJSONNumber.CreateFloat(AValue));
 end;
 
-function TJSONArray.AddNull: Integer;
+function TJSONArray.AddNull: Int;
 begin
   Result := Add(TJSONNull.Create());
 end;
 
-function TJSONArray.Extract(AIndex: Integer): TJSONData;
+function TJSONArray.Extract(AIndex: Int): TJSONData;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := FItems[AIndex];   { hold a ref so it survives the shrink }
   I := AIndex;
@@ -541,7 +541,7 @@ begin
   SetLength(FItems, Length(FItems) - 1);
 end;
 
-procedure TJSONArray.Delete(AIndex: Integer);
+procedure TJSONArray.Delete(AIndex: Int);
 var
   Gone: TJSONData;
 begin
@@ -555,7 +555,7 @@ end;
 
 procedure TJSONArray.WriteTo(AWriter: TJSONWriter);
 var
-  I: Integer;
+  I: Int;
 begin
   AWriter.BeginArray();
   I := 0;
@@ -576,14 +576,14 @@ begin
   Result := jtObject;
 end;
 
-function TJSONObject.GetCount: Integer;
+function TJSONObject.GetCount: Int;
 begin
   Result := Length(FValues);
 end;
 
-function TJSONObject.IndexOfName(const AName: string): Integer;
+function TJSONObject.IndexOfName(const AName: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := -1;
   I := 0;
@@ -598,9 +598,9 @@ begin
   end;
 end;
 
-procedure TJSONObject.RemoveIndex(AIndex: Integer);
+procedure TJSONObject.RemoveIndex(AIndex: Int);
 var
-  I: Integer;
+  I: Int;
 begin
   I := AIndex;
   while I < Length(FNames) - 1 do
@@ -613,7 +613,7 @@ begin
   SetLength(FValues, Length(FValues) - 1);
 end;
 
-function TJSONObject.Add(const AName: string; AValue: TJSONData): Integer;
+function TJSONObject.Add(const AName: string; AValue: TJSONData): Int;
 begin
   SetLength(FNames, Length(FNames) + 1);
   SetLength(FValues, Length(FValues) + 1);
@@ -622,34 +622,34 @@ begin
   Result := Length(FValues) - 1;
 end;
 
-function TJSONObject.Add(const AName: string; const AValue: string): Integer;
+function TJSONObject.Add(const AName: string; const AValue: string): Int;
 begin
   Result := Add(AName, TJSONString.Create(AValue));
 end;
 
-function TJSONObject.Add(const AName: string; AValue: Int64): Integer;
+function TJSONObject.Add(const AName: string; AValue: Int64): Int;
 begin
   Result := Add(AName, TJSONNumber.CreateInt(AValue));
 end;
 
-function TJSONObject.Add(const AName: string; AValue: Boolean): Integer;
+function TJSONObject.Add(const AName: string; AValue: Boolean): Int;
 begin
   Result := Add(AName, TJSONBoolean.Create(AValue));
 end;
 
-function TJSONObject.Add(const AName: string; AValue: Float64): Integer;
+function TJSONObject.Add(const AName: string; AValue: Float64): Int;
 begin
   Result := Add(AName, TJSONNumber.CreateFloat(AValue));
 end;
 
-function TJSONObject.AddNull(const AName: string): Integer;
+function TJSONObject.AddNull(const AName: string): Int;
 begin
   Result := Add(AName, TJSONNull.Create());
 end;
 
 function TJSONObject.Find(const AName: string): TJSONData;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := IndexOfName(AName);
   if Idx < 0 then Result := nil else Result := FValues[Idx];
@@ -662,7 +662,7 @@ end;
 
 function TJSONObject.Extract(const AName: string): TJSONData;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := IndexOfName(AName);
   if Idx < 0 then
@@ -676,7 +676,7 @@ end;
 
 function TJSONObject.Remove(const AName: string): Boolean;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := IndexOfName(AName);
   Result := Idx >= 0;
@@ -684,7 +684,7 @@ begin
     RemoveIndex(Idx);
 end;
 
-procedure TJSONObject.Delete(AIndex: Integer);
+procedure TJSONObject.Delete(AIndex: Int);
 begin
   RemoveIndex(AIndex);
 end;
@@ -700,19 +700,19 @@ begin
   Result := Find(AName);
 end;
 
-function TJSONObject.GetName(AIndex: Integer): string;
+function TJSONObject.GetName(AIndex: Int): string;
 begin
   Result := FNames[AIndex];
 end;
 
-function TJSONObject.GetItem(AIndex: Integer): TJSONData;
+function TJSONObject.GetItem(AIndex: Int): TJSONData;
 begin
   Result := FValues[AIndex];
 end;
 
 procedure TJSONObject.WriteTo(AWriter: TJSONWriter);
 var
-  I: Integer;
+  I: Int;
 begin
   AWriter.BeginObject();
   I := 0;
@@ -739,7 +739,7 @@ begin
   Result := AData.FormatJSON();
 end;
 
-function FormatJSON(AData: TJSONData; AIndent: Integer): string;
+function FormatJSON(AData: TJSONData; AIndent: Int): string;
 begin
   Result := AData.FormatJSON(AIndent);
 end;

@@ -21,7 +21,7 @@ type
     { Helpers keep the assertions terse: compile APattern, match AInput, and
       assert on the outcome. }
     procedure AssertMatchAt(const AMsg, APattern, AInput: string;
-                            AIndex: Integer; const AValue: string);
+                            AIndex: Int; const AValue: string);
     procedure AssertNoMatch(const AMsg, APattern, AInput: string);
   published
     { --- commit 1: core engine --- }
@@ -103,7 +103,7 @@ begin
 end;
 
 procedure TRegexTests.AssertMatchAt(const AMsg, APattern, AInput: string;
-  AIndex: Integer; const AValue: string);
+  AIndex: Int; const AValue: string);
 var
   R: TRegex;
   M: TMatch;
@@ -262,7 +262,7 @@ procedure TRegexTests.TestStepLimit_RaisesComplexity;
 var
   R: TRegex;
   Subject: string;
-  I: Integer;
+  I: Int;
   Raised: Boolean;
 begin
   { The step budget is the guard that a match ALWAYS terminates.  This test
@@ -325,7 +325,7 @@ end;
 procedure TRegexTests.TestSyntaxError_UnclosedGroup;
 var
   Raised: Boolean;
-  Pos: Integer;
+  Pos: Int;
   R: TRegex;
 begin
   Raised := False;
@@ -930,8 +930,8 @@ var
   R: TRegex;
   M: TMatch;
   L: TList<TMatch>;
-  I: Integer;
-  Total: Integer;
+  I: Int;
+  Total: Int;
 begin
   { Every test above matches against a string LITERAL, which the compiler can
     place in read-only data and whose bytes it knows statically.  The matcher
@@ -963,8 +963,8 @@ begin
     code, not a truncated or garbage value. }
   { Integer() around the byte read: the Byte-typed result matches several
     AssertEquals overloads equally well. }
-  AssertEquals('first byte', 97, Integer(Byte(Subject[0])));
-  AssertEquals('last byte', 51, Integer(Byte(Subject[11])));
+  AssertEquals('first byte', 97, Int32(Byte(Subject[0])));
+  AssertEquals('last byte', 51, Int32(Byte(Subject[11])));
   Total := 0;
   for I := 0 to Length(Subject) - 1 do
     Total := Total + Byte(Subject[I]);

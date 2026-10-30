@@ -79,7 +79,7 @@ procedure _RaiseDivByZero;
 procedure _RaiseInvalidCast;
 
 { StrToIntDef — convert a string to Integer; return ADefault on failure. }
-function StrToIntDef(const S: string; ADefault: Integer): Integer;
+function StrToIntDef(const S: string; ADefault: Int): Int;
 
 { StrToInt64Def — convert a string to Int64; return ADefault on failure. }
 function StrToInt64Def(const S: string; ADefault: Int64): Int64;
@@ -92,7 +92,7 @@ function StrToInt64Def(const S: string; ADefault: Int64): Int64;
   the lenient runtime _StrToInt is called (parses what it can, never raises).
   Not intended for direct use — declared in the interface so codegen can link
   them. }
-function _StrToIntChecked(const S: string): Integer;
+function _StrToIntChecked(const S: string): Int;
 function _StrToInt64Checked(const S: string): Int64;
 
 { BoolToStr — not a compiler built-in; pure Pascal implementation }
@@ -138,7 +138,7 @@ end;
 
 function IsValidIntStr(const S: string): Boolean;
 var
-  I, Len, C: Integer;
+  I, Len, C: Int;
 begin
   Len := Length(S);
   if Len = 0 then
@@ -177,7 +177,7 @@ begin
   Result := True;
 end;
 
-function StrToIntDef(const S: string; ADefault: Integer): Integer;
+function StrToIntDef(const S: string; ADefault: Int): Int;
 begin
   if not IsValidIntStr(S) then
     Exit(ADefault);
@@ -191,7 +191,7 @@ begin
   Result := StrToInt64(S);
 end;
 
-function _StrToIntChecked(const S: string): Integer;
+function _StrToIntChecked(const S: string): Int;
 begin
   if not IsValidIntStr(S) then
     raise EConvertError.Create('"' + S + '" is not a valid integer value');
@@ -220,7 +220,7 @@ end;
 function ExpandFileName(const APath: string): string;
 var
   Base: string;
-  Len, I, SegStart, LastSlash: Integer;
+  Len, I, SegStart, LastSlash: Int;
   SP: PChar;
   Seg: string;
 begin

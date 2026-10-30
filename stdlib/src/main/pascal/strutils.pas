@@ -59,13 +59,13 @@ function EndsText(const Suffix, S: string): Boolean;
 { ------------------------------------------------------------------ }
 
 { Returns the first Count bytes of S. }
-function LeftStr(const S: string; Count: Integer): string;
+function LeftStr(const S: string; Count: Int): string;
 
 { Returns the last Count bytes of S. }
-function RightStr(const S: string; Count: Integer): string;
+function RightStr(const S: string; Count: Int): string;
 
 { Returns Count bytes of S starting at 0-based position Start. }
-function MidStr(const S: string; Start, Count: Integer): string;
+function MidStr(const S: string; Start, Count: Int): string;
 
 { ------------------------------------------------------------------ }
 { Search                                                               }
@@ -74,10 +74,10 @@ function MidStr(const S: string; Start, Count: Integer): string;
 { Note: PosEx(Sub, S, StartPos) is a compiler built-in — not declared here. }
 
 { Returns the 0-based index of Str in Arr (case-sensitive), or -1. }
-function IndexStr(const Str: string; const Arr: array of string): Integer;
+function IndexStr(const Str: string; const Arr: array of string): Int;
 
 { Returns the 0-based index of Str in Arr (case-insensitive), or -1. }
-function IndexText(const Str: string; const Arr: array of string): Integer;
+function IndexText(const Str: string; const Arr: array of string): Int;
 
 { ------------------------------------------------------------------ }
 { Replacement                                                          }
@@ -98,13 +98,13 @@ function ReplaceAll(const S, OldPattern, NewPattern: string): string;
 { ------------------------------------------------------------------ }
 
 { Returns S repeated Count times. }
-function DupeString(const S: string; Count: Integer): string;
+function DupeString(const S: string; Count: Int): string;
 
 { Returns S with its bytes in reverse order. }
 function ReverseString(const S: string): string;
 
 { Deletes Len bytes at 0-based position Start and inserts Replacement. }
-function StuffString(const S: string; Start, Len: Integer;
+function StuffString(const S: string; Start, Len: Int;
                      const Replacement: string): string;
 
 { Returns S with leading whitespace (bytes <= 32) removed. }
@@ -114,13 +114,13 @@ function TrimLeft(const S: string): string;
 function TrimRight(const S: string): string;
 
 { Returns S left-padded with PadByte to at least Width bytes. }
-function PadLeft(const S: string; Width: Integer; PadByte: Byte = 32): string;
+function PadLeft(const S: string; Width: Int; PadByte: Byte = 32): string;
 
 { Returns S right-padded with PadByte to at least Width bytes. }
-function PadRight(const S: string; Width: Integer; PadByte: Byte = 32): string;
+function PadRight(const S: string; Width: Int; PadByte: Byte = 32): string;
 
 { Returns the number of non-overlapping occurrences of Sub in S. }
-function CountOccurrences(const Sub, S: string): Integer;
+function CountOccurrences(const Sub, S: string): Int;
 
 { Returns S with a leading Prefix removed (if present). }
 function RemovePrefix(const S, Prefix: string): string;
@@ -154,40 +154,40 @@ function JoinList(AList: TList<String>; const ASep: string): string;
   For ASCII bytes (0..127) the result is always 1.  For multi-byte
   sequences the lead byte encodes the total length:
     110xxxxx = 2, 1110xxxx = 3, 11110xxx = 4. }
-function CodePointSize(LeadByte: Byte): Integer;
+function CodePointSize(LeadByte: Byte): Int;
 
 { Returns the number of Unicode codepoints in S.  This is an O(n) scan
   over the raw UTF-8 bytes — each non-continuation byte (a byte that
   does NOT match the 10xxxxxx pattern) starts a new codepoint. }
-function CodePointLength(const S: string): Integer;
+function CodePointLength(const S: string): Int;
 
 { Extracts Count codepoints starting at codepoint position Index (0-based).
   Returns the corresponding UTF-8 substring.  Both Index and Count are in
   codepoint units, not bytes.  Returns an empty string if Index is beyond
   the end of the string. }
-function CodePointCopy(const S: string; Index, Count: Integer): string;
+function CodePointCopy(const S: string; Index, Count: Int): string;
 
 { Returns the Unicode codepoint value (0..U+10FFFF) at codepoint position
   Index (0-based).  This is an O(n) operation because it must scan from
   the beginning of the string to find the Nth codepoint.  Returns -1 if
   Index is out of range. }
-function CodePointAt(const S: string; Index: Integer): Integer;
+function CodePointAt(const S: string; Index: Int): Int;
 
 { Like Pos() but returns the result as a codepoint index rather than a
   byte index.  Returns -1 if Sub is not found.  Internally calls Pos()
   then counts codepoints up to the byte position. }
-function CodePointPos(const Sub, S: string): Integer;
+function CodePointPos(const Sub, S: string): Int;
 
 { Converts a codepoint index to a byte index.  Walks the string counting
   codepoints until CPIndex is reached, then returns the corresponding
   byte offset.  Returns -1 if CPIndex is beyond the end of the string. }
-function CodePointByteIndex(const S: string; CPIndex: Integer): Integer;
+function CodePointByteIndex(const S: string; CPIndex: Int): Int;
 
 { Decodes the UTF-8 codepoint starting at byte position ByteIndex and
   returns its Unicode value (0..U+10FFFF).  This is an O(1) operation —
   it reads 1 to 4 bytes starting at ByteIndex.  No bounds checking is
   performed; the caller must ensure ByteIndex is within range. }
-function CodePointFromByteIndex(const S: string; ByteIndex: Integer): Integer;
+function CodePointFromByteIndex(const S: string; ByteIndex: Int): Int;
 
 { Encodes a single Unicode codepoint (0..U+10FFFF) as its UTF-8 byte
   sequence and returns it as a 1..4 byte string.  This is the inverse of
@@ -196,7 +196,7 @@ function CodePointFromByteIndex(const S: string; ByteIndex: Integer): Integer;
   only writes a single raw byte, which is invalid for codepoints above 127,
   whereas CodePointToString emits the correct multi-byte form.  Out-of-range
   values (negative or above U+10FFFF) yield an empty string. }
-function CodePointToString(CP: Integer): string;
+function CodePointToString(CP: Int): string;
 
 { ------------------------------------------------------------------ }
 { TStringBuilder — efficient incremental string construction           }
@@ -214,9 +214,9 @@ type
   TStringBuilder = class
   private
     FData: PChar;
-    FLen:  Integer;
-    FCap:  Integer;
-    procedure Grow(ANeed: Integer);
+    FLen:  Int;
+    FCap:  Int;
+    procedure Grow(ANeed: Int);
   public
     constructor Create;
     destructor  Destroy; override;
@@ -233,17 +233,17 @@ type
     { Truncate the content to ALen bytes (no-op when ALen >= Length or
       negative).  Used for roll-back-and-redo emission patterns: mark
       Length, append, then Truncate back to the mark to discard. }
-    procedure Truncate(ALen: Integer);
+    procedure Truncate(ALen: Int);
     { True when ANeedle occurs in the content at or after byte AFrom.
       Byte-wise scan; empty needle returns False. }
-    function ContainsFrom(AFrom: Integer; const ANeedle: string): Boolean;
+    function ContainsFrom(AFrom: Int; const ANeedle: string): Boolean;
     { Number of (non-overlapping) occurrences of ANeedle at or after
       byte AFrom; 0 for an empty needle. }
-    function CountFrom(AFrom: Integer; const ANeedle: string): Integer;
+    function CountFrom(AFrom: Int; const ANeedle: string): Int;
     { Return the accumulated content as a managed string. }
     function  ToString: string;
     { Current byte length. }
-    property  Length: Integer read FLen;
+    property  Length: Int read FLen;
   end;
 
 implementation
@@ -259,7 +259,7 @@ function _Utf8CountCodePoints(Data: Pointer; Len: Int): Int; external name '_Utf
 { ------------------------------------------------------------------ }
 
 { ASCII case-fold: returns lowercase byte value. }
-function FoldLower(C: Integer): Integer;
+function FoldLower(C: Int): Int;
 begin
   if (C >= 65) and (C <= 90) then
     Result := C + 32
@@ -291,9 +291,9 @@ end;
 
 function StartsStr(const Prefix, S: string): Boolean;
 var
-  PLen, SLen: Integer;
+  PLen, SLen: Int;
   SP, PP: PChar;
-  I: Integer;
+  I: Int;
 begin
   PLen := Length(Prefix);
   SLen := Length(S);
@@ -308,9 +308,9 @@ end;
 
 function StartsText(const Prefix, S: string): Boolean;
 var
-  PLen, SLen: Integer;
+  PLen, SLen: Int;
   SP, PP: PChar;
-  I: Integer;
+  I: Int;
 begin
   PLen := Length(Prefix);
   SLen := Length(S);
@@ -325,9 +325,9 @@ end;
 
 function EndsStr(const Suffix, S: string): Boolean;
 var
-  SufLen, SLen: Integer;
+  SufLen, SLen: Int;
   SP, SufP: PChar;
-  Offset, I: Integer;
+  Offset, I: Int;
 begin
   SufLen := Length(Suffix);
   SLen   := Length(S);
@@ -343,9 +343,9 @@ end;
 
 function EndsText(const Suffix, S: string): Boolean;
 var
-  SufLen, SLen: Integer;
+  SufLen, SLen: Int;
   SP, SufP: PChar;
-  Offset, I: Integer;
+  Offset, I: Int;
 begin
   SufLen := Length(Suffix);
   SLen   := Length(S);
@@ -363,14 +363,14 @@ end;
 { Extraction                                                           }
 { ------------------------------------------------------------------ }
 
-function LeftStr(const S: string; Count: Integer): string;
+function LeftStr(const S: string; Count: Int): string;
 begin
   Result := Copy(S, 0, Count);
 end;
 
-function RightStr(const S: string; Count: Integer): string;
+function RightStr(const S: string; Count: Int): string;
 var
-  Len: Integer;
+  Len: Int;
 begin
   Len := Length(S);
   if Count >= Len then
@@ -379,7 +379,7 @@ begin
     Result := Copy(S, Len - Count, Count);
 end;
 
-function MidStr(const S: string; Start, Count: Integer): string;
+function MidStr(const S: string; Start, Count: Int): string;
 begin
   Result := Copy(S, Start, Count);
 end;
@@ -390,9 +390,9 @@ end;
 
 { PosEx is a compiler built-in — implementation omitted. }
 
-function IndexStr(const Str: string; const Arr: array of string): Integer;
+function IndexStr(const Str: string; const Arr: array of string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to High(Arr) do
     if Arr[I] = Str then
@@ -402,9 +402,9 @@ begin
   Result := -1;
 end;
 
-function IndexText(const Str: string; const Arr: array of string): Integer;
+function IndexText(const Str: string; const Arr: array of string): Int;
 var
-  I:   Integer;
+  I:   Int;
   SL:  string;
   EL:  string;
 begin
@@ -428,9 +428,9 @@ end;
   FirstOnly=True stops after the first match (the rest is copied verbatim). }
 function DoReplace(const S, OldP, NewP: string; FirstOnly: Boolean): string;
 var
-  SLen, OldLen, NewLen: Integer;
+  SLen, OldLen, NewLen: Int;
   SB: TStringBuilder;
-  I, J: Integer;
+  I, J: Int;
   Match, Done: Boolean;
   SP, OP: PChar;
 begin
@@ -491,10 +491,10 @@ end;
 { Manipulation                                                         }
 { ------------------------------------------------------------------ }
 
-function DupeString(const S: string; Count: Integer): string;
+function DupeString(const S: string; Count: Int): string;
 var
   SB: TStringBuilder;
-  I: Integer;
+  I: Int;
 begin
   if (Count <= 0) or (Length(S) = 0) then
   begin
@@ -509,7 +509,7 @@ end;
 
 function ReverseString(const S: string): string;
 var
-  Len, I: Integer;
+  Len, I: Int;
   SP, RP: PChar;
 begin
   Len := Length(S);
@@ -521,10 +521,10 @@ begin
     RP[I] := SP[Len - 1 - I];
 end;
 
-function StuffString(const S: string; Start, Len: Integer;
+function StuffString(const S: string; Start, Len: Int;
                      const Replacement: string): string;
 var
-  SLen, RepLen, ActualLen: Integer;
+  SLen, RepLen, ActualLen: Int;
 begin
   SLen   := Length(S);
   RepLen := Length(Replacement);
@@ -539,7 +539,7 @@ end;
 
 function TrimLeft(const S: string): string;
 var
-  Len, Lo: Integer;
+  Len, Lo: Int;
   SP: PChar;
 begin
   Len := Length(S);
@@ -555,7 +555,7 @@ end;
 
 function TrimRight(const S: string): string;
 var
-  Len, Hi: Integer;
+  Len, Hi: Int;
   SP: PChar;
 begin
   Len := Length(S);
@@ -569,9 +569,9 @@ begin
   Result := Copy(S, 0, Hi + 1);
 end;
 
-function PadLeft(const S: string; Width: Integer; PadByte: Byte): string;
+function PadLeft(const S: string; Width: Int; PadByte: Byte): string;
 var
-  Len, PadCount, I: Integer;
+  Len, PadCount, I: Int;
   SB: TStringBuilder;
 begin
   Len := Length(S);
@@ -588,9 +588,9 @@ begin
   SB.Free();
 end;
 
-function PadRight(const S: string; Width: Integer; PadByte: Byte): string;
+function PadRight(const S: string; Width: Int; PadByte: Byte): string;
 var
-  Len, PadCount, I: Integer;
+  Len, PadCount, I: Int;
   SB: TStringBuilder;
 begin
   Len := Length(S);
@@ -607,11 +607,11 @@ begin
   SB.Free();
 end;
 
-function CountOccurrences(const Sub, S: string): Integer;
+function CountOccurrences(const Sub, S: string): Int;
 var
-  SLen, SubLen: Integer;
+  SLen, SubLen: Int;
   SP, SubP: PChar;
-  I, J: Integer;
+  I, J: Int;
   Match: Boolean;
 begin
   Result := 0;
@@ -638,7 +638,7 @@ end;
 
 function RemovePrefix(const S, Prefix: string): string;
 var
-  PLen: Integer;
+  PLen: Int;
 begin
   if StartsStr(Prefix, S) then
   begin
@@ -651,7 +651,7 @@ end;
 
 function RemoveSuffix(const S, Suffix: string): string;
 var
-  SLen, SufLen: Integer;
+  SLen, SufLen: Int;
 begin
   if EndsStr(Suffix, S) then
   begin
@@ -674,7 +674,7 @@ end;
 function JoinStr(const Sep: string; const Parts: array of string): string;
 var
   SB: TStringBuilder;
-  I:  Integer;
+  I:  Int;
 begin
   if High(Parts) < 0 then
   begin
@@ -693,7 +693,7 @@ end;
 
 function SplitChar(const S: string; ADelim: Byte): TList<String>;
 var
-  I, N, Start: Integer;
+  I, N, Start: Int;
 begin
   Result := TList<String>.Create();
   N := Length(S);
@@ -713,7 +713,7 @@ end;
 
 { Copy S[AStart..AEnd) as a line, dropping one trailing CR so a CRLF line
   yields the bare text. }
-function LineSlice(const S: string; AStart, AEnd: Integer): string;
+function LineSlice(const S: string; AStart, AEnd: Int): string;
 begin
   if (AEnd > AStart) and (Byte(S[AEnd - 1]) = 13) then   { trailing CR }
     Result := Copy(S, AStart, AEnd - AStart - 1)
@@ -723,7 +723,7 @@ end;
 
 function SplitLines(const S: string): TList<String>;
 var
-  I, N, Start: Integer;
+  I, N, Start: Int;
 begin
   Result := TList<String>.Create();
   N := Length(S);
@@ -744,7 +744,7 @@ end;
 function JoinList(AList: TList<String>; const ASep: string): string;
 var
   SB: TStringBuilder;
-  I: Integer;
+  I: Int;
 begin
   if AList = nil then
     Exit('');
@@ -777,12 +777,12 @@ begin
   inherited Destroy();
 end;
 
-procedure TStringBuilder.Grow(ANeed: Integer);
+procedure TStringBuilder.Grow(ANeed: Int);
 var
-  NewCap:  Integer;
+  NewCap:  Int;
   NewData: PChar;
   OldData: PChar;
-  I:       Integer;
+  I:       Int;
 begin
   NewCap  := Self.FCap;
   while NewCap < Self.FLen + ANeed do
@@ -798,11 +798,11 @@ end;
 
 procedure TStringBuilder.Append(const S: string);
 var
-  SLen:   Integer;
+  SLen:   Int;
   SP:     PChar;
   DP:     PChar;
-  Offset: Integer;
-  I:      Integer;
+  Offset: Int;
+  I:      Int;
 begin
   SLen := Length(S);
   if SLen = 0 then Exit;
@@ -818,7 +818,7 @@ end;
 procedure TStringBuilder.AppendByte(B: Byte);
 var
   DP:  PChar;
-  Pos: Integer;
+  Pos: Int;
 begin
   if Self.FLen + 1 > Self.FCap then Self.Grow(1);
   DP  := Self.FData;
@@ -843,15 +843,15 @@ begin
   Self.FLen := 0;
 end;
 
-procedure TStringBuilder.Truncate(ALen: Integer);
+procedure TStringBuilder.Truncate(ALen: Int);
 begin
   if (ALen >= 0) and (ALen < Self.FLen) then
     Self.FLen := ALen;
 end;
 
-function TStringBuilder.CountFrom(AFrom: Integer; const ANeedle: string): Integer;
+function TStringBuilder.CountFrom(AFrom: Int; const ANeedle: string): Int;
 var
-  NLen, I, J: Integer;
+  NLen, I, J: Int;
   NP, DP: PChar;
 begin
   Result := 0;
@@ -876,9 +876,9 @@ begin
   end;
 end;
 
-function TStringBuilder.ContainsFrom(AFrom: Integer; const ANeedle: string): Boolean;
+function TStringBuilder.ContainsFrom(AFrom: Int; const ANeedle: string): Boolean;
 var
-  NLen, I, J: Integer;
+  NLen, I, J: Int;
   NP, DP: PChar;
 begin
   Result := False;
@@ -904,7 +904,7 @@ end;
 
 function TStringBuilder.ToString: string;
 var
-  I:  Integer;
+  I:  Int;
   RP: PChar;
   SP: PChar;
 begin
@@ -922,7 +922,7 @@ end;
 { UTF-8 Codepoint operations                                           }
 { ------------------------------------------------------------------ }
 
-function CodePointSize(LeadByte: Byte): Integer;
+function CodePointSize(LeadByte: Byte): Int;
 begin
   if LeadByte < 128 then
     Result := 1
@@ -934,7 +934,7 @@ begin
     Result := 4;
 end;
 
-function CodePointLength(const S: string): Integer;
+function CodePointLength(const S: string): Int;
 begin
   if Length(S) = 0 then
     Result := 0
@@ -942,10 +942,10 @@ begin
     Result := _Utf8CountCodePoints(PChar(S), Length(S));
 end;
 
-function CodePointByteIndex(const S: string; CPIndex: Integer): Integer;
+function CodePointByteIndex(const S: string; CPIndex: Int): Int;
 var
   P: PChar;
-  Len, Idx, Count: Integer;
+  Len, Idx, Count: Int;
 begin
   Len := Length(S);
   if CPIndex < 0 then
@@ -967,10 +967,10 @@ begin
     Result := -1;
 end;
 
-function CodePointFromByteIndex(const S: string; ByteIndex: Integer): Integer;
+function CodePointFromByteIndex(const S: string; ByteIndex: Int): Int;
 var
   P: PChar;
-  B0, B1, B2, B3: Integer;
+  B0, B1, B2, B3: Int;
 begin
   P := PChar(S);
   B0 := P[ByteIndex];
@@ -996,9 +996,9 @@ begin
   end;
 end;
 
-function CodePointAt(const S: string; Index: Integer): Integer;
+function CodePointAt(const S: string; Index: Int): Int;
 var
-  ByteIdx: Integer;
+  ByteIdx: Int;
 begin
   ByteIdx := CodePointByteIndex(S, Index);
   if ByteIdx < 0 then
@@ -1007,10 +1007,10 @@ begin
     Result := CodePointFromByteIndex(S, ByteIdx);
 end;
 
-function CodePointCopy(const S: string; Index, Count: Integer): string;
+function CodePointCopy(const S: string; Index, Count: Int): string;
 var
   P: PChar;
-  Len, StartByte, EndByte, I: Integer;
+  Len, StartByte, EndByte, I: Int;
 begin
   Len := Length(S);
   if (Len = 0) or (Count <= 0) then
@@ -1035,11 +1035,11 @@ begin
   Result := Copy(S, StartByte, EndByte - StartByte);
 end;
 
-function CodePointPos(const Sub, S: string): Integer;
+function CodePointPos(const Sub, S: string): Int;
 var
-  ByteIdx: Integer;
+  ByteIdx: Int;
   P: PChar;
-  Len, Idx, Count: Integer;
+  Len, Idx, Count: Int;
 begin
   ByteIdx := Pos(Sub, S);
   if ByteIdx < 0 then
@@ -1059,7 +1059,7 @@ begin
   Result := Count;
 end;
 
-function CodePointToString(CP: Integer): string;
+function CodePointToString(CP: Int): string;
 begin
   if (CP < 0) or (CP > $10FFFF) then
     Result := ''

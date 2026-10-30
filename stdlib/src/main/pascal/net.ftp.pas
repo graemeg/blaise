@@ -41,7 +41,7 @@ type
   TFtpClient = class
   private
     FCtrl: TTcpConn;
-    FLastCode: Integer;
+    FLastCode: Int;
     FLastText: string;
     { Send a command line (CRLF-terminated) on the control connection. }
     function SendCmd(const ALine: string): Boolean;
@@ -49,7 +49,7 @@ type
     function ReadReply: Boolean;
     { Send a command then read its reply.  True when the reply's first digit
       matches AExpectFirst (e.g. 2 for a 2xx success). }
-    function Command(const ALine: string; AExpectFirst: Integer): Boolean;
+    function Command(const ALine: string; AExpectFirst: Int): Boolean;
     { Issue PASV, parse the 227 tuple, dial the data connection.  Returns the
       connected data conn (caller owns it) or nil on failure. }
     function OpenPassiveData: TTcpConn;
@@ -101,7 +101,7 @@ type
     { Attach to an already-connected control conn (used by tests / TLS). }
     procedure Attach(AConn: TTcpConn);
 
-    property LastCode: Integer read FLastCode;
+    property LastCode: Int read FLastCode;
     property LastText: string read FLastText;
     property Ctrl: TTcpConn read FCtrl;
   end;
@@ -140,7 +140,7 @@ begin
   Result := ReadSmtpReply(FCtrl, FLastCode, FLastText);
 end;
 
-function TFtpClient.Command(const ALine: string; AExpectFirst: Integer): Boolean;
+function TFtpClient.Command(const ALine: string; AExpectFirst: Int): Boolean;
 begin
   if not Self.SendCmd(ALine) then
     Exit(False);
@@ -205,7 +205,7 @@ end;
 
 function TFtpClient.Pwd(out APath: string): Boolean;
 var
-  I, Len, Q1, Q2: Integer;
+  I, Len, Q1, Q2: Int;
   B: Byte;
 begin
   APath := '';
@@ -243,10 +243,10 @@ end;
 { Parse the six comma-separated integers inside an FTP 227 reply text.  The 227
   line looks like "Entering Passive Mode (h1,h2,h3,h4,p1,p2)."; the numbers may
   also appear without the parentheses.  Returns True and fills AVals[0..5]. }
-function ParsePasv(const AText: string; out AH1, AH2, AH3, AH4, AP1, AP2: Integer): Boolean;
+function ParsePasv(const AText: string; out AH1, AH2, AH3, AH4, AP1, AP2: Int): Boolean;
 var
-  Vals: array[0..5] of Integer;
-  Idx, Cur, Digits, I, Len: Integer;
+  Vals: array[0..5] of Int32;
+  Idx, Cur, Digits, I, Len: Int;
   B: Byte;
   InNumbers: Boolean;
 begin
@@ -308,7 +308,7 @@ end;
 
 function TFtpClient.OpenPassiveData: TTcpConn;
 var
-  H1, H2, H3, H4, P1, P2, Port: Integer;
+  H1, H2, H3, H4, P1, P2, Port: Int;
   HostIp: string;
   Cli: TTcpClient;
 begin

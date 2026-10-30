@@ -32,22 +32,22 @@ type
   { Linux epoll adapter (edge-triggered, eventfd wake). }
   TEpollReactor = class(TReactor)
   private
-    FEpFd: Integer;        { the epoll instance }
-    FWakeFd: Integer;      { eventfd for cross-thread Wake, registered on FEpFd }
+    FEpFd: Int;        { the epoll instance }
+    FWakeFd: Int;      { eventfd for cross-thread Wake, registered on FEpFd }
     FEventBuf: Pointer;    { array of epoll_event (12 bytes each, packed) }
-    FEventCap: Integer;    { capacity of FEventBuf in events }
-    FCount: Integer;       { fds registered by callers (excludes the wake fd) }
-    procedure Ctl(AOp, AFd: Integer; AInterest: TIoInterests; AToken: Pointer);
-    procedure EnsureBuf(ACap: Integer);
+    FEventCap: Int;    { capacity of FEventBuf in events }
+    FCount: Int;       { fds registered by callers (excludes the wake fd) }
+    procedure Ctl(AOp, AFd: Int; AInterest: TIoInterests; AToken: Pointer);
+    procedure EnsureBuf(ACap: Int);
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Add(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); override;
-    procedure Modify(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); override;
-    procedure Remove(AFd: Integer); override;
-    function Wait(ATimeoutMs: Integer; var AReady: TReadyList): Integer; override;
+    procedure Add(AFd: Int; AInterest: TIoInterests; AToken: Pointer); override;
+    procedure Modify(AFd: Int; AInterest: TIoInterests; AToken: Pointer); override;
+    procedure Remove(AFd: Int); override;
+    function Wait(ATimeoutMs: Int; var AReady: TReadyList): Int; override;
     procedure Wake; override;
-    function FdCount: Integer; override;
+    function FdCount: Int; override;
   end;
 
 { The per-OS factory registered in async.reactor.GReactorFactory by this
@@ -83,19 +83,19 @@ type
 
 { --- libc bindings (same pattern as Net.Sockets) --- }
 
-function c_epoll_create1(AFlags: Integer): Integer;
+function c_epoll_create1(AFlags: Int32): Int32;
   external name 'epoll_create1';
-function c_epoll_ctl(AEpFd, AOp, AFd: Integer; AEvent: Pointer): Integer;
+function c_epoll_ctl(AEpFd, AOp, AFd: Int32; AEvent: Pointer): Int32;
   external name 'epoll_ctl';
-function c_epoll_wait(AEpFd: Integer; AEvents: Pointer; AMaxEvents, ATimeout: Integer): Integer;
+function c_epoll_wait(AEpFd: Int32; AEvents: Pointer; AMaxEvents, ATimeout: Int32): Int32;
   external name 'epoll_wait';
-function c_eventfd(AInitVal, AFlags: Integer): Integer;
+function c_eventfd(AInitVal, AFlags: Int32): Int32;
   external name 'eventfd';
-function c_close(AFd: Integer): Integer;
+function c_close(AFd: Int32): Int32;
   external name 'close';
-function c_read(AFd: Integer; ABuf: Pointer; ACount: Int64): Int64;
+function c_read(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64;
   external name 'read';
-function c_write(AFd: Integer; ABuf: Pointer; ACount: Int64): Int64;
+function c_write(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64;
   external name 'write';
 
 { Compose the epoll event mask from an interest set, always edge-triggered. }
@@ -166,7 +166,7 @@ begin
   inherited Destroy();
 end;
 
-procedure TEpollReactor.EnsureBuf(ACap: Integer);
+procedure TEpollReactor.EnsureBuf(ACap: Int);
 begin
   if ACap <= Self.FEventCap then
     Exit;
@@ -179,13 +179,13 @@ end;
 { Build one epoll_event on the stack (12 bytes, packed) and issue epoll_ctl.
   For the wake fd the mask is level-triggered EPOLLIN (no EPOLLET) so a pending
   count always re-delivers until drained. }
-procedure TEpollReactor.Ctl(AOp, AFd: Integer; AInterest: TIoInterests; AToken: Pointer);
+procedure TEpollReactor.Ctl(AOp, AFd: Int; AInterest: TIoInterests; AToken: Pointer);
 var
   Ev: array[0..EPOLL_EVENT_SIZE - 1] of Byte;
   PMask: PUInt32;
   PData: PInt64;
   Mask: UInt32;
-  Rc: Integer;
+  Rc: Int;
 begin
   if AFd = Self.FWakeFd then
     Mask := UInt32(EPOLLIN)         { level-triggered wake }
@@ -200,18 +200,18 @@ begin
     raise Exception.Create('epoll_ctl failed');
 end;
 
-procedure TEpollReactor.Add(AFd: Integer; AInterest: TIoInterests; AToken: Pointer);
+procedure TEpollReactor.Add(AFd: Int; AInterest: TIoInterests; AToken: Pointer);
 begin
   Self.Ctl(EPOLL_CTL_ADD, AFd, AInterest, AToken);
   Self.FCount := Self.FCount + 1;
 end;
 
-procedure TEpollReactor.Modify(AFd: Integer; AInterest: TIoInterests; AToken: Pointer);
+procedure TEpollReactor.Modify(AFd: Int; AInterest: TIoInterests; AToken: Pointer);
 begin
   Self.Ctl(EPOLL_CTL_MOD, AFd, AInterest, AToken);
 end;
 
-procedure TEpollReactor.Remove(AFd: Integer);
+procedure TEpollReactor.Remove(AFd: Int);
 var
   Empty: TIoInterests;
 begin
@@ -232,9 +232,9 @@ begin
   c_write(Self.FWakeFd, @One, 8);
 end;
 
-function TEpollReactor.Wait(ATimeoutMs: Integer; var AReady: TReadyList): Integer;
+function TEpollReactor.Wait(ATimeoutMs: Int; var AReady: TReadyList): Int;
 var
-  N, I, OutN: Integer;
+  N, I, OutN: Int;
   PEv: PByte;
   PMask: PUInt32;
   PData: PInt64;
@@ -277,7 +277,7 @@ begin
   Result := OutN;
 end;
 
-function TEpollReactor.FdCount: Integer;
+function TEpollReactor.FdCount: Int;
 begin
   Result := Self.FCount;
 end;

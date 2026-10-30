@@ -45,23 +45,23 @@ type
     wake). }
   TKqueueReactor = class(TReactor)
   private
-    FKq: Integer;          { the kqueue instance }
+    FKq: Int32;          { the kqueue instance }
     FEventBuf: Pointer;    { array of struct kevent (KEVENT_SIZE bytes each) }
-    FEventCap: Integer;    { capacity of FEventBuf in events }
-    FCount: Integer;       { fds registered by callers (excludes the wake event) }
-    procedure EnsureBuf(ACap: Integer);
-    function Change(AIdent: Int64; AFilter, AFlags: Integer; AFflags: UInt32;
-      AToken: Pointer): Integer;
-    procedure ApplyInterest(AFd: Integer; AInterest: TIoInterests; AToken: Pointer);
+    FEventCap: Int32;    { capacity of FEventBuf in events }
+    FCount: Int32;       { fds registered by callers (excludes the wake event) }
+    procedure EnsureBuf(ACap: Int);
+    function Change(AIdent: Int64; AFilter, AFlags: Int; AFflags: UInt32;
+      AToken: Pointer): Int;
+    procedure ApplyInterest(AFd: Int; AInterest: TIoInterests; AToken: Pointer);
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Add(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); override;
-    procedure Modify(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); override;
-    procedure Remove(AFd: Integer); override;
-    function Wait(ATimeoutMs: Integer; var AReady: TReadyList): Integer; override;
+    procedure Add(AFd: Int; AInterest: TIoInterests; AToken: Pointer); override;
+    procedure Modify(AFd: Int; AInterest: TIoInterests; AToken: Pointer); override;
+    procedure Remove(AFd: Int); override;
+    function Wait(ATimeoutMs: Int; var AReady: TReadyList): Int; override;
     procedure Wake; override;
-    function FdCount: Integer; override;
+    function FdCount: Int; override;
   end;
 
 { The per-OS factory registered in async.reactor.GReactorFactory by this
@@ -109,12 +109,12 @@ type
 
 { --- libc bindings (same pattern as Net.Sockets) --- }
 
-function c_kqueue: Integer;
+function c_kqueue: Int32;
   external name 'kqueue';
-function c_kevent(AKq: Integer; AChanges: Pointer; ANChanges: Integer;
-  AEvents: Pointer; ANEvents: Integer; ATimeout: Pointer): Integer;
+function c_kevent(AKq: Int32; AChanges: Pointer; ANChanges: Int32;
+  AEvents: Pointer; ANEvents: Int32; ATimeout: Pointer): Int32;
   external name 'kevent';
-function c_close(AFd: Integer): Integer;
+function c_close(AFd: Int32): Int32;
   external name 'close';
 
 { ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ begin
   inherited Destroy();
 end;
 
-procedure TKqueueReactor.EnsureBuf(ACap: Integer);
+procedure TKqueueReactor.EnsureBuf(ACap: Int);
 begin
   if ACap <= Self.FEventCap then
     Exit;
@@ -161,11 +161,11 @@ end;
 { Build one struct kevent on the stack and submit it as a single change with
   no event slots (errors surface as the -1 return).  filter+flags share one
   32-bit little-endian store: low 16 = filter, high 16 = flags. }
-function TKqueueReactor.Change(AIdent: Int64; AFilter, AFlags: Integer;
-  AFflags: UInt32; AToken: Pointer): Integer;
+function TKqueueReactor.Change(AIdent: Int64; AFilter, AFlags: Int;
+  AFflags: UInt32; AToken: Pointer): Int;
 var
   Ev: array[0..KEVENT_SIZE - 1] of Byte;
-  I: Integer;
+  I: Int;
   PIdent: PInt64;
   PFiltFlags: PUInt32;
   PFflags: PUInt32;
@@ -188,7 +188,7 @@ end;
   filters are (re-)added — EV_ADD on an existing filter just updates udata —
   and unwanted ones deleted, ignoring "was not registered" failures.  This
   serves both Add (fresh fd: deletes are no-ops) and Modify. }
-procedure TKqueueReactor.ApplyInterest(AFd: Integer; AInterest: TIoInterests;
+procedure TKqueueReactor.ApplyInterest(AFd: Int; AInterest: TIoInterests;
   AToken: Pointer);
 begin
   if ioRead in AInterest then
@@ -207,18 +207,18 @@ begin
     Self.Change(AFd, FILT_WRITE_U16, EV_DELETE, 0, nil);
 end;
 
-procedure TKqueueReactor.Add(AFd: Integer; AInterest: TIoInterests; AToken: Pointer);
+procedure TKqueueReactor.Add(AFd: Int; AInterest: TIoInterests; AToken: Pointer);
 begin
   Self.ApplyInterest(AFd, AInterest, AToken);
   Self.FCount := Self.FCount + 1;
 end;
 
-procedure TKqueueReactor.Modify(AFd: Integer; AInterest: TIoInterests; AToken: Pointer);
+procedure TKqueueReactor.Modify(AFd: Int; AInterest: TIoInterests; AToken: Pointer);
 begin
   Self.ApplyInterest(AFd, AInterest, AToken);
 end;
 
-procedure TKqueueReactor.Remove(AFd: Integer);
+procedure TKqueueReactor.Remove(AFd: Int);
 begin
   { Delete both filters; an fd registered for only one direction reports a
     harmless failure on the other. }
@@ -235,11 +235,11 @@ begin
   Self.Change(0, FILT_USER_U16, 0, NOTE_TRIGGER, nil);
 end;
 
-function TKqueueReactor.Wait(ATimeoutMs: Integer; var AReady: TReadyList): Integer;
+function TKqueueReactor.Wait(ATimeoutMs: Int; var AReady: TReadyList): Int;
 var
   Ts: TTimeSpec;
   TsPtr: Pointer;
-  N, I, OutN: Integer;
+  N, I, OutN: Int;
   PEv: PByte;
   PFiltFlags: PUInt32;
   PUdata: PInt64;
@@ -299,7 +299,7 @@ begin
   Result := OutN;
 end;
 
-function TKqueueReactor.FdCount: Integer;
+function TKqueueReactor.FdCount: Int;
 begin
   Result := Self.FCount;
 end;

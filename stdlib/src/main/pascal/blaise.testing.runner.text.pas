@@ -61,7 +61,7 @@ procedure PrintSummary(AResult: TTestResult);
   or -h prints the usage and returns 0 without running anything; a bad
   command line prints an error and the usage to stderr and returns 2.
   Programs can do 'Halt(RunAll)' as the last statement. }
-function RunAll: Integer;
+function RunAll: Int;
 
 { Filter helpers — exposed for unit testing.  A filter list is a
   TList<String> where every entry is either a class-only filter ("TFooTests")
@@ -117,7 +117,7 @@ implementation
   blaise.codegen.qbe.pas:EmitTypeInfoDefs.
   ----------------------------------------------------------------------- }
 
-function PublishedMethodCount(ATestClass: TTestCaseClass): Integer;
+function PublishedMethodCount(ATestClass: TTestCaseClass): Int;
 var
   TInfo:   Pointer;
   Slot:    ^Pointer;
@@ -133,7 +133,7 @@ begin
     if Methods <> nil then
     begin
       Count  := Methods;
-      Result := Result + Integer(Count^);
+      Result := Result + Int32(Count^);
     end;
     Slot  := TInfo;              { typeinfo[0] = parent }
     TInfo := Slot^;
@@ -144,7 +144,7 @@ end;
   Methods declared in the class itself come first; parent methods
   follow.  Returns '' if AIndex is out of range. }
 function PublishedMethodName(ATestClass: TTestCaseClass;
-  AIndex: Integer): string;
+  AIndex: Int): string;
 var
   TInfo:   Pointer;
   Slot:    ^Pointer;
@@ -152,9 +152,9 @@ var
   Count:   ^Int64;
   Entry:   ^Pointer;
   EntName: Pointer;
-  Local:   Integer;
-  Seen:    Integer;
-  I:       Integer;
+  Local:   Int;
+  Seen:    Int;
+  I:       Int;
 begin
   Result := '';
   Seen   := 0;
@@ -166,7 +166,7 @@ begin
     if Methods <> nil then
     begin
       Count := Methods;
-      Local := Integer(Count^);
+      Local := Int32(Count^);
       if AIndex < Seen + Local then
       begin
         { The wanted entry lives in this class's own table. }
@@ -188,7 +188,7 @@ end;
   'i'/'I'/'b'/'s'/'d'/'x' per param, '' = parameterless).  Drives the
   [TestCase] typed dispatch in TTestCase.RunTest. }
 function PublishedMethodSig(ATestClass: TTestCaseClass;
-  AIndex: Integer): string;
+  AIndex: Int): string;
 var
   TInfo:   Pointer;
   Slot:    ^Pointer;
@@ -196,9 +196,9 @@ var
   Count:   ^Int64;
   Entry:   ^Pointer;
   EntSig:  Pointer;
-  Local:   Integer;
-  Seen:    Integer;
-  I:       Integer;
+  Local:   Int;
+  Seen:    Int;
+  I:       Int;
 begin
   Result := '';
   Seen   := 0;
@@ -210,7 +210,7 @@ begin
     if Methods <> nil then
     begin
       Count := Methods;
-      Local := Integer(Count^);
+      Local := Int32(Count^);
       if AIndex < Seen + Local then
       begin
         Entry := Methods + 8;
@@ -233,7 +233,7 @@ end;
 function MethodInCategory(ATestClass: TTestCaseClass;
   const AMethName, ACat: string): Boolean;
 var
-  I, N: Integer;
+  I, N: Int;
   A:    TObject;
 begin
   Result := False;
@@ -270,7 +270,7 @@ end;
 procedure SplitSuiteSpec(const ASpec: string;
   out ASuite: string; out AMethod: string);
 var
-  Dot: Integer;
+  Dot: Int;
 begin
   Dot := Pos('.', ASpec);
   if Dot >= 0 then
@@ -290,7 +290,7 @@ end;
 { Trim leading + trailing ASCII whitespace from a string. }
 function TrimWS(const S: string): string;
 var
-  Lo, Hi: Integer;
+  Lo, Hi: Int;
 begin
   Lo := 0;
   Hi := Length(S) - 1;
@@ -306,7 +306,7 @@ end;
 
 procedure AppendSuiteFilter(AFilters: TList<String>; const ASpec: string);
 var
-  Start, I: Integer;
+  Start, I: Int;
   Part:     string;
 begin
   if ASpec = '' then Exit;
@@ -329,7 +329,7 @@ end;
 function MatchesFilters(AFilters: TList<String>;
   const ASuite, AMethod: string): Boolean;
 var
-  I:        Integer;
+  I:        Int;
   FSuite:   string;
   FMethod:  string;
 begin
@@ -356,7 +356,7 @@ end;
 function FiltersTouchSuite(AFilters: TList<String>;
   const ASuite: string): Boolean;
 var
-  I:        Integer;
+  I:        Int;
   FSuite:   string;
   FMethod:  string;
 begin
@@ -378,7 +378,7 @@ end;
 { The value of the option at AArgs[AIndex], or '' when it is missing.  A
   following argument that starts with '-' is the next option, not a value:
   no suite or category name begins with one. }
-function OptionValue(AArgs: TList<String>; AIndex: Integer): string;
+function OptionValue(AArgs: TList<String>; AIndex: Int): string;
 var
   V: string;
 begin
@@ -395,7 +395,7 @@ function ParseRunnerArgs(AArgs: TList<String>; AFilters: TList<String>;
   out AVerbose: Boolean; out AExclCategory: string;
   out AError: string): TRunnerArgsResult;
 var
-  I: Integer;
+  I: Int;
   Arg: string;
   Value: string;
 begin
@@ -484,13 +484,13 @@ procedure ParseSubprocessOutput(const AOutput: string; AResult: TTestResult);
 var
   Lines:   TStringList;
   Failed:  TSet<string>;
-  I:       Integer;
+  I:       Int;
   Line:    string;
   InFail:  Boolean;
   InErr:   Boolean;
   Pending: Boolean;
   PendErr: Boolean;
-  P:       Integer;
+  P:       Int;
   MsgName: string;
   MsgBody: string;
 
@@ -590,30 +590,30 @@ end;
 function RunFilteredTests(AFilters: TList<String>; AVerbose: Boolean;
   const AExclCategory: string): TTestResult;
 var
-  ClsIdx:    Integer;
+  ClsIdx:    Int;
   Cls:       TTestCaseClass;
   CName:     string;
-  MethCnt:   Integer;
-  MethIdx:   Integer;
+  MethCnt:   Int;
+  MethIdx:   Int;
   MethName:  string;
   Inst:      TTestCase;
   Procs:     array[0..63] of TProcess;
   ProcNames: array[0..63] of string;
-  ProcCount: Integer;
+  ProcCount: Int;
   Proc:      TProcess;
   Output:    string;
   Chunk:     string;
   SubResult: TTestResult;
-  I:         Integer;
+  I:         Int;
   HasFilter: Boolean;
-  ExitCode:  Integer;
+  ExitCode:  Int;
   HasSummary: Boolean;
   Attr:      TObject;
-  RepCount:  Integer;
-  Rep:       Integer;
-  AttrIdx:   Integer;
-  AttrCnt:   Integer;
-  CaseTotal: Integer;
+  RepCount:  Int;
+  Rep:       Int;
+  AttrIdx:   Int;
+  AttrCnt:   Int;
+  CaseTotal: Int;
   Sig:       string;
 begin
   Result := TTestResult.Create();
@@ -771,7 +771,7 @@ end;
 
 procedure PrintSummary(AResult: TTestResult);
 var
-  I:     Integer;
+  I:     Int;
   Fails: TList<String>;
   Errs:  TList<String>;
   Line:  string;
@@ -805,7 +805,7 @@ begin
   end;
 end;
 
-function RunAll: Integer;
+function RunAll: Int;
 var
   R:        TTestResult;
   Filters:  TList<String>;
@@ -814,7 +814,7 @@ var
   Args: TList<String>;
   ArgError: string;
   ProgName: string;
-  I: Integer;
+  I: Int;
 begin
   Filters := TList<String>.Create();
   Args := TList<String>.Create();

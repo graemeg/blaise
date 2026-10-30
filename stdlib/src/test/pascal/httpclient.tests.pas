@@ -60,11 +60,11 @@ end;
 var
   GHcHttpServer: THttpFiberServer;
   GHcHandler: IRequestHandler;
-  GPort: Integer;
+  GPort: Int;
   GResult: string;
-  GStatus: Integer;
-  GDone: Integer;
-  GExpected: Integer;
+  GStatus: Int;
+  GDone: Int;
+  GExpected: Int;
 
 procedure HcHttpServerFiber(AArg: Pointer);
 begin
@@ -176,7 +176,7 @@ end;
 { --- chunked response (raw server on Net.Tcp emits chunked) --- }
 
 var
-  GChunkListenPort: Integer;
+  GChunkListenPort: Int;
   GChunkServer: TTcpServer;
 
 type
@@ -257,8 +257,8 @@ end;
 { --- keep-alive reuse: server counts distinct connections --- }
 
 var
-  GConnCount: Integer;
-  GKaListenPort: Integer;
+  GConnCount: Int;
+  GKaListenPort: Int;
   GKaServer: TTcpServer;
 
 type
@@ -348,7 +348,7 @@ end;
 { --- redirect following: 302 -> final body --- }
 
 var
-  GRedirListenPort: Integer;
+  GRedirListenPort: Int;
   GRedirServer: TTcpServer;
 
 type
@@ -360,7 +360,7 @@ type
 procedure TRedirectHandler.Handle(AConn: TTcpConn);
 var
   ReqLine, Line, Target, Body: string;
-  Sp1, Sp2: Integer;
+  Sp1, Sp2: Int;
 begin
   { First line: METHOD SP target SP version }
   if not AConn.ReadLine(ReqLine) then
@@ -464,15 +464,15 @@ end;
 { --- concurrent clients --- }
 
 var
-  GConcOk: Integer;
+  GConcOk: Int;
 
 procedure ConcClientFiber(AArg: Pointer);
 var
   Cli: THttpClient;
   Resp: THttpClientResponse;
-  Id: Integer;
+  Id: Int;
 begin
-  Id := Integer(AArg);
+  Id := Int32(AArg);
   FiberSleep(3);
   Cli := THttpClient.Create();
   Resp := Cli.Get(BaseUrl() + '/p' + IntToStr(Id));
@@ -493,7 +493,7 @@ const
   PORT = 29436;
   NCLIENTS = 10;
 var
-  I: Integer;
+  I: Int;
 begin
   GHcHttpServer := THttpFiberServer.Create(PORT);
   AssertTrue('server start', GHcHttpServer.Start());
