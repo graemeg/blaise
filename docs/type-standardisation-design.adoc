@@ -4,8 +4,8 @@
 :sectnums:
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
-implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
-Phase 4 (steps 4.0–4.8) done (see <<progress>>). +
+implemented 2026-10-19/20 and released in v0.15.0; Phases 4 (steps
+4.0–4.8) and 5 done in the v0.16 cycle (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -583,8 +583,20 @@ The announcement in discussion #106 is revised on the following points:
   `ReadFile`.  4.6: collection counts, capacities and indices are `Int`;
   found on the way: a `var` or `out` argument of a different width than
   its parameter was accepted and the callee wrote past or short of it.
-  4.7: `MaxInt` is `High(Int)`.  4.8: `--warn-narrowing`.  Next: Phase 5
-  (D10 revised 2026-10-30: `Integer` is decided per site, not renamed).
+  4.7: `MaxInt` is `High(Int)`.  4.8: `--warn-narrowing`.
+
+| 5
+| D10 revised: `Integer` in Blaise's own source is decided per site, not
+  renamed.  5.1: the single-meaning names renamed mechanically.  5.2–5.6:
+  front end, codegen, assemblers, object writers and linkers, the OPDF
+  emitter, RTL, stdlib, tools and tests, each retyped to `Int` with
+  `Int32` where the width is a contract; `x11` regenerated.  Found on the
+  way: a class could not implement `IEq<Int32>`; an oversized `#nnnn`
+  literal wrapped into range; OPDF held frame offsets and constant lengths
+  in 16 bits; an arm64 conditional branch beyond its reach wrapped; a
+  warm build failed to link after another unit stopped using a generic
+  instance; data directives and object-file fields truncated a value too
+  wide for them.  Next: Phase 6.
 |===
 
 [#timeline]
@@ -678,6 +690,47 @@ The detailed commit plan is in <<phase4-plan>>.
   `ClassicPascalTypes`, and a text scan finds none in inactive `{$IFDEF}`
   branches, which a token rule does not see.  Test programs held in string
   literals keep exercising the classic names until Phase 6.
+
+Done 2026-10-30.
+
+* Verification.  Where a step could not change generated code it was
+  checked to: 5.1 builds a byte-identical compiler; 5.2, 5.3a and 5.3d make
+  the previous commit's compiler source compile to identical assembly
+  (with and without `--debug-opdf`); 5.3b and 5.3c make it link to a
+  byte-identical binary, for macos-arm64 and linux-x86_64.  The RTL (5.4)
+  and stdlib (5.5) change the code they compile to, so they rest on the
+  fixpoints and the full suites on macOS and Linux.
+* What stays `Int32`.  The C ABI (externals, records mirroring C
+  structures, file descriptors), binary formats (instruction encodings,
+  ELF and Mach-O fields, readers' 32-bit values), the codegen–RTL contract
+  (exported `_` helpers, platform-class methods, refcount and length
+  fields reached through `^Int32`), comparison results, hash values and
+  character codes, and the 32-bit member of an overload pair with
+  `Int64`.  `SizeOf`, `High` and `Low` of the 32-bit type, pointer targets
+  and arrays handed to C are layout and stay `Int32`; a first RTL pass
+  that widened `PInteger` read string refcounts as 64-bit words and failed
+  its gate.
+* Widened on purpose.  `FdRead`/`FdWrite` byte counts (`size_t`/`ssize_t`
+  in C), the stdlib's counts, indices, lengths and positions; `IndexStr`,
+  `CountOccurrences`, `Sign` and `EnsureRange` return `Int`.  A widened
+  `var` or `out` parameter (`DivMod`, NNTP `SelectGroup`) needs an `Int`
+  argument.
+* Object-file fields.  A fixed-width field writer checks that its value
+  fits, read as signed or unsigned, and a data directive whose value is too
+  wide is an assembler error: neither truncates silently any more.
+* Narrowing.  `--warn-narrowing` on the compiler's own source falls from
+  3,219 to 197, each reviewed: instruction and byte encodings, which keep
+  the low bits by design, character codes stored as bytes, and hash
+  arithmetic.
+* `x11`.  Regenerated on Linux x86-64 (Ubuntu 24.04, `libx11-dev`); apart
+  from the names it is identical to the unit it replaces.  Regenerating on
+  macOS against Homebrew's headers is not equivalent: they define
+  `NeedWidePrototypes` as 1, which changes the prototypes' parameter
+  widths.
+* Cost.  Each unit now carries a weak copy of every generic instance it
+  uses (the warm-cache fix): a self-build takes 2.5% longer and the
+  compiler binary is 5% larger, because the internal linkers keep the
+  bytes of every weak copy, not only the one that wins.
 
 *Phase 6 — remove the old builtins (the flip).*
 

@@ -66,11 +66,12 @@
     "BL-2005": { "enabled": true, "severity": "warning" },
 
     "_BL-2006": [
-      "ON again from the v0.16 cycle (it was off for v0.15 only).  Its",
-      "findings are the work list for the Phase 6 classic-type migration",
-      "(docs/type-standardisation-design.adoc): 4529 in compiler/ and 1751 in",
-      "stdlib/ at v0.15.0, 4263 of the compiler's Integer.  Kept at info until",
-      "the migration is done, so it does not drown the other findings."
+      "ON again from the v0.16 cycle (it was off for v0.15 only).  It was the",
+      "work list for type standardisation Phase 5 (docs/type-standardisation-",
+      "design.adoc): 4529 findings in compiler/ and 1751 in stdlib/ at v0.15.0.",
+      "Since Phase 5 the only findings are ClassicPascalTypes' own tests, which",
+      "exercise the classic names on purpose.  Still at info, so those 28 do",
+      "not read as defects."
     ],
     "BL-2006": { "enabled": true, "severity": "info" },
 
