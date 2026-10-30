@@ -17727,6 +17727,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseProcCall(ACall: TProcCall);
 var
+  InstName: string;
   GProp: TPropertyInfo;
   Sym:     TSymbol;
   MDecl:   TMethodDecl;
@@ -17830,11 +17831,13 @@ begin
       Exit;
     end;
   end;
-  { Try on-demand instantiation of a generic function }
+  { Try on-demand instantiation of a generic function, under its canonical
+    name: Twice<Int32> is the Twice<Integer> instance, not a second one }
   if StrPos('<', ACall.Name) >= 0 then
   begin
-    InstantiateGenericFunc(ACall.Name);
-    Sym := FTable.Lookup(ACall.Name);
+    InstName := CanonGenericArgs(ACall.Name);
+    InstantiateGenericFunc(InstName);
+    Sym := FTable.Lookup(InstName);
   end;
   { Recognise, reject, explain: FPC/Delphi FillChar fills BYTES, and Blaise
     has no Char type, so the routine is FillByte (FPC's own name for it). }
@@ -18292,6 +18295,7 @@ end;
 
 function TSemanticAnalyser.AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
 var
+  InstName: string;
   GProp: TPropertyInfo;
   Sym:     TSymbol;
   MDecl:   TMethodDecl;
@@ -18661,11 +18665,13 @@ begin
       Exit;
     end;
   end;
-  { Try on-demand instantiation of a generic function }
+  { Try on-demand instantiation of a generic function, under its canonical
+    name: Twice<Int32> is the Twice<Integer> instance, not a second one }
   if StrPos('<', AExpr.Name) >= 0 then
   begin
-    InstantiateGenericFunc(AExpr.Name);
-    Sym := FTable.Lookup(AExpr.Name);
+    InstName := CanonGenericArgs(AExpr.Name);
+    InstantiateGenericFunc(InstName);
+    Sym := FTable.Lookup(InstName);
   end;
   if Sym = nil then
     SemanticError(
@@ -20078,7 +20084,7 @@ begin
     directly (it is not part of the overload set). }
   if StrPos('<', AExpr.Name) >= 0 then
   begin
-    MDecl := InstantiateGenericMethod(RT.Name, AExpr.Name);
+    MDecl := InstantiateGenericMethod(RT.Name, CanonGenericArgs(AExpr.Name));
     if MDecl = nil then
       SemanticError(Format('Class ''%s'' has no generic method ''%s''',
         [RT.Name, AExpr.Name]), AExpr.Line, AExpr.Col);

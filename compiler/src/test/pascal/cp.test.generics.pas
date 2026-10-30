@@ -84,6 +84,9 @@ type
     { ------------------------------------------------------------------ }
     procedure TestCodegen_UnitGeneric_InstanceSymbolsBareAndWeak;
     procedure TestCodegen_UnitGenericFunc_OneInstancePerBuffer;
+    { An alias argument names the same instance as its type: Twice<Int32> is
+      Twice<Integer>, B.Wrap<Int64> is B.Wrap<Int>. }
+    procedure TestCodegen_GenericRoutine_AliasArgument_OneInstance;
     procedure TestSem_RecordAndFuncInstances_RecordDeclaringUnit;
 
     { ------------------------------------------------------------------ }
@@ -920,6 +923,40 @@ begin
     Inc(Result);
     Rest := Copy(Rest, P + Length(ANeedle), Length(Rest));
     P := Pos(ANeedle, Rest);
+  end;
+end;
+
+procedure TGenericsTests.TestCodegen_GenericRoutine_AliasArgument_OneInstance;
+const
+  Src = '''
+    program P;
+    type
+      TBox = class
+        function Wrap<U>(x: U): U;
+      end;
+    function TBox.Wrap<U>(x: U): U; begin Result := x end;
+    function Twice<T>(A: T): T; begin Result := A + A end;
+    var B: TBox;
+    begin
+      B := TBox.Create();
+      WriteLn(Twice<Int32>(1), Twice<Integer>(2), Twice<Int>(3), Twice<Int64>(4));
+      WriteLn(B.Wrap<Int>(5), B.Wrap<Int64>(6))
+    end.
+    ''';
+var
+  Code: string;
+  T:   Int;
+begin
+  for T := 0 to 1 do
+  begin
+    if T = 0 then Code := GenAsm(Src, TargetX86_64)
+    else Code := GenAsm(Src, TargetArm64);
+    AssertEquals('one 32-bit Twice instance', 1,
+      CountAsmOccurrences(Code, 'Twice_Integer:') + CountAsmOccurrences(Code, 'Twice_Int32:'));
+    AssertEquals('one 64-bit Twice instance', 1,
+      CountAsmOccurrences(Code, 'Twice_Int64:') + CountAsmOccurrences(Code, 'Twice_Int:'));
+    AssertEquals('one Wrap instance', 1,
+      CountAsmOccurrences(Code, 'TBox_Wrap_Int64:') + CountAsmOccurrences(Code, 'TBox_Wrap_Int:'));
   end;
 end;
 
