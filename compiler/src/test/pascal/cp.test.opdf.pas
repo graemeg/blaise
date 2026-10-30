@@ -71,6 +71,8 @@ type
     procedure TestOPDF_Array_MultiDim_EmitsNestedRecords;
     procedure TestOPDF_Array_OpenArray_ArrayKind;
     procedure TestOPDF_OpenArray_CompanionLocation;
+    procedure TestOPDF_LocationData_BeyondSixteenBits;
+    procedure TestOPDF_StringConst_ValueLen_BeyondSixteenBits;
     procedure TestOPDF_Set_RecType;
     procedure TestOPDF_Set_SizeInBytes;
     procedure TestOPDF_Property_RecType;
@@ -482,7 +484,8 @@ begin
         begin end;
         begin end.
         ''');
-  AssertTrue('RBP offset line present', Contains(IR, '# LocationData (RBP offset)'));
+  AssertTrue('RBP offset is 4 bytes',
+    Contains(IR, '.4byte -8  # LocationData (RBP offset)'));
 end;
 
 procedure TOPDFTests.TestOPDF_LineInfo_RecType;
@@ -696,9 +699,9 @@ begin
     AssertTrue('open-array LocationExpr=5',
       Pos('.byte 5  # LocationExpr (open-array)', O) > 0);
     AssertTrue('open-array data offset -32',
-      Pos('.2byte -32  # LocationData', O) > 0);
+      Pos('.4byte -32  # LocationData', O) > 0);
     AssertTrue('open-array companion _high offset -40',
-      Pos('.2byte -40  # CompanionData (_high RBP offset)', O) > 0);
+      Pos('.4byte -40  # CompanionData (_high RBP offset)', O) > 0);
   finally
     Facts.Free();
     A.Free();
@@ -1040,8 +1043,8 @@ begin
     AssertTrue('scope record present', Pos('recFunctionScope: TThing_Bump', O) > 0);
     AssertTrue('exact HighPC end label', Pos('.quad .Ldbg_end_7  # HighPC', O) > 0);
     AssertTrue('param record for By', Pos('recParameter: By', O) > 0);
-    AssertTrue('local with real offset', Pos('.2byte -24  # LocationData', O) > 0);
-    AssertTrue('param locatable too (Self at -8)', Pos('.2byte -8  # LocationData', O) > 0);
+    AssertTrue('local with real offset', Pos('.4byte -24  # LocationData', O) > 0);
+    AssertTrue('param locatable too (Self at -8)', Pos('.4byte -8  # LocationData', O) > 0);
   finally
     Facts.Free();
     A.Free();
@@ -1049,6 +1052,91 @@ begin
     P.Free();
     L.Free();
   end;
+end;
+
+{ The record-size value on the line after the comment naming ARec in AOut. }
+function RecSizeAfter(const AOut, ARec: string): string;
+var
+  At, Hash: Int;
+  Tail:     string;
+begin
+  Result := '';
+  At := Pos(ARec, AOut);
+  if At < 0 then Exit;
+  Tail := Copy(AOut, At, 200);
+  Hash := Pos('  # RecSize', Tail);
+  if Hash < 0 then Exit;
+  Result := Copy(Tail, 0, Hash);
+  Result := Copy(Result, Pos('.4byte ', Result) + 7, MaxInt);
+end;
+
+{ A frame slot more than 32 KiB below the frame pointer: the offset and an
+  open array's companion offset are 4-byte fields.  As 2-byte fields they were
+  silently truncated (-50008 was recorded as 15528). }
+procedure TOPDFTests.TestOPDF_LocationData_BeyondSixteenBits;
+var
+  L:  TLexer;
+  P:  TParser;
+  Pr: TProgram;
+  A:  TSemanticAnalyser;
+  E:  TOPDFEmitter;
+  Facts: TDbgFacts;
+  F:  TDbgFunc;
+  V:  TDbgVar;
+  O:  string;
+begin
+  L  := TLexer.Create('program P; begin end.');
+  P  := TParser.Create(L);
+  Pr := P.Parse();
+  A  := TSemanticAnalyser.Create();
+  Facts := TDbgFacts.Create();
+  F := Facts.BeginFunc('Big');
+  F.EndLabel := '.Ldbg_end_1';
+  F.AddVar('Far', nil, -50008);
+  V := F.AddVar('Oa', nil, -60000);
+  V.IsParam := True;
+  V.IsOpenArray := True;
+  V.HighRbpOffset := -70000;
+  try
+    A.Analyse(Pr);
+    E := TOPDFEmitter.Create(Pr, 'test.pas');
+    try
+      E.SetFacts(Facts);
+      O := E.GetOutput();
+    finally
+      E.Free();
+    end;
+    AssertTrue('far local offset', Pos('.4byte -50008  # LocationData', O) > 0);
+    AssertTrue('open-array data offset', Pos('.4byte -60000  # LocationData', O) > 0);
+    AssertTrue('open-array companion offset',
+      Pos('.4byte -70000  # CompanionData (_high RBP offset)', O) > 0);
+    { 13 fixed bytes + 4 LocationData + the name }
+    AssertEquals('local RecSize', '20', RecSizeAfter(O, '# recLocalVar: Far'));
+  finally
+    Facts.Free();
+    A.Free();
+    Pr.Free();
+    P.Free();
+    L.Free();
+  end;
+end;
+
+{ A string constant longer than 64 KiB (an EMBEDSTR asset, say): ValueLen is
+  a 4-byte field.  As a 2-byte field 70000 was recorded as 4464 and the
+  reader took the value's bytes as the constant's name. }
+procedure TOPDFTests.TestOPDF_StringConst_ValueLen_BeyondSixteenBits;
+var
+  Body: string;
+  I:    Int;
+  IR:   string;
+begin
+  Body := '';
+  for I := 1 to 70000 do
+    Body := Body + 'a';
+  IR := GenOPDF('program P; const Big = ''' + Body + '''; begin end.');
+  AssertTrue('ValueLen is 4 bytes', Contains(IR, '.4byte 70000  # ValueLen'));
+  { 11 fixed bytes + the value + the name }
+  AssertEquals('constant RecSize', '70014', RecSizeAfter(IR, '# recConstant: Big'));
 end;
 
 procedure TOPDFTests.TestOPDF_Facts_ParentScopeID;

@@ -851,7 +851,7 @@ begin
     for J := 0 to V.Names.Count - 1 do
     begin
       VarName := V.Names.Strings[J];
-      RecSize := 15 + Length(VarName);
+      RecSize := 17 + Length(VarName);
       L('');
       L('    # recLocalVar: ' + VarName);
       EmitRecHdr(REC_LOCALVAR, RecSize);
@@ -860,7 +860,7 @@ begin
       L('    .byte ' + IntToStr(LOC_RBP) + '  # LocationExpr (RBP-relative)');
       L('    .2byte ' + IntToStr(DeclIdx) + '  # DeclIndex');
       EmitNameLen(VarName);
-      L('    .2byte ' + IntToStr(RBPOffset) + '  # LocationData (RBP offset)');
+      L('    .4byte ' + IntToStr(RBPOffset) + '  # LocationData (RBP offset)');
       EmitNameData(VarName);
       DeclIdx := DeclIdx + 1;
     end;
@@ -1255,13 +1255,13 @@ begin
         .double (StrVal holds the raw literal text).  The debugger decodes
         ckReal as a Double. }
       TypeID  := GetOrAllocTypeID('Double');
-      RecSize := 17 + Length(C.Name);  { 9 fixed + 8 (Double value) + name }
+      RecSize := 19 + Length(C.Name);  { 11 fixed + 8 (Double value) + name }
       L('');
       L('    # recConstant: ' + C.Name);
       EmitRecHdr(REC_CONSTANT, RecSize);
       L('    .4byte ' + IntToStr(TypeID) + '  # TypeID');
       L('    .byte ' + IntToStr(CK_REAL) + '  # ConstKind: ckReal');
-      L('    .2byte 8  # ValueLen');
+      L('    .4byte 8  # ValueLen');
       EmitNameLen(C.Name);
       L('    .double ' + C.StrVal + '  # Value');
       EmitNameData(C.Name);
@@ -1269,13 +1269,13 @@ begin
     else if C.IsString then
     begin
       TypeID  := GetOrAllocTypeID('AnsiString');
-      RecSize := 9 + Length(C.StrVal) + Length(C.Name);
+      RecSize := 11 + Length(C.StrVal) + Length(C.Name);
       L('');
       L('    # recConstant: ' + C.Name);
       EmitRecHdr(REC_CONSTANT, RecSize);
       L('    .4byte ' + IntToStr(TypeID) + '  # TypeID');
       L('    .byte ' + IntToStr(CK_STRING) + '  # ConstKind: ckString');
-      L('    .2byte ' + IntToStr(Length(C.StrVal)) + '  # ValueLen');
+      L('    .4byte ' + IntToStr(Length(C.StrVal)) + '  # ValueLen');
       EmitNameLen(C.Name);
       if Length(C.StrVal) > 0 then
         L('    .ascii "' + EscapeAsciiStr(C.StrVal) + '"  # Value');
@@ -1290,13 +1290,13 @@ begin
         TypeID := GetOrAllocTypeID(C.TypeName)
       else
         TypeID := 0;
-      RecSize := 17 + Length(C.Name);  { 9 fixed + 8 (Int64 value) + name }
+      RecSize := 19 + Length(C.Name);  { 11 fixed + 8 (Int64 value) + name }
       L('');
       L('    # recConstant: ' + C.Name);
       EmitRecHdr(REC_CONSTANT, RecSize);
       L('    .4byte ' + IntToStr(TypeID) + '  # TypeID');
       L('    .byte ' + IntToStr(CK_ORD) + '  # ConstKind: ckOrd');
-      L('    .2byte 8  # ValueLen');
+      L('    .4byte 8  # ValueLen');
       EmitNameLen(C.Name);
       L('    .quad ' + IntToStr(C.IntVal) + '  # Value');
       EmitNameData(C.Name);
@@ -1525,11 +1525,11 @@ begin
     CName := CanonicalName(AVar.TypeDesc)
   else
     CName := 'Pointer';
-  RecSize := 15 + Length(AVar.Name);
-  { Open-array locals carry an extra trailing SmallInt: the companion
+  RecSize := 17 + Length(AVar.Name);
+  { Open-array locals carry an extra trailing 4-byte field: the companion
     '_high' slot offset.  Account for it in the record size. }
   if AVar.IsOpenArray then
-    RecSize := RecSize + 2;
+    RecSize := RecSize + 4;
   L('');
   L('    # recLocalVar: ' + AVar.Name + ' (rbp' +
     IntToStr(AVar.RbpOffset) + ')');
@@ -1545,9 +1545,9 @@ begin
     L('    .byte ' + IntToStr(LOC_RBP) + '  # LocationExpr (RBP-relative)');
   L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
   EmitNameLen(AVar.Name);
-  L('    .2byte ' + IntToStr(AVar.RbpOffset) + '  # LocationData (RBP offset)');
+  L('    .4byte ' + IntToStr(AVar.RbpOffset) + '  # LocationData (RBP offset)');
   if AVar.IsOpenArray then
-    L('    .2byte ' + IntToStr(AVar.HighRbpOffset) +
+    L('    .4byte ' + IntToStr(AVar.HighRbpOffset) +
       '  # CompanionData (_high RBP offset)');
   EmitNameData(AVar.Name);
   ADeclIdx := ADeclIdx + 1;
