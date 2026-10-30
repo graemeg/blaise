@@ -58,7 +58,7 @@ type
   TPlistReader = class
   private
     FSrc: string;
-    FPos: Integer;
+    FPos: Int;
     procedure SkipSpace;
   public
     constructor Create(const ASrc: string);
@@ -73,7 +73,7 @@ type
 { The five predefined XML entities; any other '&' is an error. }
 function DecodeEntities(const ARaw: string): string;
 var
-  I, J: Integer;
+  I, J: Int;
   Ent: string;
 begin
   Result := '';
@@ -116,9 +116,9 @@ end;
 
 function TPlistReader.NextTag: string;
 var
-  Start: Integer;
+  Start: Int;
   Name: string;
-  I: Integer;
+  I: Int;
 begin
   while True do
   begin
@@ -161,7 +161,7 @@ end;
 
 function TPlistReader.ReadText: string;
 var
-  Start: Integer;
+  Start: Int;
   Raw: string;
 begin
   Start := FPos;
@@ -183,7 +183,7 @@ end;
 
 { ---- DER ---- }
 
-function DerLength(ALen: Integer): string;
+function DerLength(ALen: Int): string;
 begin
   if ALen < 128 then
     Result := Chr(ALen)
@@ -196,7 +196,7 @@ begin
       Chr(ALen and $FF);
 end;
 
-function DerTlv(ATag: Integer; const AContent: string): string;
+function DerTlv(ATag: Int; const AContent: string): string;
 begin
   Result := Chr(ATag) + DerLength(Length(AContent)) + AContent;
 end;
@@ -204,13 +204,13 @@ end;
 function DerInteger(AValue: Int64): string;
 var
   Bytes: string;
-  K: Integer;
+  K: Int;
 begin
   { minimal two's complement, big-endian: the eight bytes, then drop a
     leading byte while it only repeats the next byte's sign }
   Bytes := '';
   for K := 7 downto 0 do
-    Bytes := Bytes + Chr(Integer((AValue shr (8 * K)) and $FF));
+    Bytes := Bytes + Chr(Int32((AValue shr (8 * K)) and $FF));
   while (Length(Bytes) > 1) and
         (((StrAt(Bytes, 0) = 0) and (StrAt(Bytes, 1) < $80)) or
          ((StrAt(Bytes, 0) = $FF) and (StrAt(Bytes, 1) >= $80))) do
@@ -221,7 +221,7 @@ end;
 { True when A sorts before B, comparing bytes. }
 function ByteLess(const A, B: string): Boolean;
 var
-  I, N: Integer;
+  I, N: Int;
 begin
   N := Length(A);
   if Length(B) < N then
@@ -238,7 +238,7 @@ function ReadValue(AReader: TPlistReader; const ATag: string): string; forward;
 function ReadDict(AReader: TPlistReader): string;
 var
   Keys, Vals: array of string;
-  N, I, J: Integer;
+  N, I, J: Int;
   T, K, V: string;
 begin
   N := 0;

@@ -58,14 +58,14 @@ type
   public
     Kind:       TContainerSectionKind;
     Bytes:      array of Byte;
-    Count:      Integer;
-    Size:       Integer;       { for zerofill: logical size; else Count }
-    Align:      Integer;       { section alignment (power of 2) }
+    Count:      Int;
+    Size:       Int;       { for zerofill: logical size; else Count }
+    Align:      Int;       { section alignment (power of 2) }
     Relocs:     array of TContainerReloc;
-    RelocCount: Integer;
+    RelocCount: Int;
     constructor Create(AKind: TContainerSectionKind);
     destructor Destroy; override;
-    procedure PushByte(AVal: Integer);
+    procedure PushByte(AVal: Int);
     function AsString: string;
   end;
 
@@ -74,8 +74,8 @@ type
   public
     Name:      string;
     Section:   TContainerSectionKind;
-    Value:     Integer;
-    Size:      Integer;
+    Value:     Int;
+    Size:      Int;
     Bind:      TContainerSymBind;
     SType:     TContainerSymType;
     IsExtern:  Boolean;
@@ -88,7 +88,7 @@ type
   private
     FSections: array of TMachOWriterSection;
     FSymbols:  TList<TMachOWriterSym>;
-    FSymMap:   TDictionary<string, Integer>;
+    FSymMap:   TDictionary<string, Int>;
 
     function GetSection(AKind: TContainerSectionKind): TMachOWriterSection;
   public
@@ -96,24 +96,24 @@ type
     destructor Destroy; override;
 
     procedure SelectSection(AKind: TContainerSectionKind);
-    function Append(AKind: TContainerSectionKind; const ABytes: string): Integer;
-    procedure AppendByte(AKind: TContainerSectionKind; AVal: Integer);
-    procedure AppendWord(AKind: TContainerSectionKind; AVal: Integer);
-    procedure AppendDWord(AKind: TContainerSectionKind; AVal: Integer);
+    function Append(AKind: TContainerSectionKind; const ABytes: string): Int;
+    procedure AppendByte(AKind: TContainerSectionKind; AVal: Int);
+    procedure AppendWord(AKind: TContainerSectionKind; AVal: Int);
+    procedure AppendDWord(AKind: TContainerSectionKind; AVal: Int);
     procedure AppendQWord(AKind: TContainerSectionKind; AVal: Int64);
-    procedure AppendZeros(AKind: TContainerSectionKind; ACount: Integer);
-    procedure AlignSection(AKind: TContainerSectionKind; AAlign: Integer);
-    procedure ReserveBss(AKind: TContainerSectionKind; ASize: Integer);
-    function CurrentOffset(AKind: TContainerSectionKind): Integer;
-    procedure Patch32(AKind: TContainerSectionKind; AOffset: Integer;
-      AVal: Integer);
+    procedure AppendZeros(AKind: TContainerSectionKind; ACount: Int);
+    procedure AlignSection(AKind: TContainerSectionKind; AAlign: Int);
+    procedure ReserveBss(AKind: TContainerSectionKind; ASize: Int);
+    function CurrentOffset(AKind: TContainerSectionKind): Int;
+    procedure Patch32(AKind: TContainerSectionKind; AOffset: Int;
+      AVal: Int);
     function DefineSymbol(const AName: string; ASection: TContainerSectionKind;
-      AValue: Integer; ASize: Integer;
-      ABind: TContainerSymBind; ASType: TContainerSymType): Integer;
-    function ExternSymbol(const AName: string): Integer;
-    function FindSymbol(const AName: string): Integer;
-    procedure AddReloc(ASection: TContainerSectionKind; AOffset: Integer;
-      ASymIndex: Integer; ARType: TContainerRelocKind; AAddend: Int64);
+      AValue: Int; ASize: Int;
+      ABind: TContainerSymBind; ASType: TContainerSymType): Int;
+    function ExternSymbol(const AName: string): Int;
+    function FindSymbol(const AName: string): Int;
+    procedure AddReloc(ASection: TContainerSectionKind; AOffset: Int;
+      ASymIndex: Int; ARType: TContainerRelocKind; AAddend: Int64);
     function Finish: string;
     procedure WriteToFile(const APath: string);
   end;
@@ -161,11 +161,11 @@ type
     FTbssSize:  Int64;    { __DATA,__thread_bss zerofill size }
     FBssSize:   Int64;    { __DATA,__bss zerofill size }
     FOpdf:      string;   { __OPDF,__opdf bytes ('' = no __OPDF segment) }
-    FEntryTextOff: Integer;      { entry offset within __text }
+    FEntryTextOff: Int;      { entry offset within __text }
     FRebases:   TList<Int64>;    { vm addresses needing slide }
     FBindAddrs: TList<Int64>;    { vm addresses of dylib-bound pointers }
     FBindNames: TList<string>;   { parallel: bound symbol names }
-    FBindOrds:  TList<Integer>;  { parallel: two-level dylib ordinal (1 =
+    FBindOrds:  TList<Int>;  { parallel: two-level dylib ordinal (1 =
                                    libSystem, 2.. = AddDylib order) or
                                    BIND_SPECIAL_DYLIB_FLAT_LOOKUP }
     FDylibs:    TList<string>;   { install names of the dylibs after
@@ -195,7 +195,7 @@ type
       Must be set before the layout is queried (it adds a load command). }
     procedure SetOpdf(const ABytes: string);
     { Entry point, as an offset into the __text payload. }
-    procedure SetEntryTextOffset(AOff: Integer);
+    procedure SetEntryTextOffset(AOff: Int);
     { CodeDirectory identifier (conventionally the binary's name). }
     procedure SetIdentifier(const AName: string);
     { Sign with the entitlements in the XML plist APlistXml ('' = none).
@@ -210,15 +210,15 @@ type
     { Load the dylib whose install name is AInstallName after libSystem; the
       result is its two-level ordinal for AddBind.  Must precede any layout
       query (TextVmAddr), because each load command moves __TEXT. }
-    function AddDylib(const AInstallName: string): Integer;
+    function AddDylib(const AInstallName: string): Int;
     { Record a pointer slot at AVmAddr bound to symbol AName of the dylib
       with ordinal AOrdinal (1 = libSystem; BIND_SPECIAL_DYLIB_FLAT_LOOKUP
       lets dyld search every loaded image). }
     procedure AddBind(AVmAddr: Int64; const AName: string;
-      AOrdinal: Integer = 1);
+      AOrdinal: Int = 1);
     { The load commands' total size: fixed for the v1 configuration plus
       one LC_LOAD_DYLIB per AddDylib. }
-    function ExecSizeOfCmds: Integer;
+    function ExecSizeOfCmds: Int;
     { Record a defined global for the symbol table. }
     procedure AddGlobal(const AName: string; AVmAddr: Int64);
     { Virtual address the __text payload starts at (fixed for the v1
@@ -244,8 +244,8 @@ const
   LC_LOAD_DYLIB      = $0C;
   LC_LOAD_DYLINKER   = $0E;
   { $22/$28 or LC_REQ_DYLD ($80000000) — precomputed literals }
-  LC_DYLD_INFO_ONLY  = Integer($80000022);
-  LC_MAIN            = Integer($80000028);
+  LC_DYLD_INFO_ONLY  = Int32($80000022);
+  LC_MAIN            = Int32($80000028);
   LC_UNIXTHREAD      = $05;
 
   { legacy dyld-info opcodes }
@@ -271,8 +271,8 @@ procedure MachOSectionNames(AKind: TContainerSectionKind;
   out ASegName, ASectName: string);
 
 const
-  MH_MAGIC_64        = Integer($FEEDFACF);
-  CPU_TYPE_ARM64     = Integer($0100000C);
+  MH_MAGIC_64        = Int32($FEEDFACF);
+  CPU_TYPE_ARM64     = Int32($0100000C);
   CPU_SUBTYPE_ARM64_ALL = 0;
   MH_OBJECT          = 1;
   MH_EXECUTE         = 2;
@@ -291,7 +291,7 @@ const
   S_THREAD_LOCAL_REGULAR   = $11;
   S_THREAD_LOCAL_ZEROFILL  = $12;
   S_THREAD_LOCAL_VARIABLES = $13;
-  S_ATTR_PURE_INSTRUCTIONS = Integer($80000000);
+  S_ATTR_PURE_INSTRUCTIONS = Int32($80000000);
   S_ATTR_SOME_INSTRUCTIONS = $00000400;
 
   { nlist_64 n_type / n_desc }
@@ -395,7 +395,7 @@ begin
   end;
 end;
 
-function MachOSectionFlags(AKind: TContainerSectionKind): Integer;
+function MachOSectionFlags(AKind: TContainerSectionKind): Int;
 begin
   case AKind of
     cskText:   Result := S_REGULAR or S_ATTR_PURE_INSTRUCTIONS
@@ -414,9 +414,9 @@ begin
   Result := (AKind = cskBss) or (AKind = cskTbss);
 end;
 
-function MoAlignUp(AVal: Integer; AAlign: Integer): Integer;
+function MoAlignUp(AVal: Int; AAlign: Int): Int;
 var
-  Rem: Integer;
+  Rem: Int;
 begin
   if AAlign <= 1 then
   begin
@@ -430,9 +430,9 @@ begin
     Result := AVal + (AAlign - Rem);
 end;
 
-function Log2Align(AAlign: Integer): Integer;
+function Log2Align(AAlign: Int): Int;
 var
-  V: Integer;
+  V: Int;
 begin
   Result := 0;
   V := AAlign;
@@ -446,7 +446,7 @@ end;
 { 16-byte fixed-width name field (segname/sectname), NUL-padded. }
 procedure PushName16(ABuf: TByteBuf; const AName: string);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 15 do
   begin
@@ -478,10 +478,11 @@ begin
   inherited Destroy();
 end;
 
-procedure TMachOWriterSection.PushByte(AVal: Integer);
+procedure TMachOWriterSection.PushByte(AVal: Int);
 var
-  NewCap: Integer;
+  NewCap: Int;
 begin
+  CheckFieldFits(AVal, 8);
   if Count >= Length(Bytes) then
   begin
     NewCap := Length(Bytes) * 2;
@@ -505,7 +506,7 @@ end;
 
 constructor TMachOObjectWriter.Create;
 var
-  I: Integer;
+  I: Int;
 begin
   inherited Create();
   { sized from the enum — a new TContainerSectionKind member must never
@@ -514,12 +515,12 @@ begin
   for I := 0 to Ord(High(TContainerSectionKind)) do
     FSections[I] := nil;
   FSymbols := TList<TMachOWriterSym>.Create();
-  FSymMap  := TDictionary<string, Integer>.Create();
+  FSymMap  := TDictionary<string, Int>.Create();
 end;
 
 destructor TMachOObjectWriter.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Length(FSections) - 1 do
   begin
@@ -539,7 +540,7 @@ end;
 
 function TMachOObjectWriter.GetSection(AKind: TContainerSectionKind): TMachOWriterSection;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := Ord(AKind);
   if FSections[Idx] = nil then
@@ -553,10 +554,10 @@ begin
 end;
 
 function TMachOObjectWriter.Append(AKind: TContainerSectionKind;
-  const ABytes: string): Integer;
+  const ABytes: string): Int;
 var
   Sec: TMachOWriterSection;
-  I: Integer;
+  I: Int;
 begin
   Sec := GetSection(AKind);
   Result := Sec.Count;
@@ -564,24 +565,26 @@ begin
     Sec.PushByte(StrAt(ABytes, I));
 end;
 
-procedure TMachOObjectWriter.AppendByte(AKind: TContainerSectionKind; AVal: Integer);
+procedure TMachOObjectWriter.AppendByte(AKind: TContainerSectionKind; AVal: Int);
 begin
   GetSection(AKind).PushByte(AVal);
 end;
 
-procedure TMachOObjectWriter.AppendWord(AKind: TContainerSectionKind; AVal: Integer);
+procedure TMachOObjectWriter.AppendWord(AKind: TContainerSectionKind; AVal: Int);
 var
   Sec: TMachOWriterSection;
 begin
+  CheckFieldFits(AVal, 16);
   Sec := GetSection(AKind);
   Sec.PushByte(AVal and $FF);
   Sec.PushByte((AVal shr 8) and $FF);
 end;
 
-procedure TMachOObjectWriter.AppendDWord(AKind: TContainerSectionKind; AVal: Integer);
+procedure TMachOObjectWriter.AppendDWord(AKind: TContainerSectionKind; AVal: Int);
 var
   Sec: TMachOWriterSection;
 begin
+  CheckFieldFits(AVal, 32);
   Sec := GetSection(AKind);
   Sec.PushByte(AVal and $FF);
   Sec.PushByte((AVal shr 8) and $FF);
@@ -592,27 +595,27 @@ end;
 procedure TMachOObjectWriter.AppendQWord(AKind: TContainerSectionKind; AVal: Int64);
 var
   Sec: TMachOWriterSection;
-  I: Integer;
+  I: Int;
 begin
   Sec := GetSection(AKind);
   for I := 0 to 7 do
-    Sec.PushByte(Integer((AVal shr (I * 8)) and $FF));
+    Sec.PushByte(Int32((AVal shr (I * 8)) and $FF));
 end;
 
-procedure TMachOObjectWriter.AppendZeros(AKind: TContainerSectionKind; ACount: Integer);
+procedure TMachOObjectWriter.AppendZeros(AKind: TContainerSectionKind; ACount: Int);
 var
   Sec: TMachOWriterSection;
-  I: Integer;
+  I: Int;
 begin
   Sec := GetSection(AKind);
   for I := 1 to ACount do
     Sec.PushByte(0);
 end;
 
-procedure TMachOObjectWriter.AlignSection(AKind: TContainerSectionKind; AAlign: Integer);
+procedure TMachOObjectWriter.AlignSection(AKind: TContainerSectionKind; AAlign: Int);
 var
   Sec: TMachOWriterSection;
-  Pad, I: Integer;
+  Pad, I: Int;
 begin
   Sec := GetSection(AKind);
   if AAlign > Sec.Align then
@@ -629,7 +632,7 @@ begin
   end;
 end;
 
-procedure TMachOObjectWriter.ReserveBss(AKind: TContainerSectionKind; ASize: Integer);
+procedure TMachOObjectWriter.ReserveBss(AKind: TContainerSectionKind; ASize: Int);
 var
   Sec: TMachOWriterSection;
 begin
@@ -637,7 +640,7 @@ begin
   Sec.Size := Sec.Size + ASize;
 end;
 
-function TMachOObjectWriter.CurrentOffset(AKind: TContainerSectionKind): Integer;
+function TMachOObjectWriter.CurrentOffset(AKind: TContainerSectionKind): Int;
 var
   Sec: TMachOWriterSection;
 begin
@@ -649,10 +652,11 @@ begin
 end;
 
 procedure TMachOObjectWriter.Patch32(AKind: TContainerSectionKind;
-  AOffset: Integer; AVal: Integer);
+  AOffset: Int; AVal: Int);
 var
   Sec: TMachOWriterSection;
 begin
+  CheckFieldFits(AVal, 32);
   Sec := GetSection(AKind);
   Sec.Bytes[AOffset]     := AVal and $FF;
   Sec.Bytes[AOffset + 1] := (AVal shr 8) and $FF;
@@ -661,11 +665,11 @@ begin
 end;
 
 function TMachOObjectWriter.DefineSymbol(const AName: string;
-  ASection: TContainerSectionKind; AValue: Integer; ASize: Integer;
-  ABind: TContainerSymBind; ASType: TContainerSymType): Integer;
+  ASection: TContainerSectionKind; AValue: Int; ASize: Int;
+  ABind: TContainerSymBind; ASType: TContainerSymType): Int;
 var
   Sym: TMachOWriterSym;
-  Existing: Integer;
+  Existing: Int;
 begin
   if FSymMap.TryGetValue(AName, Existing) then
   begin
@@ -685,10 +689,10 @@ begin
   FSymMap.Add(AName, Result);
 end;
 
-function TMachOObjectWriter.ExternSymbol(const AName: string): Integer;
+function TMachOObjectWriter.ExternSymbol(const AName: string): Int;
 var
   Sym: TMachOWriterSym;
-  Existing: Integer;
+  Existing: Int;
 begin
   if FSymMap.TryGetValue(AName, Existing) then
   begin
@@ -708,9 +712,9 @@ begin
   FSymMap.Add(AName, Result);
 end;
 
-function TMachOObjectWriter.FindSymbol(const AName: string): Integer;
+function TMachOObjectWriter.FindSymbol(const AName: string): Int;
 var
-  Val: Integer;
+  Val: Int;
 begin
   if FSymMap.TryGetValue(AName, Val) then
     Result := Val
@@ -719,7 +723,7 @@ begin
 end;
 
 procedure TMachOObjectWriter.AddReloc(ASection: TContainerSectionKind;
-  AOffset: Integer; ASymIndex: Integer; ARType: TContainerRelocKind;
+  AOffset: Int; ASymIndex: Int; ARType: TContainerRelocKind;
   AAddend: Int64);
 var
   Sec: TMachOWriterSection;
@@ -738,7 +742,7 @@ end;
 
 { ---- Finish: serialise to MH_OBJECT bytes ------------------------------ }
 
-function RelocKindToMachO(ARType: TContainerRelocKind): Integer;
+function RelocKindToMachO(ARType: TContainerRelocKind): Int;
 begin
   case ARType of
     crkArm64Abs64:        Result := ARM64_RELOC_UNSIGNED;
@@ -756,7 +760,7 @@ begin
   end;
 end;
 
-function RelocIsPcRel(AMachType: Integer): Boolean;
+function RelocIsPcRel(AMachType: Int): Boolean;
 begin
   Result := (AMachType = ARM64_RELOC_BRANCH26)
     or (AMachType = ARM64_RELOC_PAGE21)
@@ -766,10 +770,10 @@ end;
 
 { One packed relocation_info record.  r_address, then the packed word:
   r_symbolnum:24 | r_pcrel:1 | r_length:2 | r_extern:1 | r_type:4. }
-procedure PushRelocInfo(ABuf: TByteBuf; AAddress, ASymNum: Integer;
-  APcRel: Boolean; ALength: Integer; AExtern: Boolean; AType: Integer);
+procedure PushRelocInfo(ABuf: TByteBuf; AAddress, ASymNum: Int;
+  APcRel: Boolean; ALength: Int; AExtern: Boolean; AType: Int);
 var
-  W: Integer;
+  W: Int;
 begin
   ABuf.PushU32(AAddress);
   W := ASymNum and $FFFFFF;
@@ -785,32 +789,32 @@ end;
 function TMachOObjectWriter.Finish: string;
 var
   Emitted: array of TMachOWriterSection;   { emission-ordered, non-empty }
-  NSects, I, J, K: Integer;
+  NSects, I, J, K: Int;
   Sec: TMachOWriterSection;
   SecAddr: array of Int64;                 { vm address per emitted section }
-  SecFileOff: array of Integer;            { file offset per emitted section }
-  SecRelOff: array of Integer;             { reloff per emitted section }
-  SecNReloc: array of Integer;             { encoded reloc count per section }
-  SectOrdinalOf: array of Integer;         { Ord(kind) -> 1-based ordinal }
+  SecFileOff: array of Int;            { file offset per emitted section }
+  SecRelOff: array of Int;             { reloff per emitted section }
+  SecNReloc: array of Int;             { encoded reloc count per section }
+  SectOrdinalOf: array of Int;         { Ord(kind) -> 1-based ordinal }
   VmOff: Int64;
-  FileOff, DataStart: Integer;
-  SizeOfCmds, NCmds: Integer;
-  Order: TList<Integer>;                   { old symbol index, serial order }
-  NewIdxOf: array of Integer;              { old index -> serialised index }
-  NLocal, NExtDef, NUndef: Integer;
+  FileOff, DataStart: Int;
+  SizeOfCmds, NCmds: Int;
+  Order: TList<Int>;                   { old symbol index, serial order }
+  NewIdxOf: array of Int;              { old index -> serialised index }
+  NLocal, NExtDef, NUndef: Int;
   Sym: TMachOWriterSym;
   StrTab: TByteBuf;
   SymTabBuf: TByteBuf;
   RelocBuf: TByteBuf;
   Head: TByteBuf;
-  StrOff: Integer;
-  NType, NSect, NDesc: Integer;
+  StrOff: Int;
+  NType, NSect, NDesc: Int;
   NValue: Int64;
-  MachType, RelLen: Integer;
+  MachType, RelLen: Int;
   R: TContainerReloc;
   V: Int64;
   SegName, SectName: string;
-  SymOff, StrTabOff: Integer;
+  SymOff, StrTabOff: Int;
   FileSizeTotal: Int64;
   VmSizeTotal: Int64;
 begin
@@ -832,7 +836,7 @@ begin
   end;
 
   { ---- order symbols: locals, externally-defined, undefined ---- }
-  Order := TList<Integer>.Create();
+  Order := TList<Int>.Create();
   StrTab := TByteBuf.Create();
   SymTabBuf := TByteBuf.Create();
   RelocBuf := TByteBuf.Create();
@@ -881,7 +885,7 @@ begin
     for I := 0 to NSects - 1 do
     begin
       Sec := Emitted[I];
-      VmOff := MoAlignUp(Integer(VmOff), Sec.Align);
+      VmOff := MoAlignUp(Int32(VmOff), Sec.Align);
       SecAddr[I] := VmOff;
       if IsZeroFill(Sec.Kind) then
       begin
@@ -925,7 +929,7 @@ begin
               V := V or (Int64(Sec.Bytes[R.Offset + K]) shl (K * 8));
             V := V + R.Addend;
             for K := 0 to 7 do
-              Sec.Bytes[R.Offset + K] := Integer((V shr (K * 8)) and $FF);
+              Sec.Bytes[R.Offset + K] := Int32((V shr (K * 8)) and $FF);
           end
           else if (MachType = ARM64_RELOC_BRANCH26)
                or (MachType = ARM64_RELOC_PAGE21)
@@ -937,7 +941,7 @@ begin
                 + IntToStr(R.Addend));
             { ADDEND pseudo-relocation immediately precedes its target. }
             PushRelocInfo(RelocBuf, R.Offset,
-              Integer(R.Addend) and $FFFFFF, False, 2, False,
+              Int32(R.Addend) and $FFFFFF, False, 2, False,
               ARM64_RELOC_ADDEND);
             SecNReloc[I] := SecNReloc[I] + 1;
           end
@@ -1143,8 +1147,8 @@ const
     kernel demands at least an ad-hoc CodeDirectory with SHA-256 page
     hashes covering the whole file up to the signature itself. }
   LC_CODE_SIGNATURE = $1D;
-  CSMAGIC_EMBEDDED_SIGNATURE = Integer($FADE0CC0);
-  CSMAGIC_CODEDIRECTORY      = Integer($FADE0C02);
+  CSMAGIC_EMBEDDED_SIGNATURE = Int32($FADE0CC0);
+  CSMAGIC_CODEDIRECTORY      = Int32($FADE0C02);
   CS_ADHOC = $2;
   CS_EXECSEG_MAIN_BINARY = $1;
   CS_HASHTYPE_SHA256 = 2;
@@ -1152,19 +1156,19 @@ const
   CD_HEADER_SIZE = 88;    { version $20400 layout }
   { entitlements (SetEntitlements): three more blobs in the SuperBlob, and
     the CodeDirectory hashes them in special slots -1..-7 }
-  CSMAGIC_REQUIREMENTS         = Integer($FADE0C01);
-  CSMAGIC_EMBEDDED_ENTITLEMENTS = Integer($FADE7171);
-  CSMAGIC_EMBEDDED_DER_ENTITLEMENTS = Integer($FADE7172);
+  CSMAGIC_REQUIREMENTS         = Int32($FADE0C01);
+  CSMAGIC_EMBEDDED_ENTITLEMENTS = Int32($FADE7171);
+  CSMAGIC_EMBEDDED_DER_ENTITLEMENTS = Int32($FADE7172);
   CSSLOT_REQUIREMENTS = 2;
   CSSLOT_ENTITLEMENTS = 5;
   CSSLOT_DER_ENTITLEMENTS = 7;
 
 procedure PushUleb(ABuf: TByteBuf; AVal: Int64);
 var
-  B: Integer;
+  B: Int;
 begin
   repeat
-    B := Integer(AVal and $7F);
+    B := Int32(AVal and $7F);
     AVal := AVal shr 7;
     if AVal <> 0 then
       B := B or $80;
@@ -1194,7 +1198,7 @@ begin
   FRebases := TList<Int64>.Create();
   FBindAddrs := TList<Int64>.Create();
   FBindNames := TList<string>.Create();
-  FBindOrds := TList<Integer>.Create();
+  FBindOrds := TList<Int>.Create();
   FDylibs := TList<string>.Create();
   FGlobalNames := TList<string>.Create();
   FGlobalAddrs := TList<Int64>.Create();
@@ -1255,7 +1259,7 @@ begin
   FOpdf := ABytes;
 end;
 
-procedure TMachOExecWriter.SetEntryTextOffset(AOff: Integer);
+procedure TMachOExecWriter.SetEntryTextOffset(AOff: Int);
 begin
   FEntryTextOff := AOff;
 end;
@@ -1278,7 +1282,7 @@ begin
   FRebases.Add(AVmAddr);
 end;
 
-function TMachOExecWriter.AddDylib(const AInstallName: string): Integer;
+function TMachOExecWriter.AddDylib(const AInstallName: string): Int;
 begin
   if FLayoutTaken then
     raise EMachOWriter.Create('machowriter: AddDylib after the layout was ' +
@@ -1288,7 +1292,7 @@ begin
 end;
 
 procedure TMachOExecWriter.AddBind(AVmAddr: Int64; const AName: string;
-  AOrdinal: Integer);
+  AOrdinal: Int);
 begin
   FBindAddrs.Add(AVmAddr);
   FBindNames.Add(AName);
@@ -1297,14 +1301,14 @@ end;
 
 { LC_LOAD_DYLIB: 24-byte dylib_command, then the NUL-terminated install
   name, padded to 8. }
-function DylibCmdSize(const AInstallName: string): Integer;
+function DylibCmdSize(const AInstallName: string): Int;
 begin
   Result := MoAlignUp(24 + Length(AInstallName) + 1, 8);
 end;
 
-function TMachOExecWriter.ExecSizeOfCmds: Integer;
+function TMachOExecWriter.ExecSizeOfCmds: Int;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := EXEC_SIZEOFCMDS;
   if FOpdf <> '' then
@@ -1328,7 +1332,7 @@ end;
 
 function TMachOExecWriter.ComputeLayout: TMachOExecLayout;
 var
-  TextOff, ConstOff: Integer;
+  TextOff, ConstOff: Int;
   TextSegFileSize, DataOff: Int64;
 begin
   FLayoutTaken := True;
@@ -1355,10 +1359,10 @@ end;
 
 function Be32(AVal: Int64): string;
 begin
-  Result := Chr(Integer((AVal shr 24) and $FF))
-    + Chr(Integer((AVal shr 16) and $FF))
-    + Chr(Integer((AVal shr 8) and $FF))
-    + Chr(Integer(AVal and $FF));
+  Result := Chr(Int32((AVal shr 24) and $FF))
+    + Chr(Int32((AVal shr 16) and $FF))
+    + Chr(Int32((AVal shr 8) and $FF))
+    + Chr(Int32(AVal and $FF));
 end;
 
 function Be64(AVal: Int64): string;
@@ -1370,7 +1374,7 @@ function TMachOExecWriter.Finish: string;
 var
   Head, Reb, Bind, SymT, StrT: TByteBuf;
   L: TMachOExecLayout;
-  TextOff, ConstOff: Integer;
+  TextOff, ConstOff: Int;
   TextSegFileSize: Int64;
   DataOff, TvarsOff, TdataOff, DataFileEnd: Int64;
   DataVm, BssVm, DataSegVmSize, DataSegFileSize: Int64;
@@ -1378,22 +1382,22 @@ var
   OpdfOff, OpdfSegSize: Int64;
   RebOff, BindOff, SymOff, StrOff: Int64;
   SigOff, SigSize: Int64;
-  NSlots, PageLen: Integer;
+  NSlots, PageLen: Int;
   Unsigned, Blob, Page: string;
   ReqBlob, EntBlob, DerBlob: string;
-  NSpecial, NBlobs, CdLen, Off: Integer;
-  I: Integer;
+  NSpecial, NBlobs, CdLen, Off: Int;
+  I: Int;
   A: Int64;
-  StrIdx: Integer;
-  NSectOf: Integer;
-  HdrFlags: Integer;
-  Ord_: Integer;
+  StrIdx: Int;
+  NSectOf: Int;
+  HdrFlags: Int;
+  Ord_: Int;
 begin
   if FIdent = '' then
     FIdent := 'blaise';
   L := ComputeLayout();
-  TextOff := Integer(L.TextVm - MACHO_EXEC_BASE);
-  ConstOff := Integer(L.ConstVm - MACHO_EXEC_BASE);
+  TextOff := Int32(L.TextVm - MACHO_EXEC_BASE);
+  ConstOff := Int32(L.ConstVm - MACHO_EXEC_BASE);
   TextSegFileSize := MoAlignUp64(ConstOff + Length(FConst), MACHO_PAGE_SIZE);
   DataOff := L.DataVm - MACHO_EXEC_BASE;
   DataVm := L.DataVm;
@@ -1509,7 +1513,7 @@ begin
     { the ad-hoc signature trails everything: 16-aligned, covering the
       file up to its own start (codeLimit = SigOff) }
     SigOff := MoAlignUp64(StrOff + StrT.Count, 16);
-    NSlots := Integer((SigOff + 4095) div 4096);
+    NSlots := Int32((SigOff + 4095) div 4096);
     NSpecial := 0;
     NBlobs := 1;
     ReqBlob := '';
@@ -1612,7 +1616,7 @@ begin
     PushName16(Head, '__DATA');
     Head.PushU64(DataVm);
     Head.PushU64(Length(FData));
-    Head.PushU32(Integer(DataOff));
+    Head.PushU32(Int32(DataOff));
     Head.PushU32(3);   { 2^3 = 8 }
     Head.PushU32(0);
     Head.PushU32(0);
@@ -1624,7 +1628,7 @@ begin
     PushName16(Head, '__DATA');
     Head.PushU64(L.TvarsVm);
     Head.PushU64(Length(FTvars));
-    Head.PushU32(Integer(TvarsOff));
+    Head.PushU32(Int32(TvarsOff));
     Head.PushU32(3);
     Head.PushU32(0);
     Head.PushU32(0);
@@ -1636,7 +1640,7 @@ begin
     PushName16(Head, '__DATA');
     Head.PushU64(L.TdataVm);
     Head.PushU64(Length(FTdata));
-    Head.PushU32(Integer(TdataOff));
+    Head.PushU32(Int32(TdataOff));
     Head.PushU32(3);
     Head.PushU32(0);
     Head.PushU32(0);
@@ -1687,7 +1691,7 @@ begin
       PushName16(Head, '__OPDF');
       Head.PushU64(L.OpdfVm);
       Head.PushU64(Length(FOpdf));
-      Head.PushU32(Integer(OpdfOff));
+      Head.PushU32(Int32(OpdfOff));
       Head.PushU32(0);   { byte-aligned stream }
       Head.PushU32(0);
       Head.PushU32(0);
@@ -1713,9 +1717,9 @@ begin
     { ---- LC_DYLD_INFO_ONLY ---- }
     Head.PushU32(LC_DYLD_INFO_ONLY);
     Head.PushU32(DYLDINFO_CMD_SIZE);
-    if Reb.Count > 0 then Head.PushU32(Integer(RebOff)) else Head.PushU32(0);
+    if Reb.Count > 0 then Head.PushU32(Int32(RebOff)) else Head.PushU32(0);
     Head.PushU32(Reb.Count);
-    if Bind.Count > 0 then Head.PushU32(Integer(BindOff)) else Head.PushU32(0);
+    if Bind.Count > 0 then Head.PushU32(Int32(BindOff)) else Head.PushU32(0);
     Head.PushU32(Bind.Count);
     Head.PushU32(0); Head.PushU32(0);   { weak bind }
     Head.PushU32(0); Head.PushU32(0);   { lazy bind }
@@ -1724,9 +1728,9 @@ begin
     { ---- LC_SYMTAB ---- }
     Head.PushU32(LC_SYMTAB);
     Head.PushU32(SYMTAB_CMD_SIZE);
-    Head.PushU32(Integer(SymOff));
+    Head.PushU32(Int32(SymOff));
     Head.PushU32(FGlobalNames.Count);
-    Head.PushU32(Integer(StrOff));
+    Head.PushU32(Int32(StrOff));
     Head.PushU32(StrT.Count);
 
     { ---- LC_DYSYMTAB ---- }
@@ -1801,8 +1805,8 @@ begin
     { ---- LC_CODE_SIGNATURE (must stay the LAST command) ---- }
     Head.PushU32(LC_CODE_SIGNATURE);
     Head.PushU32(16);
-    Head.PushU32(Integer(SigOff));
-    Head.PushU32(Integer(SigSize));
+    Head.PushU32(Int32(SigOff));
+    Head.PushU32(Int32(SigSize));
 
     if Head.Count <> MACH_HEADER_SIZE + ExecSizeOfCmds() then
       raise EMachOWriter.Create('machowriter: exec load-command size mismatch: '
@@ -1814,23 +1818,23 @@ begin
     Head.AppendBytes(FText);
     Head.PadTo(ConstOff);
     Head.AppendBytes(FConst);
-    Head.PadTo(Integer(DataOff));
+    Head.PadTo(Int32(DataOff));
     Head.AppendBytes(FData);
-    Head.PadTo(Integer(TvarsOff));
+    Head.PadTo(Int32(TvarsOff));
     Head.AppendBytes(FTvars);
-    Head.PadTo(Integer(TdataOff));
+    Head.PadTo(Int32(TdataOff));
     Head.AppendBytes(FTdata);
     if FOpdf <> '' then
     begin
-      Head.PadTo(Integer(OpdfOff));
+      Head.PadTo(Int32(OpdfOff));
       Head.AppendBytes(FOpdf);
     end;
-    Head.PadTo(Integer(LinkOff));
+    Head.PadTo(Int32(LinkOff));
     Head.AppendBuf(Reb);
     Head.AppendBuf(Bind);
     Head.AppendBuf(SymT);
     Head.AppendBuf(StrT);
-    Head.PadTo(Integer(SigOff));
+    Head.PadTo(Int32(SigOff));
 
     { ---- ad-hoc signature: a SuperBlob holding one CodeDirectory ----
       Everything BIG-endian.  The page hashes cover [0, SigOff) of the
@@ -1888,7 +1892,7 @@ begin
     begin
       PageLen := 4096;
       if Int64(I) * 4096 + PageLen > SigOff then
-        PageLen := Integer(SigOff - Int64(I) * 4096);
+        PageLen := Int32(SigOff - Int64(I) * 4096);
       Page := Copy(Unsigned, I * 4096, PageLen);
       Blob := Blob + Sha256(Page);
     end;

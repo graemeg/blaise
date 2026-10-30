@@ -46,7 +46,13 @@ unit blaise.container.writer;
 
 interface
 
+uses
+  SysUtils;
+
 type
+  { A value too wide for the object-file field it is written to. }
+  EContainerField = class(Exception);
+
   { Abstract section identity.  The writer owns the container-specific
     section name, flags, and alignment defaults. }
   TContainerSectionKind = (
@@ -110,8 +116,8 @@ type
   );
 
   TContainerReloc = record
-    Offset:   Integer;             { byte offset within the section }
-    SymIndex: Integer;             { index into the writer's symbol table }
+    Offset:   Int;             { byte offset within the section }
+    SymIndex: Int;             { index into the writer's symbol table }
     RType:    TContainerRelocKind; { relocation kind }
     Addend:   Int64;               { addend (RELA-style) }
   end;
@@ -124,14 +130,14 @@ type
   TByteBuf = class
   public
     Bytes: array of Byte;
-    Count: Integer;
+    Count: Int;
     constructor Create;
     destructor Destroy; override;
-    procedure PushByte(AVal: Integer);
-    procedure PushU16(AVal: Integer);
-    procedure PushU32(AVal: Integer);
+    procedure PushByte(AVal: Int);
+    procedure PushU16(AVal: Int);
+    procedure PushU32(AVal: Int);
     procedure PushU64(AVal: Int64);
-    procedure PadTo(ALen: Integer);        { append zeros until Count = ALen }
+    procedure PadTo(ALen: Int);        { append zeros until Count = ALen }
     procedure AppendBytes(const ASrc: string);   { bulk-copy a byte string }
     procedure AppendBuf(ASrc: TByteBuf);          { bulk-copy another buffer }
     function AsString: string;
@@ -144,42 +150,42 @@ type
 
     { Append raw bytes to a section.  Returns the offset at which the
       bytes were placed. }
-    function Append(AKind: TContainerSectionKind; const ABytes: string): Integer;
+    function Append(AKind: TContainerSectionKind; const ABytes: string): Int;
     { Append a single byte. }
-    procedure AppendByte(AKind: TContainerSectionKind; AVal: Integer);
+    procedure AppendByte(AKind: TContainerSectionKind; AVal: Int);
     { Append a 16-bit little-endian value. }
-    procedure AppendWord(AKind: TContainerSectionKind; AVal: Integer);
+    procedure AppendWord(AKind: TContainerSectionKind; AVal: Int);
     { Append a 32-bit little-endian value. }
-    procedure AppendDWord(AKind: TContainerSectionKind; AVal: Integer);
+    procedure AppendDWord(AKind: TContainerSectionKind; AVal: Int);
     { Append a 64-bit little-endian value. }
     procedure AppendQWord(AKind: TContainerSectionKind; AVal: Int64);
     { Append N zero bytes. }
-    procedure AppendZeros(AKind: TContainerSectionKind; ACount: Integer);
+    procedure AppendZeros(AKind: TContainerSectionKind; ACount: Int);
     { Pad the section to the next multiple of AAlign. }
-    procedure AlignSection(AKind: TContainerSectionKind; AAlign: Integer);
+    procedure AlignSection(AKind: TContainerSectionKind; AAlign: Int);
     { Reserve ASize bytes in a BSS/TBSS section (no data emitted). }
-    procedure ReserveBss(AKind: TContainerSectionKind; ASize: Integer);
+    procedure ReserveBss(AKind: TContainerSectionKind; ASize: Int);
 
     { Current write offset in a section. }
-    function CurrentOffset(AKind: TContainerSectionKind): Integer;
+    function CurrentOffset(AKind: TContainerSectionKind): Int;
 
     { Patch a 32-bit value at an existing offset in a section. }
-    procedure Patch32(AKind: TContainerSectionKind; AOffset: Integer;
-      AVal: Integer);
+    procedure Patch32(AKind: TContainerSectionKind; AOffset: Int;
+      AVal: Int);
 
     { Define a symbol.  Returns the symbol index. }
     function DefineSymbol(const AName: string; ASection: TContainerSectionKind;
-      AValue: Integer; ASize: Integer;
-      ABind: TContainerSymBind; ASType: TContainerSymType): Integer;
+      AValue: Int; ASize: Int;
+      ABind: TContainerSymBind; ASType: TContainerSymType): Int;
     { Reference an external (undefined) symbol.  Returns the symbol index.
       Idempotent — returns the existing index if already declared. }
-    function ExternSymbol(const AName: string): Integer;
+    function ExternSymbol(const AName: string): Int;
     { Look up a symbol by name.  Returns index or -1. }
-    function FindSymbol(const AName: string): Integer;
+    function FindSymbol(const AName: string): Int;
 
     { Add a relocation to a section. }
-    procedure AddReloc(ASection: TContainerSectionKind; AOffset: Integer;
-      ASymIndex: Integer; ARType: TContainerRelocKind; AAddend: Int64);
+    procedure AddReloc(ASection: TContainerSectionKind; AOffset: Int;
+      ASymIndex: Int; ARType: TContainerRelocKind; AAddend: Int64);
 
     { Serialise the complete object to a byte string. }
     function Finish: string;
@@ -188,7 +194,21 @@ type
     procedure WriteToFile(const APath: string);
   end;
 
+{ Raise EContainerField unless AVal fits an ABits-bit field (8, 16 or 32),
+  read as signed or unsigned: -1 and $FFFFFFFF both fill a 32-bit field.  A
+  count or an offset that has outgrown its field is an error, not a silent
+  truncation. }
+procedure CheckFieldFits(AVal: Int; ABits: Int);
+
 implementation
+
+procedure CheckFieldFits(AVal: Int; ABits: Int);
+begin
+  if (AVal < -(Int64(1) shl (ABits - 1))) or
+     (AVal > (Int64(1) shl ABits) - 1) then
+    raise EContainerField.Create(Format(
+      'value %d does not fit a %d-bit object-file field', [AVal, ABits]));
+end;
 
 { Bulk memory copy, used for O(n) buffer appends and materialisation. }
 procedure _cw_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
@@ -208,10 +228,11 @@ begin
   inherited Destroy();
 end;
 
-procedure TByteBuf.PushByte(AVal: Integer);
+procedure TByteBuf.PushByte(AVal: Int);
 var
-  NewCap: Integer;
+  NewCap: Int;
 begin
+  CheckFieldFits(AVal, 8);
   if Count >= Length(Bytes) then
   begin
     NewCap := Length(Bytes) * 2;
@@ -223,14 +244,16 @@ begin
   Count := Count + 1;
 end;
 
-procedure TByteBuf.PushU16(AVal: Integer);
+procedure TByteBuf.PushU16(AVal: Int);
 begin
+  CheckFieldFits(AVal, 16);
   PushByte(AVal and $FF);
   PushByte((AVal shr 8) and $FF);
 end;
 
-procedure TByteBuf.PushU32(AVal: Integer);
+procedure TByteBuf.PushU32(AVal: Int);
 begin
+  CheckFieldFits(AVal, 32);
   PushByte(AVal and $FF);
   PushByte((AVal shr 8) and $FF);
   PushByte((AVal shr 16) and $FF);
@@ -239,13 +262,13 @@ end;
 
 procedure TByteBuf.PushU64(AVal: Int64);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to 7 do
-    PushByte(Integer((AVal shr (I * 8)) and $FF));
+    PushByte(Int32((AVal shr (I * 8)) and $FF));
 end;
 
-procedure TByteBuf.PadTo(ALen: Integer);
+procedure TByteBuf.PadTo(ALen: Int);
 begin
   while Count < ALen do
     PushByte(0);
@@ -253,7 +276,7 @@ end;
 
 procedure TByteBuf.AppendBytes(const ASrc: string);
 var
-  N, NewCap: Integer;
+  N, NewCap: Int;
 begin
   N := Length(ASrc);
   if N = 0 then Exit;
@@ -271,7 +294,7 @@ end;
 
 procedure TByteBuf.AppendBuf(ASrc: TByteBuf);
 var
-  N, NewCap: Integer;
+  N, NewCap: Int;
 begin
   N := ASrc.Count;
   if N = 0 then Exit;

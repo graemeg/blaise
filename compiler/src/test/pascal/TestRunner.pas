@@ -196,6 +196,7 @@ uses
   cp.test.config,
   cp.test.assembler,
   cp.test.macho,
+  cp.test.containerwriter,
   cp.test.asmarm64,
   cp.test.arm64,
   cp.test.cli,

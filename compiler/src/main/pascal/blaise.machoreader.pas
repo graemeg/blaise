@@ -30,12 +30,12 @@ type
 
   TMoReloc = class
   public
-    Address:   Integer;   { r_address — offset within the section }
-    SymbolNum: Integer;   { r_symbolnum (24-bit) }
+    Address:   Int;   { r_address — offset within the section }
+    SymbolNum: Int;   { r_symbolnum (24-bit) }
     PcRel:     Boolean;
-    Length_:   Integer;   { r_length: 0=1,1=2,2=4,3=8 bytes }
+    Length_:   Int;   { r_length: 0=1,1=2,2=4,3=8 bytes }
     IsExtern:  Boolean;
-    RType:     Integer;   { ARM64_RELOC_* }
+    RType:     Int;   { ARM64_RELOC_* }
   end;
 
   TMoSection = class
@@ -44,9 +44,9 @@ type
     SectName: string;
     Addr:     Int64;
     Size:     Int64;
-    Offset:   Integer;
-    Align:    Integer;    { log2 }
-    Flags:    Integer;
+    Offset:   Int;
+    Align:    Int;    { log2 }
+    Flags:    Int;
     Relocs:   TList<TMoReloc>;
     Data:     string;     { file-backed bytes ('' for zerofill) }
     constructor Create;
@@ -56,9 +56,9 @@ type
   TMoSymbol = class
   public
     Name:  string;
-    NType: Integer;
-    Sect:  Integer;       { 1-based section ordinal; 0 = NO_SECT }
-    Desc:  Integer;
+    NType: Int;
+    Sect:  Int;       { 1-based section ordinal; 0 = NO_SECT }
+    Desc:  Int;
     Value: Int64;
     function IsExt: Boolean;
     function IsUndef: Boolean;
@@ -71,41 +71,41 @@ type
     VmSize:   Int64;
     FileOff:  Int64;
     FileSize: Int64;
-    MaxProt:  Integer;
-    InitProt: Integer;
-    NSects:   Integer;
+    MaxProt:  Int;
+    InitProt: Int;
+    NSects:   Int;
   end;
 
   { A raw load command: enough to assert presence/shape of commands the
     reader does not model structurally (LC_MAIN, LC_LOAD_DYLIB, ...). }
   TMoLoadCmd = class
   public
-    Cmd:     Integer;
-    CmdSize: Integer;
-    Offset:  Integer;     { file offset of the command header }
+    Cmd:     Int;
+    CmdSize: Int;
+    Offset:  Int;     { file offset of the command header }
   end;
 
   TMachOFile = class
   public
     SourceName: string;
-    CpuType:    Integer;
-    CpuSubtype: Integer;
-    FileType:   Integer;
-    Flags:      Integer;
+    CpuType:    Int;
+    CpuSubtype: Int;
+    FileType:   Int;
+    Flags:      Int;
     LoadCmds:   TList<TMoLoadCmd>;
     Segments:   TList<TMoSegment>;
     Sections:   TList<TMoSection>;   { across all segments, in file order }
     Symbols:    TList<TMoSymbol>;
     { LC_DYSYMTAB ranges (all -1 when the command is absent). }
-    ILocalSym, NLocalSym: Integer;
-    IExtDefSym, NExtDefSym: Integer;
-    IUndefSym, NUndefSym: Integer;
+    ILocalSym, NLocalSym: Int;
+    IExtDefSym, NExtDefSym: Int;
+    IUndefSym, NUndefSym: Int;
     Raw: string;                      { the whole image }
     constructor Create;
     destructor Destroy; override;
     function FindSection(const ASegName, ASectName: string): TMoSection;
     function FindSegment(const AName: string): TMoSegment;
-    function FindLoadCmd(ACmd: Integer): TMoLoadCmd;
+    function FindLoadCmd(ACmd: Int): TMoLoadCmd;
     function FindSymbol(const AName: string): TMoSymbol;
   end;
 
@@ -118,12 +118,12 @@ implementation
 uses
   uStrCompat, blaise.machowriter;
 
-function RdU16(const ABuf: string; AOff: Integer): Integer;
+function RdU16(const ABuf: string; AOff: Int): Int32;
 begin
   Result := StrAt(ABuf, AOff) or (StrAt(ABuf, AOff + 1) shl 8);
 end;
 
-function RdU32(const ABuf: string; AOff: Integer): Integer;
+function RdU32(const ABuf: string; AOff: Int): Int32;
 begin
   Result := StrAt(ABuf, AOff)
          or (StrAt(ABuf, AOff + 1) shl 8)
@@ -131,7 +131,7 @@ begin
          or (StrAt(ABuf, AOff + 3) shl 24);
 end;
 
-function RdU64(const ABuf: string; AOff: Integer): Int64;
+function RdU64(const ABuf: string; AOff: Int): Int64;
 var
   Lo, Hi: Int64;
 begin
@@ -141,9 +141,9 @@ begin
 end;
 
 { Fixed 16-byte NUL-padded name field. }
-function RdName16(const ABuf: string; AOff: Integer): string;
+function RdName16(const ABuf: string; AOff: Int): string;
 var
-  I, C: Integer;
+  I, C: Int;
 begin
   Result := '';
   for I := 0 to 15 do
@@ -154,9 +154,9 @@ begin
   end;
 end;
 
-function RdStrZ(const ABuf: string; AOff: Integer): string;
+function RdStrZ(const ABuf: string; AOff: Int): string;
 var
-  P, C: Integer;
+  P, C: Int;
 begin
   Result := '';
   P := AOff;
@@ -179,7 +179,7 @@ end;
 
 destructor TMoSection.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Relocs.Count - 1 do
     Relocs.Get(I).Free();
@@ -211,7 +211,7 @@ end;
 
 destructor TMachOFile.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to LoadCmds.Count - 1 do
     LoadCmds.Get(I).Free();
@@ -230,7 +230,7 @@ end;
 
 function TMachOFile.FindSection(const ASegName, ASectName: string): TMoSection;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Sections.Count - 1 do
   begin
@@ -246,7 +246,7 @@ end;
 
 function TMachOFile.FindSegment(const AName: string): TMoSegment;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Segments.Count - 1 do
   begin
@@ -259,9 +259,9 @@ begin
   Result := nil;
 end;
 
-function TMachOFile.FindLoadCmd(ACmd: Integer): TMoLoadCmd;
+function TMachOFile.FindLoadCmd(ACmd: Int): TMoLoadCmd;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to LoadCmds.Count - 1 do
   begin
@@ -276,7 +276,7 @@ end;
 
 function TMachOFile.FindSymbol(const AName: string): TMoSymbol;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Symbols.Count - 1 do
   begin
@@ -294,18 +294,18 @@ end;
 function ParseMachO(const ABytes: string; const ASourceName: string): TMachOFile;
 var
   F: TMachOFile;
-  NCmds, SizeOfCmds: Integer;
-  Off: Integer;
-  Cmd, CmdSize: Integer;
+  NCmds, SizeOfCmds: Int;
+  Off: Int;
+  Cmd, CmdSize: Int;
   LC: TMoLoadCmd;
   Seg: TMoSegment;
   Sec: TMoSection;
   Rel: TMoReloc;
   Sym: TMoSymbol;
-  I, J, NSects: Integer;
-  SecOff: Integer;
-  RelOff, NReloc, W: Integer;
-  SymOff, NSyms, StrOff: Integer;
+  I, J, NSects: Int;
+  SecOff: Int;
+  RelOff, NReloc, W: Int;
+  SymOff, NSyms, StrOff: Int;
 begin
   if Length(ABytes) < 32 then
     raise EMachOReader.Create(ASourceName + ': too small for a Mach-O header');
@@ -373,7 +373,7 @@ begin
         Sec.Flags    := RdU32(ABytes, SecOff + 64);
         if (Sec.Offset > 0) and (Sec.Size > 0) and
            (Sec.Offset + Sec.Size <= Length(ABytes)) then
-          Sec.Data := Copy(ABytes, Sec.Offset, Integer(Sec.Size))
+          Sec.Data := Copy(ABytes, Sec.Offset, Int32(Sec.Size))
         else
           Sec.Data := '';
         while NReloc > 0 do

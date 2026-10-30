@@ -66,20 +66,20 @@ type
     FTbssSize, FBssSize: Int64;
     { per input section (flat, in FSecFirst[obj]+sectIdx order):
       which stream (-1 = dropped) and the base offset inside it }
-    FSecStream: TList<Integer>;
+    FSecStream: TList<Int>;
     FSecBase: TList<Int64>;
-    FSecFirst: TList<Integer>;         { first flat index per object }
+    FSecFirst: TList<Int>;         { first flat index per object }
     { defined external symbols: name -> (flat section index, offset) }
     FDefNames: TList<string>;
-    FDefSec: TList<Integer>;           { flat section index }
+    FDefSec: TList<Int>;           { flat section index }
     FDefOff: TList<Int64>;             { offset within that section }
     FDefWeak: TList<Boolean>;
-    FDefIndex: TDictionary<string, Integer>;
+    FDefIndex: TDictionary<string, Int>;
     { imports (undefined after merge): name -> got slot ordinal or -1 }
     FImpNames: TList<string>;
-    FImpGot: TList<Integer>;           { got slot index; -1 = data-only }
-    FImpIndex: TDictionary<string, Integer>;
-    FNumGot: Integer;
+    FImpGot: TList<Int>;           { got slot index; -1 = data-only }
+    FImpIndex: TDictionary<string, Int>;
+    FNumGot: Int;
     FStubBase: Int64;                  { offset of stub 0 within FText }
     FGotBase: Int64;                   { offset of got slot 0 within FData }
     FWriter: TMachOExecWriter;
@@ -93,17 +93,17 @@ type
     procedure CollectImports;
     procedure SynthesiseStubs;
     procedure ApplyFixups;
-    function StreamOfSection(ASect: TMoSection): Integer;
-    function SectionVm(AFlat: Integer): Int64;
-    function StreamVm(AStream: Integer): Int64;
-    function DefinedVm(AIdx: Integer): Int64;
-    function ImportOf(const AName: string): Integer;
+    function StreamOfSection(ASect: TMoSection): Int;
+    function SectionVm(AFlat: Int): Int64;
+    function StreamVm(AStream: Int): Int64;
+    function DefinedVm(AIdx: Int): Int64;
+    function ImportOf(const AName: string): Int;
     function BindNameOf(const AName: string): string;
-    function BindOrdinalOf(const AName: string): Integer;
-    procedure PatchStream(AStream: Integer; AOff: Int64; ASize: Integer;
+    function BindOrdinalOf(const AName: string): Int;
+    procedure PatchStream(AStream: Int; AOff: Int64; ASize: Int;
       AValue: Int64);
-    function ReadStream(AStream: Integer; AOff: Int64;
-      ASize: Integer): Int64;
+    function ReadStream(AStream: Int; AOff: Int64;
+      ASize: Int): Int64;
   public
     constructor Create;
     destructor Destroy; override;
@@ -154,7 +154,7 @@ begin
   if Rem = 0 then Result := AVal else Result := AVal + (AAlign - Rem);
 end;
 
-procedure PadStream(var S: string; AAlign: Integer);
+procedure PadStream(var S: string; AAlign: Int);
 begin
   while (Length(S) mod AAlign) <> 0 do
     S := S + Chr(0);
@@ -164,24 +164,24 @@ constructor TMachOLinker.Create;
 begin
   inherited Create();
   FObjs := TList<TMachOFile>.Create();
-  FSecStream := TList<Integer>.Create();
+  FSecStream := TList<Int>.Create();
   FSecBase := TList<Int64>.Create();
-  FSecFirst := TList<Integer>.Create();
+  FSecFirst := TList<Int>.Create();
   FDefNames := TList<string>.Create();
-  FDefSec := TList<Integer>.Create();
+  FDefSec := TList<Int>.Create();
   FDefOff := TList<Int64>.Create();
   FDefWeak := TList<Boolean>.Create();
-  FDefIndex := TDictionary<string, Integer>.Create();
+  FDefIndex := TDictionary<string, Int>.Create();
   FImpNames := TList<string>.Create();
-  FImpGot := TList<Integer>.Create();
-  FImpIndex := TDictionary<string, Integer>.Create();
+  FImpGot := TList<Int>.Create();
+  FImpIndex := TDictionary<string, Int>.Create();
   FWriter := TMachOExecWriter.Create();
   FDylibs := TList<TMachODylib>.Create();
 end;
 
 destructor TMachOLinker.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FObjs.Count - 1 do
     FObjs.Get(I).Free();
@@ -208,7 +208,7 @@ end;
 
 procedure TMachOLinker.SetLibSystemSearchDirs(ADirs: TStringList);
 var
-  I: Integer;
+  I: Int;
 begin
   FLibSystemDirs.Free();
   FLibSystemDirs := TStringList.Create();
@@ -236,7 +236,7 @@ var
 begin
   FIn := TFileInputStream.Create(APath);
   try
-    SetLength(Bytes, Integer(FIn.Size()));
+    SetLength(Bytes, Int32(FIn.Size()));
     if Length(Bytes) > 0 then
       FIn.Read(PChar(Bytes), Length(Bytes));
   finally
@@ -245,7 +245,7 @@ begin
   AddObject(ParseMachO(Bytes, APath));
 end;
 
-function TMachOLinker.StreamOfSection(ASect: TMoSection): Integer;
+function TMachOLinker.StreamOfSection(ASect: TMoSection): Int;
 begin
   if (ASect.SegName = '__TEXT') and (ASect.SectName = '__text') then
     Exit(smText);
@@ -277,10 +277,10 @@ end;
 
 procedure TMachOLinker.MergeSections;
 var
-  I, J, Strm: Integer;
+  I, J, Strm: Int;
   Obj: TMachOFile;
   Sec: TMoSection;
-  Align: Integer;
+  Align: Int;
 begin
   for I := 0 to FObjs.Count - 1 do
   begin
@@ -352,7 +352,7 @@ end;
 
 procedure TMachOLinker.CollectSymbols;
 var
-  I, J, Flat, Prev: Integer;
+  I, J, Flat, Prev: Int;
   Obj: TMachOFile;
   Sym: TMoSymbol;
   Sec: TMoSection;
@@ -414,7 +414,7 @@ const
     'read', 'rename', 'rmdir', 'stat', 'strlen', 'sysconf', 'system',
     'time', 'unlink', 'waitpid');
 var
-  I: Integer;
+  I: Int;
 begin
   if (AName = '_tlv_bootstrap') or (AName = '_tlv_atexit') or
      (AName = '__cxa_atexit') or
@@ -446,11 +446,11 @@ end;
   otherwise surfaces only that way.  Without the SDK's libSystem stub
   (a cross-compile) nothing can be checked, so a name outside the RTL's
   known imports gets a note instead. }
-function TMachOLinker.BindOrdinalOf(const AName: string): Integer;
+function TMachOLinker.BindOrdinalOf(const AName: string): Int;
 var
   CName: string;
   Unverified: Boolean;
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FDylibs.Count - 1 do
     if FDylibs.Get(I).ExportSet.Contains(AName) then
@@ -482,7 +482,7 @@ begin
       'against.  If libSystem does not export it, dyld will abort at launch');
 end;
 
-function TMachOLinker.ImportOf(const AName: string): Integer;
+function TMachOLinker.ImportOf(const AName: string): Int;
 begin
   if not FImpIndex.TryGetValue(AName, Result) then
   begin
@@ -495,7 +495,7 @@ end;
 
 procedure TMachOLinker.CollectImports;
 var
-  I, J, K, Imp: Integer;
+  I, J, K, Imp: Int;
   Obj: TMachOFile;
   Sec: TMoSection;
   R: TMoReloc;
@@ -537,7 +537,7 @@ end;
 
 procedure TMachOLinker.SynthesiseStubs;
 var
-  I: Integer;
+  I: Int;
 begin
   { stub area at the end of __text (one 12-byte stub per got-backed
     import, in got order), got slots at the end of __data.  The stub
@@ -553,7 +553,7 @@ begin
     FData := FData + Chr(0);
 end;
 
-function TMachOLinker.StreamVm(AStream: Integer): Int64;
+function TMachOLinker.StreamVm(AStream: Int): Int64;
 begin
   case AStream of
     smText:  Result := FLayout.TextVm;
@@ -569,25 +569,25 @@ begin
   end;
 end;
 
-function TMachOLinker.SectionVm(AFlat: Integer): Int64;
+function TMachOLinker.SectionVm(AFlat: Int): Int64;
 begin
   Result := StreamVm(FSecStream.Get(AFlat)) + FSecBase.Get(AFlat);
 end;
 
-function TMachOLinker.DefinedVm(AIdx: Integer): Int64;
+function TMachOLinker.DefinedVm(AIdx: Int): Int64;
 begin
   Result := SectionVm(FDefSec.Get(AIdx)) + FDefOff.Get(AIdx);
 end;
 
-procedure TMachOLinker.PatchStream(AStream: Integer; AOff: Int64;
-  ASize: Integer; AValue: Int64);
+procedure TMachOLinker.PatchStream(AStream: Int; AOff: Int64;
+  ASize: Int; AValue: Int64);
 
   procedure PutInto(var S: string);
   var
-    L: Integer;
+    L: Int;
   begin
     for L := 0 to ASize - 1 do
-      S[AOff + L] := Chr(Integer((AValue shr (L * 8)) and $FF));
+      S[AOff + L] := Chr(Int32((AValue shr (L * 8)) and $FF));
   end;
 
 begin
@@ -603,17 +603,17 @@ begin
   end;
 end;
 
-function TMachOLinker.ReadStream(AStream: Integer; AOff: Int64;
-  ASize: Integer): Int64;
+function TMachOLinker.ReadStream(AStream: Int; AOff: Int64;
+  ASize: Int): Int64;
 
   function GetFrom(const S: string): Int64;
   var
-    M: Integer;
+    M: Int;
     V: Int64;
   begin
     V := 0;
     for M := 0 to ASize - 1 do
-      V := V or (Int64(OrdAt(S, Integer(AOff) + M) and $FF) shl (M * 8));
+      V := V or (Int64(OrdAt(S, Int32(AOff) + M) and $FF) shl (M * 8));
     Result := V;
   end;
 
@@ -632,15 +632,15 @@ end;
 
 procedure TMachOLinker.ApplyFixups;
 var
-  I, J, K, Strm, Imp: Integer;
+  I, J, K, Strm, Imp: Int;
   Obj: TMachOFile;
   Sec: TMoSection;
   R: TMoReloc;
   Sym: TMoSymbol;
-  Flat, DefIdx: Integer;
+  Flat, DefIdx: Int;
   SiteOff, SiteVm, Target, Addend, Delta, PageDelta: Int64;
-  W: Integer;
-  Scale: Integer;
+  W: Int;
+  Scale: Int;
   IsImport: Boolean;
   StubVm, GotVm: Int64;
 begin
@@ -657,16 +657,16 @@ begin
     StubVm := FLayout.TextVm + FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE;
     GotVm := FLayout.DataVm + FGotBase + Int64(FImpGot.Get(I)) * 8;
     PageDelta := (GotVm shr 12) - (StubVm shr 12);
-    W := Integer($90000010)
-      or (Integer(PageDelta and 3) shl 29)
-      or (Integer((PageDelta shr 2) and $7FFFF) shl 5);
+    W := Int32($90000010)
+      or (Int32(PageDelta and 3) shl 29)
+      or (Int32((PageDelta shr 2) and $7FFFF) shl 5);
     PatchStream(smText, FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE,
       4, W);
-    W := Integer($F9400210) or (Integer((GotVm and $FFF) shr 3) shl 10);
+    W := Int32($F9400210) or (Int32((GotVm and $FFF) shr 3) shl 10);
     PatchStream(smText, FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE + 4,
       4, W);
     PatchStream(smText, FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE + 8,
-      4, Integer($D61F0200));
+      4, Int32($D61F0200));
   end;
 
   for I := 0 to FObjs.Count - 1 do
@@ -777,8 +777,8 @@ begin
             if (Delta > $7FFFFFF) or (Delta < -$8000000) then
               raise EMachOLinker.Create('macho linker: branch to ' +
                 Sym.Name + ' out of range');
-            W := Integer(ReadStream(Strm, SiteOff, 4));
-            W := W or (Integer((Delta shr 2)) and $3FFFFFF);
+            W := Int32(ReadStream(Strm, SiteOff, 4));
+            W := W or (Int32((Delta shr 2)) and $3FFFFFF);
             PatchStream(Strm, SiteOff, 4, W);
           end;
           ARM64_RELOC_PAGE21,
@@ -788,9 +788,9 @@ begin
               raise EMachOLinker.Create('macho linker: page reference to '
                 + 'undefined symbol ' + Sym.Name);
             PageDelta := ((Target + Addend) shr 12) - (SiteVm shr 12);
-            W := Integer(ReadStream(Strm, SiteOff, 4));
-            W := W or (Integer(PageDelta and 3) shl 29)
-              or (Integer((PageDelta shr 2) and $7FFFF) shl 5);
+            W := Int32(ReadStream(Strm, SiteOff, 4));
+            W := W or (Int32(PageDelta and 3) shl 29)
+              or (Int32((PageDelta shr 2) and $7FFFF) shl 5);
             PatchStream(Strm, SiteOff, 4, W);
           end;
           ARM64_RELOC_PAGEOFF12,
@@ -799,9 +799,9 @@ begin
             if IsImport then
               raise EMachOLinker.Create('macho linker: pageoff reference '
                 + 'to undefined symbol ' + Sym.Name);
-            W := Integer(ReadStream(Strm, SiteOff, 4));
+            W := Int32(ReadStream(Strm, SiteOff, 4));
             if (R.RType = ARM64_RELOC_TLVP_LOAD_PAGEOFF12)
-               and ((W and Integer($3B000000)) = Integer($39000000)) then
+               and ((W and Int32($3B000000)) = Int32($39000000)) then
             begin
               { TLV RELAXATION, exactly as Apple's ld performs it.  The
                 canonical access sequence LOADS the descriptor's address out of
@@ -817,18 +817,18 @@ begin
                 ADD-immediate (0xF9400000 -> 0x91000000) and write the RAW
                 12-bit offset: an add-immediate is unscaled, whereas the LDR it
                 replaces had its immediate scaled by the access size. }
-              W := Integer($91000000) or (W and $3FF);
-              W := W or (Integer((Target + Addend) and $FFF) shl 10);
+              W := Int32($91000000) or (W and $3FF);
+              W := W or (Int32((Target + Addend) and $FFF) shl 10);
             end
             else
             begin
               { scaled load/store class shifts the immediate by its size;
                 add-immediate takes the raw low 12 bits }
-              if (W and Integer($3B000000)) = Integer($39000000) then
+              if (W and Int32($3B000000)) = Int32($39000000) then
                 Scale := (W shr 30) and 3
               else
                 Scale := 0;
-              W := W or (Integer(((Target + Addend) and $FFF) shr Scale)
+              W := W or (Int32(((Target + Addend) and $FFF) shr Scale)
                 shl 10);
             end;
             PatchStream(Strm, SiteOff, 4, W);
@@ -846,7 +846,7 @@ end;
 
 function TMachOLinker.Link(const AEntrySym: string): string;
 var
-  I, DefIdx: Integer;
+  I, DefIdx: Int;
 begin
   MergeSections();
   CollectSymbols();
@@ -881,7 +881,7 @@ begin
     raise EMachOLinker.Create('macho linker: entry symbol ' + AEntrySym +
       ' is not defined by any input');
   FWriter.SetEntryTextOffset(
-    Integer(DefinedVm(DefIdx) - FLayout.TextVm));
+    Int32(DefinedVm(DefIdx) - FLayout.TextVm));
 
   Result := FWriter.Finish();
 end;

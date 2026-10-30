@@ -78,7 +78,7 @@ const
   be checked: the name is bound to libSystem and AUnverified is set. }
 function ChooseBindOrdinal(const AName: string; ADylibs: TList<TMachODylib>;
   ALibSystem: TMachODylib; AFlatFallback: Boolean;
-  out AUnverified: Boolean): Integer;
+  out AUnverified: Boolean): Int;
 
 { Fill ADylib from a dylib image (fat or thin arm64). }
 procedure ReadDylibImage(const ABytes: string; ADylib: TMachODylib);
@@ -86,7 +86,7 @@ procedure ReadDylibImage(const ABytes: string; ADylib: TMachODylib);
 procedure ReadTbdStub(const AText: string; ADylib: TMachODylib);
 { Add every terminal symbol of the export trie at ABytes[AOff..AOff+ASize)
   to AOut. }
-procedure ReadExportTrie(const ABytes: string; AOff, ASize: Integer;
+procedure ReadExportTrie(const ABytes: string; AOff, ASize: Int;
   AOut: TSet<string>);
 
 type
@@ -98,13 +98,13 @@ uses
   uStrCompat, streams, blaise.machowriter;
 
 const
-  MH_MAGIC_64 = Integer($FEEDFACF);
-  FAT_MAGIC_BE = Integer($CAFEBABE);   { read big-endian }
+  MH_MAGIC_64 = Int32($FEEDFACF);
+  FAT_MAGIC_BE = Int32($CAFEBABE);   { read big-endian }
   CPU_TYPE_ARM64 = $0100000C;
   LC_ID_DYLIB = $0D;
-  LC_REEXPORT_DYLIB = Integer($8000001F);
-  LC_DYLD_INFO_ONLY = Integer($80000022);
-  LC_DYLD_EXPORTS_TRIE = Integer($80000033);
+  LC_REEXPORT_DYLIB = Int32($8000001F);
+  LC_DYLD_INFO_ONLY = Int32($80000022);
+  LC_DYLD_EXPORTS_TRIE = Int32($80000033);
 
 constructor TMachODylib.Create;
 begin
@@ -128,21 +128,21 @@ begin
     (N = 'dl') or (N = 'dyld') or (N = 'info');
 end;
 
-function U32At(const ABuf: string; AOff: Integer): Integer;
+function U32At(const ABuf: string; AOff: Int): Int32;
 begin
   Result := StrAt(ABuf, AOff) or (StrAt(ABuf, AOff + 1) shl 8) or
     (StrAt(ABuf, AOff + 2) shl 16) or (StrAt(ABuf, AOff + 3) shl 24);
 end;
 
-function U32BeAt(const ABuf: string; AOff: Integer): Integer;
+function U32BeAt(const ABuf: string; AOff: Int): Int32;
 begin
   Result := (StrAt(ABuf, AOff) shl 24) or (StrAt(ABuf, AOff + 1) shl 16) or
     (StrAt(ABuf, AOff + 2) shl 8) or StrAt(ABuf, AOff + 3);
 end;
 
-function StrZAt(const ABuf: string; AOff: Integer): string;
+function StrZAt(const ABuf: string; AOff: Int): string;
 var
-  E: Integer;
+  E: Int;
 begin
   E := AOff;
   while (E < Length(ABuf)) and (StrAt(ABuf, E) <> 0) do
@@ -150,9 +150,9 @@ begin
   Result := Copy(ABuf, AOff, E - AOff);
 end;
 
-function ReadUleb(const ABuf: string; var AOff: Integer): Int64;
+function ReadUleb(const ABuf: string; var AOff: Int): Int64;
 var
-  B, Shift: Integer;
+  B, Shift: Int;
 begin
   Result := 0;
   Shift := 0;
@@ -166,19 +166,19 @@ begin
   until (B and $80) = 0;
 end;
 
-procedure ReadExportTrie(const ABytes: string; AOff, ASize: Integer;
+procedure ReadExportTrie(const ABytes: string; AOff, ASize: Int;
   AOut: TSet<string>);
 var
-  Nodes: TList<Integer>;     { pending node offsets (relative to the trie) }
+  Nodes: TList<Int>;     { pending node offsets (relative to the trie) }
   Prefixes: TList<string>;   { parallel: the symbol prefix reaching each }
-  Node, P, TermSize, NChild, I, Child: Integer;
+  Node, P, TermSize, NChild, I, Child: Int;
   Prefix, Edge: string;
-  Steps: Integer;
+  Steps: Int;
 begin
   if ASize <= 0 then Exit;
   if (AOff < 0) or (AOff + ASize > Length(ABytes)) then
     raise EMachODylib.Create('export trie outside the image');
-  Nodes := TList<Integer>.Create();
+  Nodes := TList<Int>.Create();
   Prefixes := TList<string>.Create();
   try
     Nodes.Add(0);
@@ -197,7 +197,7 @@ begin
       if Node >= ASize then
         raise EMachODylib.Create('export trie: node outside the trie');
       P := AOff + Node;
-      TermSize := Integer(ReadUleb(ABytes, P));
+      TermSize := Int32(ReadUleb(ABytes, P));
       if TermSize > 0 then
         AOut.Include(Prefix);
       P := P + TermSize;
@@ -207,7 +207,7 @@ begin
       begin
         Edge := StrZAt(ABytes, P);
         P := P + Length(Edge) + 1;
-        Child := Integer(ReadUleb(ABytes, P));
+        Child := Int32(ReadUleb(ABytes, P));
         Nodes.Add(Child);
         Prefixes.Add(Prefix + Edge);
       end;
@@ -221,7 +221,7 @@ end;
 { The arm64 slice of a fat image, or the image itself when thin. }
 function ThinSlice(const ABytes: string): string;
 var
-  N, I, Off, Base: Integer;
+  N, I, Off, Base: Int;
 begin
   Result := ABytes;
   if (Length(ABytes) < 8) or (U32BeAt(ABytes, 0) <> FAT_MAGIC_BE) then Exit;
@@ -242,7 +242,7 @@ end;
 procedure ReadDylibImage(const ABytes: string; ADylib: TMachODylib);
 var
   Img: string;
-  NCmds, I, Off, Cmd, CmdSize: Integer;
+  NCmds, I, Off, Cmd, CmdSize: Int;
 begin
   Img := ThinSlice(ABytes);
   if (Length(Img) < 32) or (U32At(Img, 0) <> MH_MAGIC_64) then
@@ -274,9 +274,9 @@ begin
 end;
 
 { A symbol token of a .tbd list: up to a delimiter, quotes stripped. }
-function TbdToken(const AText: string; var APos: Integer): string;
+function TbdToken(const AText: string; var APos: Int): string;
 var
-  B, Start, Stop: Integer;
+  B, Start, Stop: Int;
 begin
   Start := APos;
   while APos < Length(AText) do
@@ -298,9 +298,9 @@ begin
 end;
 
 { The first index >= AFrom where ASub occurs in AText, or -1. }
-function PosFrom(const ASub, AText: string; AFrom: Integer): Integer;
+function PosFrom(const ASub, AText: string; AFrom: Int): Int;
 var
-  I, J, N, M: Integer;
+  I, J, N, M: Int;
 begin
   N := Length(AText);
   M := Length(ASub);
@@ -318,9 +318,9 @@ begin
 end;
 
 { The quoted or bare scalar after a key at APos, to the end of the line. }
-function TbdScalarAt(const AText: string; APos: Integer): string;
+function TbdScalarAt(const AText: string; APos: Int): string;
 var
-  P, Q: Integer;
+  P, Q: Int;
 begin
   P := APos;
   while (P < Length(AText)) and ((StrAt(AText, P) = Ord(' ')) or
@@ -335,9 +335,9 @@ end;
 
 { Every token of the '[ a, b, ... ]' list after APos (which may span lines),
   added to AOut. }
-procedure ReadTbdList(const AText: string; APos: Integer; AOut: TList<string>);
+procedure ReadTbdList(const AText: string; APos: Int; AOut: TList<string>);
 var
-  P, B: Integer;
+  P, B: Int;
   Tok: string;
 begin
   P := APos;
@@ -365,7 +365,7 @@ end;
   'reexported-libraries:' and 'symbols:' does not match 'weak-symbols:'. }
 procedure ReadTbdLists(const AText, AKey: string; AOut: TList<string>);
 var
-  P: Integer;
+  P: Int;
 begin
   P := PosFrom(AKey, AText, 0);
   while P >= 0 do
@@ -381,7 +381,7 @@ const
   LISTS: array[0..2] of string = ('symbols:', 'weak-symbols:',
     'thread-local-symbols:');
 var
-  P, K, I: Integer;
+  P, K, I: Int;
   Names: TSet<string>;
   Toks: TList<string>;
 begin
@@ -446,9 +446,9 @@ end;
 
 function ChooseBindOrdinal(const AName: string; ADylibs: TList<TMachODylib>;
   ALibSystem: TMachODylib; AFlatFallback: Boolean;
-  out AUnverified: Boolean): Integer;
+  out AUnverified: Boolean): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   AUnverified := False;
   for I := 0 to ADylibs.Count - 1 do
@@ -470,7 +470,7 @@ var
 begin
   FIn := TFileInputStream.Create(APath);
   try
-    SetLength(Result, Integer(FIn.Size()));
+    SetLength(Result, Int32(FIn.Size()));
     if Length(Result) > 0 then
       FIn.Read(PChar(Result), Length(Result));
   finally
@@ -487,7 +487,7 @@ procedure BuildMachOLibSearchDirs(AExtra: TStringList; AOut: TStringList);
   procedure AddColonList(const AList: string);
   var
     Seg: string;
-    K, B: Integer;
+    K, B: Int;
   begin
     Seg := '';
     for K := 0 to Length(AList) - 1 do
@@ -504,7 +504,7 @@ procedure BuildMachOLibSearchDirs(AExtra: TStringList; AOut: TStringList);
     AddDir(Seg);
   end;
 var
-  I: Integer;
+  I: Int;
   SdkRoot: string;
 begin
   if AExtra <> nil then
@@ -524,7 +524,7 @@ end;
 function ResolveMachODylib(const ALinkName: string;
   ADirs: TStringList): TMachODylib;
 var
-  I: Integer;
+  I: Int;
   Cand: string;
 begin
   for I := 0 to ADirs.Count - 1 do

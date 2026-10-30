@@ -51,15 +51,15 @@ type
   public
     Kind:      TContainerSectionKind;
     Bytes:     array of Byte;  { backing store; capacity = Length(Bytes) }
-    Count:     Integer;        { logical byte length (<= Length(Bytes)) }
-    Size:      Integer;        { for BSS: logical size; for others: Count }
-    Align:     Integer;        { section alignment (power of 2) }
+    Count:     Int;        { logical byte length (<= Length(Bytes)) }
+    Size:      Int;        { for BSS: logical size; for others: Count }
+    Align:     Int;        { section alignment (power of 2) }
     Relocs:    array of TContainerReloc;
-    RelocCount: Integer;
+    RelocCount: Int;
     constructor Create(AKind: TContainerSectionKind);
     destructor Destroy; override;
     { Append one byte, growing the backing store geometrically. }
-    procedure PushByte(AVal: Integer);
+    procedure PushByte(AVal: Int);
     { Materialise the section body as a string (used only at serialise
       time, once per section — not on the hot append path). }
     function AsString: string;
@@ -70,8 +70,8 @@ type
   public
     Name:      string;
     Section:   TContainerSectionKind;
-    Value:     Integer;
-    Size:      Integer;
+    Value:     Int;
+    Size:      Int;
     Bind:      TContainerSymBind;
     SType:     TContainerSymType;
     IsExtern:  Boolean;
@@ -84,7 +84,7 @@ type
   private
     FSections: array of TElfWriterSection;
     FSymbols:  TList<TElfWriterSym>;
-    FSymMap:   TDictionary<string, Integer>;
+    FSymMap:   TDictionary<string, Int>;
 
     function GetSection(AKind: TContainerSectionKind): TElfWriterSection;
     function SectionName(AKind: TContainerSectionKind): string;
@@ -97,41 +97,41 @@ type
 
     { Append raw bytes to a section.  Returns the offset at which the
       bytes were placed. }
-    function Append(AKind: TContainerSectionKind; const ABytes: string): Integer;
+    function Append(AKind: TContainerSectionKind; const ABytes: string): Int;
     { Append a single byte. }
-    procedure AppendByte(AKind: TContainerSectionKind; AVal: Integer);
+    procedure AppendByte(AKind: TContainerSectionKind; AVal: Int);
     { Append a 16-bit little-endian value. }
-    procedure AppendWord(AKind: TContainerSectionKind; AVal: Integer);
+    procedure AppendWord(AKind: TContainerSectionKind; AVal: Int);
     { Append a 32-bit little-endian value. }
-    procedure AppendDWord(AKind: TContainerSectionKind; AVal: Integer);
+    procedure AppendDWord(AKind: TContainerSectionKind; AVal: Int);
     { Append a 64-bit little-endian value. }
     procedure AppendQWord(AKind: TContainerSectionKind; AVal: Int64);
     { Append N zero bytes. }
-    procedure AppendZeros(AKind: TContainerSectionKind; ACount: Integer);
+    procedure AppendZeros(AKind: TContainerSectionKind; ACount: Int);
     { Pad the section to the next multiple of AAlign. }
-    procedure AlignSection(AKind: TContainerSectionKind; AAlign: Integer);
+    procedure AlignSection(AKind: TContainerSectionKind; AAlign: Int);
     { Reserve ASize bytes in a BSS/TBSS section (no data emitted). }
-    procedure ReserveBss(AKind: TContainerSectionKind; ASize: Integer);
+    procedure ReserveBss(AKind: TContainerSectionKind; ASize: Int);
 
     { Current write offset in a section. }
-    function CurrentOffset(AKind: TContainerSectionKind): Integer;
+    function CurrentOffset(AKind: TContainerSectionKind): Int;
 
     { Patch a 32-bit value at an existing offset in a section. }
-    procedure Patch32(AKind: TContainerSectionKind; AOffset: Integer; AVal: Integer);
+    procedure Patch32(AKind: TContainerSectionKind; AOffset: Int; AVal: Int);
 
     { Define a symbol.  Returns the symbol index. }
     function DefineSymbol(const AName: string; ASection: TContainerSectionKind;
-      AValue: Integer; ASize: Integer;
-      ABind: TContainerSymBind; ASType: TContainerSymType): Integer;
+      AValue: Int; ASize: Int;
+      ABind: TContainerSymBind; ASType: TContainerSymType): Int;
     { Reference an external (undefined) symbol.  Returns the symbol index.
       Idempotent — returns existing index if already declared. }
-    function ExternSymbol(const AName: string): Integer;
+    function ExternSymbol(const AName: string): Int;
     { Look up a symbol by name.  Returns index or -1. }
-    function FindSymbol(const AName: string): Integer;
+    function FindSymbol(const AName: string): Int;
 
     { Add a relocation to a section. }
-    procedure AddReloc(ASection: TContainerSectionKind; AOffset: Integer;
-      ASymIndex: Integer; ARType: TContainerRelocKind; AAddend: Int64);
+    procedure AddReloc(ASection: TContainerSectionKind; AOffset: Int;
+      ASymIndex: Int; ARType: TContainerRelocKind; AAddend: Int64);
 
     { Serialise the complete ELF object to a byte string. }
     function Finish: string;
@@ -218,10 +218,11 @@ begin
   inherited Destroy();
 end;
 
-procedure TElfWriterSection.PushByte(AVal: Integer);
+procedure TElfWriterSection.PushByte(AVal: Int);
 var
-  NewCap: Integer;
+  NewCap: Int;
 begin
+  CheckFieldFits(AVal, 8);
   if Count >= Length(Bytes) then
   begin
     { Geometric growth: amortised O(1) append, peak memory ~2x size. }
@@ -254,18 +255,21 @@ end;
 
 { ---- Byte helpers ----------------------------------------------------- }
 
-procedure PutU8(var ABuf: string; AVal: Integer);
+procedure PutU8(var ABuf: string; AVal: Int);
 begin
+  CheckFieldFits(AVal, 8);
   ABuf := ABuf + Chr(AVal and $FF);
 end;
 
-procedure PutU16LE(var ABuf: string; AVal: Integer);
+procedure PutU16LE(var ABuf: string; AVal: Int);
 begin
+  CheckFieldFits(AVal, 16);
   ABuf := ABuf + Chr(AVal and $FF) + Chr((AVal shr 8) and $FF);
 end;
 
-procedure PutU32LE(var ABuf: string; AVal: Integer);
+procedure PutU32LE(var ABuf: string; AVal: Int);
 begin
+  CheckFieldFits(AVal, 32);
   ABuf := ABuf + Chr(AVal and $FF)
               + Chr((AVal shr 8) and $FF)
               + Chr((AVal shr 16) and $FF)
@@ -274,18 +278,19 @@ end;
 
 procedure PutU64LE(var ABuf: string; AVal: Int64);
 var
-  Lo, Hi: Integer;
+  Lo, Hi: Int;
 begin
-  Lo := Integer(AVal and $FFFFFFFF);
-  Hi := Integer((AVal shr 32) and $FFFFFFFF);
+  Lo := Int32(AVal and $FFFFFFFF);
+  Hi := Int32((AVal shr 32) and $FFFFFFFF);
   PutU32LE(ABuf, Lo);
   PutU32LE(ABuf, Hi);
 end;
 
-procedure PatchU32LE(var ABuf: string; AOff: Integer; AVal: Integer);
+procedure PatchU32LE(var ABuf: string; AOff: Int; AVal: Int);
 var
   P: PChar;
 begin
+  CheckFieldFits(AVal, 32);
   P := PChar(ABuf);
   P[AOff]     := Chr(AVal and $FF);
   P[AOff + 1] := Chr((AVal shr 8) and $FF);
@@ -293,9 +298,9 @@ begin
   P[AOff + 3] := Chr((AVal shr 24) and $FF);
 end;
 
-function MakeZeros(ACount: Integer): string;
+function MakeZeros(ACount: Int): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   I := 0;
@@ -306,9 +311,9 @@ begin
   end;
 end;
 
-function ElfAlignUp(AVal: Integer; AAlign: Integer): Integer;
+function ElfAlignUp(AVal: Int; AAlign: Int): Int;
 var
-  Rem: Integer;
+  Rem: Int;
 begin
   if AAlign <= 1 then
   begin
@@ -342,7 +347,7 @@ end;
 
 constructor TElfObjectWriter.Create;
 var
-  I: Integer;
+  I: Int;
 begin
   inherited Create();
   { sized from the enum (BUG-045): ELF never emits the Mach-O-only TLV
@@ -351,12 +356,12 @@ begin
   for I := 0 to Ord(High(TContainerSectionKind)) do
     FSections[I] := nil;
   FSymbols  := TList<TElfWriterSym>.Create();
-  FSymMap   := TDictionary<string, Integer>.Create();
+  FSymMap   := TDictionary<string, Int>.Create();
 end;
 
 destructor TElfObjectWriter.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Length(FSections) - 1 do
   begin
@@ -396,7 +401,7 @@ end;
 
 function TElfObjectWriter.GetSection(AKind: TContainerSectionKind): TElfWriterSection;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := Ord(AKind);
   if FSections[Idx] = nil then
@@ -409,10 +414,10 @@ begin
   GetSection(AKind);
 end;
 
-function TElfObjectWriter.Append(AKind: TContainerSectionKind; const ABytes: string): Integer;
+function TElfObjectWriter.Append(AKind: TContainerSectionKind; const ABytes: string): Int;
 var
   Sec: TElfWriterSection;
-  I: Integer;
+  I: Int;
 begin
   Sec := GetSection(AKind);
   Result := Sec.Count;
@@ -420,24 +425,26 @@ begin
     Sec.PushByte(Ord(ABytes[I]));
 end;
 
-procedure TElfObjectWriter.AppendByte(AKind: TContainerSectionKind; AVal: Integer);
+procedure TElfObjectWriter.AppendByte(AKind: TContainerSectionKind; AVal: Int);
 begin
   GetSection(AKind).PushByte(AVal);
 end;
 
-procedure TElfObjectWriter.AppendWord(AKind: TContainerSectionKind; AVal: Integer);
+procedure TElfObjectWriter.AppendWord(AKind: TContainerSectionKind; AVal: Int);
 var
   Sec: TElfWriterSection;
 begin
+  CheckFieldFits(AVal, 16);
   Sec := GetSection(AKind);
   Sec.PushByte(AVal and $FF);
   Sec.PushByte((AVal shr 8) and $FF);
 end;
 
-procedure TElfObjectWriter.AppendDWord(AKind: TContainerSectionKind; AVal: Integer);
+procedure TElfObjectWriter.AppendDWord(AKind: TContainerSectionKind; AVal: Int);
 var
   Sec: TElfWriterSection;
 begin
+  CheckFieldFits(AVal, 32);
   Sec := GetSection(AKind);
   Sec.PushByte(AVal and $FF);
   Sec.PushByte((AVal shr 8) and $FF);
@@ -448,27 +455,27 @@ end;
 procedure TElfObjectWriter.AppendQWord(AKind: TContainerSectionKind; AVal: Int64);
 var
   Sec: TElfWriterSection;
-  I: Integer;
+  I: Int;
 begin
   Sec := GetSection(AKind);
   for I := 0 to 7 do
-    Sec.PushByte(Integer((AVal shr (I * 8)) and $FF));
+    Sec.PushByte(Int32((AVal shr (I * 8)) and $FF));
 end;
 
-procedure TElfObjectWriter.AppendZeros(AKind: TContainerSectionKind; ACount: Integer);
+procedure TElfObjectWriter.AppendZeros(AKind: TContainerSectionKind; ACount: Int);
 var
   Sec: TElfWriterSection;
-  I: Integer;
+  I: Int;
 begin
   Sec := GetSection(AKind);
   for I := 1 to ACount do
     Sec.PushByte(0);
 end;
 
-procedure TElfObjectWriter.AlignSection(AKind: TContainerSectionKind; AAlign: Integer);
+procedure TElfObjectWriter.AlignSection(AKind: TContainerSectionKind; AAlign: Int);
 var
   Sec: TElfWriterSection;
-  Pad, I: Integer;
+  Pad, I: Int;
 begin
   Sec := GetSection(AKind);
   if AAlign > Sec.Align then
@@ -485,7 +492,7 @@ begin
   end;
 end;
 
-procedure TElfObjectWriter.ReserveBss(AKind: TContainerSectionKind; ASize: Integer);
+procedure TElfObjectWriter.ReserveBss(AKind: TContainerSectionKind; ASize: Int);
 var
   Sec: TElfWriterSection;
 begin
@@ -493,7 +500,7 @@ begin
   Sec.Size := Sec.Size + ASize;
 end;
 
-function TElfObjectWriter.CurrentOffset(AKind: TContainerSectionKind): Integer;
+function TElfObjectWriter.CurrentOffset(AKind: TContainerSectionKind): Int;
 var
   Sec: TElfWriterSection;
 begin
@@ -504,11 +511,12 @@ begin
     Result := Sec.Count;
 end;
 
-procedure TElfObjectWriter.Patch32(AKind: TContainerSectionKind; AOffset: Integer;
-  AVal: Integer);
+procedure TElfObjectWriter.Patch32(AKind: TContainerSectionKind; AOffset: Int;
+  AVal: Int);
 var
   Sec: TElfWriterSection;
 begin
+  CheckFieldFits(AVal, 32);
   Sec := GetSection(AKind);
   Sec.Bytes[AOffset]     := AVal and $FF;
   Sec.Bytes[AOffset + 1] := (AVal shr 8) and $FF;
@@ -517,11 +525,11 @@ begin
 end;
 
 function TElfObjectWriter.DefineSymbol(const AName: string;
-  ASection: TContainerSectionKind; AValue: Integer; ASize: Integer;
-  ABind: TContainerSymBind; ASType: TContainerSymType): Integer;
+  ASection: TContainerSectionKind; AValue: Int; ASize: Int;
+  ABind: TContainerSymBind; ASType: TContainerSymType): Int;
 var
   Sym: TElfWriterSym;
-  Existing: Integer;
+  Existing: Int;
 begin
   if FSymMap.TryGetValue(AName, Existing) then
   begin
@@ -541,10 +549,10 @@ begin
   FSymMap.Add(AName, Result);
 end;
 
-function TElfObjectWriter.ExternSymbol(const AName: string): Integer;
+function TElfObjectWriter.ExternSymbol(const AName: string): Int;
 var
   Sym: TElfWriterSym;
-  Existing: Integer;
+  Existing: Int;
 begin
   if FSymMap.TryGetValue(AName, Existing) then
   begin
@@ -564,9 +572,9 @@ begin
   FSymMap.Add(AName, Result);
 end;
 
-function TElfObjectWriter.FindSymbol(const AName: string): Integer;
+function TElfObjectWriter.FindSymbol(const AName: string): Int;
 var
-  Val: Integer;
+  Val: Int;
 begin
   if FSymMap.TryGetValue(AName, Val) then
     Result := Val
@@ -574,8 +582,8 @@ begin
     Result := -1;
 end;
 
-procedure TElfObjectWriter.AddReloc(ASection: TContainerSectionKind; AOffset: Integer;
-  ASymIndex: Integer; ARType: TContainerRelocKind; AAddend: Int64);
+procedure TElfObjectWriter.AddReloc(ASection: TContainerSectionKind; AOffset: Int;
+  ASymIndex: Int; ARType: TContainerRelocKind; AAddend: Int64);
 var
   Sec: TElfWriterSection;
   R: TContainerReloc;
@@ -593,7 +601,7 @@ end;
 
 { ---- Finish: serialise to ELF bytes ---------------------------------- }
 
-function RelocTypeToElf(ARType: TContainerRelocKind): Integer;
+function RelocTypeToElf(ARType: TContainerRelocKind): Int;
 begin
   case ARType of
     crkNone:           Result := R_X86_64_NONE;
@@ -611,7 +619,7 @@ begin
   end;
 end;
 
-function SymBindToElf(ABind: TContainerSymBind): Integer;
+function SymBindToElf(ABind: TContainerSymBind): Int;
 begin
   case ABind of
     csbLocal:  Result := STB_LOCAL;
@@ -622,7 +630,7 @@ begin
   end;
 end;
 
-function SymTypeToElf(ASType: TContainerSymType): Integer;
+function SymTypeToElf(ASType: TContainerSymType): Int;
 begin
   case ASType of
     cstNone:    Result := STT_NOTYPE;
@@ -635,7 +643,7 @@ begin
   end;
 end;
 
-function ElfAddStrtab(var ATab: string; const AStr: string): Integer;
+function ElfAddStrtab(var ATab: string; const AStr: string): Int;
 begin
   if AStr = '' then
   begin
@@ -646,9 +654,9 @@ begin
   ATab := ATab + AStr + Chr(0);
 end;
 
-procedure ElfEmitShdr(var ABuf: string; ANameIdx: Integer; AType: Integer;
+procedure ElfEmitShdr(var ABuf: string; ANameIdx: Int; AType: Int;
   AFlags: Int64; AAddr: Int64; AOffset: Int64; ASize: Int64;
-  ALink: Integer; AInfo: Integer; AAddrAlign: Int64; AEntSize: Int64);
+  ALink: Int; AInfo: Int; AAddrAlign: Int64; AEntSize: Int64);
 begin
   PutU32LE(ABuf, ANameIdx);
   PutU32LE(ABuf, AType);
@@ -662,8 +670,8 @@ begin
   PutU64LE(ABuf, AEntSize);
 end;
 
-procedure ElfEmitSym(var ABuf: string; ANameIdx: Integer; AInfo: Integer;
-  AOther: Integer; AShndx: Integer; AValue: Int64; ASize: Int64);
+procedure ElfEmitSym(var ABuf: string; ANameIdx: Int; AInfo: Int;
+  AOther: Int; AShndx: Int; AValue: Int64; ASize: Int64);
 begin
   PutU32LE(ABuf, ANameIdx);  { st_name }
   PutU8(ABuf, AInfo);        { st_info }
@@ -673,8 +681,8 @@ begin
   PutU64LE(ABuf, ASize);     { st_size }
 end;
 
-procedure ElfEmitRela(var ABuf: string; AOffset: Int64; ASymIdx: Integer;
-  AType: Integer; AAddend: Int64);
+procedure ElfEmitRela(var ABuf: string; AOffset: Int64; ASymIdx: Int;
+  AType: Int; AAddend: Int64);
 var
   RInfo: Int64;
 begin
@@ -688,7 +696,7 @@ end;
   (.strtab, .symtab, .rela.*) so building them is amortized O(1) per
   element instead of O(n^2) string concatenation. }
 
-function ElfAddStrtabBB(ATab: TByteBuf; const AStr: string): Integer;
+function ElfAddStrtabBB(ATab: TByteBuf; const AStr: string): Int;
 begin
   if AStr = '' then
   begin
@@ -700,8 +708,8 @@ begin
   ATab.PushByte(0);
 end;
 
-procedure ElfEmitSymBB(ABuf: TByteBuf; ANameIdx: Integer; AInfo: Integer;
-  AOther: Integer; AShndx: Integer; AValue: Int64; ASize: Int64);
+procedure ElfEmitSymBB(ABuf: TByteBuf; ANameIdx: Int; AInfo: Int;
+  AOther: Int; AShndx: Int; AValue: Int64; ASize: Int64);
 begin
   ABuf.PushU32(ANameIdx);   { st_name }
   ABuf.PushByte(AInfo);     { st_info }
@@ -711,8 +719,8 @@ begin
   ABuf.PushU64(ASize);      { st_size }
 end;
 
-procedure ElfEmitRelaBB(ABuf: TByteBuf; AOffset: Int64; ASymIdx: Integer;
-  AType: Integer; AAddend: Int64);
+procedure ElfEmitRelaBB(ABuf: TByteBuf; AOffset: Int64; ASymIdx: Int;
+  AType: Int; AAddend: Int64);
 var
   RInfo: Int64;
 begin
@@ -740,13 +748,13 @@ var
     We track which sections exist and their SHT indices. }
   SecOrder: array[0..MaxSecOrder] of TContainerSectionKind;
   SecPresent: array[0..MaxSecOrder] of Boolean;
-  SecShtIdx: array[0..MaxSecOrder] of Integer;
-  NumDataSecs: Integer;
-  RelaShtIdx: array[0..MaxSecOrder] of Integer;
-  NumRelaSecs: Integer;
-  SymtabIdx, StrtabIdx, ShstrtabIdx, NoteIdx: Integer;
-  TotalShNum: Integer;
-  I, J: Integer;
+  SecShtIdx: array[0..MaxSecOrder] of Int;
+  NumDataSecs: Int;
+  RelaShtIdx: array[0..MaxSecOrder] of Int;
+  NumRelaSecs: Int;
+  SymtabIdx, StrtabIdx, ShstrtabIdx, NoteIdx: Int;
+  TotalShNum: Int;
+  I, J: Int;
   Sec: TElfWriterSection;
   Sym: TElfWriterSym;
   R: TContainerReloc;
@@ -762,21 +770,21 @@ var
   SymtabFileOff, StrtabFileOff, ShstrtabFileOff, NoteFileOff: Int64;
 
   SymtabBuf: TByteBuf;
-  FirstGlobal: Integer;
-  SymSecIdx: Integer;
-  StInfo: Integer;
+  FirstGlobal: Int;
+  SymSecIdx: Int;
+  StInfo: Int;
 
   RelaBuf: array[0..MaxSecOrder] of TByteBuf;
-  RelaCount: array[0..MaxSecOrder] of Integer;
-  SymRemapIdx: array of Integer;
-  LocalSyms, GlobalSyms: TList<Integer>;
+  RelaCount: array[0..MaxSecOrder] of Int;
+  SymRemapIdx: array of Int;
+  LocalSyms, GlobalSyms: TList<Int>;
   OutBuf: TByteBuf;
 
   ShFlags: Int64;
-  ShType: Integer;
-  SecNameIdx: array[0..MaxSecOrder] of Integer;
-  RelaNameIdx: array[0..MaxSecOrder] of Integer;
-  SymtabNameIdx, StrtabNameIdx, ShstrtabNameIdx, NoteNameIdx: Integer;
+  ShType: Int;
+  SecNameIdx: array[0..MaxSecOrder] of Int;
+  RelaNameIdx: array[0..MaxSecOrder] of Int;
+  SymtabNameIdx, StrtabNameIdx, ShstrtabNameIdx, NoteNameIdx: Int;
 
 begin
   SecOrder[0] := cskText;
@@ -831,8 +839,8 @@ begin
   SymtabBuf := TByteBuf.Create();
   for I := 0 to MaxSecOrder do
     RelaBuf[I] := nil;
-  LocalSyms := TList<Integer>.Create();
-  GlobalSyms := TList<Integer>.Create();
+  LocalSyms := TList<Int>.Create();
+  GlobalSyms := TList<Int>.Create();
   OutBuf := nil;
   try
     { Build .strtab — symbol name string table (starts with NUL byte) }
@@ -1014,7 +1022,7 @@ begin
       if not SecPresent[I] then Continue;
       Sec := GetSection(SecOrder[I]);
       if (SecOrder[I] = cskBss) or (SecOrder[I] = cskTbss) then Continue;
-      OutBuf.PadTo(Integer(SecFileOff[I]));
+      OutBuf.PadTo(Int32(SecFileOff[I]));
       OutBuf.AppendBytes(Sec.AsString());
     end;
 
@@ -1022,24 +1030,24 @@ begin
     for I := 0 to MaxSecOrder do
     begin
       if RelaShtIdx[I] = 0 then Continue;
-      OutBuf.PadTo(Integer(RelaFileOff[I]));
+      OutBuf.PadTo(Int32(RelaFileOff[I]));
       OutBuf.AppendBuf(RelaBuf[I]);
     end;
 
     { Emit .symtab }
-    OutBuf.PadTo(Integer(SymtabFileOff));
+    OutBuf.PadTo(Int32(SymtabFileOff));
     OutBuf.AppendBuf(SymtabBuf);
 
     { Emit .strtab }
-    OutBuf.PadTo(Integer(StrtabFileOff));
+    OutBuf.PadTo(Int32(StrtabFileOff));
     OutBuf.AppendBuf(Strtab);
 
     { Emit .shstrtab }
-    OutBuf.PadTo(Integer(ShstrtabFileOff));
+    OutBuf.PadTo(Int32(ShstrtabFileOff));
     OutBuf.AppendBuf(Shstrtab);
 
     { Pad to section header table }
-    OutBuf.PadTo(Integer(ShdrOff));
+    OutBuf.PadTo(Int32(ShdrOff));
 
     { Section header table — built into a local string then appended. }
     Buf := '';

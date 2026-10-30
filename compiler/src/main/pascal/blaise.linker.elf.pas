@@ -75,8 +75,8 @@ type
   public
     Arch:      TLinkArch;
     Is64:      Boolean;       { 64-bit pointers/addresses }
-    OSABI:     Integer;       { EI_OSABI: 0 = SysV/Linux, 9 = FreeBSD }
-    EMachine:  Integer;       { e_machine: EM_X86_64 / EM_386 }
+    OSABI:     Int;       { EI_OSABI: 0 = SysV/Linux, 9 = FreeBSD }
+    EMachine:  Int;       { e_machine: EM_X86_64 / EM_386 }
     BaseAddr:  Int64;         { fixed load base for non-PIE ET_EXEC }
     PageSize:  Int64;         { segment alignment }
     InterpPath: string;       { PT_INTERP: the run-time loader this OS uses }
@@ -104,7 +104,7 @@ type
   TMergedSection = class
   public
     Name:   string;
-    ShType: Integer;
+    ShType: Int;
     Flags:  Int64;
     Align:  Int64;
     Data:   string;     { concatenated bytes; empty for SHT_NOBITS }
@@ -114,8 +114,8 @@ type
   { Where one input section landed: merged section + byte offset. }
   TSectionPlacement = class
   public
-    ObjIndex: Integer;        { caller-assigned input object index }
-    SecIndex: Integer;        { ELF section index within that object }
+    ObjIndex: Int;        { caller-assigned input object index }
+    SecIndex: Int;        { ELF section index within that object }
     Merged:   TMergedSection; { destination (not owned) }
     Offset:   Int64;          { offset of the contribution }
   end;
@@ -132,12 +132,12 @@ type
 
     { Merge every wanted section of AObj.  AObjIndex tags the
       placements; callers number their inputs sequentially. }
-    procedure AddObject(AObjIndex: Integer; AObj: TElfObjectFile);
+    procedure AddObject(AObjIndex: Int; AObj: TElfObjectFile);
 
     function FindMerged(const AName: string): TMergedSection;
     { Placement of input object AObjIndex's section ASecIndex, or nil
       if that section was skipped. }
-    function PlacementOf(AObjIndex, ASecIndex: Integer): TSectionPlacement;
+    function PlacementOf(AObjIndex, ASecIndex: Int): TSectionPlacement;
 
     property Merged: TList<TMergedSection> read FMerged;
     property Placements: TList<TSectionPlacement> read FPlacements;
@@ -165,9 +165,9 @@ type
   TPltEntry = class
   public
     Name:       string;    { symbol name (e.g. 'write') }
-    DynSymIdx:  Integer;   { index in .dynsym (set during BuildDynamic) }
-    GotOffset:  Integer;   { byte offset within .got for this slot }
-    PltOffset:  Integer;   { byte offset within .plt for this stub }
+    DynSymIdx:  Int;   { index in .dynsym (set during BuildDynamic) }
+    GotOffset:  Int;   { byte offset within .got for this slot }
+    PltOffset:  Int;   { byte offset within .plt for this stub }
   end;
 
   { A non-PLT GOT slot for GOTPCREL references to locally-defined or
@@ -175,7 +175,7 @@ type
   TGotSlot = class
   public
     Name:      string;
-    GotOffset: Integer;
+    GotOffset: Int;
     Value:     Int64;     { resolved absolute address (0 for weak-undef) }
   end;
 
@@ -185,9 +185,9 @@ type
     Name:  string;
     Value: Int64;
     Size:  Int64;    { 0 = derive from the next symbol in the section }
-    Bind:  Integer;
-    SType: Integer;
-    SecNo: Integer;  { output section header index }
+    Bind:  Int;
+    SType: Int;
+    SecNo: Int;  { output section header index }
   end;
 
   { Linker: merge → layout → resolve symbols → relocate → emit.
@@ -258,9 +258,9 @@ type
     FTlsAddr:       Int64;
 
     function MergedAddr(AMerged: TMergedSection): Int64;
-    function SectionOfPlacement(AObjIdx, ASecIdx: Integer): TMergedSection;
-    function PlacementBaseAddr(AObjIdx, ASecIdx: Integer): Int64;
-    function FileOffset(AAddr: Int64): Integer;
+    function SectionOfPlacement(AObjIdx, ASecIdx: Int): TMergedSection;
+    function PlacementBaseAddr(AObjIdx, ASecIdx: Int): Int64;
+    function FileOffset(AAddr: Int64): Int;
     procedure PlaceSection(AM: TMergedSection; var AAddr: Int64);
     procedure PlaceTlsSections(var AAddr: Int64);
     procedure LayoutSections;
@@ -269,18 +269,18 @@ type
     procedure AddSynthSymbol(const AName: string; AAddr: Int64);
     procedure DefineSynthSymbols;
     procedure ApplyRelocations;
-    function ResolveSymbolAddr(AObj: TElfObjectFile; ASymIdx: Integer;
+    function ResolveSymbolAddr(AObj: TElfObjectFile; ASymIdx: Int;
       const AContext: string): Int64;
-    function OutSectionIndex(AMerged: TMergedSection): Integer;
-    function BuildSymtab(out ASymTab, AStrTab: string): Integer;
+    function OutSectionIndex(AMerged: TMergedSection): Int;
+    function BuildSymtab(out ASymTab, AStrTab: string): Int;
     procedure EmitSymtabHeaders(var ABuf: string; ASymName, AStrName,
-      ASymOff, ASymSize, AStrOff, AStrSize, AStrIndex, AFirstGlobal: Integer);
+      ASymOff, ASymSize, AStrOff, AStrSize, AStrIndex, AFirstGlobal: Int);
     function EmitExecutable(AEntry: Int64): string;
 
     { Phase C methods }
     procedure CollectExternals;
     procedure CollectGotSlots;
-    function CountRelativeRelocs: Integer;
+    function CountRelativeRelocs: Int;
     function FindPltEntry(const AName: string): TPltEntry;
     function FindOrCreateGotSlot(const AName: string): TGotSlot;
     procedure BuildDynamic;
@@ -312,7 +312,7 @@ type
       image; a non-empty result names the C symbols that would need libc /
       shared libraries.  Weak undefineds are excluded (they legally resolve
       to 0). }
-    function CollectUnresolvedExternals(ADest: TStringList): Integer;
+    function CollectUnresolvedExternals(ADest: TStringList): Int;
 
     { Add a parsed object the caller owns (not freed by the linker). }
     procedure AddObject(AObj: TElfObjectFile);
@@ -357,14 +357,14 @@ procedure MakeFileExecutable(const APath: string);
   so a linker that deviates by a single bit hides the symbol from the loader
   entirely — and the failure surfaces far away, at exec time, as an "Undefined
   symbol" for a symbol that is plainly present in .dynsym. }
-function LkElfHash(const AName: string): Integer;
+function LkElfHash(const AName: string): Int;
 
 implementation
 
-function LkElfHash(const AName: string): Integer;
+function LkElfHash(const AName: string): Int;
 var
   H, G: Int64;
-  J: Integer;
+  J: Int;
 begin
   { gABI figure 5-13.  The top nibble is XORed back into bits 4..7 before
     being cleared — NOT simply masked away.  Int64 with an explicit 32-bit
@@ -380,7 +380,7 @@ begin
       H := H xor (G shr 24);
     H := H and (not G);
   end;
-  Result := Integer(H);
+  Result := Int32(H);
 end;
 
 function LkAlignUp(AVal: Int64; AAlign: Int64): Int64;
@@ -402,16 +402,16 @@ end;
 function LkZeros(ACount: Int64): string;
 var
   P: PChar;
-  I: Integer;
+  I: Int;
 begin
   if ACount <= 0 then
   begin
     Result := '';
     Exit;
   end;
-  SetLength(Result, Integer(ACount));
+  SetLength(Result, Int32(ACount));
   P := PChar(Result);
-  for I := 0 to Integer(ACount) - 1 do
+  for I := 0 to Int32(ACount) - 1 do
     P[I] := Chr(0);
 end;
 
@@ -424,7 +424,7 @@ end;
 
 destructor TSectionMerger.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FMerged.Count - 1 do
     FMerged.Get(I).Free();
@@ -459,7 +459,7 @@ end;
 
 function TSectionMerger.GetOrCreate(ASec: TRdSection): TMergedSection;
 var
-  I: Integer;
+  I: Int;
   M: TMergedSection;
 begin
   for I := 0 to FMerged.Count - 1 do
@@ -485,9 +485,9 @@ begin
   Result := M;
 end;
 
-procedure TSectionMerger.AddObject(AObjIndex: Integer; AObj: TElfObjectFile);
+procedure TSectionMerger.AddObject(AObjIndex: Int; AObj: TElfObjectFile);
 var
-  I: Integer;
+  I: Int;
   Sec: TRdSection;
   M: TMergedSection;
   P: TSectionPlacement;
@@ -523,7 +523,7 @@ end;
 
 function TSectionMerger.FindMerged(const AName: string): TMergedSection;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FMerged.Count - 1 do
     if FMerged.Get(I).Name = AName then
@@ -535,9 +535,9 @@ begin
 end;
 
 function TSectionMerger.PlacementOf(AObjIndex,
-  ASecIndex: Integer): TSectionPlacement;
+  ASecIndex: Int): TSectionPlacement;
 var
-  I: Integer;
+  I: Int;
   P: TSectionPlacement;
 begin
   for I := 0 to FPlacements.Count - 1 do
@@ -631,25 +631,25 @@ const
   patching is done with memcpy (a pointer write, which is fine). }
 
 { N-byte little-endian encoding of AVal. }
-function LkLE(AVal: Int64; ANBytes: Integer): string;
+function LkLE(AVal: Int64; ANBytes: Int): string;
 var
-  I: Integer;
+  I: Int;
   P: PChar;
 begin
   SetLength(Result, ANBytes);
   P := PChar(Result);
   for I := 0 to ANBytes - 1 do
-    P[I] := Chr(Integer((AVal shr (I * 8)) and $FF));
+    P[I] := Chr(Int32((AVal shr (I * 8)) and $FF));
 end;
 
 { Overwrite ABuf[AOff..] in place with ASrc's bytes (ABuf already large
   enough).  Blaise rejects `ABuf[i] := c` and `@ABuf[i]`, so writes go
   through a local PChar — the one idiom the native backend accepts for
   in-place string mutation (see ZeroBuf in uElfObject.pas). }
-procedure LkCopyInto(var ABuf: string; AOff: Integer; const ASrc: string);
+procedure LkCopyInto(var ABuf: string; AOff: Int; const ASrc: string);
 var
   P: PChar;
-  I: Integer;
+  I: Int;
 begin
   if Length(ASrc) = 0 then Exit;
   { A section placed outside the image the writer sized is a layout bug.
@@ -665,19 +665,19 @@ begin
 end;
 
 { Patch a 32-bit LE value at AOff. }
-procedure LkPatch32(var ABuf: string; AOff: Integer; AVal: Int64);
+procedure LkPatch32(var ABuf: string; AOff: Int; AVal: Int64);
 begin
   LkCopyInto(ABuf, AOff, LkLE(AVal, 4));
 end;
 
 { Patch a 64-bit LE value at AOff. }
-procedure LkPatch64(var ABuf: string; AOff: Integer; AVal: Int64);
+procedure LkPatch64(var ABuf: string; AOff: Int; AVal: Int64);
 begin
   LkCopyInto(ABuf, AOff, LkLE(AVal, 8));
 end;
 
 { Add a NUL-terminated string to a string table; return its offset. }
-function LkAddStr(var ATab: string; const AStr: string): Integer;
+function LkAddStr(var ATab: string; const AStr: string): Int;
 begin
   if AStr = '' then
   begin
@@ -690,7 +690,7 @@ end;
 
 { ---- chmod binding ----------------------------------------------------- }
 
-function _lk_chmod(APath: PChar; AMode: Integer): Integer;
+function _lk_chmod(APath: PChar; AMode: Int): Int;
   external name 'chmod';
 
 procedure MakeFileExecutable(const APath: string);
@@ -789,7 +789,7 @@ end;
 
 destructor TLinker.Destroy;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FPltEntries.Count - 1 do
     FPltEntries.Get(I).Free();
@@ -842,7 +842,7 @@ end;
 
 procedure TLinker.AddNeededLib(const ASoname: string);
 var
-  I: Integer;
+  I: Int;
 begin
   if ASoname = '' then Exit;
   { De-dup by value (small list; avoids a second DT_NEEDED for the same lib). }
@@ -864,7 +864,7 @@ var
   Members: TList<TArchiveMember>;
   M: TArchiveMember;
   Obj: TElfObjectFile;
-  I: Integer;
+  I: Int;
 begin
   Members := TList<TArchiveMember>.Create();
   try
@@ -886,7 +886,7 @@ end;
   not laid out (e.g. a non-alloc debug section). }
 function TLinker.MergedAddr(AMerged: TMergedSection): Int64;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FSecAddr.Count - 1 do
     if FSecAddr.Get(I) = AMerged then
@@ -899,13 +899,13 @@ end;
 
 { File offset for a virtual address in a laid-out section: the file
   image mirrors the virtual layout shifted down by the load base. }
-function TLinker.FileOffset(AAddr: Int64): Integer;
+function TLinker.FileOffset(AAddr: Int64): Int;
 begin
-  Result := Integer(AAddr - FTarget.BaseAddr);
+  Result := Int32(AAddr - FTarget.BaseAddr);
 end;
 
 function TLinker.SectionOfPlacement(AObjIdx,
-  ASecIdx: Integer): TMergedSection;
+  ASecIdx: Int): TMergedSection;
 var
   P: TSectionPlacement;
 begin
@@ -916,7 +916,7 @@ begin
     Result := P.Merged;
 end;
 
-function TLinker.PlacementBaseAddr(AObjIdx, ASecIdx: Integer): Int64;
+function TLinker.PlacementBaseAddr(AObjIdx, ASecIdx: Int): Int64;
 var
   P: TSectionPlacement;
   Base: Int64;
@@ -957,7 +957,7 @@ end;
 
 procedure TLinker.LayoutSections;
 var
-  I: Integer;
+  I: Int;
   M: TMergedSection;
   Addr: Int64;
   HdrBytes: Int64;
@@ -1064,7 +1064,7 @@ end;
 
 function TLinker.FindSymbol(const AName: string): TLinkSymbol;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FSymbols.Count - 1 do
     if FSymbols.Get(I).Name = AName then
@@ -1097,7 +1097,7 @@ end;
   must have run so addresses are known. }
 procedure TLinker.BuildSymbols;
 var
-  Oi, Si: Integer;
+  Oi, Si: Int;
   Obj: TElfObjectFile;
   Sym: TRdSymbol;
   Existing: TLinkSymbol;
@@ -1155,7 +1155,7 @@ end;
   Only defined if not already provided by an input object. }
 procedure TLinker.DefineSynthSymbols;
 var
-  I: Integer;
+  I: Int;
   M: TMergedSection;
   DataEnd, BssStart, BssEnd, WritableBase: Int64;
   A: Int64;
@@ -1202,7 +1202,7 @@ end;
   scans raw object symbol tables directly. }
 procedure TLinker.CollectExternals;
 var
-  Oi, Si, Di, Dsi: Integer;
+  Oi, Si, Di, Dsi: Int;
   Obj, DefObj: TElfObjectFile;
   Sym, DefSym: TRdSymbol;
   PE: TPltEntry;
@@ -1269,9 +1269,9 @@ begin
   end;
 end;
 
-function TLinker.CollectUnresolvedExternals(ADest: TStringList): Integer;
+function TLinker.CollectUnresolvedExternals(ADest: TStringList): Int;
 var
-  Oi, Si, Di, Dsi: Integer;
+  Oi, Si, Di, Dsi: Int;
   Obj, DefObj: TElfObjectFile;
   Sym, DefSym: TRdSymbol;
   Seen: TDictionary<string, Boolean>;
@@ -1332,7 +1332,7 @@ end;
 
 function TLinker.FindPltEntry(const AName: string): TPltEntry;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FPltEntries.Count - 1 do
     if FPltEntries.Get(I).Name = AName then
@@ -1345,7 +1345,7 @@ end;
 
 function TLinker.FindOrCreateGotSlot(const AName: string): TGotSlot;
 var
-  I: Integer;
+  I: Int;
   GS: TGotSlot;
 begin
   for I := 0 to FGotSlots.Count - 1 do
@@ -1367,7 +1367,7 @@ end;
   slot so GOTPCREL can resolve through it.  Called after CollectExternals. }
 procedure TLinker.CollectGotSlots;
 var
-  Oi, Ri: Integer;
+  Oi, Ri: Int;
   Obj: TElfObjectFile;
   Rel: TRdReloc;
   Sym: TRdSymbol;
@@ -1393,9 +1393,9 @@ end;
   (each becomes an R_X86_64_RELATIVE in .rela.dyn), plus non-PLT GOT
   slots that will need RELATIVE entries.  Used to reserve space for
   .rela.dyn before layout. }
-function TLinker.CountRelativeRelocs: Integer;
+function TLinker.CountRelativeRelocs: Int;
 var
-  Oi, Ri: Integer;
+  Oi, Ri: Int;
   Obj: TElfObjectFile;
   Rel: TRdReloc;
 begin
@@ -1433,14 +1433,14 @@ end;
   then places at virtual addresses. }
 procedure TLinker.BuildDynamic;
 var
-  I: Integer;
+  I: Int;
   PE: TPltEntry;
-  NameOff: Integer;
+  NameOff: Int;
   SymInfo: Int64;
-  NumBuckets, Bkt: Integer;
-  HashChain: TList<Integer>;
-  HashBuckets: TList<Integer>;
-  H: Integer;
+  NumBuckets, Bkt: Int;
+  HashChain: TList<Int>;
+  HashBuckets: TList<Int>;
+  H: Int;
   RInfo: Int64;
 begin
   FInterpData := FTarget.InterpPath + Chr(0);
@@ -1471,7 +1471,7 @@ begin
     FDynSymNames.Add(PE.Name);
     SymInfo := (Int64(STB_GLOBAL) shl 4) or Int64(STT_FUNC);
     FDynSymTab := FDynSymTab + LkLE(NameOff, 4);
-    FDynSymTab := FDynSymTab + Chr(Integer(SymInfo) and $FF);
+    FDynSymTab := FDynSymTab + Chr(Int32(SymInfo) and $FF);
     FDynSymTab := FDynSymTab + Chr(0);
     FDynSymTab := FDynSymTab + LkLE(SHN_UNDEF, 2);
     FDynSymTab := FDynSymTab + LkLE(0, 8);
@@ -1491,7 +1491,7 @@ begin
     FDynSymNames.Add(FTarget.CrtExports.Get(I));
     SymInfo := (Int64(STB_GLOBAL) shl 4) or Int64(STT_OBJECT);
     FDynSymTab := FDynSymTab + LkLE(NameOff, 4);
-    FDynSymTab := FDynSymTab + Chr(Integer(SymInfo) and $FF);
+    FDynSymTab := FDynSymTab + Chr(Int32(SymInfo) and $FF);
     FDynSymTab := FDynSymTab + Chr(0);
     FDynSymTab := FDynSymTab + LkLE(SHN_UNDEF, 2);
     FDynSymTab := FDynSymTab + LkLE(0, 8);
@@ -1503,8 +1503,8 @@ begin
   NumBuckets := FPltEntries.Count + FExported.Count;
   if NumBuckets < 1 then NumBuckets := 1;
 
-  HashBuckets := TList<Integer>.Create();
-  HashChain := TList<Integer>.Create();
+  HashBuckets := TList<Int>.Create();
+  HashChain := TList<Int>.Create();
   try
     for I := 0 to NumBuckets - 1 do
       HashBuckets.Add(0);
@@ -1596,10 +1596,10 @@ end;
   Addresses start at 0 (PIE). }
 procedure TLinker.LayoutDynamic;
 var
-  I, J: Integer;
+  I, J: Int;
   M: TMergedSection;
   Addr: Int64;
-  PhdrCount: Integer;
+  PhdrCount: Int;
   HdrBytes: Int64;
   IsAlloc, IsExec, IsWrite: Boolean;
   PE: TPltEntry;
@@ -1853,7 +1853,7 @@ end;
   address is known, so it cannot consult FSymbols. }
 function TLinker.ObjectsDefine(const AName: string): Boolean;
 var
-  Oi, Si: Integer;
+  Oi, Si: Int;
   Obj: TElfObjectFile;
   Sym: TRdSymbol;
 begin
@@ -1882,7 +1882,7 @@ end;
   entry looking like an import and the loader would keep searching. }
 procedure TLinker.PatchExportedDynSyms;
 var
-  I, J, Shndx, Off: Integer;
+  I, J, Shndx, Off: Int;
   Sym: TLinkSymbol;
   A: Int64;
 begin
@@ -1917,11 +1917,11 @@ end;
   object's own section placement; a global reference goes through the
   resolved symbol table.  A strong undefined symbol with no definition
   is a link error; a weak undefined resolves to 0. }
-function TLinker.ResolveSymbolAddr(AObj: TElfObjectFile; ASymIdx: Integer;
+function TLinker.ResolveSymbolAddr(AObj: TElfObjectFile; ASymIdx: Int;
   const AContext: string): Int64;
 var
   Sym: TRdSymbol;
-  Oi: Integer;
+  Oi: Int;
   Base: Int64;
   G: TLinkSymbol;
 begin
@@ -1988,13 +1988,13 @@ end;
   additionally handles GOT-relative and emits RELATIVE fixups. }
 procedure TLinker.ApplyRelocations;
 var
-  Oi, Ri: Integer;
+  Oi, Ri: Int;
   Obj: TElfObjectFile;
   Rel: TRdReloc;
   M: TMergedSection;
   P: TSectionPlacement;
   PAddr: Int64;
-  PFileOff: Integer;
+  PFileOff: Int;
   S, Val: Int64;
   Ctx: string;
   Sym: TRdSymbol;
@@ -2015,7 +2015,7 @@ begin
       if Self.MergedAddr(M) < 0 then Continue;
 
       Ctx := Obj.SourceName;
-      PFileOff := Integer(P.Offset + Rel.Offset);
+      PFileOff := Int32(P.Offset + Rel.Offset);
       PAddr := Self.MergedAddr(M) + P.Offset + Rel.Offset;
 
       Sym := Obj.Symbols.Get(Rel.SymIndex);
@@ -2126,9 +2126,9 @@ end;
   readelf/objdump can inspect the result. }
 { Output section header index of AMerged: the merged sections follow the
   NULL header in layout order.  0 when AMerged was not laid out. }
-function TLinker.OutSectionIndex(AMerged: TMergedSection): Integer;
+function TLinker.OutSectionIndex(AMerged: TMergedSection): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FSecAddr.Count - 1 do
     if FSecAddr.Get(I) = AMerged then
@@ -2139,9 +2139,9 @@ end;
 type
   TInt64Arr = array of Int64;
 
-procedure LkSiftDown(var A: TInt64Arr; ARoot, AEnd: Integer);
+procedure LkSiftDown(var A: TInt64Arr; ARoot, AEnd: Int);
 var
-  Root, Child: Integer;
+  Root, Child: Int;
   T: Int64;
 begin
   Root := ARoot;
@@ -2160,9 +2160,9 @@ end;
 
 { In-place heapsort of the first ACount keys: O(n log n) without recursion,
   for the tens of thousands of symbols a self-hosted compiler links. }
-procedure LkSortInt64(var A: TInt64Arr; ACount: Integer);
+procedure LkSortInt64(var A: TInt64Arr; ACount: Int);
 var
-  I: Integer;
+  I: Int;
   T: Int64;
 begin
   for I := ACount div 2 - 1 downto 0 do
@@ -2188,15 +2188,15 @@ const
   the assembler gave no size gets the distance to the next symbol in its
   section, so nm -S and per-function size comparisons work.  Returns the index
   of the first global symbol (the .symtab sh_info). }
-function TLinker.BuildSymtab(out ASymTab, AStrTab: string): Integer;
+function TLinker.BuildSymtab(out ASymTab, AStrTab: string): Int;
 var
-  Oi, Si, I, N, Lo, Hi, Mid, Idx: Integer;
+  Oi, Si, I, N, Lo, Hi, Mid, Idx: Int;
   Obj: TElfObjectFile;
   Sym: TRdSymbol;
   M: TMergedSection;
   Base, Key, Mask, Value: Int64;
   All, Locals, Globals: TList<TOutSym>;
-  GlobalIdx: TDictionary<string, Integer>;
+  GlobalIdx: TDictionary<string, Int>;
   OS: TOutSym;
   Keys: TInt64Arr;
   SymBuf, StrBuf: TByteBuf;
@@ -2204,7 +2204,7 @@ begin
   All := TList<TOutSym>.Create();
   Locals := TList<TOutSym>.Create();
   Globals := TList<TOutSym>.Create();
-  GlobalIdx := TDictionary<string, Integer>.Create();
+  GlobalIdx := TDictionary<string, Int>.Create();
   SymBuf := TByteBuf.Create();
   StrBuf := TByteBuf.Create();
   try
@@ -2338,7 +2338,7 @@ end;
 { The .symtab and .strtab section headers.  AStrIndex is the .strtab
   section's header index (the .symtab sh_link). }
 procedure TLinker.EmitSymtabHeaders(var ABuf: string; ASymName, AStrName,
-  ASymOff, ASymSize, AStrOff, AStrSize, AStrIndex, AFirstGlobal: Integer);
+  ASymOff, ASymSize, AStrOff, AStrSize, AStrIndex, AFirstGlobal: Int);
 begin
   ABuf := ABuf + LkLE(ASymName, 4) + LkLE(SHT_SYMTAB, 4) + LkLE(0, 8)
     + LkLE(0, 8) + LkLE(ASymOff, 8) + LkLE(ASymSize, 8)
@@ -2352,18 +2352,18 @@ end;
 function TLinker.EmitExecutable(AEntry: Int64): string;
 var
   Buf: string;
-  I: Integer;
+  I: Int;
   M: TMergedSection;
   A: Int64;
   Base, PageSz: Int64;
   ExecLo, ExecHi, WriteLo, WriteMemHi, WriteFileHi: Int64;
-  PhOff, FirstSecFileEnd: Integer;
+  PhOff, FirstSecFileEnd: Int;
   ShStr: string;
-  ShStrOff: TList<Integer>;
-  SecCount, ShTabOff: Integer;
-  NamePos: Integer;
+  ShStrOff: TList<Int>;
+  SecCount, ShTabOff: Int;
+  NamePos: Int;
   SymTab, StrTab: string;
-  SymTabOff, StrTabOff, FirstGlobal, SymNamePos, StrNamePos: Integer;
+  SymTabOff, StrTabOff, FirstGlobal, SymNamePos, StrNamePos: Int;
 begin
   Base := FTarget.BaseAddr;
   PageSz := FTarget.PageSize;
@@ -2482,7 +2482,7 @@ begin
   { .shstrtab: NULL, one name per laid-out section, .symtab, .strtab, then
     .shstrtab. }
   ShStr := Chr(0);
-  ShStrOff := TList<Integer>.Create();
+  ShStrOff := TList<Int>.Create();
   try
     for I := 0 to FSecAddr.Count - 1 do
     begin
@@ -2560,28 +2560,28 @@ end;
 function TLinker.EmitDynExecutable(AEntry: Int64): string;
 var
   Buf: string;
-  I: Integer;
+  I: Int;
   M: TMergedSection;
   A: Int64;
-  PhdrCount: Integer;
+  PhdrCount: Int;
   HdrBytes: Int64;
   RoLo, RoHi: Int64;
   ExecLo, ExecHi: Int64;
   RelroLo, RelroHi: Int64;
   DataLo, DataMemHi, DataFileHi: Int64;
   ShStr: string;
-  ShStrOff: TList<Integer>;
-  SecCount, ShTabOff: Integer;
-  NamePos: Integer;
-  PhIdx: Integer;
+  ShStrOff: TList<Int>;
+  SecCount, ShTabOff: Int;
+  NamePos: Int;
+  PhIdx: Int;
   HasTls: Boolean;
   { Section headers for the linker-generated sections, built as parallel
     lists because sh_link / sh_info reference each other by index. }
   LkName: TList<string>;
   LkType, LkFlags, LkAddr, LkSize, LkLink, LkInfo, LkAlign, LkEnt: TList<Int64>;
-  LkBase, LkIdxDynSym, LkIdxDynStr, LkIdxGot: Integer;
+  LkBase, LkIdxDynSym, LkIdxDynStr, LkIdxGot: Int;
   SymTab, StrTab: string;
-  SymTabOff, StrTabOff, FirstGlobal, SymNamePos, StrNamePos: Integer;
+  SymTabOff, StrTabOff, FirstGlobal, SymNamePos, StrNamePos: Int;
 begin
   { Compute extents for each loadable segment.
     RO: headers + linker metadata + .rodata + .eh_frame etc.
@@ -2825,22 +2825,22 @@ begin
   if ExecHi > A then A := ExecHi;
   if RelroHi > A then A := RelroHi;
   if DataFileHi > A then A := DataFileHi;
-  if Length(Buf) < Integer(A) then
-    Buf := Buf + LkZeros(Integer(A) - Length(Buf));
+  if Length(Buf) < Int32(A) then
+    Buf := Buf + LkZeros(Int32(A) - Length(Buf));
 
   { Copy linker-generated sections. }
-  LkCopyInto(Buf, Integer(FInterpAddr), FInterpData);
-  LkCopyInto(Buf, Integer(FHashAddr), FHashTab);
-  LkCopyInto(Buf, Integer(FDynSymAddr), FDynSymTab);
-  LkCopyInto(Buf, Integer(FDynStrAddr), FDynStrTab);
+  LkCopyInto(Buf, Int32(FInterpAddr), FInterpData);
+  LkCopyInto(Buf, Int32(FHashAddr), FHashTab);
+  LkCopyInto(Buf, Int32(FDynSymAddr), FDynSymTab);
+  LkCopyInto(Buf, Int32(FDynStrAddr), FDynStrTab);
   if Length(FRelaDynData) > 0 then
-    LkCopyInto(Buf, Integer(FRelaDynAddr), FRelaDynData);
+    LkCopyInto(Buf, Int32(FRelaDynAddr), FRelaDynData);
   if Length(FRelaPlt) > 0 then
-    LkCopyInto(Buf, Integer(FRelaPltAddr), FRelaPlt);
+    LkCopyInto(Buf, Int32(FRelaPltAddr), FRelaPlt);
   if Length(FPltCode) > 0 then
-    LkCopyInto(Buf, Integer(FPltAddr), FPltCode);
-  LkCopyInto(Buf, Integer(FDynamicAddr), FDynamicData);
-  LkCopyInto(Buf, Integer(FGotAddr), FGotData);
+    LkCopyInto(Buf, Int32(FPltAddr), FPltCode);
+  LkCopyInto(Buf, Int32(FDynamicAddr), FDynamicData);
+  LkCopyInto(Buf, Int32(FGotAddr), FGotData);
 
   { Copy merged sections at their virtual addresses. }
   for I := 0 to FSecAddr.Count - 1 do
@@ -2849,7 +2849,7 @@ begin
     A := FAddrOf.Get(I);
     if M.ShType = SHT_NOBITS then Continue;
     if Length(M.Data) > 0 then
-      LkCopyInto(Buf, Integer(A), M.Data);
+      LkCopyInto(Buf, Int32(A), M.Data);
   end;
 
   { ---- Section header table (for readelf / objdump) ----
@@ -2864,7 +2864,7 @@ begin
     They are appended after the merged sections so a merged section keeps the
     index PatchExportedDynSyms assigns it (FSecAddr position + 1). }
   ShStr := Chr(0);
-  ShStrOff := TList<Integer>.Create();
+  ShStrOff := TList<Int>.Create();
   LkName := TList<string>.Create();
   LkType := TList<Int64>.Create();
   LkFlags := TList<Int64>.Create();
@@ -3002,9 +3002,9 @@ begin
       Buf := Buf + LkLE(M.Flags, 8);
       Buf := Buf + LkLE(A, 8);
       if M.ShType = SHT_NOBITS then
-        Buf := Buf + LkLE(Integer(DataFileHi), 8)
+        Buf := Buf + LkLE(Int32(DataFileHi), 8)
       else
-        Buf := Buf + LkLE(Integer(A), 8);
+        Buf := Buf + LkLE(Int32(A), 8);
       Buf := Buf + LkLE(M.Size, 8);
       Buf := Buf + LkLE(0, 4);
       Buf := Buf + LkLE(0, 4);
@@ -3062,7 +3062,7 @@ function TLinker.LinkToBytes(const AEntryName: string): string;
 var
   Sym: TLinkSymbol;
   RE: TRelaDynEntry;
-  I: Integer;
+  I: Int;
 begin
   if FDynamic then
   begin

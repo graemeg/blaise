@@ -39,11 +39,11 @@ type
     Is64:          Boolean;     { ELFCLASS64 vs ELFCLASS32 }
     LittleEndian:  Boolean;     { ELFDATA2LSB vs ELFDATA2MSB }
     IsRelocatable: Boolean;     { e_type = ET_REL }
-    Machine:       Integer;     { e_machine (EM_X86_64=62, EM_AARCH64=183, ...) }
+    Machine:       Int;     { e_machine (EM_X86_64=62, EM_AARCH64=183, ...) }
     ShOff:         Int64;       { section header table file offset }
-    ShEntSize:     Integer;
-    ShNum:         Integer;
-    ShStrNdx:      Integer;     { index of .shstrtab in SHT }
+    ShEntSize:     Int;
+    ShNum:         Int;
+    ShStrNdx:      Int;     { index of .shstrtab in SHT }
   end;
 
   { One parsed section header table entry.
@@ -54,10 +54,10 @@ type
   TElfSection = class
   public
     Name:    string;     { resolved from .shstrtab }
-    SType:   Integer;    { sh_type }
+    SType:   Int;    { sh_type }
     Offset:  Int64;      { sh_offset }
     Size:    Int64;      { sh_size }
-    NameOff: Integer;    { sh_name (raw index into .shstrtab) }
+    NameOff: Int;    { sh_name (raw index into .shstrtab) }
   end;
 
   TElfSectionArray = array of TElfSection;
@@ -125,7 +125,7 @@ function LoadSections(const APath: string; const AInfo: TElfInfo): TElfSectionAr
   { Linear lookup by name.  Returns the index into ASections, or -1
     if not found (Blaise convention). }
 function FindSection(const ASections: TElfSectionArray;
-                     const AName: string): Integer;
+                     const AName: string): Int;
 
   { Append a SHT_PROGBITS section named ASectionName containing AData
     to the relocatable ELF at APath.  The section is written with
@@ -159,9 +159,9 @@ implementation
   All operate on a Blaise byte-oriented string (0-indexed); ABuf must
   be at least AOff + width bytes long. }
 
-function ReadU16(ABuf: string; AOff: Integer; ALE: Boolean): Integer;
+function ReadU16(ABuf: string; AOff: Int; ALE: Boolean): Int32;
 var
-  B0, B1, K: Integer;
+  B0, B1, K: Int;
 begin
   K := AOff;
   B0 := Ord(ABuf[K]);
@@ -173,9 +173,9 @@ begin
     Result := (B0 shl 8) or B1;
 end;
 
-function ReadU32(ABuf: string; AOff: Integer; ALE: Boolean): Integer;
+function ReadU32(ABuf: string; AOff: Int; ALE: Boolean): Int32;
 var
-  B0, B1, B2, B3, K: Integer;
+  B0, B1, B2, B3, K: Int;
 begin
   K := AOff;
   B0 := Ord(ABuf[K]);  K := K + 1;
@@ -188,7 +188,7 @@ begin
     Result := (B0 shl 24) or (B1 shl 16) or (B2 shl 8) or B3;
 end;
 
-function ReadU64(ABuf: string; AOff: Integer; ALE: Boolean): Int64;
+function ReadU64(ABuf: string; AOff: Int; ALE: Boolean): Int64;
 var
   Lo, Hi: Int64;
 begin
@@ -209,10 +209,10 @@ end;
 
 { Read ACount bytes from AStream at AOffset into a fresh Blaise string.
   Returns False (and leaves AOut empty) if the read came up short. }
-function BlockRead(AStream: TFileInputStream; AOffset: Int64; ACount: Integer;
+function BlockRead(AStream: TFileInputStream; AOffset: Int64; ACount: Int;
                    var AOut: string): Boolean;
 var
-  Got: Integer;
+  Got: Int;
 begin
   AOut := '';
   if ACount <= 0 then
@@ -234,7 +234,7 @@ var
   Buf:   string;
   LE:    Boolean;
   Is64:  Boolean;
-  HSize: Integer;
+  HSize: Int;
 begin
   AInfo.IsElf         := False;
   AInfo.Is64          := False;
@@ -326,9 +326,9 @@ end;
 
 { Extract a NUL-terminated string from a byte buffer at AOff.  Returns
   '' if AOff is out of range or no terminator is found. }
-function StringFromStrtab(const ABuf: string; AOff: Integer): string;
+function StringFromStrtab(const ABuf: string; AOff: Int): string;
 var
-  EndIdx, I, Len: Integer;
+  EndIdx, I, Len: Int;
   S: string;
 begin
   Result := '';
@@ -361,9 +361,9 @@ end;
     sh_type   @ 4  (4 B, both)
     sh_offset @ 16 (4 B Elf32) / 24 (8 B Elf64)
     sh_size   @ 20 (4 B Elf32) / 32 (8 B Elf64) }
-procedure DecodeShdr(const ABuf: string; AOff: Integer;
+procedure DecodeShdr(const ABuf: string; AOff: Int;
                      AIs64, ALE: Boolean;
-                     var ANameOff, AType: Integer;
+                     var ANameOff, AType: Int;
                      var AOffset, ASize: Int64);
 begin
   ANameOff := ReadU32(ABuf, AOff + 0, ALE);
@@ -385,13 +385,13 @@ var
   FS:        TFileInputStream;
   ShtBuf:    string;
   StrBuf:    string;
-  I:         Integer;
+  I:         Int;
   StrOff:    Int64;
   StrSize:   Int64;
-  StrType:   Integer;
-  StrName:   Integer;
-  EntrySize: Integer;
-  NameOff, SType: Integer;
+  StrType:   Int;
+  StrName:   Int;
+  EntrySize: Int;
+  NameOff, SType: Int;
   Offset, Size:   Int64;
   Sects:     TElfSectionArray;
   Sec:       TElfSection;
@@ -426,8 +426,8 @@ begin
     if StrSize > 0 then
     begin
       FS.Seek(StrOff, soBeginning);
-      SetLength(StrBuf, Integer(StrSize));
-      if FS.Read(PChar(StrBuf), Integer(StrSize)) <> Integer(StrSize) then
+      SetLength(StrBuf, Int32(StrSize));
+      if FS.Read(PChar(StrBuf), Int32(StrSize)) <> Int32(StrSize) then
         raise EElfObject.Create(APath + ': short read on .shstrtab');
     end;
 
@@ -464,9 +464,9 @@ begin
 end;
 
 function FindSection(const ASections: TElfSectionArray;
-                     const AName: string): Integer;
+                     const AName: string): Int;
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I <= High(ASections) do
@@ -484,10 +484,10 @@ end;
 { Zero a Blaise byte-string in place — Blaise's parser rejects
   `PChar(buf)[i] := ...`, so the indirection through a local pointer
   is mandatory. }
-procedure ZeroBuf(var ABuf: string; ACount: Integer);
+procedure ZeroBuf(var ABuf: string; ACount: Int);
 var
   P: PChar;
-  I: Integer;
+  I: Int;
 begin
   P := PChar(ABuf);
   I := 0;
@@ -500,10 +500,10 @@ end;
 
 { ---- Endian-aware byte writers (LE only for now) -------------------- }
 
-procedure WriteU16LE(var ABuf: string; AOff: Integer; AVal: Integer);
+procedure WriteU16LE(var ABuf: string; AOff: Int; AVal: Int);
 var
   P: PChar;
-  K: Integer;
+  K: Int;
 begin
   P := PChar(ABuf);
   K := AOff;
@@ -511,10 +511,10 @@ begin
   P[K] := Chr((AVal shr 8) and $FF);
 end;
 
-procedure WriteU32LE(var ABuf: string; AOff: Integer; AVal: Integer);
+procedure WriteU32LE(var ABuf: string; AOff: Int; AVal: Int);
 var
   P: PChar;
-  K: Integer;
+  K: Int;
 begin
   P := PChar(ABuf);
   K := AOff;
@@ -524,14 +524,14 @@ begin
   P[K] := Chr((AVal shr 24) and $FF);
 end;
 
-procedure WriteU64LE(var ABuf: string; AOff: Integer; AVal: Int64);
+procedure WriteU64LE(var ABuf: string; AOff: Int; AVal: Int64);
 var
   Lo, Hi: Int64;
 begin
   Lo := AVal and $FFFFFFFF;
   Hi := (AVal shr 32) and $FFFFFFFF;
-  WriteU32LE(ABuf, AOff,     Integer(Lo));
-  WriteU32LE(ABuf, AOff + 4, Integer(Hi));
+  WriteU32LE(ABuf, AOff,     Int32(Lo));
+  WriteU32LE(ABuf, AOff + 4, Int32(Hi));
 end;
 
 { Round AVal up to the next multiple of AAlign (AAlign must be a power of 2). }
@@ -561,15 +561,15 @@ var
   ShtBuf:    string;       { rewritten SHT }
   Pad:       string;
   TmpPath:   string;
-  I:         Integer;
+  I:         Int;
   DataEnd:   Int64;        { highest sh_offset+sh_size across all sections }
   StrEnd:    Int64;
   NewStrOff: Int64;
   NewDataOff: Int64;
   NewShOff:  Int64;
-  NewShNum:  Integer;
-  NewNameOff: Integer;
-  EntrySize: Integer;
+  NewShNum:  Int;
+  NewNameOff: Int;
+  EntrySize: Int;
   HdrBuf:    string;
   BodyBuf:   string;
 begin
@@ -590,7 +590,7 @@ begin
   { Slurp the entire file. }
   FIn := TFileInputStream.Create(APath);
   try
-    SetLength(OldFile, Integer(FIn.Size()));
+    SetLength(OldFile, Int32(FIn.Size()));
     if FIn.Read(PChar(OldFile), Length(OldFile)) <> Length(OldFile) then
       raise EElfObject.Create(APath + ': short read on original file');
   finally
@@ -601,8 +601,8 @@ begin
 
   { Pull the existing .shstrtab contents from OldFile. }
   StrEnd := Secs[Info.ShStrNdx].Offset + Secs[Info.ShStrNdx].Size;
-  OldStrBuf := Copy(OldFile, Integer(Secs[Info.ShStrNdx].Offset),
-                    Integer(Secs[Info.ShStrNdx].Size));
+  OldStrBuf := Copy(OldFile, Int32(Secs[Info.ShStrNdx].Offset),
+                    Int32(Secs[Info.ShStrNdx].Size));
 
   { New .shstrtab = old + name + #0.  Record the offset at which our
     name starts — that becomes the new entry's sh_name. }
@@ -637,7 +637,7 @@ begin
   { Build the new SHT in memory.  Start with the verbatim original
     SHT slice from the file, padded with one zero entry for our new
     section. }
-  ShtBuf := Copy(OldFile, Integer(Info.ShOff), Info.ShNum * EntrySize);
+  ShtBuf := Copy(OldFile, Int32(Info.ShOff), Info.ShNum * EntrySize);
   { Append EntrySize zero bytes for the new entry. }
   SetLength(Pad, EntrySize);
   ZeroBuf(Pad, EntrySize);
@@ -678,20 +678,20 @@ begin
     FOut.Write(PChar(HdrBuf), ELF64_EHDR_SIZE);
     { 2. Original body from EhSize .. DataEnd. }
     BodyBuf := Copy(OldFile, ELF64_EHDR_SIZE,
-                    Integer(DataEnd) - ELF64_EHDR_SIZE);
+                    Int32(DataEnd) - ELF64_EHDR_SIZE);
     FOut.Write(PChar(BodyBuf), Length(BodyBuf));
     { 3. New .shstrtab. }
     if NewStrOff > DataEnd then
-      FOut.Write(PChar(Pad), Integer(NewStrOff - DataEnd));
+      FOut.Write(PChar(Pad), Int32(NewStrOff - DataEnd));
     FOut.Write(PChar(NewStrBuf), Length(NewStrBuf));
     { 4. Padding to NewDataOff, then our payload. }
     if NewDataOff > NewStrOff + Length(NewStrBuf) then
-      FOut.Write(PChar(Pad), Integer(NewDataOff - (NewStrOff + Length(NewStrBuf))));
+      FOut.Write(PChar(Pad), Int32(NewDataOff - (NewStrOff + Length(NewStrBuf))));
     if Length(AData) > 0 then
       FOut.Write(PChar(AData), Length(AData));
     { 5. Padding to NewShOff, then the rewritten SHT. }
     if NewShOff > NewDataOff + Length(AData) then
-      FOut.Write(PChar(Pad), Integer(NewShOff - (NewDataOff + Length(AData))));
+      FOut.Write(PChar(Pad), Int32(NewShOff - (NewDataOff + Length(AData))));
     FOut.Write(PChar(ShtBuf), Length(ShtBuf));
     FOut.Flush();
   finally
@@ -711,7 +711,7 @@ function ReadSection(const APath, ASectionName: string;
 var
   Info:  TElfInfo;
   Secs:  TElfSectionArray;
-  Idx:   Integer;
+  Idx:   Int;
   FIn:   TFileInputStream;
   Sec:   TElfSection;
 begin
@@ -732,8 +732,8 @@ begin
   FIn := TFileInputStream.Create(APath);
   try
     FIn.Seek(Sec.Offset, soBeginning);
-    SetLength(AData, Integer(Sec.Size));
-    if FIn.Read(PChar(AData), Integer(Sec.Size)) <> Integer(Sec.Size) then
+    SetLength(AData, Int32(Sec.Size));
+    if FIn.Read(PChar(AData), Int32(Sec.Size)) <> Int32(Sec.Size) then
       raise EElfObject.Create(APath + ': short read on section ' + ASectionName);
   finally
     FIn.Free();

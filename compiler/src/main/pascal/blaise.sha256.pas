@@ -34,7 +34,7 @@ const
 
 { The 64 round constants (fractional parts of the cube roots of the
   first 64 primes). }
-function KConst(AIdx: Integer): Int64;
+function KConst(AIdx: Int): Int64;
 const
   K: array[0..63] of Int64 = (
     $428A2F98, $71374491, $B5C0FBCF, $E9B5DBA5,
@@ -57,7 +57,7 @@ begin
   Result := K[AIdx];
 end;
 
-function Rotr(AVal: Int64; ABits: Integer): Int64;
+function Rotr(AVal: Int64; ABits: Int): Int64;
 begin
   Result := ((AVal shr ABits) or (AVal shl (32 - ABits))) and $FFFFFFFF;
 end;
@@ -68,10 +68,10 @@ var
   W: array[0..63] of Int64;
   Msg: string;
   BitLen: Int64;
-  I, J, Blk, NBlks: Integer;
+  I, J, Blk, NBlks: Int;
   A, B, C, D, E, F, G, HH: Int64;
   S0, S1, Ch, Maj, T1, T2: Int64;
-  Base: Integer;
+  Base: Int;
 begin
   H[0] := $6A09E667; H[1] := $BB67AE85; H[2] := $3C6EF372;
   H[3] := $A54FF53A; H[4] := $510E527F; H[5] := $9B05688C;
@@ -83,7 +83,7 @@ begin
   while (Length(Msg) mod 64) <> 56 do
     Msg := Msg + Chr(0);
   for I := 7 downto 0 do
-    Msg := Msg + Chr(Integer((BitLen shr (I * 8)) and $FF));
+    Msg := Msg + Chr(Int32((BitLen shr (I * 8)) and $FF));
 
   NBlks := Length(Msg) div 64;
   for Blk := 0 to NBlks - 1 do
@@ -131,13 +131,13 @@ begin
   Result := '';
   for I := 0 to 7 do
     for J := 3 downto 0 do
-      Result := Result + Chr(Integer((H[I] shr (J * 8)) and $FF));
+      Result := Result + Chr(Int32((H[I] shr (J * 8)) and $FF));
 end;
 
 function Sha256Hex(const ABytes: string): string;
 var
   D: string;
-  I, V: Integer;
+  I, V: Int;
 begin
   D := Sha256(ABytes);
   Result := '';
