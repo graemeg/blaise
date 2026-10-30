@@ -11,10 +11,10 @@ program test_06_local_variables;
 
 { Test program for debugging local variables and function parameters }
 
-function Calculate(A, B: Integer): Integer;
+function Calculate(A, B: Int32): Int32;
 var
-  Sum: Integer;
-  Product: Integer;
+  Sum: Int32;
+  Product: Int32;
 begin
   Sum := A + B;
   Product := A * B;
@@ -22,8 +22,8 @@ begin
 end;
 
 var
-  X, Y, ResultValue: Integer;
-  Sentinel: Integer;
+  X, Y, ResultValue: Int32;
+  Sentinel: Int32;
 begin
   X := 5;
   Y := 10;

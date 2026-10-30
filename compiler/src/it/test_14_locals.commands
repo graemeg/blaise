@@ -1,7 +1,7 @@
 run
-break test_14_locals.pas:17
+break test_14_locals.pas:25
 continue
 locals
-break test_14_locals.pas:23
+break test_14_locals.pas:31
 continue
 quit

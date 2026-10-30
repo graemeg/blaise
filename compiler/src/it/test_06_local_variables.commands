@@ -1,10 +1,10 @@
 run
-break test_06_local_variables.pas:13
+break test_06_local_variables.pas:21
 continue
 print A
 print B
 print Sum
 print Product
-break test_06_local_variables.pas:23
+break test_06_local_variables.pas:31
 continue
 quit

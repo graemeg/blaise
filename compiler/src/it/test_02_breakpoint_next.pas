@@ -11,8 +11,8 @@ program test_02_breakpoint_next;
 
 
 var
-  MyInt: Integer;
-  Sentinel: Integer;
+  MyInt: Int32;
+  Sentinel: Int32;
 
 begin
   WriteLn('Test: Breakpoint and Next');

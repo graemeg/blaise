@@ -14,13 +14,13 @@ program test_26_step_over;
 
 
 
-procedure SetResult(var N: Integer; V: Integer);
+procedure SetResult(var N: Int32; V: Int32);
 begin
   N := V;
 end;
 
 var
-  Counter: Integer;
+  Counter: Int32;
 
 begin
   Counter := 0;

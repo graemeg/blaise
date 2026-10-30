@@ -12,13 +12,13 @@ program test_14_locals;
 { Test program for 'locals' command — lists all in-scope variables }
 
 var
-  GlobalCount: Integer;
-  Sentinel: Integer;
+  GlobalCount: Int32;
+  Sentinel: Int32;
 
-function Compute(A, B: Integer): Integer;
+function Compute(A, B: Int32): Int32;
 var
-  Sum: Integer;
-  Product: Integer;
+  Sum: Int32;
+  Product: Int32;
 begin
   Sum := A + B;
   Product := A * B;
