@@ -21588,8 +21588,8 @@ function TSemanticAnalyser.PromotedIntType(AExpr: TASTExpr): TTypeDesc;
 var
   V: Int64;
 begin
-  if Self.TryEvalConstIntExpr(AExpr, V) and (V >= Low(Int)) and
-     (V <= High(Int)) then
+  if Self.TryEvalConstIntExpr(AExpr, V) and (V >= Low(Int32)) and
+     (V <= High(Int32)) then
     Result := FTable.TypeInteger
   else
     Result := FTable.TypeInt64;
