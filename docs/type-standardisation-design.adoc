@@ -443,15 +443,43 @@ the rule in one line — *when transcribing a C header, C `int` is `Int32`, C
 `intptr_t`/`ssize_t`, never to C `int`* — and `bindgen` output follows that
 mapping.
 
-=== D10. Compiler-internal usage
+=== D10. Compiler-internal usage — revised 2026-10-30: decided per site
 
-The compiler, runtime and stdlib use the fixed-width names. The
-behaviour-preserving migration is the *mechanical rename* `Integer` → `Int32`,
-`Cardinal` → `UInt32`, `Double` → `Float64` etc., which changes no layout, no
-semantics and no generated code — an ideal fixpoint-verified commit.
-Opportunistic *widening* of internal fields to `Int` is a separate,
-case-by-case decision outside the rename (widening a field is a layout
-change; see D5). The internal `TTypeKind` enumeration keeps its existing
+The compiler, runtime, stdlib and tools use the width-stating names.  The
+names with a single meaning are renamed mechanically: `Cardinal` → `UInt32`,
+`Word` → `UInt16`, `PtrUInt` → `UInt`, `Single` → `Float32`, `Double` →
+`Float64`.  Each pair names the same type, so these commits change no
+generated code.
+
+`Integer` is decided per site, because it carries no intent: it was the
+default integer, chosen without regard to width.  A mechanical rename to
+`Int32` would make every such site read as a deliberate 32-bit choice and
+remove the only marker of the sites still undecided; the later widening pass
+would have nothing to work from.  The rule:
+
+* `Int32` where the width is part of a contract:
+** the C ABI: external `cdecl` and syscall declarations, and records that
+   mirror C structures (C `int` is 32-bit on every target, D9);
+** binary formats: OPDF, `.bif`, ELF and Mach-O fields, instruction
+   encodings and their immediates and displacements;
+** the codegen–RTL contract: the parameters and results of RTL helpers that
+   codegen calls, and the fields of RTL records whose offsets codegen knows.
+   Widening one is a teach-then-use change to codegen and RTL together, not
+   part of the rename;
+** values 32-bit by definition: hash values, comparison results, character
+   codes and code points;
+** arithmetic that relies on 32-bit wraparound or bit layout.
+* `Int` everywhere else: counts, indices, lengths, positions, sizes, loop
+  variables, and general bookkeeping.  On a 32-bit target these follow the
+  pointer width; a value that must exceed 2^31^ there (a file offset) is
+  declared `Int64`.
+
+Widening a field is a layout change (D5), so these commits are verified by
+the fixpoints and the full suite rather than by an identical binary.  The
+narrowing warning (4.8) measures progress: its count falls as index
+variables are retyped.  A stdlib signature that widens is a breaking change
+for a `var` argument (4.6) and for an override; both are acceptable in the
+v0.16 cycle.  The internal `TTypeKind` enumeration keeps its existing
 constant names — renaming `tyInteger` across the source tree buys nothing and
 risks much.
 
@@ -555,7 +583,8 @@ The announcement in discussion #106 is revised on the following points:
   `ReadFile`.  4.6: collection counts, capacities and indices are `Int`;
   found on the way: a `var` or `out` argument of a different width than
   its parameter was accepted and the callee wrote past or short of it.
-  4.7: `MaxInt` is `High(Int)`.  4.8: `--warn-narrowing`.  Next: Phase 5.
+  4.7: `MaxInt` is `High(Int)`.  4.8: `--warn-narrowing`.  Next: Phase 5
+  (D10 revised 2026-10-30: `Integer` is decided per site, not renamed).
 |===
 
 [#timeline]
@@ -633,17 +662,22 @@ the project's test rules.
 
 The detailed commit plan is in <<phase4-plan>>.
 
-*Phase 5 — mechanical rename of Blaise's own source.*
+*Phase 5 — Blaise's own source moves to the width-stating names (D10).*
 
+* 5.1: the single-meaning names (`Cardinal`, `Word`, `PtrUInt`, `Single`,
+  `Double`) are renamed mechanically across compiler, runtime, stdlib, tools
+  and tests.  Built by the same compiler, the result is byte-identical.
+* 5.2 onward: `Integer` is decided per site under the D10 rule, one tree
+  region per commit, each green: compiler front end (lexer, parser, AST,
+  symbol table, semantic pass); codegen, assemblers, linkers and object
+  writers; RTL; stdlib; tools, runtime tests and compiler tests.
 * Regenerate `bindings/src/main/pascal/x11.pas` with the Phase 2 `bindgen`
   (it needs clang and the X11 development headers).  Until then the
   committed unit still uses the classic names, which remain builtins.
-
-* `Integer` → `Int32`, `Cardinal` → `UInt32`, `Double` → `Float64`, ... across
-  compiler, runtime, stdlib, tools and tests. Behaviour-preserving; the native
-  fixpoint diff should be empty modulo type-name strings. Several commits,
-  tree-region by tree-region, each green. The BlaiseGuard rule from Phase 2
-  doubles as the completeness check.
+* Completeness: BlaiseGuard BL-2006 reports no classic name outside
+  `ClassicPascalTypes`, and a text scan finds none in inactive `{$IFDEF}`
+  branches, which a token rule does not see.  Test programs held in string
+  literals keep exercising the classic names until Phase 6.
 
 *Phase 6 — remove the old builtins (the flip).*
 
