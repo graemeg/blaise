@@ -1133,6 +1133,11 @@ begin
             RecordGenericDepNames(
               TUnitInterface(UnitIfaces.Items[UnitIfaces.Count - 1]),
               Semantic.GenericSourceUnits());
+            { And the hash of every prebuilt object it was compiled against,
+              which another build (another cache) may later rebuild. }
+            RecordPrebuiltDepHashes(
+              TUnitInterface(UnitIfaces.Items[UnitIfaces.Count - 1]),
+              Loader.PrebuiltIfaces, UnitIfaces);
             Semantic.RegisterUnitIface(
               TUnitInterface(UnitIfaces.Items[UnitIfaces.Count - 1]));
             { Emit on-disk artifact when --emit-iface DIR was passed.

@@ -79,6 +79,10 @@ type
       on the cached path, so memoising makes that work shared rather than
       repeated — this is a net saving even before the new check is counted. }
     FHashMemo:             TStringList;  { Name=Hash, filled on demand }
+    FObjHashMemo:          TStringList;  { Name=Hash of the SourceHash a
+                                           unit's object on the path carries,
+                                           for one with no source; filled on
+                                           demand }
     FSourceLoadedNames:    TStringList;  { units taken via the SOURCE-recompile
                                            path (stale cache or no cache).  A
                                            cached unit whose dependency is in
@@ -129,6 +133,12 @@ type
     { True when AIface recorded monomorphising a generic from a unit whose
       source has changed since.  See TUnitInterface.GenericDepHashes. }
     function GenericDepChanged(AIface: TUnitInterface): Boolean;
+    { The SourceHash AName now has: its source's on the search path, else
+      the one recorded in its object on the path; '' when neither is found. }
+    function CurrentDepHash(const AName: string): string;
+    { True when AIface was compiled against a prebuilt dependency whose
+      object has been rebuilt since.  See TUnitInterface.PrebuiltDepHashes. }
+    function PrebuiltDepChanged(AIface: TUnitInterface): Boolean;
     procedure LoadTransitive(const AName: string);
     { Collect the .o for an impl-only dependency (and its transitive
       dependencies) for linking, without parsing source or importing its
@@ -316,6 +326,16 @@ begin
       WriteLn(StdErr,
               'note: ', AName,
               '.o instantiates a generic whose source changed; recompiling from source');
+      Exit;
+    end;
+    { Or a dependency it took from a prebuilt object -- another module's
+      cache, with no source on this path -- was rebuilt since, perhaps with
+      a different record layout. }
+    if PrebuiltDepChanged(AIface) then
+    begin
+      WriteLn(StdErr,
+              'note: ', AName,
+              '.o was compiled against a dependency that has been rebuilt; recompiling from source');
       Exit;
     end;
     { Source unchanged — but the cached .o must also have been emitted by THIS
@@ -615,6 +635,54 @@ begin
   Result := False;
 end;
 
+function TUnitLoader.CurrentDepHash(const AName: string): string;
+var
+  Idx:     Int;
+  ObjPath: string;
+  Iface:   TUnitInterface;
+begin
+  if Locate(AName) <> '' then
+    Exit(SourceHashOf(AName));
+  for Idx := 0 to FObjHashMemo.Count - 1 do
+    if SameText(DepPairName(FObjHashMemo.Strings[Idx]), AName) then
+      Exit(DepPairHash(FObjHashMemo.Strings[Idx]));
+  Result := '';
+  ObjPath := LocateWithExt(AName, '.o');
+  if ObjPath <> '' then
+  begin
+    Iface := LoadIfaceFromObject(ObjPath);
+    if Iface <> nil then
+    begin
+      Result := Iface.SourceHash;
+      Iface.Free();
+    end;
+  end;
+  FObjHashMemo.Add(AName + '=' + Result);
+end;
+
+function TUnitLoader.PrebuiltDepChanged(AIface: TUnitInterface): Boolean;
+var
+  I:       Int;
+  DepName: string;
+  WasHash: string;
+  NowHash: string;
+begin
+  { A dependency that cannot be found now is left to the loader, which
+    reports it when it loads that unit. }
+  Result := True;
+  for I := 0 to AIface.PrebuiltDepHashes.Count - 1 do
+  begin
+    DepName := DepPairName(AIface.PrebuiltDepHashes.Strings[I]);
+    WasHash := DepPairHash(AIface.PrebuiltDepHashes.Strings[I]);
+    if (DepName = '') or (WasHash = '') then Continue;
+    NowHash := CurrentDepHash(DepName);
+    if NowHash = '' then Continue;
+    if not SameText(NowHash, WasHash) then
+      Exit;
+  end;
+  Result := False;
+end;
+
 function TUnitLoader.WouldRecompileFromSource(const AName: string): Boolean;
 var
   ObjPath: string;
@@ -856,6 +924,7 @@ begin
   FSourceLoadedNames := TStringList.Create();
   FSourceLoadedNames.CaseSensitive := False;
   FHashMemo := TStringList.Create();
+  FObjHashMemo := TStringList.Create();
   FHashMemo.CaseSensitive := False;
   FPrebuiltIfaces      := TObjectList.Create(True);
   FPrebuiltObjectPaths := TStringList.Create();
@@ -875,6 +944,7 @@ begin
   FPrebuiltObjectPaths.Free();
   FPrebuiltIfaces.Free();
   FHashMemo.Free();
+  FObjHashMemo.Free();
   FSourceLoadedNames.Free();
   FLoadedNames.Free();
   FIfaceChain.Free();

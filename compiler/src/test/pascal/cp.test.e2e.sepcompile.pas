@@ -454,6 +454,12 @@ type
     { The consumer's type argument shares its name with a type the generic's
       declaring unit can see: the instance must use the CONSUMER's type. }
     procedure TestGenericBody_TypeArgShadowsDeclaringUnitName;
+    { A dependency read from ANOTHER cache on the unit path, with no source
+      beside it (a PasBuild module's dependency module), is rebuilt there
+      with a bigger record.  The dependent unit in this cache -- direct, and
+      through a middle unit -- kept its object compiled against the old
+      layout, indexing the array with the old element size. }
+    procedure TestIncrementalRebuild_DependencyInOtherCache_Rebuilt;
   end;
 
 implementation
@@ -7144,6 +7150,147 @@ begin
   AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 stdout', '24 24 9' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_DependencyInOtherCache_Rebuilt;
+const
+  ShapeV1 =
+    '''
+    unit OcShape;
+    interface
+    type
+      TShaped = record
+        G: Int;
+        X: Float32;
+      end;
+      TShapedArray = array of TShaped;
+    implementation
+    end.
+    ''';
+  ShapeV2 =
+    '''
+    unit OcShape;
+    interface
+    type
+      TShaped = record
+        G: Int;
+        X: Float32;
+        Extra1, Extra2: Int;
+      end;
+      TShapedArray = array of TShaped;
+    implementation
+    end.
+    ''';
+  MidSrc =
+    '''
+    unit OcMid;
+    interface
+    uses OcShape;
+    function Shape(N: Int): TShapedArray;
+    implementation
+    function Shape(N: Int): TShapedArray;
+    var
+      I: Int;
+    begin
+      SetLength(Result, N);
+      for I := 0 to N - 1 do
+        Result[I].G := I;
+    end;
+    end.
+    ''';
+  LibProgSrc =
+    '''
+    program OcLib;
+    uses OcShape, OcMid;
+    begin
+    end.
+    ''';
+  ParaSrc =
+    '''
+    unit OcPara;
+    interface
+    uses OcShape;
+    type
+      TPara = class
+        Items: array of TShaped;
+        procedure Fill(N: Int);
+      end;
+    implementation
+    procedure TPara.Fill(N: Int);
+    var
+      I: Int;
+    begin
+      SetLength(Items, N);
+      for I := 0 to N - 1 do
+        Items[I].G := I;
+    end;
+    end.
+    ''';
+  ChainSrc =
+    '''
+    unit OcChain;
+    interface
+    uses OcMid;
+    function Third(): Int;
+    implementation
+    function Third(): Int;
+    begin
+      Result := Shape(10)[3].G;
+    end;
+    end.
+    ''';
+  AppSrc =
+    '''
+    program OcApp;
+    uses OcShape, OcPara, OcChain;
+    var
+      P: TPara;
+      S: TShaped;
+    begin
+      P := TPara.Create();
+      P.Fill(10);
+      WriteLn(SizeOf(S), ' ', P.Items[3].G, ' ', Third());
+      P.Free();
+    end.
+    ''';
+var
+  Dir, LibDir, AppDir, Captured: string;
+  Rc: Int;
+
+  procedure Build(const AWhat: string);
+  begin
+    Rc := RunBlaise(['--source', LibDir + '/oclib.pas', '--output',
+                     LibDir + '/oclib', '--unit-cache', LibDir + '/units',
+                     '--unit-path', LibDir], Captured);
+    AssertEquals(AWhat + ': library exit code (out: ' + Captured + ')', 0, Rc);
+    { the application sees the library only through its cache }
+    Rc := RunBlaise(['--source', AppDir + '/ocapp.pas', '--output',
+                     AppDir + '/ocapp', '--unit-cache', AppDir + '/units',
+                     '--unit-path', AppDir, '--unit-path', LibDir + '/units'],
+                    Captured);
+    AssertEquals(AWhat + ': application exit code (out: ' + Captured + ')',
+                 0, Rc);
+    Rc := RunBinary(AppDir + '/ocapp', Captured);
+  end;
+
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := FScratch + '/othercache_rebuild';
+  LibDir := Dir + '/lib';
+  AppDir := Dir + '/app';
+  ForceDirectories(LibDir);
+  ForceDirectories(AppDir);
+  WriteFile(LibDir + '/ocshape.pas', ShapeV1);
+  WriteFile(LibDir + '/ocmid.pas', MidSrc);
+  WriteFile(LibDir + '/oclib.pas', LibProgSrc);
+  WriteFile(AppDir + '/ocpara.pas', ParaSrc);
+  WriteFile(AppDir + '/occhain.pas', ChainSrc);
+  WriteFile(AppDir + '/ocapp.pas', AppSrc);
+  Build('build1');
+  AssertEquals('build1 stdout', '16 3 3' + #10, Captured);
+  WriteFile(LibDir + '/ocshape.pas', ShapeV2);
+  Build('build2');
+  AssertEquals('build2 stdout', '32 3 3' + #10, Captured);
 end;
 
 initialization

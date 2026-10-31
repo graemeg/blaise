@@ -252,6 +252,18 @@ type
       If cross-unit inlining ever starts EMITTING the body into the caller,
       inline deps must be recorded here too. }
     GenericDepHashes: TStringList; { owned — Name=Hash of generic sources }
+    { The SourceHash of each dependency this unit was compiled against that
+      came from a PREBUILT object rather than being compiled in the same
+      build, as Name=Hash pairs.  A dependency compiled from source in the
+      same build already invalidates this unit's object
+      (TUnitLoader.DependsOnSourceLoaded).  A prebuilt one may live in
+      ANOTHER cache -- a PasBuild module reads its dependency module's
+      target/units on the unit path, with no source beside it -- and be
+      rebuilt by another build, which nothing here saw: this unit's object
+      kept the old record layout (BUG-20261031-stale-dependent-across-
+      caches).  Comparing against the hash the dependency's current object
+      carries catches it. }
+    PrebuiltDepHashes: TStringList; { owned — Name=Hash of prebuilt deps }
     LinkLibs:        TStringList; { owned — bare library names this unit must be
                                     linked against (deduped), hoisted from every
                                     'external ''lib''' decl, interface OR
@@ -485,6 +497,8 @@ begin
   ImplicitDeps.CaseSensitive := False;
   GenericDepHashes := TStringList.Create();
   GenericDepHashes.CaseSensitive := False;
+  PrebuiltDepHashes := TStringList.Create();
+  PrebuiltDepHashes.CaseSensitive := False;
   LinkLibs  := TStringList.Create();
 
   Types         := TObjectList.Create(True);
@@ -518,6 +532,7 @@ begin
 
   LinkLibs.Free();
   GenericDepHashes.Free();
+  PrebuiltDepHashes.Free();
   ImplicitDeps.Free();
   ImplUsedUnits.Free();
   UsedUnits.Free();

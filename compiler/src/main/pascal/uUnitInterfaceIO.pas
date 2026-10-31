@@ -54,7 +54,12 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 32; { v32: a method sig carries IsOperator and the
+  IFACE_VERSION = 33; { v33: the META block carries PrebuiltDepHashes
+                          after Target -- the SourceHash of each dependency
+                          taken from a prebuilt object -- so a cached unit is
+                          rebuilt when that object is rebuilt by another
+                          build (BUG-20261031-stale-dependent-across-caches).
+                        v32: a method sig carries IsOperator and the
                           OperatorKind ordinal after its visibility, so a
                           cached unit's `class operator`s are found again
                           (BUG-20261028-operators-lost-on-warm-build).
@@ -264,6 +269,14 @@ function DepPairHash(const AEntry: string): string;
   that unit's source hash, since it already hashes sources and knows the active
   defines.  See TUnitInterface.GenericDepHashes. }
 procedure RecordGenericDepNames(AIface: TUnitInterface; ANames: TStringList);
+
+{ Record, on AIface, the SourceHash of every unit in its transitive
+  dependency closure that this build took from a prebuilt object
+  (APrebuilt), as Name=Hash pairs.  ABuilt holds the ifaces built from
+  source in this build, whose dependency lists the walk follows too.  See
+  TUnitInterface.PrebuiltDepHashes. }
+procedure RecordPrebuiltDepHashes(AIface: TUnitInterface;
+  APrebuilt, ABuilt: TObjectList);
 
 { File wrappers.  Caller owns the returned interface. }
 procedure WriteUnitInterfaceToFile(AIface: TUnitInterface; const APath: string);
@@ -1159,6 +1172,7 @@ begin
            EncodeStringList(AIface.GenericDepHashes) +
            EncodeStringList(AIface.ImplicitDeps) +
            EncodeLpstr(AIface.Target) +
+           EncodeStringList(AIface.PrebuiltDepHashes) +
            EncodeBool(AIface.HasInitialization) +
            EncodeBool(AIface.HasFinalization));
     SB.AppendLine('END');
@@ -2747,6 +2761,9 @@ begin
   for I := 1 to C do
     AIface.ImplicitDeps.Add(ReadLpstrAt(AText, APos));
   AIface.Target := ReadLpstrAt(AText, APos);
+  C := DecodeCount(AText, APos);
+  for I := 1 to C do
+    AIface.PrebuiltDepHashes.Add(ReadLpstrAt(AText, APos));
   AIface.HasInitialization := ReadLpstrAt(AText, APos) = '1';
   AIface.HasFinalization := ReadLpstrAt(AText, APos) = '1';
   if ReadTag(AText, APos) <> 'END' then
@@ -3377,6 +3394,68 @@ begin
     Result := ''
   else
     Result := StrCopyTail(AEntry, P + 1);
+end;
+
+procedure RecordPrebuiltDepHashes(AIface: TUnitInterface;
+  APrebuilt, ABuilt: TObjectList);
+var
+  Todo, Seen: TStringList;
+  Name: string;
+  Dep: TUnitInterface;
+
+  function FindIn(AList: TObjectList; const AName: string): TUnitInterface;
+  var
+    K: Int;
+  begin
+    Result := nil;
+    if AList = nil then Exit;
+    for K := 0 to AList.Count - 1 do
+      if SameText(TUnitInterface(AList.Items[K]).Name, AName) then
+        Exit(TUnitInterface(AList.Items[K]));
+  end;
+
+  procedure Queue(AFrom: TUnitInterface);
+  var
+    K: Int;
+  begin
+    for K := 0 to AFrom.UsedUnits.Count - 1 do
+      Todo.Add(AFrom.UsedUnits.Strings[K]);
+    for K := 0 to AFrom.ImplUsedUnits.Count - 1 do
+      Todo.Add(AFrom.ImplUsedUnits.Strings[K]);
+    for K := 0 to AFrom.ImplicitDeps.Count - 1 do
+      Todo.Add(AFrom.ImplicitDeps.Strings[K]);
+  end;
+
+begin
+  if AIface = nil then Exit;
+  AIface.PrebuiltDepHashes.Clear();
+  Todo := TStringList.Create();
+  Seen := TStringList.Create();
+  Seen.CaseSensitive := False;
+  try
+    Queue(AIface);
+    while Todo.Count > 0 do
+    begin
+      Name := Todo.Strings[Todo.Count - 1];
+      Todo.Delete(Todo.Count - 1);
+      if (Name = '') or (Seen.IndexOf(Name) >= 0) then Continue;
+      Seen.Add(Name);
+      Dep := FindIn(APrebuilt, Name);
+      if Dep <> nil then
+      begin
+        if Dep.SourceHash <> '' then
+          AIface.PrebuiltDepHashes.Add(Name + '=' + Dep.SourceHash);
+        Queue(Dep);
+        Continue;
+      end;
+      Dep := FindIn(ABuilt, Name);
+      if Dep <> nil then
+        Queue(Dep);
+    end;
+  finally
+    Seen.Free();
+    Todo.Free();
+  end;
 end;
 
 procedure RecordGenericDepNames(AIface: TUnitInterface; ANames: TStringList);

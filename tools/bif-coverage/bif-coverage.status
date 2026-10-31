@@ -369,6 +369,7 @@ TUnitInterface.UsedUnits  serialise
 TUnitInterface.ImplUsedUnits  serialise
 TUnitInterface.ImplicitDeps  serialise
 TUnitInterface.GenericDepHashes  serialise
+TUnitInterface.PrebuiltDepHashes  serialise
 TUnitInterface.LinkLibs  serialise
 TUnitInterface.HasInitialization  serialise
 TUnitInterface.HasFinalization  serialise
