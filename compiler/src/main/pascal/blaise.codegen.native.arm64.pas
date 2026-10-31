@@ -12370,8 +12370,11 @@ begin
         EmitStoreSlot('x0', OwnedRecv);
       end;
     end
-    else
+    else if not EmitCapturedBase('x0', ME.ObjectName, True, ME.IsVarParam) then
     begin
+      { (a captured receiver is reached through its '_cap_' slot: loading
+        the name inside a closure failed, "neither a frame slot nor a
+        global", as AOnDone(True, D.Colour()) did) }
       EmitLoadSlot('x0', ME.ObjectName);
       if ME.IsVarParam then
         Self.Emit(#9'ldr x0, [x0]');
@@ -19062,6 +19065,9 @@ begin
   for I := 0 to AProg.GenericInstances.Count - 1 do
   begin
     GI := TGenericInstance(AProg.GenericInstances.Items[I]);
+    { a unit appended to this buffer before the program (a whole-program
+      build) already emitted the same instance }
+    if not ClaimGenericTypeEmit(GI.TypeName) then Continue;
     { instances that implement interfaces flow through the ordinary class
       machinery too — EmitIntfMetaSections weak-binds their itab + impllist
       (leg 15); the method pointers bind to the clone's own bodies. }
@@ -19105,6 +19111,9 @@ begin
     definition rather than colliding. }
   for I := 0 to AProg.GenericRecordInstances.Count - 1 do
   begin
+    if not ClaimGenericTypeEmit(TGenericRecordInstance(
+             AProg.GenericRecordInstances.Items[I]).TypeName) then
+      Continue;
     GRDef := TGenericRecordInstance(
                AProg.GenericRecordInstances.Items[I]).RecordDef;
     { the clone's Line fields refer to the template's declaring unit }
@@ -19124,8 +19133,11 @@ begin
     ResolvedEmitName, OwnerTypeName set), so it emits exactly like a generic
     function instance — weak-bound for cross-unit dedup. }
   for I := 0 to AProg.GenericMethodInstances.Count - 1 do
-    if TGenericMethodInstance(
-         AProg.GenericMethodInstances.Items[I]).MethodDecl.Body <> nil then
+    if (TGenericMethodInstance(
+          AProg.GenericMethodInstances.Items[I]).MethodDecl.Body <> nil) and
+       ClaimGenericTypeEmit(TGenericMethodInstance(
+         AProg.GenericMethodInstances.Items[I]).OwnerType + '.' +
+         TGenericMethodInstance(AProg.GenericMethodInstances.Items[I]).InstName) then
       EmitFunctionDef(
         TGenericMethodInstance(AProg.GenericMethodInstances.Items[I]).MethodDecl,
         True);
@@ -19475,6 +19487,8 @@ var
   GICDef: TClassTypeDef;
   URGDef: TRecordTypeDef;
   SavedUnit: string;
+  OwnInstances: TObjectList;  { not owned -- this unit's class instances
+                                that no earlier module in the buffer emitted }
 
   procedure CheckTypeSubset(ATypeDecls: TObjectList);
   var
@@ -19567,6 +19581,9 @@ begin
     are weak-bound so duplicates across units collapse at link time. }
   for I := 0 to AUnit.GenericRecordInstances.Count - 1 do
   begin
+    if not ClaimGenericTypeEmit(TGenericRecordInstance(
+             AUnit.GenericRecordInstances.Items[I]).TypeName) then
+      Continue;
     URGDef := TGenericRecordInstance(
                 AUnit.GenericRecordInstances.Items[I]).RecordDef;
     FLeakSiteUnit := TGenericRecordInstance(
@@ -19579,15 +19596,23 @@ begin
     end;
   end;
   FLeakSiteUnit := '';
+  { an instance an earlier module in this buffer emitted (a whole-program
+    build appends every unit) is left to that copy: a second one redefined
+    its vtable, typeinfo and every method label }
+  OwnInstances := TObjectList.Create(False);
   for I := 0 to AUnit.GenericInstances.Count - 1 do
+    if ClaimGenericTypeEmit(
+         TGenericInstance(AUnit.GenericInstances.Items[I]).TypeName) then
+      OwnInstances.Add(AUnit.GenericInstances.Items[I]);
+  for I := 0 to OwnInstances.Count - 1 do
   begin
     { interface-implementing instances flow through too — their itab +
       impllist are weak-bound in EmitIntfMetaSections (leg 15). }
     UTD := TTypeDecl.Create();
-    UTD.Name := TGenericInstance(AUnit.GenericInstances.Items[I]).TypeName;
-    UTD.Def := TGenericInstance(AUnit.GenericInstances.Items[I]).ClassDef;
+    UTD.Name := TGenericInstance(OwnInstances.Items[I]).TypeName;
+    UTD.Def := TGenericInstance(OwnInstances.Items[I]).ClassDef;
     UTD.ResolvedDesc :=
-      TGenericInstance(AUnit.GenericInstances.Items[I]).TypeDesc;
+      TGenericInstance(OwnInstances.Items[I]).TypeDesc;
     FGenericDecls.Add(UTD);
     FClassDecls.Add(UTD);
     { This unit emits these instance bodies itself, further down (the
@@ -19608,8 +19633,11 @@ begin
   EmitGenericFuncInstances(AUnit.GenericFuncInstances);
   { generic METHOD instances (leg 37) — weak-bound like the func instances }
   for I := 0 to AUnit.GenericMethodInstances.Count - 1 do
-    if TGenericMethodInstance(
-         AUnit.GenericMethodInstances.Items[I]).MethodDecl.Body <> nil then
+    if (TGenericMethodInstance(
+          AUnit.GenericMethodInstances.Items[I]).MethodDecl.Body <> nil) and
+       ClaimGenericTypeEmit(TGenericMethodInstance(
+         AUnit.GenericMethodInstances.Items[I]).OwnerType + '.' +
+         TGenericMethodInstance(AUnit.GenericMethodInstances.Items[I]).InstName) then
       EmitFunctionDef(
         TGenericMethodInstance(AUnit.GenericMethodInstances.Items[I]).MethodDecl,
         True);
@@ -19627,9 +19655,9 @@ begin
     to the DECLARING unit, so swap FCurrentUnitName to DefUnitName for correct
     allocation-site tracking, exactly like x86-64. }
   SavedUnit := FCurrentUnitName;
-  for I := 0 to AUnit.GenericInstances.Count - 1 do
+  for I := 0 to OwnInstances.Count - 1 do
   begin
-    GI := TGenericInstance(AUnit.GenericInstances.Items[I]);
+    GI := TGenericInstance(OwnInstances.Items[I]);
     if GI.DefUnitName <> '' then
       FCurrentUnitName := GI.DefUnitName
     else
@@ -19644,6 +19672,7 @@ begin
     end;
   end;
   FCurrentUnitName := SavedUnit;
+  OwnInstances.Free();
 
   for I := 0 to AUnit.ImplBlock.ProcDecls.Count - 1 do
   begin

@@ -779,7 +779,7 @@ const
     ''';
 begin
   AssertEquals('static-array getter as a subscript base', '',
-    AsmMissing(Src, 'movq O(%rip), %rsi',
+    AsmMissing(Src, 'movq O(%rip), %rax' + #10#9 + 'movq %rax, %rsi',
       'ldr x0, [x9, _g_O@PAGEOFF]' + #10#9 + 'sub x8, x29, #'));
 end;
 

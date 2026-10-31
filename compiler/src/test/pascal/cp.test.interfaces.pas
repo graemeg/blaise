@@ -1525,9 +1525,15 @@ const
       end.
       ''';
 begin
-  { the result buffer goes in the hidden-pointer register (x8 / %rdi) }
+  { the result buffer goes in the hidden-pointer register (x8 / %rdi):
+    on x86-64 its address is saved below it and loaded as EmitCall's
+    hidden argument }
   AssertEquals('external interface call', '',
-    AsmMissing(Src, #9'movq %rsp, %rdi'#10#9'callq RealMake',
+    AsmMissing(Src, #9'movq %rsp, %rax'#10#9'pushq %rax',
+      #9'bl _RealMake'#10#9'sub x9, x29, #'));
+  AssertEquals('external interface call loads %rdi', '',
+    AsmMissing(Src, #9'movq 0(%rsp), %rdi'#10#9'addq $16, %rsp'#10#9 +
+      'subq $8, %rsp'#10#9'callq RealMake',
       #9'bl _RealMake'#10#9'sub x9, x29, #'));
   AssertTrue('arm64 sets x8', Pos(#9'sub x8, x29, #',
     GenAsm(Src, TargetArm64)) >= 0);

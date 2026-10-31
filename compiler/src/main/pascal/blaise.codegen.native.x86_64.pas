@@ -9201,8 +9201,13 @@ begin
         Self.Emit(#9'movq (%rcx), %rcx');
       Self.EmitLoadVar('(%rcx)', Self.IntExprType(AExpr));
     end
-    else if TIdentExpr(AExpr).ParamMode <> pmNone then
+    else if (TIdentExpr(AExpr).ParamMode <> pmNone) and
+            not ((TIdentExpr(AExpr).ResolvedType <> nil) and
+                 (TIdentExpr(AExpr).ResolvedType.Kind = tyOpenArray)) then
     begin
+      { (a var open array's slot holds the data pointer itself, as a value
+        one's does -- dereferencing it read the first elements as the
+        pointer; the integer subscript path already loads the slot) }
       Self.Emit(Format(#9'movq %s, %%rcx',
         [Self.VarOperand(TIdentExpr(AExpr).Name)]));
       Self.EmitLoadVar('(%rcx)', Self.IntExprType(AExpr));
@@ -15505,6 +15510,21 @@ begin
     Self.Emit(#9'jmp ' + AFalseLabel);
     Exit;
   end;
+  { K = nil / K <> nil on a closure or method pointer: EmitExprToEax tests
+    its code half.  The fused compare below compared the block's address,
+    which is never nil, so `if K <> nil` was always taken. }
+  if (AExpr is TBinaryExpr) and (TBinaryExpr(AExpr).Op in [boEQ, boNE]) and
+     (((TBinaryExpr(AExpr).Right is TNilLiteral) and
+       IsMethodPtrType(TBinaryExpr(AExpr).Left.ResolvedType)) or
+      ((TBinaryExpr(AExpr).Left is TNilLiteral) and
+       IsMethodPtrType(TBinaryExpr(AExpr).Right.ResolvedType))) then
+  begin
+    Self.EmitExprToEax(AExpr);
+    Self.Emit(#9'testq %rax, %rax');
+    Self.Emit(#9'jne ' + ATrueLabel);
+    Self.Emit(#9'jmp ' + AFalseLabel);
+    Exit;
+  end;
   { Float comparison: ucomisd/ucomiss sets CF/ZF directly; use conditional
     jumps that map CF/ZF to the comparison operator.  The result is a direct
     branch without materialising a 0/1 in %rax. }
@@ -17562,8 +17582,8 @@ begin
         Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Self')]));
         if ISFld.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%rbx', [ISFld.Offset]));
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
-        Self.EmitIntfRecordSretDispatch(TMethodCallExpr(Asgn.Expr), '(%rbx)', False);
+        Self.EmitRecordCallIntoFieldViaTemp(Asgn.Expr,
+          TRecordTypeDesc(Asgn.ResolvedLhsType));
         Self.Emit(#9'popq %rbx');
       end
       else if (Asgn.ResolvedLhsType.Kind = tyRecord) and
@@ -17576,8 +17596,12 @@ begin
         Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Self')]));
         if ISFld.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%rbx', [ISFld.Offset]));
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
-        Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr), '(%rbx)', False);
+        { through a temporary, as for Obj.Field := Call(): the call (its
+          receiver, an argument, a getter) may read this field, which the
+          sret path zeroed -- and the old managed fields released -- before
+          the arguments ran (FCaret := InsertAt(SelStart(), T)) }
+        Self.EmitRecordCallIntoFieldViaTemp(Asgn.Expr,
+          TRecordTypeDesc(Asgn.ResolvedLhsType));
         Self.Emit(#9'popq %rbx');
       end
       else if (Asgn.ResolvedLhsType.Kind = tyRecord) and
@@ -17590,8 +17614,8 @@ begin
         Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Self')]));
         if ISFld.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%rbx', [ISFld.Offset]));
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
-        Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr), '(%rbx)', False);
+        Self.EmitRecordCallIntoFieldViaTemp(Asgn.Expr,
+          TRecordTypeDesc(Asgn.ResolvedLhsType));
         Self.Emit(#9'popq %rbx');
       end
       else if IsJumboSet(Asgn.ResolvedLhsType) then
@@ -24810,16 +24834,11 @@ begin
     RC := ClassifyRecordReturn(RetRec);
   if RC <> rcSret then
   begin
-    { Reg-return: zero the dest buffer, call without hidden sret param,
-      capture return registers into the dest buffer. }
-    if ASretIsIndirect then
-      Self.Emit(Format(#9'movq %s, %%r10', [ASretAddr]))
-    else
-      Self.Emit(Format(#9'leaq %s, %%r10', [ASretAddr]));
-    Self.Emit(#9'movq %r10, %rdi');
-    Self.Emit(#9'xorl %esi, %esi');
-    Self.Emit(Format(#9'movq $%d, %%rdx', [RetRec.TotalSize()]));
-    Self.Emit(#9'callq memset');
+    { Reg-return: call without hidden sret param, capture return registers
+      into the dest buffer.  The capture writes the whole record, so the
+      destination is not zeroed first: zeroing it before the arguments were
+      evaluated cleared what an argument might read (FCaret :=
+      InsertAt(SelStart(), T), with SelStart reading the field FCaret). }
     Self.EmitCall(AFuncSym, ADecl, AArgs);
     Self.EmitRecordRegReturnCapture(ASretAddr, RetRec, RC, ASretIsIndirect);
     Exit;
@@ -24989,7 +25008,23 @@ end;
 procedure TX86_64Backend.EmitMethodSretRecvToRax(ACall: TMethodCallExpr;
   MD: TMethodDecl; ARecvBufBytes: Int);
 begin
-  if ACall.ObjectName <> '' then
+  if (ACall.ObjectName <> '') and Self.IsCaptured(ACall.ObjectName) then
+  begin
+    { a receiver captured by a closure or nested routine: through its
+      '_cap_' slot (the record's address, or the object reference one load
+      further; a var parameter's slot holds the caller's pointer).  Loading
+      the name read a global that does not exist -- D.Colour() inside a
+      closure crashed }
+    if MD.IsRecordMethod then
+      Self.EmitVarBaseToReg(ACall.ObjectName, not ACall.IsVarParam, '%rax')
+    else
+    begin
+      Self.EmitVarBaseToReg(ACall.ObjectName, False, '%rax');
+      if ACall.IsVarParam then
+        Self.Emit(#9'movq (%rax), %rax');
+    end;
+  end
+  else if ACall.ObjectName <> '' then
   begin
     if MD.IsRecordMethod and ACall.IsVarParam then
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
@@ -25132,48 +25167,17 @@ begin
     RC := ClassifyRecordReturn(RetRec);
   if RC <> rcSret then
   begin
-    if LSretIndirect then
-      Self.Emit(Format(#9'movq %s, %%r10', [LSretAddr]))
-    else
-      Self.Emit(Format(#9'leaq %s, %%r10', [LSretAddr]));
-    Self.Emit(#9'movq %r10, %rdi');
-    Self.Emit(#9'xorl %esi, %esi');
-    Self.Emit(Format(#9'movq $%d, %%rdx', [RetRec.TotalSize()]));
-    Self.Emit(#9'callq memset');
+    { (no zeroing of the destination: the capture below writes all of it,
+      and zeroing it before the arguments cleared what they might read --
+      see EmitSretCall) }
     Self.BeginCallArgs(MD.Params, ACall.Args);
     for I := 0 to ACall.Args.Count - 1 do
     begin
       Arg := TASTExpr(ACall.Args.Items[I]);
       Self.PushCallArg(TMethodParam(MD.Params.Items[I]), Arg, I);
     end;
-    if ACall.ObjectName <> '' then
-    begin
-      if MD.IsRecordMethod and ACall.IsVarParam then
-        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]))
-      else if MD.IsRecordMethod then
-      begin
-        Self.EmitVarAddr(ACall.ObjectName, '%rdi');
-      end
-      else if ACall.IsVarParam then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]));
-        Self.Emit(#9'movq (%rdi), %rdi');
-      end
-      else
-      begin
-        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]));
-      end;
-    end
-    else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
-      Self.Emit(#9'movq %rbx, %rdi')      { record-call receiver address }
-    else if ACall.ObjExpr <> nil then
-    begin
-      Self.EmitExprToEax(ACall.ObjExpr);
-      Self.DeferOwnedClassRecv(ACall.ObjExpr);
-      Self.Emit(#9'movq %rax, %rdi');
-    end
-    else
-      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand('Self')]));
+    Self.EmitMethodSretRecvToRax(ACall, MD, RecvBufBytes);
+    Self.Emit(#9'movq %rax, %rdi');
     { Pop one register per SLOT (interface args take two): integer slots
       into %rsi onwards (Self occupies %rdi), float slots into %xmm0
       onwards, per SysV. }
@@ -25251,34 +25255,8 @@ begin
       Self.PushCallArg(TMethodParam(MD.Params.Items[I]), Arg, I);
     end;
 
-    if ACall.ObjectName <> '' then
-    begin
-      if MD.IsRecordMethod and ACall.IsVarParam then
-        Self.Emit(Format(#9'movq %s, %%rsi', [Self.VarOperand(ACall.ObjectName)]))
-      else if MD.IsRecordMethod then
-      begin
-        Self.EmitVarAddr(ACall.ObjectName, '%rsi');
-      end
-      else if ACall.IsVarParam then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rsi', [Self.VarOperand(ACall.ObjectName)]));
-        Self.Emit(#9'movq (%rsi), %rsi');
-      end
-      else
-      begin
-        Self.Emit(Format(#9'movq %s, %%rsi', [Self.VarOperand(ACall.ObjectName)]));
-      end;
-    end
-    else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
-      Self.Emit(#9'movq %rbx, %rsi')      { record-call receiver address }
-    else if ACall.ObjExpr <> nil then
-    begin
-      Self.EmitExprToEax(ACall.ObjExpr);
-      Self.DeferOwnedClassRecv(ACall.ObjExpr);
-      Self.Emit(#9'movq %rax, %rsi');
-    end
-    else
-      Self.Emit(Format(#9'movq %s, %%rsi', [Self.VarOperand('Self')]));
+    Self.EmitMethodSretRecvToRax(ACall, MD, RecvBufBytes);
+    Self.Emit(#9'movq %rax, %rsi');
 
     { Pop one register per SLOT (interface args occupy two), into the integer
       registers after %rdi (sret) and %rsi (Self): %rdx, %rcx, %r8, %r9. }
@@ -25358,6 +25336,22 @@ begin
   MD := TMethodDecl(ACall.ResolvedDecl);
   FSym := FuncSymbolOf(ACall);
   ArgCnt := ACall.Args.Count;
+  if not ACall.IsImplicitSelfMethod then
+  begin
+    { A free function: the zeroed pair at (%rsp), its address saved below it
+      as EmitCall's hidden result argument, so every argument shape -- var
+      and out parameters, floats, open arrays, interfaces, captures,
+      overflow -- goes through EmitCall's slot path.  Pushing each
+      argument's VALUE passed a var parameter's contents as its address. }
+    Self.Emit(#9'subq $16, %rsp');
+    Self.Emit(#9'movq $0, (%rsp)');
+    Self.Emit(#9'movq $0, 8(%rsp)');
+    Self.Emit(#9'movq %rsp, %rax');
+    Self.Emit(#9'pushq %rax');
+    Self.EmitCall(FSym, MD, ACall.Args, True);
+    Self.Emit(#9'addq $8, %rsp');
+    Exit;
+  end;
   { Hoist region BELOW the sret buffer: the buffer must sit exactly at %rsp
     when the call is made, so the region cannot live between buffer and call.
     After the call the buffer is relocated down over the region so callers
@@ -25405,27 +25399,6 @@ begin
     { Virtual implicit-Self interface-sret call dispatches through the vtable
       (Self is in %rsi here; %rdi holds the sret buffer). }
     Self.EmitSelfDispatchVia(MD, FSym, '%rsi');
-  end
-  else
-  begin
-    Pushed := 0;
-    for I := 0 to ArgCnt - 1 do
-    begin
-      Arg := TASTExpr(ACall.Args.Items[I]);
-      if HK.Get(I) >= akRecCall then
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [16 + HTotal - HD.Get(I) + Pushed]))
-      else
-        Self.EmitExprToEax(Arg);
-      Self.Emit(#9'pushq %rax');
-      Pushed := Pushed + 8;
-    end;
-    { Consume args (base 1: %rdi = sret buffer); spill overflow. }
-    OverflowBytes := Self.EmitSretRegArgs(ArgCnt, 1);
-    Self.Emit(#9'movq %rsp, %rdi');
-    if OverflowBytes > 0 then
-      Self.Emit(Format(#9'addq $%d, %%rdi', [OverflowBytes]));
-    Self.Emit(#9'callq ' + FSym);
   end;
   { Reclaim overflow stack args before touching the sret buffer. }
   if OverflowBytes > 0 then
@@ -26934,7 +26907,14 @@ var
   Decl:  TMethodDecl;
   SavedArmNodes: TStringList;
   SavedArmPos: Int;
+  OwnGI, OwnGRI, OwnGMI: TObjectList;  { not owned -- see the first statement }
 begin
+  { this module's generic instances that no module appended before it
+    to the buffer emitted (a whole-program build): a second copy
+    redefined every label of the instance }
+  OwnGI := Self.ClaimGenericInstances(AProg.GenericInstances);
+  OwnGRI := Self.ClaimGenericInstances(AProg.GenericRecordInstances);
+  OwnGMI := Self.ClaimGenericInstances(AProg.GenericMethodInstances);
   if FSymTable <> nil then FSymTable.InCodegen := True;
   FCurrentUnitName := AProg.Name;
   FDbgSrcFile := '';
@@ -26971,8 +26951,8 @@ begin
   end;
 
   { Class method bodies before standalone procedures. }
-  Self.EmitClassMethods(AProg.Block.TypeDecls, AProg.GenericInstances,
-                        AProg.GenericRecordInstances, AProg.GenericMethodInstances);
+  Self.EmitClassMethods(AProg.Block.TypeDecls, OwnGI,
+                        OwnGRI, OwnGMI);
 
   { Array-typed constants — emit data sections so const arrays are defined
     as assembly labels before being referenced in code.  Covers block-level
@@ -27076,17 +27056,20 @@ begin
   { Data section: all registered global integer/float/record slots. }
   Self.EmitDataSection();
   { Class data section: typeinfo, vtables, field-cleanup functions. }
-  Self.EmitClassSection(AProg.Block.TypeDecls, AProg.GenericInstances,
+  Self.EmitClassSection(AProg.Block.TypeDecls, OwnGI,
                         AProg.SymbolTable);
   { Anonymous-method environment cleanup functions (Phase 2). }
   Self.EmitEnvCleanupDefs(AProg.Block);
-  Self.EmitEnvCleanupDefsForInstances(AProg.GenericInstances,
-                                      AProg.GenericRecordInstances);
+  Self.EmitEnvCleanupDefsForInstances(OwnGI,
+                                      OwnGRI);
   { Interface data: typeinfo tokens, itabs, impllists.  Emitted after the class
     section so the class-name strings and method symbols it references exist. }
   Self.Emit('.data');
-  Self.EmitInterfaceDefs(AProg.Block.TypeDecls, AProg.GenericInstances,
+  Self.EmitInterfaceDefs(AProg.Block.TypeDecls, OwnGI,
                          AProg.GenericIntfInstances, AProg.SymbolTable);
+  OwnGI.Free();
+  OwnGRI.Free();
+  OwnGMI.Free();
 end;
 
 { ------------------------------------------------------------------ }
@@ -27107,7 +27090,14 @@ var
   SavedDOU:  string;        { prior FSymTable.DefineOwningUnit, restored at end }
   SavedArmNodes: TStringList;
   SavedArmPos: Int;
+  OwnGI, OwnGRI, OwnGMI: TObjectList;  { not owned -- see the first statement }
 begin
+  { this module's generic instances that no module appended before it
+    to the buffer emitted (a whole-program build): a second copy
+    redefined every label of the instance }
+  OwnGI := Self.ClaimGenericInstances(AUnit.GenericInstances);
+  OwnGRI := Self.ClaimGenericInstances(AUnit.GenericRecordInstances);
+  OwnGMI := Self.ClaimGenericInstances(AUnit.GenericMethodInstances);
   FCurrentUnitName := AUnit.Name;
   FDbgSrcFile := AUnit.SourceFile;
   { Establish THIS unit as the symbol-table viewing context so that resolving
@@ -27182,8 +27172,8 @@ begin
   { Class / record method bodies declared in the interface block, plus any
     generic class/record instances declared in this unit.  After
     LinkClassMethodImpls the definition's TMethodDecl nodes hold the bodies. }
-  Self.EmitClassMethods(AUnit.IntfBlock.TypeDecls, AUnit.GenericInstances,
-                        AUnit.GenericRecordInstances, AUnit.GenericMethodInstances);
+  Self.EmitClassMethods(AUnit.IntfBlock.TypeDecls, OwnGI,
+                        OwnGRI, OwnGMI);
   { Classes/records declared in the IMPLEMENTATION section: their method bodies
     are emitted too (generics already covered by the IntfBlock pass above, so
     pass empty generic lists to avoid re-emitting them). }
@@ -27336,7 +27326,7 @@ begin
     ClassSymName, which must resolve THIS unit's own impl-section classes. }
   if FSymTable <> nil then
     FSymTable.DefineOwningUnit := AUnit.Name;
-  Self.EmitClassSection(AUnit.IntfBlock.TypeDecls, AUnit.GenericInstances,
+  Self.EmitClassSection(AUnit.IntfBlock.TypeDecls, OwnGI,
                         UnitSym);
   { Impl-section classes' typeinfo / vtable / _FieldCleanup (generics already
     emitted above — empty list here). }
@@ -27346,17 +27336,20 @@ begin
   { Interface-section classes carry their method bodies after
     LinkClassMethodImpls — emit their closures' env cleanups too. }
   Self.EmitEnvCleanupDefs(AUnit.IntfBlock);
-  Self.EmitEnvCleanupDefsForInstances(AUnit.GenericInstances,
-                                      AUnit.GenericRecordInstances);
+  Self.EmitEnvCleanupDefsForInstances(OwnGI,
+                                      OwnGRI);
   { Interface data: typeinfo tokens, itabs, impllists. }
   Self.Emit('.data');
-  Self.EmitInterfaceDefs(AUnit.IntfBlock.TypeDecls, AUnit.GenericInstances,
+  Self.EmitInterfaceDefs(AUnit.IntfBlock.TypeDecls, OwnGI,
                          AUnit.GenericIntfInstances, UnitSym);
   Self.EmitInterfaceDefs(AUnit.ImplBlock.TypeDecls, EmptyGen, EmptyGen, UnitSym);
 
   EmptyGen.Free();
   if FSymTable <> nil then
     FSymTable.DefineOwningUnit := SavedDOU;
+  OwnGI.Free();
+  OwnGRI.Free();
+  OwnGMI.Free();
 end;
 
 procedure TX86_64Backend.NoteDepInitUnit(const AUnitName: string;

@@ -305,6 +305,19 @@ type
       of the destination (X := X.Sub.Grow(10)): the callee also wrote its
       result over its own Self. }
     procedure TestRun_SretCall_DestReadInsideArgExpr;
+    { FCaret := InsertAt(SelStart(), T), with FCaret a record field of Self
+      named bare and SelStart() reading it.  x86-64 zeroed the field (and,
+      for a register-returned record, the destination of every such call)
+      before the arguments ran, so SelStart() read zeros.  Covered for a
+      record returned in registers and one returned through the hidden
+      result pointer, and for Obj.Field := F(Obj.M()). }
+    procedure TestRun_RecordCallIntoSelfField_ArgReadsField;
+    { B.Copy().Bounds(): a method returning a float record (s0..s3 / d0, d1)
+      on an owned temporary receiver, which is released after the call.
+      arm64's save of d0..d3 around the release was assembled as an
+      integer pair, so the result's first field came back as whatever the
+      destructor left in d0. }
+    procedure TestRun_FloatRecordResult_OwnedReceiverReleased;
   end;
 
 implementation
@@ -3138,6 +3151,133 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '-13 -13 50 50' + LineEnding + '11 12 3 4 100' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RecordCallIntoSelfField_ArgReadsField;
+const
+  Src = '''
+    program P;
+    type
+      TPos = record
+        Line, Col: Int;
+      end;
+      TBig = record
+        Line, Col, A, B: Int;
+      end;
+      TEd = class
+        FCaret: TPos;
+        FBig: TBig;
+        function SelStart(): TPos;
+        function BigSel(): TBig;
+        function InsertAt(const P: TPos; const T: string): TPos;
+        function BigAt(const P: TBig; N: Int): TBig;
+        procedure Ins(const T: string);
+      end;
+    function TEd.SelStart(): TPos;
+    begin
+      Result := FCaret;
+    end;
+    function TEd.BigSel(): TBig;
+    begin
+      Result := FBig;
+    end;
+    function TEd.InsertAt(const P: TPos; const T: string): TPos;
+    begin
+      Result.Line := P.Line;
+      Result.Col := P.Col + Length(T);
+    end;
+    function TEd.BigAt(const P: TBig; N: Int): TBig;
+    begin
+      Result := P;
+      Result.Col := P.Col + N;
+    end;
+    function Shift(const P: TBig; N: Int): TBig;
+    begin
+      Result := P;
+      Result.Col := P.Col + N;
+    end;
+    procedure TEd.Ins(const T: string);
+    begin
+      FCaret := InsertAt(SelStart(), T);
+      FBig := BigAt(BigSel(), Length(T));
+    end;
+    var
+      E: TEd;
+    begin
+      E := TEd.Create();
+      E.FCaret.Line := 3; E.FCaret.Col := 4;
+      E.FBig.Line := 5; E.FBig.Col := 6;
+      E.Ins('abc');
+      WriteLn(E.FCaret.Line, ' ', E.FCaret.Col, ' ', E.FBig.Line, ' ', E.FBig.Col);
+      E.FBig := Shift(E.BigSel(), 1);
+      WriteLn(E.FBig.Line, ' ', E.FBig.Col);
+      E.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '3 7 5 9' + LineEnding + '5 10' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_FloatRecordResult_OwnedReceiverReleased;
+const
+  Src = '''
+    program P;
+    type
+      TRectF = record
+        Left, Top, Width, Height: Float32;
+      end;
+      TPair = record
+        A, B: Float64;
+      end;
+      TBox = class
+        FR: TRectF;
+        function Copy(): TBox;
+        function Bounds(): TRectF;
+        function Pair(): TPair;
+        destructor Destroy; override;
+      end;
+    function TBox.Copy(): TBox;
+    begin
+      Result := TBox.Create();
+      Result.FR := FR;
+    end;
+    function TBox.Bounds(): TRectF;
+    begin
+      Result := FR;
+    end;
+    function TBox.Pair(): TPair;
+    begin
+      Result.A := FR.Left;
+      Result.B := FR.Top;
+    end;
+    destructor TBox.Destroy;
+    var
+      X: Float64;
+    begin
+      X := 42.0;
+      FR.Left := Float32(X);
+      inherited Destroy();
+    end;
+    var
+      B: TBox;
+      R: TRectF;
+      Q: TPair;
+    begin
+      B := TBox.Create();
+      B.FR.Left := 5; B.FR.Top := 6; B.FR.Width := 7; B.FR.Height := 8;
+      R := B.Copy().Bounds();
+      WriteLn(Round(R.Left), ' ', Round(R.Top), ' ', Round(R.Width), ' ', Round(R.Height));
+      WriteLn(Round(B.Copy().Bounds().Left));
+      Q := B.Copy().Pair();
+      WriteLn(Round(Q.A), ' ', Round(Q.B));
+      B.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '5 6 7 8' + LineEnding + '5' + LineEnding + '5 6' +
+    LineEnding, 0);
 end;
 
 initialization

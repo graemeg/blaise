@@ -454,6 +454,11 @@ type
     { The consumer's type argument shares its name with a type the generic's
       declaring unit can see: the instance must use the CONSUMER's type. }
     procedure TestGenericBody_TypeArgShadowsDeclaringUnitName;
+    { A whole-program build (--no-incremental) of two units and a program
+      that all use TList<string>: each module carries the instance, and all
+      of them landed in one assembly file, which rejected the second copy
+      ("duplicate label: TList_string_Grow"). }
+    procedure TestWholeProgram_GenericInstanceSharedByUnits;
     { A dependency read from ANOTHER cache on the unit path, with no source
       beside it (a PasBuild module's dependency module), is rebuilt there
       with a bigger record.  The dependent unit in this cache -- direct, and
@@ -7150,6 +7155,67 @@ begin
   AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 stdout', '24 24 9' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestWholeProgram_GenericInstanceSharedByUnits;
+const
+  UnitASrc =
+    '''
+    unit WpA;
+    interface
+    uses Generics.Collections;
+    procedure AddA(L: TList<string>);
+    implementation
+    procedure AddA(L: TList<string>);
+    begin
+      L.Add('a');
+    end;
+    end.
+    ''';
+  UnitBSrc =
+    '''
+    unit WpB;
+    interface
+    uses Generics.Collections;
+    function MakeB(): TList<string>;
+    implementation
+    function MakeB(): TList<string>;
+    begin
+      Result := TList<string>.Create();
+      Result.Add('b');
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program WpProg;
+    uses Generics.Collections, WpA, WpB;
+    var
+      L: TList<string>;
+    begin
+      L := MakeB();
+      AddA(L);
+      WriteLn(L.Count, ' ', L[0], L[1]);
+    end.
+    ''';
+var
+  Dir, ProgBin, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := FScratch + '/wholeprog_generic';
+  ForceDirectories(Dir);
+  WriteFile(Dir + '/wpa.pas', UnitASrc);
+  WriteFile(Dir + '/wpb.pas', UnitBSrc);
+  WriteFile(Dir + '/wpprog.pas', ProgSrc);
+  ProgBin := Dir + '/wpprog';
+  Rc := RunBlaise(['--source', Dir + '/wpprog.pas', '--output', ProgBin,
+                   '--no-incremental', '--unit-path', Dir,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                  Captured);
+  AssertEquals('build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('stdout', '2 ba' + #10, Captured);
 end;
 
 procedure TSepCompileTests.TestIncrementalRebuild_DependencyInOtherCache_Rebuilt;

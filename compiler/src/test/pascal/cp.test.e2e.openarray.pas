@@ -123,6 +123,12 @@ type
       x86-64 passed only the address to a method (the call segfaulted) and
       to an interface call (the callee saw the wrong length) }
     procedure TestRun_VarOpenArray_EveryCallPath;
+    { Reading a float element of a var open-array parameter fed from a
+      dynamic array (A[I] := A[I] + 1 on var A: array of Float32).  x86-64
+      dereferenced the parameter's slot once more than for an integer
+      element -- it holds the data pointer itself -- and read the first
+      elements as the pointer: a segmentation fault. }
+    procedure TestRun_VarOpenArray_FloatElementRead;
   end;
 
 implementation
@@ -1621,6 +1627,45 @@ var
 begin
   LE := LineEnding;
   AssertRunsOnAll(Src, 'si 7 2 2' + LE + 'si 3 4 3' + LE + 'ss cb' + LE, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_VarOpenArray_FloatElementRead;
+const
+  Src = '''
+    program P;
+    procedure Fill(var ASizes: array of Float32; N: Int);
+    var
+      I: Int;
+    begin
+      for I := 0 to High(ASizes) do
+        ASizes[I] := ASizes[I] + I * N;
+    end;
+    procedure Bump(var A: array of Float64);
+    begin
+      A[0] := A[0] + 0.5;
+      A[High(A)] := A[0] * 2;
+    end;
+    var
+      D: array of Float32;
+      E: array of Float64;
+      I: Int;
+      Line: string;
+    begin
+      SetLength(D, 4);
+      for I := 0 to 3 do D[I] := I;
+      Fill(D, 10);
+      Line := '';
+      for I := 0 to 3 do Line := Line + IntToStr(Round(D[I])) + ' ';
+      WriteLn(Line);
+      SetLength(E, 3);
+      E[0] := 1;
+      Bump(E);
+      WriteLn(Round(E[0] * 10), ' ', Round(E[2] * 10));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, '0 11 22 33 ' + LineEnding + '15 30' + LineEnding);
 end;
 
 initialization

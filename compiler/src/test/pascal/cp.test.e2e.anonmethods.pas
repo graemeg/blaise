@@ -279,6 +279,17 @@ type
       inner closure outlives both calls.  A name only the inner literal uses
       is captured by the outer one too.  It was "Undeclared variable". }
     procedure TestRun_NestedLiteral_SharesEnclosingEnvironment;
+    { if U <> nil / if U = nil on a closure or method pointer as a branch
+      condition.  x86-64's fused compare-and-branch compared the value's
+      block ADDRESS, never nil, so `U <> nil` was taken for a nil closure. }
+    procedure TestRun_ClosureNilCompare_AsCondition;
+    { A captured local used only as the receiver of a method returning a
+      record (D.Colour() inside a closure), as an argument, an assignment
+      source and a field-read base; also a captured record's own method.
+      The receiver was loaded by name instead of through the capture: arm64
+      failed to compile ("neither a frame slot nor a global") and x86-64
+      crashed. }
+    procedure TestRun_ClosureCapturesRecordMethodReceiver;
   end;
 
 implementation
@@ -3885,6 +3896,146 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'on 6 11' + LineEnding + 'onkk' + LineEnding +
     '3 9 9' + LineEnding);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureNilCompare_AsCondition;
+const
+  Src = '''
+    program P;
+    type
+      TProcX = reference to procedure(A: TObject);
+      TNotify = procedure(A: TObject) of object;
+      THolder = class
+        F: TProcX;
+        procedure Handle(A: TObject);
+      end;
+    procedure THolder.Handle(A: TObject);
+    begin
+      WriteLn('handled');
+    end;
+    var
+      U: TProcX;
+      M: TNotify;
+      H: THolder;
+      N: Int;
+    begin
+      U := nil;
+      if U <> nil then WriteLn('wrong: nil <> nil');
+      if U = nil then WriteLn('nil = nil');
+      N := 0;
+      while (U <> nil) and (N < 3) do N := N + 1;
+      if N <> 0 then WriteLn('wrong: while');
+      N := 5;
+      U := procedure(A: TObject) begin WriteLn('called ', N); end;
+      if U <> nil then U(nil);
+      if U = nil then WriteLn('wrong: set = nil');
+      H := THolder.Create();
+      if H.F <> nil then WriteLn('wrong: field');
+      H.F := U;
+      if H.F <> nil then H.F(nil);
+      M := nil;
+      if M <> nil then WriteLn('wrong: method pointer');
+      M := @H.Handle;
+      if M <> nil then M(nil);
+      H.F := nil;
+      H.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'nil = nil' + LineEnding + 'called 5' + LineEnding +
+    'called 5' + LineEnding + 'handled' + LineEnding);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureCapturesRecordMethodReceiver;
+const
+  Src = '''
+    program P;
+    type
+      TColor = record
+        R, G, B, A: UInt8;
+      end;
+      TBig = record
+        X, Y, Z, W: Int;
+        function Twice(): TBig;
+      end;
+      TDone = reference to procedure(Ok: Boolean; C: TColor);
+      TCb = reference to procedure;
+      TObj = class
+        Cb: TCb;
+        FC: TColor;
+        function Colour(): TColor;
+      end;
+    function TObj.Colour(): TColor;
+    begin
+      Result := FC;
+    end;
+    function TBig.Twice(): TBig;
+    begin
+      Result.X := X * 2; Result.Y := Y * 2; Result.Z := 0; Result.W := 0;
+    end;
+    procedure Show(C: TColor);
+    begin
+      WriteLn('show ', C.R);
+    end;
+    function Make(AOnDone: TDone): TObj;
+    var
+      D: TObj;
+    begin
+      D := TObj.Create();
+      D.FC.R := 7; D.FC.G := 8;
+      D.Cb := procedure
+        var
+          C: TColor;
+        begin
+          AOnDone(True, D.Colour());
+          Show(D.Colour());
+          C := D.Colour();
+          WriteLn(C.G, ' ', D.Colour().R);
+        end;
+      Result := D;
+    end;
+    procedure Nested(const M: TBig; var V: TBig);
+      function Via(): Int;
+      begin
+        Result := M.Twice().X + V.Twice().Y;
+      end;
+    begin
+      WriteLn(Via());
+    end;
+    procedure Run();
+    var
+      R: TBig;
+      L: TCb;
+    begin
+      R.X := 3; R.Y := 4;
+      L := procedure
+        var
+          E: TBig;
+        begin
+          E := R.Twice();
+          WriteLn(E.X, ' ', E.Y, ' ', R.Twice().X);
+        end;
+      L();
+      Nested(R, R);
+    end;
+    var
+      O: TObj;
+    begin
+      O := Make(procedure (Ok: Boolean; C: TColor)
+        begin
+          WriteLn(Ok, ' ', C.R, ' ', C.G);
+        end);
+      O.Cb();
+      O.Cb := nil;
+      O.Free();
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'True 7 8' + LineEnding + 'show 7' + LineEnding +
+    '8 7' + LineEnding + '6 8 6' + LineEnding + '14' + LineEnding);
 end;
 
 initialization

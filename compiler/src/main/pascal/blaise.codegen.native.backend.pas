@@ -70,11 +70,21 @@ type
       objects), so a whole-program build that appends several modules to one
       buffer would otherwise define the same label twice. }
     FEmittedGenericFuncs: TStringList;
+    { Generic class, record and method instances already emitted into FAsm,
+      by instance name.  Each module that uses TList<string> carries its own
+      instance (weak-bound across objects); a whole-program build appends
+      them all to one buffer, where a second copy redefined every label
+      (--no-incremental: "duplicate label: TList_string_Grow"). }
+    FEmittedGenericTypes: TStringList;
     { --debug allocation-site unit override while emitting a generic clone
       whose Line fields refer to the template's declaring unit; '' = the
       unit being emitted. }
     FLeakSiteUnit: string;
     function ClaimGenericFuncEmit(ADecl: TMethodDecl): Boolean;
+    function ClaimGenericTypeEmit(const AInstName: string): Boolean;
+    { The class, record or method instances of AList (one kind per list)
+      that ClaimGenericTypeEmit grants this buffer; not owning. }
+    function ClaimGenericInstances(AList: TObjectList): TObjectList;
 
     { Append one line of assembly (a newline is added).  Virtual so a target
       backend can observe the emitted stream (the x86-64 backend tracks the
@@ -282,12 +292,15 @@ begin
   FAsm      := TStringBuilder.Create();
   FEmittedGenericFuncs := TStringList.Create();
   FEmittedGenericFuncs.CaseSensitive := True;
+  FEmittedGenericTypes := TStringList.Create();
+  FEmittedGenericTypes.CaseSensitive := True;
 end;
 
 destructor TNativeBackend.Destroy;
 begin
   FAsm.Free();
   FEmittedGenericFuncs.Free();
+  FEmittedGenericTypes.Free();
   inherited Destroy();
 end;
 
@@ -297,6 +310,41 @@ begin
   Result := FEmittedGenericFuncs.IndexOf(ADecl.Name) < 0;
   if Result then
     FEmittedGenericFuncs.Add(ADecl.Name);
+end;
+
+{ True the first time the generic instance AInstName (a class or record
+  instance's type name, a method instance's Owner.Name<Args>) is emitted
+  into this buffer. }
+function TNativeBackend.ClaimGenericTypeEmit(const AInstName: string): Boolean;
+begin
+  Result := FEmittedGenericTypes.IndexOf(AInstName) < 0;
+  if Result then
+    FEmittedGenericTypes.Add(AInstName);
+end;
+
+function TNativeBackend.ClaimGenericInstances(AList: TObjectList): TObjectList;
+var
+  I: Int;
+  Item: TObject;
+  Key: string;
+begin
+  Result := TObjectList.Create(False);
+  if AList = nil then Exit;
+  for I := 0 to AList.Count - 1 do
+  begin
+    Item := AList.Items[I];
+    if Item is TGenericInstance then
+      Key := TGenericInstance(Item).TypeName
+    else if Item is TGenericRecordInstance then
+      Key := TGenericRecordInstance(Item).TypeName
+    else if Item is TGenericMethodInstance then
+      Key := TGenericMethodInstance(Item).OwnerType + '.' +
+             TGenericMethodInstance(Item).InstName
+    else
+      Key := '';
+    if (Key = '') or Self.ClaimGenericTypeEmit(Key) then
+      Result.Add(Item);
+  end;
 end;
 
 procedure TNativeBackend.SetSymbolTable(ASymTable: TSymbolTable);
@@ -695,6 +743,7 @@ end;
 function TNativeBackend.GenerateProgram(AProg: TProgram): string;
 begin
   FAsm.Clear();
+  FEmittedGenericTypes.Clear();   { a claim is per buffer }
   Self.EmitProgram(AProg);
   Result := FAsm.ToString();
 end;
@@ -702,6 +751,7 @@ end;
 function TNativeBackend.GenerateUnit(AUnit: TUnit): string;
 begin
   FAsm.Clear();
+  FEmittedGenericTypes.Clear();
   FSeparateCompile := True;
   Self.EmitUnit(AUnit);
   Self.FinalizeEmit();

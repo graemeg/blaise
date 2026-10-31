@@ -207,6 +207,11 @@ type
     procedure TestRun_IntfCall_ArgsTakeDeclaredParamType;
     procedure TestRun_IntfResult_FromArrayFieldElement;
     procedure TestCompile_CyclicIntfInheritance_ReportsNotHangs;
+    { P := G(Q) where G returns an interface and takes Q as a var or out
+      parameter (or a float).  x86-64 pushed every argument's VALUE, so the
+      callee wrote through the variable's contents as a pointer: nothing
+      printed, or a crash. }
+    procedure TestRun_InterfaceResult_VarOutAndFloatParams;
   end;
 
 implementation
@@ -2875,6 +2880,62 @@ begin
     '2 c2 0.5' + LE + 'xy' + LE + 'n chain' + LE + '1 4 5' + LE +
     'hello n' + LE + 'hello fld-tmp' + LE + '3 n 1.5' + LE + 'done' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceResult_VarOutAndFloatParams;
+const
+  Src = '''
+    program IntfVarArgs;
+    type
+      IPlatform = interface
+        function Name(): string;
+      end;
+      THeadless = class(TObject, IPlatform)
+        FN: Int;
+        constructor Create(N: Int);
+        function Name(): string;
+      end;
+    constructor THeadless.Create(N: Int);
+    begin
+      FN := N;
+    end;
+    function THeadless.Name(): string;
+    begin
+      Result := 'headless' + IntToStr(FN);
+    end;
+    function G(var S: string): IPlatform;
+    begin
+      S := 'x';
+      Result := THeadless.Create(1);
+    end;
+    function H(out S: string; out N: Int): IPlatform;
+    begin
+      S := 'y';
+      N := 7;
+      Result := THeadless.Create(2);
+    end;
+    function F(A: Float64; B: Int; C: Float32): IPlatform;
+    begin
+      Result := THeadless.Create(Round(A * 10) + B + Round(C));
+    end;
+    var
+      P: IPlatform;
+      Q: string;
+      N: Int;
+    begin
+      Q := '';
+      P := G(Q);
+      WriteLn(P.Name(), ' ', Q);
+      P := H(Q, N);
+      WriteLn(P.Name(), ' ', Q, ' ', N);
+      P := F(1.5, 100, 3);
+      WriteLn(P.Name());
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'headless1 x' + LineEnding + 'headless2 y 7' +
+    LineEnding + 'headless118' + LineEnding);
 end;
 
 initialization
