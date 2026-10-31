@@ -113,6 +113,11 @@ type
     procedure TestRun_WeakFieldOfGenericClass;
     { ...and the same with the generic class in a unit. }
     procedure TestRun_WeakFieldOfGenericClass_InUnit;
+    { A unit's interface alias of a generic instance (TContours =
+      TList<TContour>) used from a program, through a method and the default
+      indexed property: arm64 called the getter under the unit's prefix, which
+      the instance's methods do not carry, and the link failed. }
+    procedure TestRun_GenericInstanceAlias_InUnit;
   end;
 
 implementation
@@ -1472,6 +1477,49 @@ begin
   AssertEquals('exit code', 0, ExitCode);
   AssertEquals('stdout', 'R destroyed' + LineEnding + 'assigned False' + LineEnding,
     Output);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericInstanceAlias_InUnit;
+const
+  UnitSrc = '''
+    unit galias;
+    interface
+    uses Generics.Collections;
+    type
+      TContour = record X: Int; end;
+      TContours = TList<TContour>;
+    function Make(): TContours;
+    implementation
+    function Make(): TContours;
+    var
+      C: TContour;
+    begin
+      Result := TContours.Create();
+      C.X := 7;
+      Result.Add(C);
+    end;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses galias;
+    var
+      L: TContours;
+    begin
+      L := Make();
+      WriteLn(L.Count, ' ', L[0].X, ' ', L.Get(0).X);
+      L.Free();
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile + run: ' + Output,
+    CompileAndRunWithUnit('galias', UnitSrc, Src, Output, ExitCode));
+  AssertEquals('exit code', 0, ExitCode);
+  AssertEquals('stdout', '1 7 7' + LineEnding, Output);
 end;
 
 initialization

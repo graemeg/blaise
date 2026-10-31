@@ -844,6 +844,7 @@ var
   RT:       TRecordTypeDesc;
   ParentRT: TRecordTypeDesc;
   ParentName: string;
+  ParentTD:   TTypeDesc;
   Sym:      TSymbol;
   FldDecl:  TFieldDecl;
   FldType:  TTypeDesc;
@@ -882,7 +883,18 @@ begin
     handled here; that's a class-import edge case for 6c-C generics. }
   ParentName := ClassDef.ParentName;
   if ParentName <> '' then
-    ParentRT := ResolveParentClassByName(ParentName, ATable)
+  begin
+    ParentRT := ResolveParentClassByName(ParentName, ATable);
+    { a generic instance parent (class(TList<TContour>)) is made on demand,
+      as the source path does; without it the warm build lost every
+      inherited member }
+    if (ParentRT = nil) and (StrPos('<', ParentName) >= 0) then
+    begin
+      ParentTD := ResolveImportTypeName(ParentName, ATable, ASemantic);
+      if ParentTD is TRecordTypeDesc then
+        ParentRT := TRecordTypeDesc(ParentTD);
+    end;
+  end
   else if AEntry.Name <> 'TObject' then
   begin
     Sym := ATable.Lookup('TObject');
@@ -1162,7 +1174,7 @@ begin
 end;
 
 procedure RegisterAlias(AEntry: TTypeEntry; ATable: TSymbolTable;
-                        const AUnitName: string);
+                        const AUnitName: string; ASemantic: TSemanticAnalyser);
 var
   AliasDef:   TTypeAliasDef;
   AliasName:  string;
@@ -1179,7 +1191,9 @@ begin
     AliasDesc := BaseSym.TypeDesc
   else
   begin
-    AliasDesc := ResolveInlineTypeName(AliasName, ATable);
+    { ResolveImportTypeName also instantiates a generic base
+      (TContours = TList<TContour>), as the source path's alias does. }
+    AliasDesc := ResolveImportTypeName(AliasName, ATable, ASemantic);
     if AliasDesc = nil then
       raise EImportError.CreateFmt(
         'Type alias %s = %s: base not found', [AEntry.Name, AliasName]);
@@ -1288,7 +1302,7 @@ begin
     else if Entry.Def is TSetTypeDef then
       RegisterSet(Entry, ATable, AIface.Name)
     else if Entry.Def is TTypeAliasDef then
-      RegisterAlias(Entry, ATable, AIface.Name)
+      RegisterAlias(Entry, ATable, AIface.Name, ASemantic)
     else if Entry.Def is TInterfaceTypeDef then
       RegisterInterface(Entry, ATable, AIface.Name)
     else if Entry.Def is TClassTypeDef then

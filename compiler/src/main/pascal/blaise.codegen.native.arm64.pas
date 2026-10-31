@@ -16813,7 +16813,13 @@ begin
     linker bound it to libSystem and dyld aborted at launch
     (TTimerHeap.Count in the fiber scheduler).  ClassPrefixOwner still
     decides WHETHER a prefix applies (program / System / RTL units: none). }
-  if (D <> nil) and (ClassPrefixOwner(D.OwningUnit) <> '') then
+  { A generic instance's methods are emitted unprefixed in whichever unit
+    instantiates it (InstantiateGenericCore names them '<Type>_<Method>'), so
+    its getter takes no prefix either -- as x86-64's ClassSymOf.  An instance
+    first made by a unit (TContours = TList<TContour> in its interface)
+    records that unit as its owner, and the reference dangled. }
+  if (D <> nil) and (Pos('<', D.Name) < 0) and
+     (ClassPrefixOwner(D.OwningUnit) <> '') then
     Pfx := MangleUnitPrefix(D.OwningUnit);
   Result := DarwinSym(Pfx + CodegenMangle(AOwnerType) + '_' +
     CodegenMangle(AMethod));
@@ -17427,8 +17433,10 @@ begin
     Self.Emit(Format(#9'.ascii "%s"', [TD.Name]));
     Self.Emit(#9'.byte 0');
     if (RT.Parent <> nil) and (RT.Parent.Name <> 'TObject') then
-      ParentRef := TypeinfoSym(ClassPrefixOwner(RT.Parent.OwningUnit) +
-        CodegenMangle(RT.Parent.Name))
+      { through TypeinfoSymForDesc, the definition's own naming: a generic
+        instance parent (class(TList<TContour>)) is bare whichever unit
+        instantiated it }
+      ParentRef := TypeinfoSymForDesc(RT.Parent, RT.Parent.Name)
     else
       ParentRef := TypeinfoSym('TObject');
     EmitAttrTables(TClassTypeDef(TD.Def), Sym, AttrsRef, MethAttrsRef);

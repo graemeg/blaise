@@ -61,6 +61,13 @@ type
     procedure TestStaticAsyncReactor_LinksAndRuns;
     procedure TestFreeRoutine_RoundTrip_WithoutSource;
     procedure TestGenericClass_RoundTrip_WithoutSource;
+    { A unit's interface types built on a generic instance -- an alias
+      (TContours = TList<TContour>), a subclass (TShapes = class(TList<...>)),
+      a generic class with a [Weak] field -- and a set-constant parameter
+      default, all used from a program that sees only the unit's object.
+      The import raised "Type alias ... base not found", lost the subclass's
+      inherited members ("has no field 'Count'") and the field's weakness. }
+    procedure TestGenericInstanceTypes_RoundTrip_WithoutSource;
     { BUG-20260919-clonetypedef-generic-record-in-unit: a generic RECORD
       template declared in a unit INTERFACE could not be compiled at all. }
     procedure TestGenericRecord_InUnitInterface_Compiles;
@@ -1161,6 +1168,115 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_box exit code', 0, Rc);
   AssertEquals('use_box stdout', 'Box = 42' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestGenericInstanceTypes_RoundTrip_WithoutSource;
+const
+  DepSrc =
+    '''
+    unit GenTypes;
+    interface
+    uses Generics.Collections;
+    type
+      TContour = record X: Int; end;
+      TContours = TList<TContour>;
+      TShapes = class(TList<TContour>)
+      end;
+      TMod = (mShift, mCtrl);
+      TMods = set of TMod;
+      THolder<T> = class
+      public
+        [Weak] W: TObject;
+        V: T;
+      end;
+    function MakeContours(): TContours;
+    function MakeShapes(): TShapes;
+    function Mods(M: TMods = [mCtrl]): Int;
+    implementation
+    function MakeContours(): TContours;
+    var
+      C: TContour;
+    begin
+      Result := TContours.Create();
+      C.X := 7;
+      Result.Add(C);
+    end;
+    function MakeShapes(): TShapes;
+    var
+      C: TContour;
+    begin
+      Result := TShapes.Create();
+      C.X := 8;
+      Result.Add(C);
+    end;
+    function Mods(M: TMods): Int;
+    begin
+      Result := 0;
+      if mShift in M then Result := Result + 1;
+      if mCtrl in M then Result := Result + 2;
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseGenTypes;
+    uses GenTypes;
+    var
+      L: TContours;
+      S: TShapes;
+      H: THolder<Int>;
+      R: TObject;
+    begin
+      L := MakeContours();
+      S := MakeShapes();
+      WriteLn(L.Count, ' ', L[0].X, ' ', S.Count, ' ', S[0].X, ' ', S.Get(0).X);
+      WriteLn(Mods(), ' ', Mods([mShift]));
+      H := THolder<Int>.Create();
+      R := TObject.Create();
+      H.W := R;
+      R := nil;
+      WriteLn(H.W = nil);
+      H.Free();
+      S.Free();
+      L.Free()
+    end.
+    ''';
+var
+  DepPas, DepObj, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  DepPas  := FScratch + '/GenTypes.pas';
+  DepObj  := FScratch + '/GenTypes.o';
+  ProgPas := FScratch + '/use_gentypes.pas';
+  ProgBin := FScratch + '/use_gentypes';
+
+  WriteFile(DepPas, DepSrc);
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  AssertEquals('blaise(GenTypes) exit code 0' + #10 + Captured, 0, Rc);
+  DeleteFile(DepPas);
+  AssertFalse('GenTypes.pas hidden', FileExists(DepPas));
+
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_gentypes) exit code 0' + #10 + Captured, 0, Rc);
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_gentypes exit code', 0, Rc);
+  AssertEquals('use_gentypes stdout',
+    '1 7 1 8 8' + #10 + '2 1' + #10 + 'True' + #10, Captured)
 end;
 
 { Regression for GH #194.  Pascal identifiers are case-insensitive, so
