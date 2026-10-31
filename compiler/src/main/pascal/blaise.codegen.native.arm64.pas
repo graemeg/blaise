@@ -459,6 +459,7 @@ type
       EmitExprToX0 + scvtf widening. }
     procedure EmitExprToD0OrConvert(AExpr: TASTExpr);
     procedure EmitD0ToSinglePrecision(AOperand: TASTExpr);
+    procedure EmitSingleResultRounding(AExpr: TASTExpr);
     function  IsFloatExpr(AExpr: TASTExpr): Boolean;
     { Ownership of a string value in x0: ArcExprOwnsRef plus concat — this
       backend consumes concat's +1 directly instead of the deferred
@@ -8188,6 +8189,7 @@ begin
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym(RtlMathSym);
+      EmitSingleResultRounding(AExpr);
       Exit;
     end;
   end;
@@ -8209,6 +8211,7 @@ begin
       EmitCallSym('_BlaisePow')
     else
       EmitCallSym('_BlaiseArcTan2');
+    EmitSingleResultRounding(AExpr);
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -8396,6 +8399,20 @@ begin
   end;
   InternalError('float expression ' + AExpr.ClassName +
     ' has no float lowering', AExpr);
+end;
+
+procedure TArm64Backend.EmitSingleResultRounding(AExpr: TASTExpr);
+begin
+  { a Single-typed math builtin (Sqrt, Sin, ArcTan2 ...) runs in double; its
+    result is a Single value, rounded as x86-64's cvtsd2ss / sqrtss leave it.
+    Left unrounded in d0, a Single operation using it (Sqrt(D) * A) skipped
+    the operand rounding -- a Single value is exact -- and differed from
+    x86-64 in the last bit. }
+  if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tySingle) then
+  begin
+    Self.Emit(#9'fcvt s0, d0');
+    Self.Emit(#9'fcvt d0, s0');
+  end;
 end;
 
 procedure TArm64Backend.EmitD0ToSinglePrecision(AOperand: TASTExpr);

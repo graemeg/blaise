@@ -5856,6 +5856,11 @@ expression sees.  An operand of a `Float32` operation that is not itself a
 `Float32` first.  An operation with a `Float64` operand is a `Float64`
 operation, as before.  This is C's `FLT_EVAL_METHOD == 0`.
 
+A math builtin applied to a `Float32` (`Sqrt`, `Sin`, `ArcTan2` and the
+rest) returns a `Float32`: the runtime computes it in double and the result
+is rounded to `Float32` before an enclosing expression uses it, so
+`Sqrt(D) * A + C` rounds after the square root, the multiply and the add.
+
 === Rationale
 
 * *The same program gives the same bits on every target.*  x86-64

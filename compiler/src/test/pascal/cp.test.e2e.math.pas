@@ -205,6 +205,11 @@ type
       once, so A + (B - A) * T differed from x86-64 in the last bit
       (anti-aliased edge pixels in blaise-canvas-ui). }
     procedure TestRun_Float32_SinglePrecisionEvaluation;
+    { A Single math builtin's result used as an operand (Sqrt(D) * A + C):
+      arm64 computed Sqrt in double and left it unrounded, and the Single
+      multiply took it as an exact Single value, so the result differed
+      from x86-64's sqrtss/mulss/addss in the last bit. }
+    procedure TestRun_Float32_BuiltinResultIsSinglePrecision;
   end;
 
 implementation
@@ -2152,6 +2157,29 @@ begin
     1052863291 for the first two }
   AssertRunsOnAll(Src, '1052863292' + LineEnding + '1052863292' + LineEnding +
     '1067958458' + LineEnding, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Float32_BuiltinResultIsSinglePrecision;
+const
+  Src = '''
+    program P;
+    type
+      PU32 = ^UInt32;
+      PF32 = ^Float32;
+    var
+      UA, UC, UD: UInt32;
+      A, C, D, R: Float32;
+    begin
+      UA := 3244033315; UC := 3250306891; UD := 1103577858;
+      A := PF32(@UA)^; C := PF32(@UC)^; D := PF32(@UD)^;
+      R := Sqrt(D) * A + C;
+      WriteLn(PU32(@R)^);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { rounding Sqrt only when R was stored gave 3266851329 }
+  AssertRunsOnAll(Src, '3266851328' + LineEnding, 0);
 end;
 
 initialization
