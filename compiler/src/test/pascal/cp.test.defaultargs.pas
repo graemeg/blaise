@@ -33,6 +33,10 @@ type
       F(1) and a procedure statement already did; they reported "expects 2
       argument(s) but got 1" }
     procedure TestSemantic_DefaultArgs_EveryMethodCallForm;
+    { a set-constant default ([], [mShift]) is accepted; a variable element
+      is not, since the literal is substituted at every call site }
+    procedure TestSemantic_SetDefault_ConstantsAccepted;
+    procedure TestSemantic_SetDefault_VariableElementRejected;
   end;
 
 implementation
@@ -84,6 +88,45 @@ begin
     'function TA.F(A: Int32; B: Int32): Int32; begin Result := A end; ' +
     'procedure TA.Q(A: Int32; B: Int32); begin end; ' +
     'procedure TA.Run(); begin end; begin N := X.F() end.')) >= 0);
+end;
+
+procedure TDefaultArgsTests.TestSemantic_SetDefault_ConstantsAccepted;
+const
+  Src = '''
+    program P;
+    type
+      TMod = (mShift, mCtrl);
+      TMods = set of TMod;
+    procedure A(M: TMods = []); begin end;
+    procedure B(M: TMods = [mShift, mCtrl]); begin end;
+    begin
+      A();
+      B();
+    end.
+    ''';
+begin
+  AssertEquals('accepted', '', SemanticError(Src));
+end;
+
+procedure TDefaultArgsTests.TestSemantic_SetDefault_VariableElementRejected;
+const
+  Src = '''
+    program P;
+    type
+      TMod = (mShift, mCtrl);
+      TMods = set of TMod;
+    var
+      V: TMod;
+    procedure A(M: TMods = [V]); begin end;
+    begin
+      A();
+    end.
+    ''';
+var
+  Msg: string;
+begin
+  Msg := SemanticError(Src);
+  AssertTrue('rejected: ' + Msg, Pos('must be a set of constants', Msg) >= 0);
 end;
 
 initialization

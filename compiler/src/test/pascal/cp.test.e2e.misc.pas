@@ -372,6 +372,12 @@ type
       case for TIndirectFuncCallExpr ("CloneExpr: unhandled expression node
       TIndirectFuncCallExpr"). }
     procedure TestRun_IndirectCallInUnitClassMethod_Clones;
+    { A set-constant parameter default -- [], members, a range of a
+      named-constant bound -- on a routine and a method; it was rejected
+      ("must be a literal or named constant"). }
+    procedure TestRun_SetConstantParamDefault;
+    { ...and declared in a unit's interface, used from a program. }
+    procedure TestRun_SetConstantParamDefault_InUnit;
   end;
 
 implementation
@@ -5271,6 +5277,99 @@ begin
     CompileAndRunWithUnit('indirclone', UnitSrc, Src, Output, ExitCode));
   AssertEquals('exit code', 0, ExitCode);
   AssertEquals('stdout', '42' + LineEnding + 'abc 5' + LineEnding, Output);
+end;
+
+procedure TE2EMiscTests.TestRun_SetConstantParamDefault;
+const
+  Src = '''
+    program P;
+    const
+      Lo = 2;
+    type
+      TMod = (mShift, mCtrl, mAlt, mMeta);
+      TMods = set of TMod;
+      TBytes = set of Byte;
+      TK = class
+        procedure Key(const N: string; M: TMods = [mCtrl, mAlt]);
+      end;
+    procedure Show(A: Int; M: TMods = []);
+    begin
+      WriteLn(A, ' ', mShift in M, ' ', mCtrl in M);
+    end;
+    procedure Bytes(B: TBytes = [Lo..4, 9]);
+    var
+      I: Int;
+    begin
+      for I := 0 to 10 do
+        if I in B then
+          Write(I, ' ');
+      WriteLn();
+    end;
+    procedure Span(M: TMods = [mShift..mAlt]);
+    begin
+      WriteLn(mShift in M, ' ', mAlt in M, ' ', mMeta in M);
+    end;
+    procedure TK.Key(const N: string; M: TMods);
+    begin
+      WriteLn(N, ' ', mCtrl in M, ' ', mAlt in M, ' ', mShift in M);
+    end;
+    var
+      K: TK;
+    begin
+      Show(1);
+      Show(2, [mShift]);
+      Bytes();
+      Bytes([1]);
+      Span();
+      K := TK.Create();
+      K.Key('k');
+      K.Key('s', [mShift]);
+      K.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1 False False' + LineEnding + '2 True False' + LineEnding +
+    '2 3 4 9 ' + LineEnding + '1 ' + LineEnding +
+    'True True False' + LineEnding +
+    'k True True False' + LineEnding + 's False False True' + LineEnding, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_SetConstantParamDefault_InUnit;
+const
+  UnitSrc = '''
+    unit usetdef;
+    interface
+    type
+      TMod = (mShift, mCtrl, mAlt);
+      TMods = set of TMod;
+    procedure Show(const N: string; M: TMods = [mCtrl]);
+    implementation
+    procedure Show(const N: string; M: TMods);
+    begin
+      WriteLn(N, ' ', mShift in M, ' ', mCtrl in M);
+    end;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses usetdef;
+    begin
+      Show('a');
+      Show('b', [mShift]);
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile + run: ' + Output,
+    CompileAndRunWithUnit('usetdef', UnitSrc, Src, Output, ExitCode));
+  AssertEquals('exit code', 0, ExitCode);
+  AssertEquals('stdout', 'a False True' + LineEnding + 'b True False' + LineEnding,
+    Output);
 end;
 
 initialization

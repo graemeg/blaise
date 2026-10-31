@@ -3030,7 +3030,10 @@ A default value is permitted only when *all three* conditions hold:
 A default value must be a literal of the parameter's type or a named
 constant whose resolved type matches.  Permitted forms: integer
 literal, float literal, string literal, the `nil` keyword, and a bare
-identifier that resolves to a `skConstant` symbol.  Arbitrary
+identifier that resolves to a `skConstant` symbol.  A `set of`
+parameter may also default to a set constant whose elements are literals
+or named constants, ranges included: `M: TModifiers = []`,
+`M: TModifiers = [mCtrl, mAlt]`, `B: TBytes = [Lo..4, 9]`.  Arbitrary
 constant expressions are *not* permitted in this iteration.
 
 === Rationale

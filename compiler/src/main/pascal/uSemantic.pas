@@ -1016,6 +1016,11 @@ type
     procedure AnalyseDefaultValueExpr(APar: TMethodParam;
       const AContext: string; ALine, ACol: Int);
     function  CloneDefaultExprNode(ASrc: TASTExpr): TASTExpr;
+    { A set-constant parameter default ([], [mShift], [lo..hi]): every element
+      a literal or named constant, typed against the formal's set. }
+    procedure AnalyseDefaultSetLiteral(APar: TMethodParam;
+      AExpr: TArrayLiteralExpr; ALine, ACol: Int);
+    function  IsDefaultSetConstNode(AExpr: TASTExpr): Boolean;
     procedure AppendDefaultArgs(AArgs: TObjectList; ADecl: TMethodDecl;
       const AContext: string; ALine, ACol: Int);
 
@@ -16636,6 +16641,14 @@ var
 begin
   if APar.DefaultValue = nil then Exit;
   if APar.DefaultValue.ResolvedType <> nil then Exit;  { already analysed }
+  { a set constant: [], [mShift], [mShift, mCtrl], [lo..hi] }
+  if (APar.DefaultValue is TArrayLiteralExpr) and (APar.ResolvedType <> nil) and
+     (APar.ResolvedType.Kind = tySet) then
+  begin
+    Self.AnalyseDefaultSetLiteral(APar, TArrayLiteralExpr(APar.DefaultValue),
+      ALine, ACol);
+    Exit;
+  end;
   if not ((APar.DefaultValue is TIntLiteral)    or
           (APar.DefaultValue is TFloatLiteral)  or
           (APar.DefaultValue is TStringLiteral) or
@@ -16671,6 +16684,49 @@ begin
     ALine, ACol);
 end;
 
+procedure TSemanticAnalyser.AnalyseDefaultSetLiteral(APar: TMethodParam;
+  AExpr: TArrayLiteralExpr; ALine, ACol: Int);
+var
+  I:    Int;
+  Elem: TASTExpr;
+begin
+  { Each element must be a constant -- the literal is substituted at every call
+    site that omits the argument -- so a variable or call is rejected first. }
+  for I := 0 to AExpr.Elements.Count - 1 do
+  begin
+    Elem := TASTExpr(AExpr.Elements.Items[I]);
+    if Elem is TSetRangeExpr then
+    begin
+      if not (IsDefaultSetConstNode(TSetRangeExpr(Elem).LowExpr) and
+              IsDefaultSetConstNode(TSetRangeExpr(Elem).HighExpr)) then
+        SemanticError(
+          Format('Default value for parameter ''%s'' must be a set of constants',
+            [APar.ParamName]), ALine, ACol);
+    end
+    else if not IsDefaultSetConstNode(Elem) then
+      SemanticError(
+        Format('Default value for parameter ''%s'' must be a set of constants',
+          [APar.ParamName]), ALine, ACol);
+  end;
+  AnalyseSetLiteralExpr(AExpr, TSetTypeDesc(APar.ResolvedType));
+  for I := 0 to AExpr.Elements.Count - 1 do
+  begin
+    Elem := TASTExpr(AExpr.Elements.Items[I]);
+    if (Elem is TIdentExpr) and not TIdentExpr(Elem).IsConstant then
+      SemanticError(
+        Format('Default value for parameter ''%s'' must be a set of constants',
+          [APar.ParamName]), ALine, ACol);
+  end;
+  AExpr.ResolvedType := APar.ResolvedType;
+end;
+
+function TSemanticAnalyser.IsDefaultSetConstNode(AExpr: TASTExpr): Boolean;
+begin
+  Result := (AExpr is TIntLiteral) or (AExpr is TStringLiteral) or
+            (AExpr is TIdentExpr) or
+            ((AExpr is TNegExpr) and (TNegExpr(AExpr).Expr is TIntLiteral));
+end;
+
 function TSemanticAnalyser.CloneDefaultExprNode(ASrc: TASTExpr): TASTExpr;
 var
   ILit: TIntLiteral;
@@ -16679,6 +16735,9 @@ var
   Ident: TIdentExpr;
   SrcId: TIdentExpr;
   NegE:  TNegExpr;
+  ALit:  TArrayLiteralExpr;
+  SRng:  TSetRangeExpr;
+  I:     Int;
 begin
   Result := nil;
   if ASrc = nil then Exit;
@@ -16739,6 +16798,29 @@ begin
     NegE.Col  := ASrc.Col;
     NegE.ResolvedType := ASrc.ResolvedType;
     Result := NegE;
+  end
+  else if ASrc is TArrayLiteralExpr then
+  begin
+    { a set-constant default, already typed against the formal's set }
+    ALit := TArrayLiteralExpr.Create();
+    for I := 0 to TArrayLiteralExpr(ASrc).Elements.Count - 1 do
+      ALit.Elements.Add(Self.CloneDefaultExprNode(
+        TASTExpr(TArrayLiteralExpr(ASrc).Elements.Items[I])));
+    ALit.IsConstArray := TArrayLiteralExpr(ASrc).IsConstArray;
+    ALit.Line := ASrc.Line;
+    ALit.Col  := ASrc.Col;
+    ALit.ResolvedType := ASrc.ResolvedType;
+    Result := ALit;
+  end
+  else if ASrc is TSetRangeExpr then
+  begin
+    SRng := TSetRangeExpr.Create();
+    SRng.LowExpr  := Self.CloneDefaultExprNode(TSetRangeExpr(ASrc).LowExpr);
+    SRng.HighExpr := Self.CloneDefaultExprNode(TSetRangeExpr(ASrc).HighExpr);
+    SRng.Line := ASrc.Line;
+    SRng.Col  := ASrc.Col;
+    SRng.ResolvedType := ASrc.ResolvedType;
+    Result := SRng;
   end
   else
     SemanticError(
