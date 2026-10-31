@@ -2598,6 +2598,7 @@ var
   BE:  TBinaryExpr;
   NE:  TNotExpr;
   NgE: TNegExpr;
+  ICE: TIndirectFuncCallExpr;
   FCE: TFuncCallExpr;
   DE:  TDerefExpr;
   AoE: TAddrOfExpr;
@@ -2749,6 +2750,17 @@ begin
     for I := 0 to TMethodCallExpr(AExpr).Args.Count - 1 do
       MCE.Args.Add(CloneExpr(TASTExpr(TMethodCallExpr(AExpr).Args.Items[I])));
     Result := MCE;
+  end
+  else if AExpr is TIndirectFuncCallExpr then
+  begin
+    { F()(args), P(args) through a procedural variable, and similar: the
+      callee expression and the arguments are owned; ResolvedProcType is a
+      semantic product, recomputed on analysis. }
+    ICE := TIndirectFuncCallExpr.Create();
+    ICE.CalleeExpr := CloneExpr(TIndirectFuncCallExpr(AExpr).CalleeExpr);
+    for I := 0 to TIndirectFuncCallExpr(AExpr).Args.Count - 1 do
+      ICE.Args.Add(CloneExpr(TASTExpr(TIndirectFuncCallExpr(AExpr).Args.Items[I])));
+    Result := ICE;
   end
   else if AExpr is TAnonMethodExpr then
   begin

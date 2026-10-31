@@ -367,6 +367,11 @@ type
       element of the array it points at, the whole pointee, a field of a
       record it points at -- written and read back }
     procedure TestRun_DerefAfterSubscript_Statements;
+    { A class method in a unit calling through a function result,
+      GetFn()(40, 2): the compiler clones such bodies, and CloneExpr had no
+      case for TIndirectFuncCallExpr ("CloneExpr: unhandled expression node
+      TIndirectFuncCallExpr"). }
+    procedure TestRun_IndirectCallInUnitClassMethod_Clones;
   end;
 
 implementation
@@ -5215,6 +5220,57 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '12 12' + LE + '9 9' + LE + '5 6' + LE + '77' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_IndirectCallInUnitClassMethod_Clones;
+const
+  UnitSrc = '''
+    unit indirclone;
+    interface
+    type
+      TFn = function(A, B: Int): Int;
+      TK = class
+        function Go(): Int;
+        procedure Show(const S: string);
+      end;
+    function GetFn(): TFn;
+    implementation
+    function Add(A, B: Int): Int; begin Result := A + B; end;
+    function GetFn(): TFn; begin Result := @Add; end;
+    function TK.Go(): Int;
+    begin
+      Result := GetFn()(40, 2);
+    end;
+    procedure TK.Show(const S: string);
+    var
+      N: Int;
+    begin
+      N := GetFn()(Length(S), GetFn()(1, 1));
+      WriteLn(S, ' ', N);
+    end;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses indirclone;
+    var
+      K: TK;
+    begin
+      K := TK.Create();
+      WriteLn(K.Go());
+      K.Show('abc');
+      K.Free();
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile + run: ' + Output,
+    CompileAndRunWithUnit('indirclone', UnitSrc, Src, Output, ExitCode));
+  AssertEquals('exit code', 0, ExitCode);
+  AssertEquals('stdout', '42' + LineEnding + 'abc 5' + LineEnding, Output);
 end;
 
 initialization
