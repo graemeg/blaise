@@ -556,7 +556,8 @@ type
       for a nested routine, false for an anonymous method, whose captures
       move to a heap environment that a function result cannot live in }
     procedure CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMethodDecl;
-                              AWithResult: Boolean = True);
+                              AWithResult: Boolean = True;
+                              AWithEnvNames: Boolean = False);
     { Add AName to ADecl.CapturedVars if it names an enclosing variable
       (member of AOuterVars) not already recorded. }
     procedure MaybeCaptureName(ADecl: TMethodDecl; AOuterVars: TStringList;
@@ -12437,7 +12438,8 @@ begin
 end;
 
 procedure TSemanticAnalyser.CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMethodDecl;
-                                            AWithResult: Boolean);
+                                            AWithResult: Boolean;
+                                            AWithEnvNames: Boolean);
 { Walk ADecl's body statements/expressions to find every reference to a variable
   belonging to the enclosing proc AOuterDecl — its locals AND its parameters
   (a `var` record parameter captured by a nested proc is the case that broke
@@ -12514,6 +12516,14 @@ begin
         OuterVars.Add('Result');
       ChainDecl := ChainDecl.EnclosingDecl;
     end;
+    { AWithEnvNames: AOuterDecl is an anonymous method's thunk, and the names
+      it reads through its environment are capturable too -- a literal nested
+      in it shares that environment.  After the frame walk, so the thunk's own
+      params and locals shadow them. }
+    if AWithEnvNames and (AOuterDecl.EnvCaptured <> nil) then
+      for I := 0 to AOuterDecl.EnvCaptured.Count - 1 do
+        if OuterVars.IndexOf(AOuterDecl.EnvCaptured.Strings[I]) < 0 then
+          OuterVars.Add(AOuterDecl.EnvCaptured.Strings[I]);
     { Nested-of-method: the enclosing method's Self is capturable like any
       other outer name (BUG-008).  It is an implicit parameter, so it never
       appears in the local/param sets above — list it explicitly.  Implicit
@@ -12850,6 +12860,15 @@ begin
           MaybeCaptureName(ADecl, OuterVars, 'Self');
           for J := 0 to TInheritedCallExpr(CurExpr).Args.Count - 1 do
             TodoExprs.Add(TInheritedCallExpr(CurExpr).Args.Items[J]);
+        end
+        else if (CurExpr is TAnonMethodExpr) and ADecl.IsAnonThunk and
+                (TAnonMethodExpr(CurExpr).Decl <> nil) and
+                (TAnonMethodExpr(CurExpr).Decl.Body <> nil) then
+        begin
+          { A literal nested in this one shares this one's environment, so a
+            name only the nested literal uses must be captured here too. }
+          for J := 0 to TAnonMethodExpr(CurExpr).Decl.Body.Stmts.Count - 1 do
+            TodoStmts.Add(TAnonMethodExpr(CurExpr).Decl.Body.Stmts.Items[J]);
         end;
       end;
     end;
@@ -22814,7 +22833,7 @@ begin
     InMethod := False;
   end;
 
-  CollectCaptures(AThunk, Encl, False);
+  CollectCaptures(AThunk, Encl, False, Encl.IsAnonThunk);
   { An anonymous method inside a CLASSIC NESTED ROUTINE of a method cannot
     capture Self yet: the nested routine holds Self behind a hidden by-
     pointer capture param (BUG-008), and the env-fill machinery has no path
@@ -22877,15 +22896,48 @@ begin
           'literal in that routine, or pass the value in', [Name, Encl.Name]),
           AThunk.Line, AThunk.Col);
     end;
-  { A literal nested in another literal: one that captures nothing needs no
-    environment and is an ordinary closure value.  Capturing the enclosing
-    literal's names would need environment chaining, which is deferred. }
+  { A literal nested in another literal.  Names the enclosing literal itself
+    reads through its environment (the outer routine's variables, and Self)
+    are SHARED: the inner closure takes the same environment, so reads and
+    writes land in the one heap record.  The enclosing literal's own params
+    and locals live in its frame, not an environment -- capturing those needs
+    environment chaining, which is deferred.  One that captures nothing needs
+    no environment and is an ordinary closure value. }
   if Encl.IsAnonThunk then
   begin
+    if AThunk.CapturedVars <> nil then
+      for I := 0 to AThunk.CapturedVars.Count - 1 do
+      begin
+        Name := AThunk.CapturedVars.Strings[I];
+        if (Encl.EnvCaptured = nil) or (Encl.EnvCaptured.IndexOf(Name) < 0) or
+           ((not SameText(Name, 'Self')) and Self.FrameOwnsName(Encl, Name)) then
+          SemanticError(Format('Capturing ''%s'', a parameter or local of ' +
+            'the enclosing anonymous method, is not yet supported (nested ' +
+            'closure environments are a later phase); variables of the ' +
+            'routine around both literals can be captured', [Name]),
+            AThunk.Line, AThunk.Col);
+      end;
+    { Self, as in a method body, is shared conservatively: implicit member
+      access cannot be seen before analysis. }
+    if (Encl.EnvCaptured <> nil) and (Encl.EnvCaptured.IndexOf('Self') >= 0) and
+       not AThunk.IsRoutineAdapter then
+    begin
+      if AThunk.CapturedVars = nil then
+        AThunk.CapturedVars := TStringList.Create();
+      if AThunk.CapturedVars.IndexOf('Self') < 0 then
+        AThunk.CapturedVars.Add('Self');
+    end;
     if (AThunk.CapturedVars <> nil) and (AThunk.CapturedVars.Count > 0) then
-      SemanticError('Capturing variables of an enclosing anonymous method ' +
-        'is not yet supported (nested closure environments are a later phase)',
-        AThunk.Line, AThunk.Col);
+    begin
+      { The value is built in the enclosing thunk's frame from its hidden
+        '__env' parameter, the environment it was called with. }
+      AThunk.EnvCaptured := AThunk.CapturedVars;
+      AThunk.EnvType := Encl.EnvType;
+      AThunk.EnvSlotName := '__env';
+    end
+    else if AThunk.CapturedVars <> nil then
+      AThunk.CapturedVars.Free();
+    AThunk.CapturedVars := nil;
     Exit;
   end;
   { Classify captures: BLOCK-SCOPED names (declared by a 'var' statement,

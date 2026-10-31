@@ -2174,12 +2174,15 @@ receiver (records are caller-frame storage, not ARC instances; static
 methods have none); their member references fail with clear errors.
 
 A literal NESTED inside another literal (a closure that returns a
-closure) is an ordinary closure value as long as it captures nothing from
-the enclosing literal — its own parameters, locals and `Result` are its
-own.  Capturing the enclosing literal's names would need the inner
-environment to reach the outer one (environment chaining), which is
-deferred, so that remains a clear compile-time error rather than a
-silently wrong capture.
+closure, a handler that connects another handler) may use the variables
+of the routine around both literals, and `Self`: it SHARES the enclosing
+literal's environment, so a write from either level lands in the one heap
+record, also when the inner closure outlives both calls.  A name only the
+inner literal uses is captured by the outer one too, so it is in that
+environment.  Capturing the enclosing literal's OWN parameters, locals or
+`Result` would need the inner environment to reach the outer literal's
+frame (environment chaining), which is deferred, so that remains a clear
+compile-time error rather than a silently wrong capture.
 
 === Method-pointer → `reference to` coercion (Phase 3)
 

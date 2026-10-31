@@ -273,6 +273,12 @@ type
       counter store into the packed env fields at each variable's width
       (arm64 stored 8 bytes and clobbered the neighbouring fields) }
     procedure TestRun_NestedRoutineWritesClosureEnvFields;
+    { A literal nested in another literal, using the variables of the routine
+      around both (and Self): it shares the enclosing literal's environment,
+      so writes from either level land in the same storage, also when the
+      inner closure outlives both calls.  A name only the inner literal uses
+      is captured by the outer one too.  It was "Undeclared variable". }
+    procedure TestRun_NestedLiteral_SharesEnclosingEnvironment;
   end;
 
 implementation
@@ -3805,6 +3811,80 @@ begin
     '200 -3 -1 2 -5 True' + LineEnding +
     '44 -3000 10 -6 1 True' + LineEnding +
     '44 -3000 10 -6 1 True' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedLiteral_SharesEnclosingEnvironment;
+const
+  Src = '''
+    program P;
+    uses Functional;
+    type
+      TIntFn = TFunc<Int, Int>;
+      TMaker = reference to function(Z: Int): TIntFn;
+      TS = class
+        FCount: Int;
+        FKeep: TAction<Int>;
+        procedure Connect(H: TAction<Int>);
+        procedure Bump();
+        procedure Test();
+      end;
+    procedure TS.Connect(H: TAction<Int>); begin H(1); end;
+    procedure TS.Bump(); begin FCount := FCount + 1; end;
+    procedure TS.Test();
+    var
+      Log: string;
+      OnlyInner: Int;
+    begin
+      Log := '';
+      OnlyInner := 5;
+      Connect(procedure(V: Int)
+        begin
+          Log := Log + 'o';
+          Connect(procedure(W: Int)
+            begin
+              Log := Log + 'n';
+              OnlyInner := OnlyInner + W;
+              Bump();
+              FCount := FCount + 10;
+            end);
+        end);
+      WriteLn(Log, ' ', OnlyInner, ' ', FCount);
+      Connect(procedure(V: Int)
+        begin
+          FKeep := procedure(W: Int) begin Log := Log + 'k'; end;
+        end);
+      FKeep(0);
+      FKeep(0);
+      WriteLn(Log);
+    end;
+    procedure Standalone();
+    var
+      N: Int;
+      F: TIntFn;
+      G: TMaker;
+    begin
+      N := 1;
+      G := function(Z: Int): TIntFn
+        begin
+          Result := function(Z: Int): Int begin N := N * 3; Result := N; end;
+        end;
+      F := G(0);
+      WriteLn(F(0), ' ', F(0), ' ', N);
+    end;
+    var
+      T: TS;
+    begin
+      T := TS.Create();
+      T.Test();
+      T.FKeep := nil;
+      T.Free();
+      Standalone();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'on 6 11' + LineEnding + 'onkk' + LineEnding +
+    '3 9 9' + LineEnding);
 end;
 
 initialization
