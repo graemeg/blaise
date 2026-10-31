@@ -37,6 +37,9 @@ type
       is not, since the literal is substituted at every call site }
     procedure TestSemantic_SetDefault_ConstantsAccepted;
     procedure TestSemantic_SetDefault_VariableElementRejected;
+    { [Weak] on a generic class field whose instance type is not a class or
+      interface is rejected at instantiation, at the field's position }
+    procedure TestSemantic_WeakGenericField_NonClassInstanceRejected;
   end;
 
 implementation
@@ -127,6 +130,30 @@ var
 begin
   Msg := SemanticError(Src);
   AssertTrue('rejected: ' + Msg, Pos('must be a set of constants', Msg) >= 0);
+end;
+
+procedure TDefaultArgsTests.TestSemantic_WeakGenericField_NonClassInstanceRejected;
+const
+  Src = '''
+    program P;
+    type
+      TG<T> = class
+      public
+        [Weak] W: T;
+      end;
+    var
+      G: TG<Int>;
+    begin
+      G := TG<Int>.Create();
+    end.
+    ''';
+var
+  Msg: string;
+begin
+  Msg := SemanticError(Src);
+  AssertTrue('rejected: ' + Msg,
+    Pos('[Weak] can only be applied to class or interface fields', Msg) >= 0);
+  AssertTrue('at the field: ' + Msg, Pos('line 5', Msg) >= 0);
 end;
 
 initialization

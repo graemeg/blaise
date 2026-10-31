@@ -106,6 +106,13 @@ type
       function -- the result matches the concrete cast.  arm64 failed to
       compile it (BUG-20261028-arm64-typeparam-cast). }
     procedure TestRun_TypeParamCast_EveryIntegerKind;
+    { [Weak] on a field of a generic class: the instance's field is weak,
+      as in a non-generic class -- it does not keep its target alive and is
+      cleared when the target dies.  The attribute was dropped when the
+      template was instantiated. }
+    procedure TestRun_WeakFieldOfGenericClass;
+    { ...and the same with the generic class in a unit. }
+    procedure TestRun_WeakFieldOfGenericClass_InUnit;
   end;
 
 implementation
@@ -1388,6 +1395,83 @@ begin
   AssertRunsOnAll(Src,
     '44 -56 -25536 4464' + LE + '1 4294967295 -5 4294967297 2' + LE +
     '44 -56 -25536 4464' + LE + '1 4294967295 -5 4294967297 2' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_WeakFieldOfGenericClass;
+const
+  Src = '''
+    program P;
+    type
+      TR = class
+        destructor Destroy; override;
+      end;
+      TG<T> = class
+      public
+        [Weak] W: TObject;
+        V: T;
+      end;
+    destructor TR.Destroy; begin WriteLn('R destroyed'); inherited Destroy(); end;
+    var
+      G: TG<Int>;
+      R: TObject;
+    begin
+      G := TG<Int>.Create();
+      R := TR.Create();
+      G.W := R;
+      R := nil;
+      WriteLn('assigned ', G.W <> nil);
+      G.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'R destroyed' + LineEnding + 'assigned False' + LineEnding, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_WeakFieldOfGenericClass_InUnit;
+const
+  UnitSrc = '''
+    unit gweak;
+    interface
+    type
+      TG<T> = class
+      public
+        [Weak] W: TObject;
+        V: T;
+      end;
+    implementation
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses gweak;
+    type
+      TR = class
+        destructor Destroy; override;
+      end;
+    destructor TR.Destroy; begin WriteLn('R destroyed'); inherited Destroy(); end;
+    var
+      G: TG<Int>;
+      R: TObject;
+    begin
+      G := TG<Int>.Create();
+      R := TR.Create();
+      G.W := R;
+      R := nil;
+      WriteLn('assigned ', G.W <> nil);
+      G.Free();
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile + run: ' + Output,
+    CompileAndRunWithUnit('gweak', UnitSrc, Src, Output, ExitCode));
+  AssertEquals('exit code', 0, ExitCode);
+  AssertEquals('stdout', 'R destroyed' + LineEnding + 'assigned False' + LineEnding,
+    Output);
 end;
 
 initialization

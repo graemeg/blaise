@@ -5971,6 +5971,7 @@ var
   ParentRT:  TRecordTypeDesc;
   FldInfo:   TFieldInfo;
   DeferBodies: Boolean;
+  AttrName:  string;
 begin
   Result := nil;
   { No program/unit context yet (ImportUnitInterface resolving a cached
@@ -6056,6 +6057,10 @@ begin
         NewFDecl.Names.Add(FDecl.Names.Strings[J]);
       NewFDecl.TypeName := SubstTypeParam(FDecl.TypeName, Templ.ParamNames, Args);
       NewFDecl.Visibility := FDecl.Visibility;
+      NewFDecl.IsWeak       := FDecl.IsWeak;
+      NewFDecl.IsUnretained := FDecl.IsUnretained;
+      NewFDecl.Line := FDecl.Line;
+      NewFDecl.Col  := FDecl.Col;
       ClonedCD.Fields.Add(NewFDecl);
     end;
 
@@ -6226,10 +6231,31 @@ begin
           Format('Unknown type ''%s'' for field in ''%s''', [NewFDecl.TypeName, ATypeName]),
           0, 0);
       NewFDecl.ResolvedType := FldType;
+      { [Weak] / [Unretained] (flagged on the template): the same rules as a
+        non-generic class field, checked against the substituted type. }
+      if (NewFDecl.IsWeak or NewFDecl.IsUnretained) and
+         not ((FldType.Kind = tyClass) or (FldType.Kind = tyInterface)) then
+      begin
+        if NewFDecl.IsWeak then
+          AttrName := 'Weak'
+        else
+          AttrName := 'Unretained';
+        SemanticError(
+          Format('[%s] can only be applied to class or interface fields, ' +
+                 'not ''%s'' (in ''%s'')',
+            [AttrName, NewFDecl.TypeName, ATypeName]), NewFDecl.Line, NewFDecl.Col);
+      end;
+      if NewFDecl.IsWeak and NewFDecl.IsUnretained then
+        SemanticError('[Weak] and [Unretained] are mutually exclusive',
+          NewFDecl.Line, NewFDecl.Col);
       for K := 0 to NewFDecl.Names.Count - 1 do
       begin
         FldName := NewFDecl.Names.Strings[K];
         RT.AddField(FldName, FldType);
+        if NewFDecl.IsWeak then
+          RT.FindField(FldName).IsWeak := True;
+        if NewFDecl.IsUnretained then
+          RT.FindField(FldName).IsUnretained := True;
         RT.FindField(FldName).Visibility    := NewFDecl.Visibility;
         RT.FindField(FldName).DeclaringUnit := FCurrentUnitName;
         RT.FindField(FldName).DeclaringType := ATypeName;
@@ -9622,6 +9648,18 @@ begin
         Record the declaring unit so allocation sites inside cloned method
         bodies are attributed to the template's source, not the instantiator. }
       TGenericTypeDef(TD.Def).DefUnitName := FCurrentUnitName;
+      { [Weak] / [Unretained] on the template's fields: record the flags now,
+        on the template itself, so they reach every instance -- including one
+        instantiated from the unit's .bif, which carries the flag, not the
+        attribute list.  The type check waits for the instance's field type. }
+      for J := 0 to TGenericTypeDef(TD.Def).ClassDef.Fields.Count - 1 do
+      begin
+        FDecl := TFieldDecl(TGenericTypeDef(TD.Def).ClassDef.Fields.Items[J]);
+        if HasWeakAttribute(FDecl.Attributes) then
+          FDecl.IsWeak := True;
+        if HasUnretainedAttribute(FDecl.Attributes) then
+          FDecl.IsUnretained := True;
+      end;
       CheckedRegisterGeneric(TD);
       Continue;
     end
