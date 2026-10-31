@@ -70,6 +70,10 @@ type
     procedure TestCsetAndConditionals;
     procedure TestLseAtomics;
     procedure TestErrors_HaveLineNumbers;
+    { stp/ldp of FP registers (the d0..d3 save around a call, d8..d15) use
+      the SIMD&FP pair encoding.  They were encoded as the integer pair:
+      `stp d0, d1, [sp, #-16]!` saved x0 and x1. }
+    procedure TestFPRegisterPairs;
   end;
 
 implementation
@@ -679,6 +683,15 @@ begin
   end;
   AssertTrue('unknown mnemonic raises', Raised);
   AssertTrue('message names line 2', Pos('line 2', Msg) >= 0);
+end;
+
+procedure TArm64AsmTests.TestFPRegisterPairs;
+begin
+  { reference words from the system assembler }
+  AssertWord('stp d0, d1, [sp, #-16]!', Int32($6DBF07E0));
+  AssertWord('ldp d0, d1, [sp], #16', Int32($6CC107E0));
+  AssertWord('stp s2, s3, [sp, #8]', Int32($2D010FE2));
+  AssertWord('stp d8, d9, [x29, #-32]', Int32($6D3E27A8));
 end;
 
 initialization

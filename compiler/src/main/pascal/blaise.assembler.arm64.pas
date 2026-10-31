@@ -789,7 +789,7 @@ end;
 
 { ldp/stp.  AMode: 0=signed offset, 1=pre-index, 2=post-index. }
 function EncLdStPair(AIs64: Boolean; ALoad: Boolean; AMode: Int32;
-  ARt, ARt2, ARn: Int32; AImm: Int64): Int32;
+  ARt, ARt2, ARn: Int32; AImm: Int64; AIsFP: Boolean): Int32;
 var
   Scale, W: Int32;
   Scaled: Int64;
@@ -800,7 +800,15 @@ begin
   Scaled := AImm div (Int64(1) shl Scale);
   if (Scaled < -64) or (Scaled > 63) then
     raise EArm64Assembler.Create('ldp/stp offset out of range');
-  W := $28000000 or (Int32(Ord(AIs64)) shl 31);
+  { opc (bits 31:30): 00 = W, 10 = X for the integer pair; 00 = S, 01 = D
+    with V (bit 26) set for the SIMD&FP pair.  Encoding `stp d0, d1` as the
+    integer form saved x0/x1 instead, so every d-register save around a call
+    (an owned receiver's release after B.Copy().Bounds()) kept nothing and
+    the result came back as whatever the call left in d0. }
+  if AIsFP then
+    W := $2C000000 or (Int32(Ord(AIs64)) shl 30)
+  else
+    W := $28000000 or (Int32(Ord(AIs64)) shl 31);
   case AMode of
     0: W := W or (2 shl 23);   { signed offset }
     1: W := W or (3 shl 23);   { pre-index }
@@ -1612,8 +1620,10 @@ procedure TArm64Assembler.EncodeInstr;
       Opc := 0;   { signed-offset mode }
       if FA[2].PreIdx then Opc := 1
       else if FA[2].PostIdx then Opc := 2;
+      if (FA[0].IsFP <> FA[1].IsFP) or (FA[0].Is64 <> FA[1].Is64) then
+        LineError('ldp/stp registers must be the same kind');
       EmitW(EncLdStPair(FA[0].Is64, FL.Mnemonic = 'ldp', Opc,
-        FA[0].Reg, FA[1].Reg, FA[2].Base, FA[2].MemImm));
+        FA[0].Reg, FA[1].Reg, FA[2].Base, FA[2].MemImm, FA[0].IsFP));
       Exit;
     end;
 
