@@ -199,6 +199,12 @@ type
     procedure TestRun_Sin_Single_WidensAndNarrows;
     procedure TestRun_Sin_HugeArg_PayneHanek;
     procedure TestRun_ConstDoubleArray_Elements;
+    { Float32 arithmetic is evaluated in single precision: each + - * / of
+      Float32 operands rounds to Float32, an integer operand converts to
+      Float32 first.  arm64 kept the intermediates in double and rounded
+      once, so A + (B - A) * T differed from x86-64 in the last bit
+      (anti-aliased edge pixels in blaise-canvas-ui). }
+    procedure TestRun_Float32_SinglePrecisionEvaluation;
   end;
 
 implementation
@@ -2112,6 +2118,40 @@ begin
     'b-a FalseTrueFalseFalseTrueTrue eNlmGH' + LE +
     'a-a TrueFalseFalseTrueFalseTrue EnlMgH' + LE +
     'single FalseTrueFalseFalseTrueTrue' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Float32_SinglePrecisionEvaluation;
+const
+  Src = '''
+    program P;
+    type
+      PU32 = ^UInt32;
+    function Lerp(A, B, T: Float32): Float32;
+    begin
+      Result := A + (B - A) * T;
+    end;
+    var
+      A, B, T, R: Float32;
+      N: Int;
+    begin
+      A := 0.028347477316856384;
+      B := 0.8357651233673096;
+      T := 0.4327670633792877;
+      R := A + (B - A) * T;
+      WriteLn(PU32(@R)^);
+      R := Lerp(A, B, T);
+      WriteLn(PU32(@R)^);
+      N := 3;
+      R := (A + N) * T;
+      WriteLn(PU32(@R)^);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { the IEEE single-precision bit patterns: rounding once from double gives
+    1052863291 for the first two }
+  AssertRunsOnAll(Src, '1052863292' + LineEnding + '1052863292' + LineEnding +
+    '1067958458' + LineEnding, 0);
 end;
 
 initialization

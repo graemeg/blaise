@@ -458,6 +458,7 @@ type
     { Float-context operand: floats via EmitExprToD0, integers via
       EmitExprToX0 + scvtf widening. }
     procedure EmitExprToD0OrConvert(AExpr: TASTExpr);
+    procedure EmitD0ToSinglePrecision(AOperand: TASTExpr);
     function  IsFloatExpr(AExpr: TASTExpr): Boolean;
     { Ownership of a string value in x0: ArcExprOwnsRef plus concat — this
       backend consumes concat's +1 directly instead of the deferred
@@ -7937,6 +7938,7 @@ end;
 procedure TArm64Backend.EmitExprToD0(AExpr: TASTExpr);
 var
   BE: TBinaryExpr;
+  IsS: Boolean;
   Idx: Int;
   Lit: string;
   RtlMathSym: string;
@@ -8321,10 +8323,23 @@ begin
   if AExpr is TBinaryExpr then
   begin
     BE := TBinaryExpr(AExpr);
+    { A Single operation is evaluated in single precision, as x86-64 does
+      (addss/mulss) and as C does: every operand is a Single value, and the
+      result is rounded to Single.  d0 keeps its double contract -- the
+      operation itself runs in double, which for + - * / of two Single
+      values rounded once to Single is bit-identical to the single-precision
+      instruction (double carries more than 2 * 24 + 2 bits).  Rounding only
+      when the value was finally stored let a Float32 expression differ
+      between the ISAs in its last bit. }
+    IsS := (BE.ResolvedType <> nil) and (BE.ResolvedType.Kind = tySingle);
     { int operands convert on the way in (scvtf) — mixed int/float exprs }
     Self.EmitExprToD0OrConvert(BE.Left);
+    if IsS then
+      Self.EmitD0ToSinglePrecision(BE.Left);
     Self.Emit(#9'str d0, [sp, #-16]!');
     Self.EmitExprToD0OrConvert(BE.Right);
+    if IsS then
+      Self.EmitD0ToSinglePrecision(BE.Right);
     Self.Emit(#9'fmov d1, d0');
     Self.Emit(#9'ldr d0, [sp], #16');
     case BE.Op of
@@ -8336,6 +8351,11 @@ begin
       { the semantic pass types only + - * / as a float }
       InternalError('float-typed binary operator ' + IntToStr(Ord(BE.Op)),
         AExpr);
+    end;
+    if IsS then
+    begin
+      Self.Emit(#9'fcvt s0, d0');
+      Self.Emit(#9'fcvt d0, s0');
     end;
     Exit;
   end;
@@ -8376,6 +8396,17 @@ begin
   end;
   InternalError('float expression ' + AExpr.ClassName +
     ' has no float lowering', AExpr);
+end;
+
+procedure TArm64Backend.EmitD0ToSinglePrecision(AOperand: TASTExpr);
+begin
+  { an operand of a Single operation that is not itself a Single (an
+    integer, a Double-typed literal or constant) takes Single precision
+    first, as x86-64's cvtsi2ss / cvtsd2ss do; a Single value is exact }
+  if (AOperand.ResolvedType <> nil) and (AOperand.ResolvedType.Kind = tySingle) then
+    Exit;
+  Self.Emit(#9'fcvt s0, d0');
+  Self.Emit(#9'fcvt d0, s0');
 end;
 
 procedure TArm64Backend.EmitExprToD0OrConvert(AExpr: TASTExpr);

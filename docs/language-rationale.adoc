@@ -5844,6 +5844,34 @@ rather than the generic "Expected expression" that prompted the issue.
   `leaq` for record receivers.  All were masked by the old
   `TFieldAccessExpr.IsMethodCall` path.
 
+== Float32 Evaluation Precision
+
+=== Decision
+
+An arithmetic operation (`+`, `-`, `*`, `/`) whose operands are both
+`Float32` is evaluated in single precision: its result is the correctly
+rounded `Float32` value, and that rounded value is what the enclosing
+expression sees.  An operand of a `Float32` operation that is not itself a
+`Float32` -- an integer, a `Float64`-typed constant -- converts to
+`Float32` first.  An operation with a `Float64` operand is a `Float64`
+operation, as before.  This is C's `FLT_EVAL_METHOD == 0`.
+
+=== Rationale
+
+* *The same program gives the same bits on every target.*  x86-64
+  evaluates `Float32` with the single-precision SSE instructions (`addss`,
+  `mulss`); arm64 kept intermediates in double and rounded once, at the
+  store.  `A + (B - A) * T` then differed in its last bit between the two,
+  which showed up as differing anti-aliased edge pixels in a graphics
+  toolkit.
+* *It is what `Float32` code is written for.*  Graphics and signal code
+  chooses `Float32` for its width, and is compared against reference output
+  produced by C, which evaluates `float` in `float`.
+* *It costs nothing on arm64.*  The backend still computes in a double
+  register and rounds the result: for `+ - * /` of two single values,
+  double (53 bits, more than `2 * 24 + 2`) rounded once to single is
+  bit-identical to the single-precision instruction.
+
 == Implicit Integer→Float Widening — Builtins and Typecasts
 
 === Decision
