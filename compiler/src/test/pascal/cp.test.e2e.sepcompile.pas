@@ -1263,14 +1263,18 @@ begin
   ProgBin := FScratch + '/use_gentypes';
 
   WriteFile(DepPas, DepSrc);
-  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  { the unit uses Generics.Collections: name the stdlib, as a host without a
+    blaise.cfg (the FreeBSD CI VM) has no default for it }
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
   AssertEquals('blaise(GenTypes) exit code 0' + #10 + Captured, 0, Rc);
   DeleteFile(DepPas);
   AssertFalse('GenTypes.pas hidden', FileExists(DepPas));
 
   WriteFile(ProgPas, ProgSrc);
   Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
-                   '--unit-path', FScratch], Captured);
+                   '--unit-path', FScratch,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
   AssertEquals('blaise(use_gentypes) exit code 0' + #10 + Captured, 0, Rc);
 
   Rc := RunBinary(ProgBin, Captured);
