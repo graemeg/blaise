@@ -293,6 +293,18 @@ type
       var parameter, and a function given the field as an argument.  x86-64
       zeroed the field before the call ran and printed zeros. }
     procedure TestRun_RecordFieldFromCall_ThatReadsTheField;
+    { Float arguments to a record or class method whose result is a record
+      small enough to come back in registers (Q.Off(1, 2) returning TQ).
+      x86-64 popped every argument into the integer registers, so the callee
+      read garbage from %xmm0 and Q.Off(1, 2) on (10, 20) gave (12, 20). }
+    procedure TestRun_RegisterReturnMethod_FloatArgs;
+    { X := F(X.Left - 1, X.Right()) with X a local record returned through
+      the hidden result pointer: the destination is read inside argument
+      expressions, not as a bare argument.  x86-64 zeroed X before the
+      arguments ran, so they read zeros.  The same for a receiver that is part
+      of the destination (X := X.Sub.Grow(10)): the callee also wrote its
+      result over its own Self. }
+    procedure TestRun_SretCall_DestReadInsideArgExpr;
   end;
 
 implementation
@@ -3014,6 +3026,118 @@ begin
   AssertLeakFreeOnAll(Src,
     '6 10 14' + LineEnding + '42 x1' + LineEnding + '43 x1+' + LineEnding +
     'ab!? 7' + LineEnding);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RegisterReturnMethod_FloatArgs;
+const
+  Src = '''
+    program P;
+    type
+      TQ = record
+        L, T: Float32;
+        function Off(DX, DY: Float32): TQ;
+      end;
+      TC = class
+        function Off(Q: TQ; DX, DY: Float32): TQ;
+        function Mix(N: Int; DX: Float; M: Int; DY: Float32): TQ;
+      end;
+    function TQ.Off(DX, DY: Float32): TQ;
+    begin
+      Result.L := L + DX;
+      Result.T := T + DY;
+    end;
+    function TC.Off(Q: TQ; DX, DY: Float32): TQ;
+    begin
+      Result.L := Q.L + DX;
+      Result.T := Q.T + DY;
+    end;
+    function TC.Mix(N: Int; DX: Float; M: Int; DY: Float32): TQ;
+    begin
+      Result.L := N + DX;
+      Result.T := M + DY;
+    end;
+    var
+      Q, R: TQ;
+      C: TC;
+    begin
+      Q.L := 10; Q.T := 20;
+      R := Q.Off(1, 2);
+      WriteLn(R.L:0:1, ' ', R.T:0:1);
+      C := TC.Create();
+      R := C.Off(Q, 3, 4);
+      WriteLn(R.L:0:1, ' ', R.T:0:1);
+      R := C.Mix(5, 0.5, 6, 0.25);
+      WriteLn(R.L:0:2, ' ', R.T:0:2);
+      C.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '11.0 22.0' + LineEnding + '13.0 24.0' + LineEnding + '5.50 6.25' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_SretCall_DestReadInsideArgExpr;
+const
+  Src = '''
+    program P;
+    type
+      TRectI = record
+        Left, Top, Width, Height: Int32;
+        function Right(): Int32;
+        function Bottom(): Int32;
+      end;
+      TIn = record
+        A, B, C, D: Int;
+        function Grow(K: Int): TOut;
+      end;
+      TOut = record
+        Sub: TIn;
+        E: Int;
+      end;
+      TBox = class
+        procedure Run();
+      end;
+    function TIn.Grow(K: Int): TOut;
+    begin
+      Result.Sub.A := A + K; Result.Sub.B := B + K;
+      Result.Sub.C := C; Result.Sub.D := D;
+      Result.E := A * 100;
+    end;
+    function TRectI.Right(): Int32; begin Result := Left + Width; end;
+    function TRectI.Bottom(): Int32; begin Result := Top + Height; end;
+    function FromEdges(L, T, R, B: Int32): TRectI;
+    begin
+      Result.Left := L; Result.Top := T;
+      Result.Width := R - L; Result.Height := B - T;
+    end;
+    function RectI(L, T, W, H: Int32): TRectI;
+    begin
+      Result.Left := L; Result.Top := T; Result.Width := W; Result.Height := H;
+    end;
+    procedure TBox.Run();
+    var
+      B: TRectI;
+      X: TOut;
+    begin
+      B := RectI(2, 2, 20, 20);
+      B := FromEdges(B.Left - 15, B.Top - 15, B.Right() + 15, B.Bottom() + 15);
+      WriteLn(B.Left, ' ', B.Top, ' ', B.Width, ' ', B.Height);
+      X.Sub.A := 1; X.Sub.B := 2; X.Sub.C := 3; X.Sub.D := 4; X.E := 0;
+      X := X.Sub.Grow(10);
+      WriteLn(X.Sub.A, ' ', X.Sub.B, ' ', X.Sub.C, ' ', X.Sub.D, ' ', X.E);
+    end;
+    var
+      X: TBox;
+    begin
+      X := TBox.Create();
+      X.Run();
+      X.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '-13 -13 50 50' + LineEnding + '11 12 3 4 100' + LineEnding, 0);
 end;
 
 initialization

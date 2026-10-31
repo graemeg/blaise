@@ -7273,8 +7273,11 @@ begin
   if MCall.ResolvedMethod = nil then Exit;
   MDecl := TMethodDecl(MCall.ResolvedMethod);
   if not MDecl.IsRecordMethod then Exit;
-  { Only a bare variable receiver (M.Method) can alias the destination var. }
-  if MCall.ObjExpr <> nil then Exit;
+  { A receiver expression (X := X.Sub.Grow(1), X := P^.Grow(1)) may be part
+    of the destination: the callee would then write its result over its own
+    Self.  Treat every receiver expression as a possible alias, as
+    CallAliasesDestVar does for argument expressions. }
+  if MCall.ObjExpr <> nil then Exit(True);
   Result := (MCall.ObjectName = AName) and (MCall.IsGlobal = AIsGlobal);
 end;
 
@@ -7288,9 +7291,10 @@ begin
   Result := False;
   { receiver alias — M := M.Method(...) }
   if Self.RecordCallReceiverIsVar(AExpr, AName, AIsGlobal) then Exit(True);
-  { argument alias — X := F(X) / X := F(N, X) / X := Obj.M(X).  Only a bare
-    identifier is matched: a subscript, field access or expression is not a
-    whole-variable alias of the destination var. }
+  { argument alias — X := F(X) / X := F(N, X) / X := Obj.M(X), or an
+    argument expression that may read X (F(X.Left - 1), F(X.Right())).  A
+    literal or a different identifier cannot; anything else is treated as a
+    possible alias. }
   Args := nil;
   if AExpr is TFuncCallExpr then
     Args := TFuncCallExpr(AExpr).Args
@@ -7300,9 +7304,20 @@ begin
   for I := 0 to Args.Count - 1 do
   begin
     Arg := TASTExpr(Args.Items[I]);
-    if not (Arg is TIdentExpr) then Continue;
-    if TIdentExpr(Arg).Name <> AName then Continue;
-    if TIdentExpr(Arg).IsGlobal <> AIsGlobal then Continue;
+    { A literal cannot read the destination. }
+    if (Arg is TIntLiteral) or (Arg is TFloatLiteral) or (Arg is TStringLiteral)
+      or (Arg is TNilLiteral) then
+      Continue;
+    if Arg is TIdentExpr then
+    begin
+      if TIdentExpr(Arg).Name <> AName then Continue;
+      if TIdentExpr(Arg).IsGlobal <> AIsGlobal then Continue;
+      Exit(True);
+    end;
+    { Any other expression may read the destination through a field, a
+      subscript or a method call (X := F(X.Left - 1, X.Right())), and the
+      destination is zeroed before arguments are evaluated: take the
+      temporary path, which is always correct. }
     Exit(True);
   end;
 end;
@@ -25159,10 +25174,10 @@ begin
     end
     else
       Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand('Self')]));
-    { Pop one register per SLOT (interface args take two) into %rsi onwards;
-      Self occupies %rdi (slot index 0), so user slots start at index 1. }
-    for I := Self.CountArgSlots(MD.Params) - 1 downto 0 do
-      Self.Emit(#9'popq ' + SysVArg64(I + 1));
+    { Pop one register per SLOT (interface args take two): integer slots
+      into %rsi onwards (Self occupies %rdi), float slots into %xmm0
+      onwards, per SysV. }
+    Self.EmitPopMethodArgsToRegs(MD.Params, ACall.Args, 1);
     if (MD.VTableSlot >= 0) and not AForceStatic then
     begin
       Self.Emit(#9'movq (%rdi), %rax');
