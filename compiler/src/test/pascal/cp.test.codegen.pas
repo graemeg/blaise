@@ -32,6 +32,10 @@ type
       a branch condition }
     procedure TestFloatCompare_X86_NaNSafe;
 
+    { @P^ is the pointer value itself on both targets: written out, and as
+      the implicit address of a dereferenced Move / FillByte argument }
+    procedure TestAddrOfDeref_IsThePointerValue;
+
     { WriteLn }
 
     { Variables and assignment }
@@ -165,6 +169,33 @@ begin
   AssertTrue('= branches false on parity first', Pos(#9'jp .L', Br) >= 0);
   AssertTrue('no jb / jbe on a float compare',
     (Pos(#9'jb .L', Br) < 0) and (Pos(#9'jbe .L', Br) < 0));
+end;
+
+procedure TCodeGenTests.TestAddrOfDeref_IsThePointerValue;
+const
+  Src = '''
+    program AddrOfDeref;
+    type
+      PU8 = ^UInt8;
+    var
+      P, Q: Pointer;
+      R: ^Int32;
+    begin
+      Move(PU8(P)^, PU8(Q)^, 4);
+      Move(R^, PU8(Q)^, 4);
+      FillByte(PU8(P)^, 4, 0);
+      Q := @R^
+    end.
+    ''';
+var
+  Code: string;
+begin
+  Code := GenAsm(Src, TargetX86_64);
+  AssertTrue('x86-64 calls _BlaiseMove and _BlaiseFillByte',
+    (Pos('_BlaiseMove', Code) >= 0) and (Pos('_BlaiseFillByte', Code) >= 0));
+  Code := GenAsm(Src, TargetArm64);
+  AssertTrue('arm64 calls _BlaiseMove and _BlaiseFillByte',
+    (Pos('_BlaiseMove', Code) >= 0) and (Pos('_BlaiseFillByte', Code) >= 0));
 end;
 
 initialization

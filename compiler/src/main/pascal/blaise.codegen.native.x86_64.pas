@@ -12189,6 +12189,16 @@ begin
       Exit;
     end;
 
+    { @P^ is just the pointer value P -- written out, and as the implicit
+      address of a dereferenced untyped argument (Move(P^, Q^, N),
+      FillByte(P^, N, V)).  It was rejected as an unsupported form here
+      while arm64 compiled it. }
+    if AOE.Expr is TDerefExpr then
+    begin
+      Self.EmitExprToEax(TDerefExpr(AOE.Expr).Expr);
+      Exit;
+    end;
+
     raise ENativeCodeGenError.Create(
       'native backend: unsupported TAddrOfExpr form (' +
       AOE.Expr.ClassName + ')');

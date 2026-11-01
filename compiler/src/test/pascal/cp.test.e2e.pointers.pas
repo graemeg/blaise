@@ -75,6 +75,11 @@ type
     procedure TestRun_Move_CopiesAndHandlesOverlap;
     procedure TestRun_Move_MethodNamedMoveStillCalled;
     procedure TestRun_FillByte_FillsAndTruncatesValue;
+    { the address of a dereference is the pointer itself: @R^ written out,
+      and Move / FillByte with a dereferenced argument on either side,
+      through a typed and a cast pointer (x86-64 rejected all of them as an
+      unsupported TAddrOfExpr form) }
+    procedure TestRun_AddrOfDeref_MoveFillByteAndAt;
     { writes through P^[I]: an element, a record element's field, a
       multi-dimensional and a chained element, in a loop and through Inc --
       the statement form did not parse }
@@ -1065,6 +1070,51 @@ begin
     '0 0' + LineEnding +
     '7' + LineEnding +
     '7 255 255' + LineEnding, 0);
+end;
+
+procedure TE2EPointersTests.TestRun_AddrOfDeref_MoveFillByteAndAt;
+const
+  Src = '''
+    program AddrOfDeref;
+    type
+      PU8 = ^UInt8;
+    var
+      A: array of UInt8;
+      P, Q: Pointer;
+      X: Int32;
+      R: ^Int32;
+      I: Int;
+    begin
+      SetLength(A, 8);
+      for I := 0 to 3 do
+        A[I] := I + 1;
+      P := @A[0];
+      Q := @A[4];
+      R := @X;
+      Move(PU8(P)^, PU8(Q)^, 4);
+      for I := 0 to 7 do
+        Write(A[I], ' ');
+      WriteLn();
+      FillByte(PU8(P)^, 2, 9);
+      Move(A[0], PU8(Q)^, 2);
+      for I := 0 to 7 do
+        Write(A[I], ' ');
+      WriteLn();
+      X := 0;
+      Move(PU8(P)^, R^, 4);
+      Move(R^, A[4], 4);
+      for I := 0 to 7 do
+        Write(A[I], ' ');
+      WriteLn();
+      WriteLn(@R^ = Pointer(R), ' ', @PU8(Q)^ = Q);
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src,
+    '1 2 3 4 1 2 3 4 ' + LineEnding +
+    '9 9 3 4 9 9 3 4 ' + LineEnding +
+    '9 9 3 4 9 9 3 4 ' + LineEnding +
+    'True True' + LineEnding, 0);
 end;
 
 procedure TE2EPointersTests.TestRun_PointerWriteOfStaticArray;
