@@ -22,7 +22,7 @@ unit cp.test.embed;
 interface
 
 uses
-  Classes, SysUtils, Streams, blaise.testing,
+  Classes, SysUtils, StrUtils, Streams, blaise.testing,
   uLexer, uParser, uAST, uSemantic, uUnitInterfaceIO;
 
 type
@@ -73,6 +73,7 @@ type
     procedure TestCacheKey_StableWhenTheUnitMoves;
     procedure TestCacheKey_CoversDefineGatedEmbed;
     procedure TestLexer_RecordsEmbeddedFiles;
+    procedure TestLexer_DiscoveryRecordsEmbedsWithoutExpanding;
   end;
 
 implementation
@@ -641,6 +642,54 @@ begin
                Pos('rec-one.txt', L.EmbeddedFiles.Strings[0]) >= 0);
     AssertTrue('records the bin',
                Pos('rec-two.bin', L.EmbeddedFiles.Strings[1]) >= 0);
+  finally
+    L.Free();
+  end;
+end;
+
+{ The cache key only needs to know WHICH files a unit embeds, and lexing a
+  unit to find out ran on every build for every cached unit.  Expanding a
+  1.5 MB font into one token per byte made that check most of a no-change
+  build.  In discovery mode the lexer records each embed and produces none
+  of its bytes, and still lexes the rest of the unit (later embeds, IFDEF
+  branches). }
+procedure TEmbedTests.TestLexer_DiscoveryRecordsEmbedsWithoutExpanding;
+var
+  L:      TLexer;
+  Tok:    TToken;
+  Big:    string;
+  Count:  Int;
+  SawSeven: Boolean;
+begin
+  Big := DupeString('x', 100000);
+  WriteFixture('disc-big.bin', Big);
+  WriteFixture('disc-str.txt', 'TEXT');
+  L := TLexer.Create(
+    '''
+    unit U;
+    interface
+    const A: array of Byte = {$EMBED 'disc-big.bin'};
+    const B: string = {$EMBEDSTR 'disc-str.txt'};
+    const C = 7;
+    implementation
+    end.
+    ''', FDir + '/u.pas');
+  try
+    L.DiscoverEmbedsOnly := True;
+    Count := 0;
+    SawSeven := False;
+    repeat
+      Tok := L.Next();
+      Count := Count + 1;
+      if (Tok.Kind = tkIntLit) and (Tok.Value = '7') then
+        SawSeven := True;
+      AssertFalse('no embedded bytes as tokens', Tok.Kind = tkStringLit);
+    until Tok.Kind = tkEOF;
+    AssertTrue('a handful of tokens, not one per byte: ' + IntToStr(Count), Count < 50);
+    AssertTrue('the rest of the unit is lexed', SawSeven);
+    AssertEquals('both embeds recorded', 2, L.EmbeddedFiles.Count);
+    AssertTrue('the binary', Pos('disc-big.bin', L.EmbeddedFiles.Strings[0]) >= 0);
+    AssertTrue('the string', Pos('disc-str.txt', L.EmbeddedFiles.Strings[1]) >= 0);
   finally
     L.Free();
   end;

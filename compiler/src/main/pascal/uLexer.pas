@@ -154,6 +154,7 @@ type
       into the unit's source hash so editing an asset invalidates the
       cached .o exactly as editing the source does. }
     FEmbedded:     TStringList;
+    FDiscoverEmbedsOnly: Boolean;
     function MapKeyword(const AUpper: string): TTokenKind;
     function CodepointToUtf8(ACodepoint: Int32): string;
     function UnescapeString(const ARaw: string): string;
@@ -182,6 +183,13 @@ type
     { Absolute paths of files pulled in by EMBED/EMBEDSTR while lexing.
       Read after a full lex to extend the unit-cache staleness key. }
     property EmbeddedFiles: TStringList read FEmbedded;
+    { Discovery mode, for the unit-cache staleness key: EMBED and EMBEDSTR
+      record the resolved file in EmbeddedFiles and produce no tokens,
+      without reading the file (the key reads it once, itself).  Expanding
+      a large asset into one token per byte just to learn its name made the
+      check dominate no-change builds.  The token stream is then not
+      parseable; use it only to walk the unit to its end. }
+    property DiscoverEmbedsOnly: Boolean read FDiscoverEmbedsOnly write FDiscoverEmbedsOnly;
     { Define a conditional-compilation symbol before lexing (e.g. from the
       -d command-line flag).  Case-insensitive. }
     procedure AddDefine(const ASym: string);
@@ -971,6 +979,13 @@ begin
     begin
       text  := FTok.TokenText();
       dname := DirectiveName(text);
+      if ((dname = 'EMBED') or (dname = 'EMBEDSTR')) and FDiscoverEmbedsOnly then
+      begin
+        text := Self.ResolveEmbedPath(DirectiveRawArg(text));
+        if FEmbedded.IndexOf(text) < 0 then
+          FEmbedded.Add(text);
+        Continue;
+      end;
       if (dname = 'EMBED') or (dname = 'EMBEDSTR') then
       begin
         { These directives PRODUCE tokens rather than gating them, so they

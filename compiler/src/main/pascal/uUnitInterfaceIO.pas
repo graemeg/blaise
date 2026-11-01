@@ -3252,6 +3252,7 @@ begin
     alone — the subsequent real compile reports the error with diagnostics. }
   Lx := TLexer.Create(ASourceText, ASourcePath);
   Lx.ApplyDefines(ADefines);   { same branches the real compile takes }
+  Lx.DiscoverEmbedsOnly := True;   { names only; the files are read below }
   try
     { blaise-guard: ignore BL-2005 - deliberate; see the except note below }
     try
