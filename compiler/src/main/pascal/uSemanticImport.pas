@@ -915,7 +915,12 @@ begin
     begin
       FldInfo := TFieldInfo(ParentRT.Fields.Items[I]);
       RT.AddField(FldInfo.Name, FldInfo.TypeDesc);
-      { Inherited field keeps the ancestor's visibility + declaring origin. }
+      { Inherited field keeps the ancestor's ownership flags (a [Weak] or
+        [Unretained] field must stay non-owning in every descendant, or the
+        descendant's cleanup releases what was never retained), visibility
+        and declaring origin. }
+      RT.FindField(FldInfo.Name).IsWeak        := FldInfo.IsWeak;
+      RT.FindField(FldInfo.Name).IsUnretained  := FldInfo.IsUnretained;
       RT.FindField(FldInfo.Name).Visibility    := FldInfo.Visibility;
       RT.FindField(FldInfo.Name).DeclaringUnit := FldInfo.DeclaringUnit;
       RT.FindField(FldInfo.Name).DeclaringType := FldInfo.DeclaringType;
@@ -954,6 +959,10 @@ begin
       for J := 0 to FldDecl.Names.Count - 1 do
       begin
         RT.AddField(FldDecl.Names.Strings[J], FldType);
+        { [Weak] / [Unretained] as declared: dropping them made the importer
+          retain on store and release on cleanup. }
+        RT.FindField(FldDecl.Names.Strings[J]).IsWeak       := FldDecl.IsWeak;
+        RT.FindField(FldDecl.Names.Strings[J]).IsUnretained := FldDecl.IsUnretained;
         { An imported field's privacy boundary is its own declaring unit, not
           the importing unit — carry both so cross-unit private/protected is
           enforced exactly as in the declaring unit. }
@@ -1093,6 +1102,8 @@ begin
       for J := 0 to FldDecl.Names.Count - 1 do
       begin
         RecDesc.AddField(FldDecl.Names.Strings[J], FldType);
+        RecDesc.FindField(FldDecl.Names.Strings[J]).IsWeak       := FldDecl.IsWeak;
+        RecDesc.FindField(FldDecl.Names.Strings[J]).IsUnretained := FldDecl.IsUnretained;
         RecDesc.FindField(FldDecl.Names.Strings[J]).Visibility    := FldDecl.Visibility;
         RecDesc.FindField(FldDecl.Names.Strings[J]).DeclaringUnit := AUnitName;
         RecDesc.FindField(FldDecl.Names.Strings[J]).DeclaringType := AEntry.Name;

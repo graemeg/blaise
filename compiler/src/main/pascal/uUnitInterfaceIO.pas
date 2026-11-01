@@ -54,7 +54,11 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 33; { v33: the META block carries PrebuiltDepHashes
+  IFACE_VERSION = 34; { v34: a field carries IsUnretained after IsWeak, so an
+                          importer knows the field is non-owning (it was
+                          treated as strong: stored with addref, released by
+                          the cleanup).
+                        v33: the META block carries PrebuiltDepHashes
                           after Target -- the SourceHash of each dependency
                           taken from a prebuilt object -- so a cached unit is
                           rebuilt when that object is rebuilt by another
@@ -544,6 +548,7 @@ begin
                 EncodeLpstr(F.Names.Strings[J]) +
                 EncodeLpstr(F.TypeName) +
                 EncodeBool(F.IsWeak) +
+                EncodeBool(F.IsUnretained) +
                 { `static var` (class variable) facts: IsClassVar marks the field
                   as a shared global rather than an instance slot; ClassVarEmitName
                   is the defining unit's mangled global label (set by uSemantic).
@@ -2414,6 +2419,7 @@ var
   FldName:     string;
   FldType:     string;
   IsWeak:      Boolean;
+  IsUnretained: Boolean;
   IsClassVar:  Boolean;
   ClassVarEmit: string;
   Vis:         Int;
@@ -2425,6 +2431,7 @@ begin
     FldName := ReadLpstrAt(AText, APos);
     FldType := ReadLpstrAt(AText, APos);
     IsWeak  := DecodeBool(AText, APos);
+    IsUnretained := DecodeBool(AText, APos);
     { Order must mirror EncodeFieldList: IsClassVar then ClassVarEmitName
       then the visibility ordinal. }
     IsClassVar   := DecodeBool(AText, APos);
@@ -2434,6 +2441,7 @@ begin
     F.Names.Add(FldName);
     F.TypeName := FldType;
     F.IsWeak   := IsWeak;
+    F.IsUnretained := IsUnretained;
     F.IsClassVar      := IsClassVar;
     F.ClassVarEmitName := ClassVarEmit;
     F.Visibility := TMemberVisibility(Vis);

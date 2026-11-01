@@ -240,9 +240,13 @@ shape depends on the kind:
 | `<type-param-list><parent-name lpstr><method-decl-list>`
 |===
 
-A `field-list` is a count lpstr followed by `<name><type-name><is-weak>`
-triples — flattened so multi-name declarations like `X, Y: Integer`
-produce two records.
+A `field-list` is a count lpstr followed by one record per field name:
+`<name><type-name><is-weak><is-unretained><is-class-var><class-var-emit-name><visibility>`
+— flattened so multi-name declarations like `X, Y: Integer` produce two
+records.  `is-weak` and `is-unretained` must reach the importer's field
+infos (own and inherited fields alike): an importer that drops them treats
+the field as owning, retaining on store and releasing in the field cleanup
+(v34 added `is-unretained`).
 
 A `method-list` and `method-decl-list` are structurally similar but
 not identical:

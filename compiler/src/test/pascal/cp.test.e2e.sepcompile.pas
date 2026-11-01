@@ -238,6 +238,13 @@ type
       operator -- into uother's object, so a program using only uother failed
       to link: undefined upos_TPos_Equal. }
     procedure TestIncrementalRebuild_ImportedInstanceStaysOutOfOtherUnits;
+    { [Weak] and [Unretained] fields stay non-owning in a class imported from
+      a cached interface: declared there, inherited by a class in another
+      unit, stored to and cleaned up.  The import dropped both flags, so a
+      store from source took no reference while the importer's cleanup
+      released one (blaise-canvas-ui: every freed popup released the widget
+      focused before it opened, and the third freed a combo box in use). }
+    procedure TestWarmRebuild_ImportedWeakAndUnretainedFieldsStayNonOwning;
     { Regression (reported by blaise-canvas-ui): under --no-incremental every
       module is appended to one assembly buffer, and the typeinfo of a generic
       INTERFACE instance (IMap<string, TFoo>, implemented by the dictionary)
@@ -3641,6 +3648,118 @@ begin
   Rc := RunBinary(Dir + '/impapp', Captured);
   AssertEquals('uother-only program run exit code', 0, Rc);
   AssertEquals('uother-only program stdout', '43' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestWarmRebuild_ImportedWeakAndUnretainedFieldsStayNonOwning;
+const
+  BaseSrc =
+    '''
+    unit ubasew;
+    interface
+    type
+      TBase = class
+        FName: string;
+        [Weak] FPrev: TObject;
+        [Unretained] FRaw: TObject;
+        procedure Remember(AObj: TObject);
+      end;
+    implementation
+    procedure TBase.Remember(AObj: TObject);
+    begin
+      FPrev := AObj;
+      FRaw := AObj
+    end;
+    end.
+    ''';
+  DerivedV1 =
+    '''
+    unit uderivedw;
+    interface
+    uses ubasew;
+    type
+      TDerived = class(TBase)
+        FOwned: TObject;
+        [Weak] FParent: TObject;
+      end;
+    implementation
+    end.
+    ''';
+  DerivedV2 =
+    '''
+    unit uderivedw;
+    interface
+    uses ubasew;
+    type
+      TDerived = class(TBase)
+        FOwned: TObject;
+        [Weak] FParent: TObject;
+      end;
+    implementation
+    { edited: rebuilt against ubasew's cached interface }
+    end.
+    ''';
+  AppSrc =
+    '''
+    program WeakApp;
+    uses ubasew, uderivedw;
+    type
+      PI32 = ^Int32;
+    function RC(P: Pointer): Int32;
+    begin
+      Result := PI32(P - 16)^
+    end;
+    var
+      Target: TObject;
+      D: TDerived;
+    begin
+      Target := TObject.Create();
+      D := TDerived.Create();
+      D.Remember(Target);
+      D.FParent := Target;
+      D.FPrev := Target;
+      D.FRaw := Target;
+      D.FOwned := TObject.Create();
+      Write(RC(Pointer(Target)), ' ');
+      D := nil;
+      WriteLn(RC(Pointer(Target)))
+    end.
+    ''';
+var
+  Dir, CacheDir, DerivedPas, AppPas, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir      := FScratch + '/imported_weak_fields';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  DerivedPas := Dir + '/uderivedw.pas';
+  AppPas     := Dir + '/weakapp.pas';
+  WriteFile(Dir + '/ubasew.pas', BaseSrc);
+  WriteFile(DerivedPas, DerivedV1);
+  WriteFile(AppPas, AppSrc);
+
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/weakapp1',
+                   '--unit-cache', CacheDir, '--unit-path', Dir,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
+  AssertEquals('cold build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/weakapp1', Captured);
+  AssertEquals('cold build: only Target holds Target', '1 1' + #10, Captured);
+
+  { uderivedw (and the program) now compile against ubasew's cached
+    interface. }
+  WriteFile(DerivedPas, DerivedV2);
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/weakapp2',
+                   '--unit-cache', CacheDir, '--unit-path', Dir,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
+  AssertEquals('warm rebuild exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/weakapp2', Captured);
+  AssertEquals('warm rebuild: the imported fields still take no reference',
+    '1 1' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestNoIncremental_GenericIntfInstanceInTwoModules_Links;
