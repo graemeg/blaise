@@ -70,6 +70,7 @@ type
     procedure TestCacheKey_ChangesWhenEmbeddedFileChanges;
     procedure TestCacheKey_StableWhenNothingChanges;
     procedure TestCacheKey_ChangesWhenEmbeddedPathChanges;
+    procedure TestCacheKey_StableWhenTheUnitMoves;
     procedure TestCacheKey_CoversDefineGatedEmbed;
     procedure TestLexer_RecordsEmbeddedFiles;
   end;
@@ -549,6 +550,32 @@ begin
   HA := SourceHashWithEmbeds(SrcA, FDir + '/u.pas', nil);
   HB := SourceHashWithEmbeds(SrcB, FDir + '/u.pas', nil);
   AssertTrue('hash covers the embedded path', HA <> HB);
+end;
+
+procedure TEmbedTests.TestCacheKey_StableWhenTheUnitMoves;
+var
+  Src, HA, HB: string;
+begin
+  { The same unit and asset in two places -- a module built in its own
+    tree, then installed elsewhere with its sources (pasbuild install) --
+    must hash alike.  The key held the asset's RESOLVED path, so the
+    installed object never matched its installed source and every
+    dependent build recompiled the unit (and everything that uses it). }
+  Src :=
+    '''
+    unit U;
+    interface
+    const S: string = {$EMBEDSTR 'assets/moved.txt'};
+    implementation
+    end.
+    ''';
+  ForceDirectories(FDir + '/built/assets');
+  ForceDirectories(FDir + '/installed/src/assets');
+  WriteFixture('built/assets/moved.txt', 'SAME BYTES');
+  WriteFixture('installed/src/assets/moved.txt', 'SAME BYTES');
+  HA := SourceHashWithEmbeds(Src, FDir + '/built/u.pas', nil);
+  HB := SourceHashWithEmbeds(Src, FDir + '/installed/src/u.pas', nil);
+  AssertEquals('hash does not depend on where the unit is', HA, HB);
 end;
 
 procedure TEmbedTests.TestCacheKey_CoversDefineGatedEmbed;

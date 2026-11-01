@@ -3236,8 +3236,15 @@ var
   N:       Int;
   Got:     Int;
   I2:      Int;
+  SrcDir:  string;
+  KeyPath: string;
 begin
   Acc := ASourceText;
+  { The directory the lexer resolves relative embed paths against
+    (TLexer.ResolveEmbedPath); '' when there is no source anchor. }
+  SrcDir := '';
+  if ASourcePath <> '' then
+    SrcDir := ExtractFilePath(ExpandFileName(ASourcePath));
   { Discover the embedded files by lexing.  The lexer records each file it
     reads, and resolves relative paths against ASourcePath exactly as the
     real compile will, so the set found here matches the set compiled in.
@@ -3259,8 +3266,17 @@ begin
     begin
       Path := Lx.EmbeddedFiles.Strings[I];
       { Include the path itself, so swapping which file is embedded changes
-        the hash even when two assets happen to have identical content. }
-      Acc := Acc + Chr(0) + Path + Chr(0);
+        the hash even when two assets happen to have identical content --
+        but relative to the unit's directory, as the directive spells it.
+        The resolved path also captured WHERE the unit sits, so the same
+        unit and asset elsewhere (a module installed with its sources)
+        hashed differently and its object never validated there.  An
+        absolute embed path stays absolute. }
+      KeyPath := Path;
+      if (SrcDir <> '') and (Length(Path) > Length(SrcDir)) and
+         (Copy(Path, 0, Length(SrcDir)) = SrcDir) then
+        KeyPath := Copy(Path, Length(SrcDir), Length(Path) - Length(SrcDir));
+      Acc := Acc + Chr(0) + KeyPath + Chr(0);
       Blob := '';
       try
         FIn := TFileInputStream.Create(Path);
