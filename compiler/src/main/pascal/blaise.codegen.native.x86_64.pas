@@ -4955,6 +4955,10 @@ begin
   for I := 0 to AGenericIntfInstances.Count - 1 do
   begin
     GII := TGenericInterfaceInstance(AGenericIntfInstances.Items[I]);
+    { Once per buffer: --no-incremental appends every module to one buffer
+      and each module that uses the instance carries it (see the arm64
+      backend). }
+    if not ClaimGenericTypeEmit('intf:' + GII.InstName) then Continue;
     MName := NativeMangle(GII.InstName);
     Self.Emit('.balign 8');
     Self.Emit('.weak typeinfo_' + MName);

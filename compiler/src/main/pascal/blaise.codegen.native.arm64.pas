@@ -17771,6 +17771,12 @@ begin
   for I := 0 to FGenericIntfInstances.Count - 1 do
   begin
     GII := TGenericInterfaceInstance(FGenericIntfInstances.Items[I]);
+    { --no-incremental appends every module to one buffer, and each module
+      that uses the instance carries it: define the label once per buffer,
+      as the generic class/record/method instances are (the weak binding
+      only dedups ACROSS objects; a repeated label is an assembler error:
+      "duplicate label: _typeinfo_IMap_string_TGlyphRun"). }
+    if not ClaimGenericTypeEmit('intf:' + GII.InstName) then Continue;
     { mangled — a NESTED generic argument leaves inner '<'/'>' in InstName,
       while references resolve through the mangler; see the x86-64 path for
       the full rationale. }
