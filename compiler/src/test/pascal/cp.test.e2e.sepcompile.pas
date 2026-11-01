@@ -231,6 +231,19 @@ type
     { Two units use one generic instance; the first stops using it and the
       second comes from the cache: the second must still carry the instance. }
     procedure TestIncrementalRebuild_SharedGenericInstance_OtherUserDrops;
+    { Regression (reported by blaise-canvas-ui): a generic instance created
+      while importing a CACHED unit's interface (TList<TPos> from upos) was
+      handed to whichever unit was analysed next.  Rebuilding an unrelated
+      unit (uother) put TList<TPos> -- and its call to upos's TPos '='
+      operator -- into uother's object, so a program using only uother failed
+      to link: undefined upos_TPos_Equal. }
+    procedure TestIncrementalRebuild_ImportedInstanceStaysOutOfOtherUnits;
+    { Regression (reported by blaise-canvas-ui): under --no-incremental every
+      module is appended to one assembly buffer, and the typeinfo of a generic
+      INTERFACE instance (IMap<string, TFoo>, implemented by the dictionary)
+      was defined by each module that carried it: "duplicate label:
+      _typeinfo_IMap_string_TFoo".  Only ua comes from the cache. }
+    procedure TestNoIncremental_GenericIntfInstanceInTwoModules_Links;
     { Regression (BUG-20260720-unit-iface-static-array-bif-roundtrip): a unit
       INTERFACE var of an anonymous array type — `array[0..2] of string` or
       `array of string` — broke the warm rebuild.  The .bif stored the type as
@@ -3503,6 +3516,214 @@ begin
   Rc := RunBinary(Bin2, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 stdout', '12' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_ImportedInstanceStaysOutOfOtherUnits;
+const
+  PosSrc =
+    '''
+    unit upos;
+    interface
+    uses Generics.Collections;
+    type
+      TPos = record
+        X: Int32;
+        class operator Equal(const A, B: TPos): Boolean;
+      end;
+      THolder = class
+      public
+        Items: TList<TPos>;
+        constructor Create();
+        function Has(const P: TPos): Boolean;
+      end;
+    implementation
+    class operator TPos.Equal(const A, B: TPos): Boolean;
+    begin
+      Result := A.X = B.X
+    end;
+    constructor THolder.Create();
+    begin
+      Items := TList<TPos>.Create()
+    end;
+    function THolder.Has(const P: TPos): Boolean;
+    begin
+      Result := Items.IndexOf(P) >= 0
+    end;
+    end.
+    ''';
+  OtherV1 =
+    '''
+    unit uother;
+    interface
+    function Answer(): Int32;
+    implementation
+    function Answer(): Int32;
+    begin
+      Result := 42
+    end;
+    end.
+    ''';
+  OtherV2 =
+    '''
+    unit uother;
+    interface
+    function Answer(): Int32;
+    implementation
+    function Answer(): Int32;
+    begin
+      Result := 43
+    end;
+    end.
+    ''';
+  LibSrc =
+    '''
+    program ImpLib;
+    uses upos, uother;
+    begin
+      WriteLn(THolder.Create().Items.Count + Answer())
+    end.
+    ''';
+  AppSrc =
+    '''
+    program ImpApp;
+    uses uother;
+    begin
+      WriteLn(Answer())
+    end.
+    ''';
+var
+  Dir, CacheDir, OtherPas, LibPas, AppPas, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir      := FScratch + '/imported_instance';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  OtherPas := Dir + '/uother.pas';
+  LibPas   := Dir + '/implib.pas';
+  AppPas   := Dir + '/impapp.pas';
+  WriteFile(Dir + '/upos.pas', PosSrc);
+  WriteFile(OtherPas, OtherV1);
+  WriteFile(LibPas, LibSrc);
+  WriteFile(AppPas, AppSrc);
+
+  Rc := RunBlaise(['--source', LibPas, '--output', Dir + '/implib1',
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('cold build exit code (out: ' + Captured + ')', 0, Rc);
+
+  { Only uother changes; upos comes from the cache, so TList<TPos> is
+    created while importing its interface. }
+  WriteFile(OtherPas, OtherV2);
+  Rc := RunBlaise(['--source', LibPas, '--output', Dir + '/implib2',
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('warm rebuild exit code (out: ' + Captured + ')', 0, Rc);
+
+  { A program that uses only uother links uother's fresh object alone. }
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/impapp',
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('uother-only program exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/impapp', Captured);
+  AssertEquals('uother-only program run exit code', 0, Rc);
+  AssertEquals('uother-only program stdout', '43' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestNoIncremental_GenericIntfInstanceInTwoModules_Links;
+const
+  ASrc =
+    '''
+    unit ua;
+    interface
+    uses Generics.Collections;
+    type
+      TFoo = class
+        N: Int32;
+      end;
+      TReg = class
+        D: TDictionary<string, TFoo>;
+        constructor Create();
+      end;
+    implementation
+    constructor TReg.Create();
+    begin
+      D := TDictionary<string, TFoo>.Create()
+    end;
+    end.
+    ''';
+  UserSrc =
+    '''
+    unit %s;
+    interface
+    function %s(): Int32;
+    implementation
+    uses ua;
+    function %s(): Int32;
+    var
+      R: TReg;
+    begin
+      R := TReg.Create();
+      R.D.Add('a', TFoo.Create());
+      Result := R.D.Count
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program IntfDup;
+    uses ua, ub, uc;
+    begin
+      WriteLn(CountB() + CountC())
+    end.
+    ''';
+var
+  Dir, CacheDir, ProgPas, Bin, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir      := FScratch + '/intf_dup';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  ProgPas  := Dir + '/intfdup.pas';
+  Bin      := Dir + '/intfdup';
+  WriteFile(CacheDir + '/ua.pas', ASrc);
+  WriteFile(Dir + '/ub.pas', Format(UserSrc, ['ub', 'CountB', 'CountB']));
+  WriteFile(Dir + '/uc.pas', Format(UserSrc, ['uc', 'CountC', 'CountC']));
+  WriteFile(ProgPas, ProgSrc);
+
+  { ua's object (with its embedded interface) alone, its source removed:
+    ub and uc are compiled from source and both carry IMap<string, TFoo>. }
+  Rc := RunBlaise(['--source', CacheDir + '/ua.pas', '--output', CacheDir + '/ua.o'],
+                  Captured);
+  AssertEquals('ua.o exit code (out: ' + Captured + ')', 0, Rc);
+  DeleteFile(CacheDir + '/ua.pas');
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin, '--no-incremental',
+                   '--unit-path', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('--no-incremental exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Bin, Captured);
+  AssertEquals('run exit code', 0, Rc);
+  AssertEquals('stdout', '2' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestIncrementalRebuild_UnitIfaceAnonArrayVar;

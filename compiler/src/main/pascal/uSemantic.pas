@@ -4625,18 +4625,16 @@ procedure TSemanticAnalyser.FlushPendingGenericInstances;
 var
   I: Int;
 begin
+  { Only the program takes pending instances.  They were created while
+    importing a cached unit's interface, whose object already carries their
+    methods; handing them to whichever unit is analysed next made that
+    unit's object define them, referencing symbols of a unit it may not use
+    (an incremental rebuild of an unrelated unit then failed to link:
+    undefined upos_TPos_Equal from TList<TPos> in uother.o).  The program
+    links every unit it uses, so its weak copy is always resolvable. }
   if FCurrentUnit <> nil then
-  begin
-    for I := 0 to FPendingGenericInstances.Count - 1 do
-      FCurrentUnit.GenericInstances.Add(FPendingGenericInstances.Items[I]);
-    for I := 0 to FPendingGenericRecordInstances.Count - 1 do
-      FCurrentUnit.GenericRecordInstances.Add(
-        FPendingGenericRecordInstances.Items[I]);
-    for I := 0 to FPendingGenericIntfInstances.Count - 1 do
-      FCurrentUnit.GenericIntfInstances.Add(
-        FPendingGenericIntfInstances.Items[I]);
-  end
-  else if FProg <> nil then
+    Exit;
+  if FProg <> nil then
   begin
     for I := 0 to FPendingGenericInstances.Count - 1 do
       FProg.GenericInstances.Add(FPendingGenericInstances.Items[I]);
