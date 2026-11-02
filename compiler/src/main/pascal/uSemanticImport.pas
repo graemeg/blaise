@@ -517,8 +517,18 @@ begin
   if StrAt(ATypeName, 0) = Ord('^') then
   begin
     Base := ResolveNestedAliasTarget(StrCopyTail(ATypeName, 1), AOwner, ATable);
+    { Interned under its canonical '^Base' name, as the cold path's
+      FindTypeOrInstantiate does: an anonymous pointer named a generic
+      instance over it 'TList<>' (TList<TBox.PNode>). }
     if Base <> nil then
-      Result := ATable.NewPointerType('', Base);
+    begin
+      Result := ATable.FindType('^' + Base.Name);
+      if Result = nil then
+      begin
+        Result := ATable.NewPointerType('^' + Base.Name, Base);
+        ATable.DefineGlobal(TSymbol.Create(Result.Name, skType, Result));
+      end;
+    end;
     Exit;
   end;
   { Bare first, then the owner's sibling: the cold path's order, so a cold
@@ -1279,6 +1289,14 @@ begin
                                           AliasDef.SubrangeLow,
                                           AliasDef.SubrangeHigh);
   end;
+  { A pointer alias (type PPt = ^TPt) is a descriptor of its own named after
+    the alias, as AnalyseTypeDecls builds it on the cold path.  The inline
+    resolver above returns an anonymous ('') pointer, and a generic instance
+    is named from its arguments' descriptor names, so TList<PPt> from a
+    cached unit was instantiated as 'TList<>' and failed with "Undeclared
+    identifier 'TList<T>'" where a cold build compiled. }
+  if (AliasDesc is TPointerTypeDesc) and (AliasDesc.Name = '') then
+    AliasDesc.Name := AEntry.Name;
   Sym := TSymbol.Create(AEntry.Name, skType, AliasDesc);
   Sym.OwningUnit := AUnitName;
   DefineImportedType(Sym, ATable, AUnitName);

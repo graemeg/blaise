@@ -326,6 +326,11 @@ type
       GH #258). }
     procedure TestImport_DynArrayAlias_SharesCanonicalDesc;
     procedure TestImport_StaticArrayAlias_SharesCanonicalDesc;
+    { A pointer alias imported from a cached interface is named after the
+      alias, as on a cold build: a generic instance is named from its
+      arguments' descriptor names, so an anonymous pointer made TList<PPt>
+      instantiate as 'TList<>'. }
+    procedure TestImport_PointerAlias_NamedAfterAlias;
     procedure TestImport_ProcedureRoutine_DefinedAsSkProcedure;
     procedure TestImport_FunctionRoutine_DefinedAsSkFunction;
     procedure TestImport_GlobalVar_MarkedIsGlobal;
@@ -2215,6 +2220,37 @@ begin
     AssertTrue('TQuad is a static array', TyDesc.Kind = tyStaticArray);
     AssertTrue('array[0..3] of Int16 resolves to the TQuad descriptor',
       Sem.ResolveImportedTypeName('array[0..3] of Int16') = TyDesc);
+  finally
+    Sem.Free();
+    Iface.Free();
+  end;
+end;
+
+procedure TImportRoundTripTests.TestImport_PointerAlias_NamedAfterAlias;
+const
+  SRC =
+    'unit U;' + #10 +
+    'interface' + #10 +
+    'type' + #10 +
+    '  TPt = record X, Y: Int32; end;' + #10 +
+    '  PPt = ^TPt;' + #10 +
+    'implementation' + #10 +
+    'end.' + #10;
+var
+  Iface: TUnitInterface;
+  Sem:   TSemanticAnalyser;
+  TyDesc: TTypeDesc;
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  Sem   := TSemanticAnalyser.Create();
+  try
+    ImportUnitInterface(Iface, Sem.GetSymbolTable(), Sem);
+    TyDesc := Sem.GetSymbolTable().FindType('PPt');
+    AssertTrue('PPt defined', TyDesc <> nil);
+    AssertTrue('PPt is a pointer', TyDesc is TPointerTypeDesc);
+    AssertEquals('PPt descriptor name', 'PPt', TyDesc.Name);
+    AssertTrue('PPt points at TPt',
+      TPointerTypeDesc(TyDesc).BaseType = Sem.GetSymbolTable().FindType('TPt'));
   finally
     Sem.Free();
     Iface.Free();

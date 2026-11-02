@@ -343,6 +343,11 @@ type
       Int16' but got 'array of Int16'" -- the import built a second
       descriptor for the same array type). }
     procedure TestIncrementalRebuild_ArrayAliasAsGenericArg_Warm;
+    { A pointer alias from a cached unit used as a generic argument rebuilds
+      warm: the import named the pointer '' -- a unit-level and a nested
+      alias alike -- and TList<PPt> failed with "Undeclared identifier
+      'TList<T>'". }
+    procedure TestIncrementalRebuild_PointerAliasAsGenericArg_Warm;
     { Editing a unit rebuilds the cached unit that depends on it.  umid once
       named ubase's TBag without using ubase (the "leaked" dependency); that
       is now rejected (GH #248), so umid uses ubase. }
@@ -5226,6 +5231,86 @@ begin
     AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
     AssertEquals(Format('build%d stdout', [Pass]),
       '3 -32768 32767 -1 2 -32768 32767' + #10, Captured);
+  end;
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_PointerAliasAsGenericArg_Warm;
+const
+  LibSrc =
+    '''
+    unit PtrTypes;
+    interface
+    type
+      TPt = record
+        X, Y: Int32;
+      end;
+      PPt = ^TPt;
+      PI64 = ^Int64;
+      TBox = class
+        type
+          TNode = record
+            V: Int32;
+          end;
+          PNode = ^TNode;
+      end;
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program use_ptrs;
+    uses classes, PtrTypes;
+    var
+      R: TPt;
+      V: Int64;
+      P: PPt;
+      L: TList<PPt>;
+      LI: TList<PI64>;
+      N: TBox.TNode;
+      LN: TList<TBox.PNode>;
+    begin
+      R.X := Low(Int32);
+      R.Y := High(Int32);
+      V := Low(Int64);
+      L := TList<PPt>.Create;
+      L.Add(@R);
+      P := L[0];
+      LI := TList<PI64>.Create;
+      LI.Add(@V);
+      N.V := 7;
+      LN := TList<TBox.PNode>.Create;
+      LN.Add(@N);
+      WriteLn(P^.X, ' ', L[0]^.Y, ' ', LI[0]^, ' ', LN[0]^.V)
+    end.
+    ''';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  ProgPas  := FScratch + '/use_ptrs.pas';
+  ProgBin  := FScratch + '/use_ptrs';
+  CacheDir := FScratch + '/units-ptrs';
+  WriteFile(FScratch + '/PtrTypes.pas', LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    DeleteFile(ProgBin);
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch,
+                     '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                    Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]),
+      '-2147483648 2147483647 -9223372036854775808 7' + #10, Captured);
   end;
 end;
 
