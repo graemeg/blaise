@@ -12,13 +12,20 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, uDebugOPDF, uDebugFacts;
+  uLexer, uParser, uAST, uSemantic, uDebugOPDF, uDebugFacts,
+  blaise.codegen.native, blaise.codegen.target, cp.test.harness, uStrCompat;
 
 type
   TOPDFTests = class(TTestCase)
   private
     function GenOPDF(const ASrc: string): string;
     function Contains(const AText, AFragment: string): Boolean;
+    { Compiles AProgSrc together with the unit AUnitSrc for ATarget with
+      OPDF enabled, and returns the linker symbols the OPDF section
+      references (.quad <sym>) that the generated assembly never defines,
+      one per line ('' = all resolve). }
+    function UnitOPDFUndefinedSyms(const AUnitSrc, AProgSrc,
+      ATarget: string): string;
   published
     procedure TestOPDF_SectionDeclaration;
     procedure TestOPDF_HeaderMagic;
@@ -90,6 +97,14 @@ type
     procedure TestOPDF_RuntimeHelper_StringRelease;
     procedure TestOPDF_RuntimeHelper_DynArrayRelease;
     procedure TestOPDF_RuntimeHelper_KindOrdinals;
+    { GH #253: every symbol a unit's OPDF section references must be one the
+      unit's own codegen defines -- a generic instance's vtable and property
+      accessors are bare (unit-independent), and arm64 spells a dotted
+      unit's class prefix with its dot. }
+    procedure TestOPDF_Unit_GenericInstance_SymbolsDefined_X86_64;
+    procedure TestOPDF_Unit_GenericInstance_SymbolsDefined_Arm64;
+    procedure TestOPDF_Unit_DottedUnitClass_SymbolsDefined_X86_64;
+    procedure TestOPDF_Unit_DottedUnitClass_SymbolsDefined_Arm64;
   end;
 
 implementation
@@ -1235,6 +1250,189 @@ begin
     P.Free();
     L.Free();
   end;
+end;
+
+function TOPDFTests.UnitOPDFUndefinedSyms(const AUnitSrc, AProgSrc,
+  ATarget: string): string;
+var
+  U: TUnit;
+  Pr: TProgram;
+  A: TSemanticAnalyser;
+  CG: TCodeGenNative;
+  E: TOPDFEmitter;
+  Tgt: TTargetDesc;
+  AsmText, Line, Sym: string;
+  Lines: TStringList;
+  I, Sp: Int;
+  Lx: TLexer;
+  Ps: TParser;
+begin
+  Result := '';
+  if not ParseTargetName(ATarget, Tgt) then
+    raise Exception.Create('unknown target ' + ATarget);
+  Lx := TLexer.Create(AUnitSrc);
+  Ps := TParser.Create(Lx);
+  try
+    U := Ps.ParseUnit();
+  finally
+    Ps.Free();
+    Lx.Free();
+  end;
+  Lx := TLexer.Create(AProgSrc);
+  Ps := TParser.Create(Lx);
+  try
+    Pr := Ps.Parse();
+  finally
+    Ps.Free();
+    Lx.Free();
+  end;
+  Lines := TStringList.Create();
+  A := TSemanticAnalyser.Create();
+  try
+    A.AnalyseUnitForExport(U);
+    A.Analyse(Pr);
+    CG := TCodeGenNative.Create();
+    try
+      CG.SetTarget(Tgt);
+      CG.SetSymbolTable(Pr.SymbolTable);
+      CG.SetOpdfMode(True);
+      CG.AppendUnit(U);
+      CG.AppendProgram(Pr);
+      AsmText := CG.GetOutput();
+      E := TOPDFEmitter.Create(Pr, 'p.pas');
+      try
+        if Tgt.CPU = cpuArm64 then
+          E.TargetArch := 4;
+        E.DarwinSymbols := Tgt.OS = osMacOS;
+        E.SetFacts(CG.GetDebugFacts());
+        Lines.Text := E.GetOutput();
+      finally
+        E.Free();
+      end;
+    finally
+      CG.Free();
+    end;
+    for I := 0 to Lines.Count - 1 do
+    begin
+      Line := Trim(Lines[I]);
+      if Copy(Line, 0, 6) <> '.quad ' then Continue;
+      Sym := Trim(Copy(Line, 6, Length(Line) - 6));
+      Sp := Pos(' ', Sym);
+      if Sp >= 0 then
+        Sym := Copy(Sym, 0, Sp);
+      { numeric payloads and assembler-local labels are not linker symbols;
+        the recRuntimeHelper routines live in the RTL's own objects }
+      if (Sym = '') or ((StrAt(Sym, 0) >= 48) and (StrAt(Sym, 0) <= 57)) or
+         (Copy(Sym, 0, 2) = '.L') or
+         (Pos('_StringRelease', Sym) >= 0) or
+         (Pos('_DynArrayRelease', Sym) >= 0) then
+        Continue;
+      if Pos(LineEnding + Sym + ':', AsmText) < 0 then
+        Result := Result + Sym + LineEnding;
+    end;
+  finally
+    A.Free();
+    Lines.Free();
+    Pr.Free();
+    U.Free();
+  end;
+end;
+
+const
+  GenericInstUnitSrc =
+    '''
+    unit BoxUnit;
+    interface
+    type
+      TBox<T> = class
+      private
+        FItem: T;
+        function GetItem: T;
+        procedure SetItem(AValue: T);
+      public
+        property Item: T read GetItem write SetItem;
+      end;
+    var
+      GBox: TBox<Int32>;
+    implementation
+    function TBox<T>.GetItem: T;
+    begin
+      Result := FItem;
+    end;
+    procedure TBox<T>.SetItem(AValue: T);
+    begin
+      FItem := AValue;
+    end;
+    end.
+    ''';
+
+  DottedUnitSrc =
+    '''
+    unit My.Dotted;
+    interface
+    type
+      TPlain = class
+      private
+        FX: Int32;
+        function GetX: Int32;
+      public
+        property X: Int32 read GetX;
+      end;
+    var
+      GPlain: TPlain;
+    implementation
+    function TPlain.GetX: Int32;
+    begin
+      Result := FX;
+    end;
+    end.
+    ''';
+
+  GenericInstProgSrc =
+    '''
+    program P;
+    uses BoxUnit;
+    var
+      B: TBox<Int32>;
+    begin
+      B := TBox<Int32>.Create();
+      B.Item := 3;
+    end.
+    ''';
+
+  DottedProgSrc =
+    '''
+    program P;
+    uses My.Dotted;
+    var
+      Q: TPlain;
+    begin
+      Q := TPlain.Create();
+    end.
+    ''';
+
+procedure TOPDFTests.TestOPDF_Unit_GenericInstance_SymbolsDefined_X86_64;
+begin
+  AssertEquals('OPDF references only defined symbols', '',
+    UnitOPDFUndefinedSyms(GenericInstUnitSrc, GenericInstProgSrc, TargetX86_64));
+end;
+
+procedure TOPDFTests.TestOPDF_Unit_GenericInstance_SymbolsDefined_Arm64;
+begin
+  AssertEquals('OPDF references only defined symbols', '',
+    UnitOPDFUndefinedSyms(GenericInstUnitSrc, GenericInstProgSrc, TargetArm64));
+end;
+
+procedure TOPDFTests.TestOPDF_Unit_DottedUnitClass_SymbolsDefined_X86_64;
+begin
+  AssertEquals('OPDF references only defined symbols', '',
+    UnitOPDFUndefinedSyms(DottedUnitSrc, DottedProgSrc, TargetX86_64));
+end;
+
+procedure TOPDFTests.TestOPDF_Unit_DottedUnitClass_SymbolsDefined_Arm64;
+begin
+  AssertEquals('OPDF references only defined symbols', '',
+    UnitOPDFUndefinedSyms(DottedUnitSrc, DottedProgSrc, TargetArm64));
 end;
 
 initialization

@@ -350,6 +350,14 @@ type
       pass dereferenced nil.  The standalone unit object must carry its own
       OPDF section and still link into a program. }
     procedure TestDebugOpdf_UnitAsSource_Compiles;
+    { Regression (GH #253): `uses Classes` with --debug-opdf failed to link on
+      x86-64 ("references to symbols it never defined (vtable_StrUtils_
+      TList_String ...)") and left zeroed OPDF addresses on arm64.  The OPDF
+      emitter prefixed a generic instance's vtable and property accessors
+      with the unit that first instantiated it, although the backends emit
+      instances bare, and on arm64 spelled a dotted unit's vtable prefix
+      with an underscore where the backend keeps the dot. }
+    procedure TestDebugOpdf_StdlibGenericsAndDottedUnit_Links;
     { Regression (F1-followup cross-unit static members): a class with `static`
       members — a static var, a static method, and a static const — declared in
       one unit and used through the COMPILED .bif boundary from another unit.
@@ -5602,6 +5610,126 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_opdftop exit code', 0, Rc);
   AssertEquals('use_opdftop stdout', '18 44100' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestDebugOpdf_StdlibGenericsAndDottedUnit_Links;
+const
+  UnitSrc =
+    '''
+    unit Opdf.Shapes;
+    interface
+    type
+      TBox<T> = class
+      private
+        FItem: T;
+        function GetItem: T;
+        procedure SetItem(AValue: T);
+      public
+        property Item: T read GetItem write SetItem;
+      end;
+      TSquare = class
+      private
+        FSide: Int32;
+        function GetArea: Int32;
+      public
+        constructor Create(ASide: Int32);
+        property Area: Int32 read GetArea;
+      end;
+    var
+      GBox: TBox<Int32>;
+    implementation
+    function TBox<T>.GetItem: T;
+    begin
+      Result := FItem;
+    end;
+    procedure TBox<T>.SetItem(AValue: T);
+    begin
+      FItem := AValue;
+    end;
+    constructor TSquare.Create(ASide: Int32);
+    begin
+      FSide := ASide;
+    end;
+    function TSquare.GetArea: Int32;
+    begin
+      Result := FSide * FSide;
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseOpdfShapes;
+    uses Classes, SysUtils, StrUtils, Generics.Collections, Opdf.Shapes;
+    var
+      SL: TStringList;
+      L: TList<String>;
+      Sq: TSquare;
+    begin
+      SL := TStringList.Create();
+      SL.Add('a');
+      SL.Add('b');
+      L := TList<String>.Create();
+      L.Add('x');
+      GBox := TBox<Int32>.Create();
+      GBox.Item := 5;
+      Sq := TSquare.Create(3);
+      WriteLn(IntToStr(SL.Count) + ' ' + L[0] + ' ' + IntToStr(GBox.Item) +
+        ' ' + IntToStr(Sq.Area));
+    end.
+    ''';
+var
+  Dir, ProgPas, ProgBin, Mode: string;
+  Captured: string;
+  Rc, Pass: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  { Both OPDF emission paths: the default incremental build (one section per
+    unit object) and the whole-program build (one section for everything). }
+  for Pass := 0 to 1 do
+  begin
+    if Pass = 0 then
+      Mode := 'incremental'
+    else
+      Mode := 'whole-program';
+    Dir := FScratch + '/gh253_opdf_' + IntToStr(Pass);
+    ForceDirectories(Dir);
+    ProgPas := Dir + '/use_opdfshapes.pas';
+    ProgBin := Dir + '/use_opdfshapes';
+    WriteFile(Dir + '/opdf.shapes.pas', UnitSrc);
+    WriteFile(ProgPas, ProgSrc);
+
+    if Pass = 0 then
+      Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                       '--debug-opdf',
+                       '--unit-path', Dir,
+                       '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                      Captured)
+    else
+      Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                       '--debug-opdf', '--no-incremental',
+                       '--unit-path', Dir,
+                       '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                      Captured);
+    AssertEquals(Mode + ' --debug-opdf exit code (out: ' + Captured + ')',
+      0, Rc);
+    { the Mach-O linker tolerates an unresolved OPDF reference with a note
+      and leaves the address 0; the ELF link rejects it outright }
+    AssertTrue(Mode + ' OPDF references only defined symbols (out: ' +
+      Captured + ')', Pos('undefined symbol', Captured) < 0);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Mode + ' use_opdfshapes exit code', 0, Rc);
+    AssertEquals(Mode + ' use_opdfshapes stdout', '2 x 5 9' + #10, Captured);
+  end;
 end;
 
 { Shared source for the two cross-unit static-member tests below.  RegModU

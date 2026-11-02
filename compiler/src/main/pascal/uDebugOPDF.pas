@@ -94,7 +94,9 @@ type
     procedure EmitAllTypes;
     procedure EmitGlobalVars;
     procedure EmitFunctionScopes;
+    function ClassOwnerUnit(const AClassName: string): string;
     function MangledClassSym(const AClassName: string): string;
+    function MethodOwnerSym(const AClassName: string): string;
     procedure EmitFactsTypes;
     procedure EmitFunctionScopesFromFacts;
     procedure EmitFactParameter(AVar: TDbgVar; var ADeclIdx: Int);
@@ -587,45 +589,62 @@ begin
   EmitProperties(AType);
 end;
 
+function TOPDFEmitter.ClassOwnerUnit(const AClassName: string): string;
+var
+  Sym: TSymbol;
+begin
+  { The unit whose prefix the backend puts on AClassName's symbols, or '' when
+    they are bare.  Generic instances are ALWAYS bare: the same instance is
+    materialised (weak) by every compilation that touches it, so its symbols
+    are unit-independent -- TX86_64Backend.ClassSymName, TArm64Backend.ClassSym
+    and PropAccessorSym.  Its Sym.OwningUnit is merely the unit that first
+    instantiated it (StrUtils for TList<String>), which a dependent unit's
+    section must not name (GH #253).  In WHOLE-PROGRAM mode the program's own
+    classes are bare; in UNIT mode there is no program, so even the unit's own
+    classes carry their unit prefix.  System and the RTL units stay bare. }
+  Result := '';
+  if Pos('<', AClassName) >= 0 then Exit;
+  if Self.ActiveSymTable() = nil then Exit;
+  Sym := Self.ActiveSymTable().Lookup(AClassName);
+  if Sym = nil then Exit;
+  Result := Sym.OwningUnit;
+  if (Result = '') or
+     ((FProgram <> nil) and SameText(Result, FProgram.Name)) or
+     SameText(Result, 'System') or
+     ((Length(Result) >= 4) and SameText(Copy(Result, 0, 4), 'rtl.')) or
+     ((Length(Result) >= 7) and SameText(Copy(Result, 0, 7), 'blaise_')) then
+    Result := '';
+end;
+
 function TOPDFEmitter.MangledClassSym(const AClassName: string): string;
 var
-  Sym:   TSymbol;
   Owner: string;
-  I:     Int;
-  Ch:    string;
-  Pfx:   string;
 begin
-  { Mirror the native backend's ClassSymName exactly so the .quad vtable_<sym>
-    label here matches the symbol the backend actually defined.  In WHOLE-
-    PROGRAM mode the backend has a program name and drops the prefix for
-    program-owned classes; in UNIT mode there is no program name, so even the
-    unit's own classes carry their unit prefix (vtable_<Unit>_<Class>). }
-  Pfx := '';
-  if Self.ActiveSymTable() <> nil then
-  begin
-    Sym := Self.ActiveSymTable().Lookup(AClassName);
-    if Sym <> nil then
-    begin
-      Owner := Sym.OwningUnit;
-      if (Owner <> '') and
-         not ((FProgram <> nil) and SameText(Owner, FProgram.Name)) and
-         not SameText(Owner, 'System') and
-         not ((Length(Owner) >= 4) and SameText(Copy(Owner, 0, 4), 'rtl.')) and
-         not ((Length(Owner) >= 7) and SameText(Copy(Owner, 0, 7), 'blaise_')) then
-      begin
-        for I := 0 to Length(Owner) - 1 do
-        begin
-          Ch := Copy(Owner, I, 1);
-          if Ch = '.' then Pfx := Pfx + '_'
-          else             Pfx := Pfx + Ch;
-        end;
-        Pfx := Pfx + '_';
-      end;
-    end;
-  end;
-  { Apply the shared CodegenMangle so the symbol matches the native backend
-    exactly — handles '<', '>', ',', ' ' (e.g. 'class of T'), '$', '@', '^'. }
-  Result := Pfx + CodegenMangle(AClassName);
+  { The class part of AClassName's vtable / typeinfo symbol, spelled exactly
+    as the backend DEFINES it.  The ISAs differ for a dotted unit: x86-64's
+    ClassOwnerPrefix turns the dots into underscores (vtable_My_Unit_TFoo),
+    while arm64's ClassPrefixOwner keeps them (vtable_My.Unit_TFoo). }
+  Owner := ClassOwnerUnit(AClassName);
+  if Owner = '' then
+    Result := CodegenMangle(AClassName)
+  else if FTargetArch = 4 then
+    Result := CodegenMangle(Owner) + '_' + CodegenMangle(AClassName)
+  else
+    Result := MangleUnitPrefix(Owner) + CodegenMangle(AClassName);
+end;
+
+function TOPDFEmitter.MethodOwnerSym(const AClassName: string): string;
+var
+  Owner: string;
+begin
+  { The '<Owner>' part of a method symbol '<Owner>_<Method>'.  Method
+    definitions take the semantic pass's MangleUnitPrefix on both ISAs, so a
+    dotted unit's dots are always underscores here. }
+  Owner := ClassOwnerUnit(AClassName);
+  if Owner = '' then
+    Result := CodegenMangle(AClassName)
+  else
+    Result := MangleUnitPrefix(Owner) + CodegenMangle(AClassName);
 end;
 
 procedure TOPDFEmitter.EmitClass(AType: TRecordTypeDesc);
@@ -1179,11 +1198,11 @@ begin
       recFunctionScope name = the mangled symbol) and inject the call.  The
       symbol is the same one written as ReadAddr/WriteAddr below. }
     if ReadType = PAT_METHOD then
-      ReadMethSym := MangledClassSym(AClass.Name) + '_' + PI.ReadMethod
+      ReadMethSym := MethodOwnerSym(AClass.Name) + '_' + PI.ReadMethod
     else
       ReadMethSym := '';
     if WriteType = PAT_METHOD then
-      WriteMethSym := MangledClassSym(AClass.Name) + '_' + PI.WriteMethod
+      WriteMethSym := MethodOwnerSym(AClass.Name) + '_' + PI.WriteMethod
     else
       WriteMethSym := '';
 
