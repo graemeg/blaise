@@ -196,7 +196,12 @@ never committed to the repository.
 === Prerequisites
 
 * A previously released Blaise binary (see `releases/`)
-* https://github.com/graemeg/pasbuild[PasBuild]
+* https://github.com/graemeg/pasbuild[PasBuild] 1.9.0 or later, the build
+  tool, installed separately.  Its releases page has a prebuilt Linux
+  x86_64 binary; elsewhere build it from source, which needs Free Pascal
+  3.2.2 or later (FPC builds PasBuild only; it plays no part in building
+  Blaise).  On macOS PasBuild builds with Homebrew's FPC; or use
+  `scripts/macos-dev.sh` instead (see below).
 * No C compiler and no `make`: the compiler builds its RTL from source and
   assembles and links with its own internal assembler and linker.  A C compiler
   is used only when you ask for one with `--assembler external` or
@@ -247,6 +252,16 @@ pasbuild compile -m blaise-compiler --compiler compiler/target/blaise
 pasbuild test -m blaise-compiler --compiler compiler/target/blaise
 ----
 
+PasBuild works the same on macOS.  `scripts/macos-dev.sh` is an
+alternative there that drives the compiler directly and needs no PasBuild
+(the macOS CI job uses it, since PasBuild publishes no macOS binary):
+
+[source,shell]
+----
+scripts/macos-dev.sh compile     # build compiler/target/blaise
+scripts/macos-dev.sh test        # build and run the compiler test suite
+----
+
 === Run tests
 
 [source,shell]
@@ -256,14 +271,55 @@ pasbuild test -m blaise-compiler --compiler compiler/target/blaise
 
 === Verify self-hosting fixpoint
 
-After any compiler change, verify that the compiler reproduces itself:
+After any compiler change, verify that the compiler reproduces itself: the
+built compiler (stage-1) compiles the compiler into a stage-2 binary, stage-2
+compiles it again into stage-3, and the two binaries must be byte-identical:
 
 [source,shell]
 ----
-./scripts/fixpoint.sh
+./scripts/fixpoint-binary.sh --compiler compiler/target/blaise   # BINARY_FIXPOINT_OK
 ----
 
-This generates stage-2 and stage-3 IR and confirms they are identical.
+`--target <os>-<cpu>` (for example `macos-arm64` or `freebsd-x86_64`)
+checks a cross-compiled container instead of the host's.  On macOS,
+`scripts/macos-dev.sh fixpoint` runs the same check, and `--install` then
+copies the verified stage-2 binary to `compiler/target/blaise`.
+
+The other fixpoint scripts guard narrower paths and are run by hand (CI
+runs `fixpoint-binary.sh` on Linux, and the same self-host check on macOS
+and FreeBSD).  Each uses the compiler at `compiler/target/blaise` and
+prints its `*_OK` marker on success.  They are written to run on Linux,
+FreeBSD and macOS (all five pass on macOS arm64).
+
+[cols="2,4,2", options="header"]
+|===
+| Script | What it checks | Needs
+
+| `fixpoint-binary.sh`
+| Stage-2 and stage-3 compiler binaries are byte-identical (the main check;
+  CI runs it for the host and for `macos-arm64`).
+| The compiler only
+
+| `fixpoint-warmcache.sh`
+| Rebuilding the whole compiler against its own cached unit interfaces
+  (`--unit-cache`) gives a correct compiler; catches interface
+  writer/reader mismatches that a cold build never exercises.
+| The compiler only
+
+| `fixpoint-initorder.sh`
+| Unit initialisation runs in dependency order however units are split
+  between the cache and source.
+| The compiler only
+
+| `fixpoint-native.sh`
+| Stage-2 and stage-3 emit identical assembly text.
+| An external C toolchain (`cc`, or `$CC`) to assemble and link
+
+| `fixpoint-native-internal.sh`
+| The internal assembler and linker produce a program that behaves like
+  the external toolchain's.
+| An external C toolchain (`cc`, or `$CC`) for the reference build
+|===
 
 === Running the compiler
 

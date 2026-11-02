@@ -190,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL -o /tmp/pasbuild.zip \
-            https://github.com/graemeg/PasBuild/releases/download/v1.9.0/pasbuild-1.9.0-x86_64-linux.zip
+            https://github.com/graemeg/PasBuild/releases/download/v1.10.1/pasbuild-1.10.1-x86_64-linux.zip
           unzip -o -q /tmp/pasbuild.zip -d /tmp/pasbuild
           # The binary may sit at the zip root or inside a subdir — find it.
           PB="$(find /tmp/pasbuild -type f -name pasbuild | head -1)"
@@ -338,16 +338,13 @@ jobs:
   # macOS arm64 on a native Apple Silicon runner.
   #
   # Starts from the macos-arm64 seed the bootstrap job cross-compiled, then
-  # gates on what currently passes on macOS:
+  # gates on:
   #   - the self-host fixpoint: seed -> stage-1 -> stage-2 -> stage-3 with
   #     stage-2 and stage-3 BYTE-IDENTICAL (internal assembler, internal
-  #     linker and Mach-O writer, all on-device);
-  #   - the stdlib suite, built and run by the verified stage-2 compiler.
-  # The compiler suite is not a gate yet: it still has known macOS failures,
-  # tracked locally.  It joins this job once it reaches zero.
-  #
-  # PasBuild has no macOS build (it is an FPC program), so the job drives the
-  # compiler through scripts/macos-dev.sh.
+  #     linker and Mach-O writer, all on-device).  scripts/macos-dev.sh runs
+  #     it and installs the verified stage-2 as compiler/target/blaise;
+  #   - the compiler suite and the stdlib suite, built by PasBuild (its
+  #     macOS arm64 release binary) with that verified stage-2 compiler.
   # ======================================================================
   macos-check:
     needs: bootstrap
@@ -370,10 +367,51 @@ jobs:
           uname -a
           scripts/macos-dev.sh fixpoint --compiler "$PWD/.macos-seed/blaise" --install
 
+      - name: Install PasBuild (macOS arm64)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/pasbuild.zip" \
+            https://github.com/graemeg/PasBuild/releases/download/v1.10.1/pasbuild-1.10.1-aarch64-darwin.zip
+          unzip -o -q "$RUNNER_TEMP/pasbuild.zip" -d "$RUNNER_TEMP/pasbuild"
+          PB="$(find "$RUNNER_TEMP/pasbuild" -type f -name pasbuild | head -1)"
+          if [ -z "$PB" ]; then
+            echo "::error::pasbuild binary not found inside the release zip."
+            find "$RUNNER_TEMP/pasbuild" -maxdepth 2 -type f | sed 's/^/  /'
+            exit 1
+          fi
+          chmod +x "$PB"
+          sudo install -m 0755 "$PB" /usr/local/bin/pasbuild
+          pasbuild --version || true
+          # Build with a COPY of the verified stage-2: compiling the compiler
+          # module writes compiler/target/blaise, which must not be the
+          # running compiler.  The copy stays in compiler/target/ so the
+          # dev-layout blaise.cfg beside it (relative paths) still applies.
+          cp compiler/target/blaise compiler/target/blaise-ci
+
+      - name: Run compiler tests (macOS arm64)
+        run: |
+          set -euo pipefail
+          BLAISE="$PWD/compiler/target/blaise-ci"
+          # As on Linux: compile via pasbuild, then run the runner directly
+          # with --verbose, so a red run names the failing (or last) test.
+          if ! pasbuild test-compile -m blaise-compiler --compiler "$BLAISE"; then
+            echo "===== compiler test-compile log ====="
+            cat compiler/target/pasbuild-status/test-compile/compiler.log 2>/dev/null || true
+            exit 1
+          fi
+          BLAISE_TEST_COMPILER="$BLAISE" compiler/target/TestRunner --verbose
+
       - name: Run stdlib tests (macOS arm64)
         run: |
           set -euo pipefail
-          scripts/macos-dev.sh stdlib-test --verbose
+          if ! pasbuild test-compile -m blaise-stdlib --compiler "$PWD/compiler/target/blaise-ci"; then
+            echo "===== stdlib compile log ====="
+            cat stdlib/target/pasbuild-status/compile/compiler.log 2>/dev/null || true
+            echo "===== stdlib test-compile log ====="
+            cat stdlib/target/pasbuild-status/test-compile/compiler.log 2>/dev/null || true
+            exit 1
+          fi
+          stdlib/target/TestRunner --verbose
 
   # ======================================================================
   # FreeBSD cross-compile verification under emulation

@@ -1,8 +1,12 @@
 #!/bin/bash
-# macos-dev.sh — stand-in for PasBuild on macOS.  PasBuild is an FPC program
-# and there is no macOS FPC build of it yet, so on macOS the Blaise compiler
-# is driven directly.  Used locally and by the macos-check CI job; retire it
-# once PasBuild runs on macOS (ported to Blaise, or built by a macOS FPC).
+# macos-dev.sh — drives the Blaise compiler directly on macOS, with no
+# PasBuild.  PasBuild itself works on macOS (build it from source with
+# Homebrew's FPC), but publishes no macOS binary, so the macos-check CI job
+# uses this script rather than build FPC and PasBuild on every run.  Its
+# `fixpoint --install` also has no PasBuild equivalent: it self-hosts the
+# compiler and installs the verified stage-2 as compiler/target/blaise.
+# Retire it once PasBuild publishes a macOS binary (or is ported to Blaise)
+# and CI can use that.
 #
 #   scripts/macos-dev.sh compile [--compiler BIN]
 #       build compiler/target/blaise (stage-1 default: newest releases/v*/blaise)

@@ -63,34 +63,37 @@ that it should always be discussed before implementation.
   serialiser surface), bump `COMPILER_ID` in `uCompilerId.pas` instead —
   same effect for the binary-only-dep case but cheaper to reason about.
 
-. *Run the full gate* before pushing, from the project root:
+. *Run the full gate* before pushing, from the project root (on macOS
+  without PasBuild, `scripts/macos-dev.sh compile` and
+  `scripts/macos-dev.sh test` replace the two `pasbuild` lines):
 +
 [source,bash]
 ----
-# Rebuild the compiler.
-pasbuild compile -f project.xml --compiler compiler/target/blaise
+# Rebuild the compiler with a known-good one (stage-1): the newest
+# releases/v*/blaise, or a copy of master's build.  The RTL is compiled
+# from source on demand; there is no separate runtime build.
+pasbuild compile -m blaise-compiler --compiler releases/v0.16.0-pre/blaise
 
-# Rebuild the RTL (only needed when runtime/ sources changed, or if
-# you bumped IFACE_VERSION / COMPILER_ID and want to refresh the
-# embedded .bif sections inside blaise_rtl.a).
-make -C runtime clean all install
+# The compiler test suite (prints OK (<n> tests, <m> ignored)).
+pasbuild test -m blaise-compiler --compiler compiler/target/blaise
 
-# Test suites.
-./compiler/target/TestRunner                            # 2248/0 expected
-./loader-testrunner/target/loader-testrunner            # 92/92 expected
+# Self-hosting: stage-2 and stage-3 binaries must be byte-identical.
+./scripts/fixpoint-binary.sh --compiler compiler/target/blaise   # BINARY_FIXPOINT_OK
 
-# Multi-stage fixpoint — the catch-all for serialiser asymmetry.
-STAGE1=/path/to/known-good/blaise ./scripts/fixpoint.sh # FIXPOINT_OK
+# The serialiser round trip: the whole compiler rebuilt against its own
+# cached unit interfaces.
+./scripts/fixpoint-warmcache.sh                                  # WARMCACHE_FIXPOINT_OK
 ----
 +
-`STAGE1` should point at a working pre-change `blaise` binary —
-typically the most recent `releases/v*/blaise` or a copy of `master`'s
-build. The script will use it to bootstrap a fresh compile of the new
-sources.
-+
-The fixpoint check is the one that catches encoder/decoder asymmetries —
-if you forget to update the reader to match the writer (or vice versa),
-stage-2 emits `.bifs` stage-3 can't read.
+The warm-cache check is the one that catches encoder/decoder asymmetries.
+A cold build never reads a `.bif`: every unit is compiled from source, so
+a reader that drops or misreads what the writer stored only shows up when
+a unit is compiled against another unit's cached interface.  For the same
+reason, a change to what the `.bif` carries should come with a
+separate-compilation test (`cp.test.e2e.sepcompile.pas`) that builds once
+cold, edits one unit, rebuilds warm, and checks that both binaries behave
+alike.  (`[Weak]` and `[Unretained]` fields were once dropped this way: a
+cold build was correct, a warm one released objects still in use.)
 
 . *Add a test under `compiler/src/test/pascal/`* exercising the new
   shape. For a new statement form, both a unit test
@@ -401,21 +404,15 @@ Register both in `TestRunner.pas`'s uses-clause and add the
 
 === Step 7: Gate
 
-Run from the project root:
+Run the full gate from "Always-Required Steps" above: rebuild, the
+compiler test suite (your new tests among them), `fixpoint-binary.sh`
+and `fixpoint-warmcache.sh`.
 
-[source,bash]
-----
-pasbuild compile -f project.xml --compiler compiler/target/blaise
-make -C runtime clean all install        # if you bumped IFACE_VERSION
-./compiler/target/TestRunner             # OK (2251 tests) — +3 from yours
-./loader-testrunner/target/loader-testrunner   # OK (92 tests)
-STAGE1=/path/to/known-good/blaise ./scripts/fixpoint.sh  # FIXPOINT_OK
-----
-
-The fixpoint stage is the diagnostic for serialiser asymmetry. If
-stage-2 != stage-3 != stage-4, you have an encoder that doesn't match
-the decoder (or vice versa). The diff lines usually contain enough
-context to spot the offending node.
+The warm-cache stage is the diagnostic for serialiser asymmetry: it
+rebuilds the compiler against its own cached interfaces, so an encoder
+that doesn't match the decoder (or vice versa) shows up as a failing or
+misbehaving warm build.  The binary fixpoint then confirms that the
+compiler still reproduces itself.
 
 
 == Just Adding a Field
