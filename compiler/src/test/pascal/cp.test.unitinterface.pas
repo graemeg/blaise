@@ -318,6 +318,14 @@ type
     procedure TestImport_Enum_MembersInAnalyserReverseIndex;
     procedure TestImport_Set_BaseEnumLinked;
     procedure TestImport_Alias_ResolvesToBase;
+    { A named array type imported from a cached interface must be the SAME
+      descriptor the analyser hands out for its structural spelling, as on a
+      cold build: a generic argument is re-resolved by that spelling, so a
+      second descriptor made TDictionary<string, TPcm>.Add reject a TPcm
+      argument ("expected 'array of Int16' but got 'array of Int16'",
+      GH #258). }
+    procedure TestImport_DynArrayAlias_SharesCanonicalDesc;
+    procedure TestImport_StaticArrayAlias_SharesCanonicalDesc;
     procedure TestImport_ProcedureRoutine_DefinedAsSkProcedure;
     procedure TestImport_FunctionRoutine_DefinedAsSkFunction;
     procedure TestImport_GlobalVar_MarkedIsGlobal;
@@ -2153,6 +2161,62 @@ begin
     AssertTrue('Aliases to Int32', TyDesc = Tab.FindType('Int32'));
   finally
     Tab.Free();
+    Iface.Free();
+  end;
+end;
+
+procedure TImportRoundTripTests.TestImport_DynArrayAlias_SharesCanonicalDesc;
+const
+  SRC =
+    'unit U;' + #10 +
+    'interface' + #10 +
+    'type TPcm = array of Int16;' + #10 +
+    'implementation' + #10 +
+    'end.' + #10;
+var
+  Iface: TUnitInterface;
+  Sem:   TSemanticAnalyser;
+  TyDesc: TTypeDesc;
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  Sem   := TSemanticAnalyser.Create();
+  try
+    ImportUnitInterface(Iface, Sem.GetSymbolTable(), Sem);
+    TyDesc := Sem.GetSymbolTable().FindType('TPcm');
+    AssertTrue('TPcm defined', TyDesc <> nil);
+    AssertTrue('TPcm is a dynamic array', TyDesc.Kind = tyDynArray);
+    AssertTrue('array of Int16 resolves to the TPcm descriptor',
+      Sem.ResolveImportedTypeName('array of Int16') = TyDesc);
+  finally
+    Sem.Free();
+    Iface.Free();
+  end;
+end;
+
+procedure TImportRoundTripTests.TestImport_StaticArrayAlias_SharesCanonicalDesc;
+const
+  SRC =
+    'unit U;' + #10 +
+    'interface' + #10 +
+    'type TQuad = array[0..3] of Int16;' + #10 +
+    'implementation' + #10 +
+    'end.' + #10;
+var
+  Iface: TUnitInterface;
+  Sem:   TSemanticAnalyser;
+  TyDesc: TTypeDesc;
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  Sem   := TSemanticAnalyser.Create();
+  try
+    ImportUnitInterface(Iface, Sem.GetSymbolTable(), Sem);
+    TyDesc := Sem.GetSymbolTable().FindType('TQuad');
+    AssertTrue('TQuad defined', TyDesc <> nil);
+    AssertTrue('TQuad is a static array', TyDesc.Kind = tyStaticArray);
+    AssertTrue('array[0..3] of Int16 resolves to the TQuad descriptor',
+      Sem.ResolveImportedTypeName('array[0..3] of Int16') = TyDesc);
+  finally
+    Sem.Free();
     Iface.Free();
   end;
 end;

@@ -337,6 +337,12 @@ type
       array[@boolean] of integer: base not found" on every second build). }
     procedure TestIncrementalRebuild_TypeIndexedArrayAlias_Warm;
     procedure TestIncrementalRebuild_NestedPointerAlias_Warm;
+    { A named array type from a cached unit, used as a generic argument and
+      passed to the instance's methods, rebuilds warm (GH #258: the second
+      build rejected TDictionary<string, TPcm>.Add with "expected 'array of
+      Int16' but got 'array of Int16'" -- the import built a second
+      descriptor for the same array type). }
+    procedure TestIncrementalRebuild_ArrayAliasAsGenericArg_Warm;
     { Editing a unit rebuilds the cached unit that depends on it.  umid once
       named ubase's TBag without using ubase (the "leaked" dependency); that
       is now rejected (GH #248), so umid uses ubase. }
@@ -5125,6 +5131,101 @@ begin
     Rc := RunBinary(ProgBin, Captured);
     AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
     AssertEquals(Format('build%d stdout', [Pass]), '2 2 9' + #10, Captured);
+  end;
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_ArrayAliasAsGenericArg_Warm;
+const
+  TypesSrc =
+    '''
+    unit base.types;
+    interface
+    type
+      TPcm = array of Int16;
+      TQuad = array[0..3] of Int16;
+    implementation
+    end.
+    ''';
+  HelperSrc =
+    '''
+    unit helper.concatpcm;
+    interface
+    uses base.types;
+    function CcPcm(A1, A2: TPcm): TPcm;
+    implementation
+    function CcPcm(A1, A2: TPcm): TPcm;
+    var
+      I: Int;
+    begin
+      SetLength(Result, Length(A1) + Length(A2));
+      for I := 0 to Length(A1) - 1 do
+        Result[I] := A1[I];
+      for I := 0 to Length(A2) - 1 do
+        Result[Length(A1) + I] := A2[I];
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program use_pcm;
+    uses classes, base.types, helper.concatpcm;
+    type
+      TDi = TDictionary<string, TPcm>;
+    var
+      P1, P2, P3: TPcm;
+      Q: TQuad;
+      Di: TDi;
+      Lq: TList<TQuad>;
+    begin
+      SetLength(P1, 2);
+      P1[0] := Low(Int16);
+      P1[1] := High(Int16);
+      SetLength(P2, 1);
+      P2[0] := -1;
+      Di := TDi.Create;
+      Di.Add('p1', P1);
+      Di.Add('p2', P2);
+      if Di.ContainsKey('p1') then
+        P3 := CcPcm(P1, Di.GetItem('p2'));
+      P1 := Di.GetItem('p1');
+      Q[0] := Low(Int16);
+      Q[3] := High(Int16);
+      Lq := TList<TQuad>.Create;
+      Lq.Add(Q);
+      Q := Lq[0];
+      WriteLn(Length(P3), ' ', P3[0], ' ', P3[1], ' ', P3[2], ' ',
+        Length(P1), ' ', Lq[0][0], ' ', Q[3])
+    end.
+    ''';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  ProgPas  := FScratch + '/use_pcm.pas';
+  ProgBin  := FScratch + '/use_pcm';
+  CacheDir := FScratch + '/units-pcm';
+  WriteFile(FScratch + '/base.types.pas', TypesSrc);
+  WriteFile(FScratch + '/helper.concatpcm.pas', HelperSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    DeleteFile(ProgBin);
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch,
+                     '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                    Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]),
+      '3 -32768 32767 -1 2 -32768 32767' + #10, Captured);
   end;
 end;
 

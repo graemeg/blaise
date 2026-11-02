@@ -97,6 +97,42 @@ begin
   Result := ATable.FindType(ATypeName);
 end;
 
+{ An anonymous array type is INTERNED under its canonical spelling
+  ('array of Int16', 'array[0..3] of Int16'), exactly as the source path's
+  TSemanticAnalyser.FindTypeOrInstantiate does: it looks the canonical name up
+  first and, on a miss, defines a global symbol for the descriptor it creates.
+  Array types are compared by descriptor identity (CheckTypesMatch), so every
+  later resolution of the same spelling -- a generic argument re-resolved by
+  name while an instance is built, a parameter, a variable -- must reach this
+  one descriptor.  The importer used to build a fresh, unregistered descriptor
+  instead, so on a warm --unit-cache build a named 'TPcm = array of Int16'
+  from a cached unit and the 'array of Int16' a TDictionary<string, TPcm>
+  instance resolved were two types, and Add rejected a TPcm argument with
+  "expected 'array of Int16' but got 'array of Int16'" (GH #258). }
+function InternArrayType(ATable: TSymbolTable; ADesc: TTypeDesc): TTypeDesc;
+begin
+  ATable.DefineGlobal(TSymbol.Create(ADesc.Name, skType, ADesc));
+  Result := ADesc;
+end;
+
+function InternedDynArrayType(ATable: TSymbolTable;
+                              AElem: TTypeDesc): TTypeDesc;
+begin
+  Result := ATable.FindType('array of ' + AElem.Name);
+  if Result = nil then
+    Result := InternArrayType(ATable, ATable.NewDynArrayType(AElem));
+end;
+
+function InternedStaticArrayType(ATable: TSymbolTable; AElem: TTypeDesc;
+                                 ALo, AHi: Int): TTypeDesc;
+begin
+  Result := ATable.FindType(Format('array[%d..%d] of %s',
+                                   [ALo, AHi, AElem.Name]));
+  if Result = nil then
+    Result := InternArrayType(ATable,
+                              ATable.NewStaticArrayType(AElem, ALo, AHi));
+end;
+
 { Resolve an inline type name that is not a registered symbol.
   Handles:
     - '^BaseName'         → pointer to BaseName
@@ -139,14 +175,14 @@ begin
     Hi := StrToInt(HighStr);
     ElemSym := ATable.Lookup(ElemName);
     if (ElemSym <> nil) and (ElemSym.Kind = skType) then
-      Result := ATable.NewStaticArrayType(ElemSym.TypeDesc, Lo, Hi)
+      Result := InternedStaticArrayType(ATable, ElemSym.TypeDesc, Lo, Hi)
     else
     begin
       { an array of arrays (array[1..8] of array[0..2] of Integer): the
         element is itself an inline type with no symbol of its own }
       ElemType := ResolveInlineTypeName(ElemName, ATable);
       if ElemType <> nil then
-        Result := ATable.NewStaticArrayType(ElemType, Lo, Hi);
+        Result := InternedStaticArrayType(ATable, ElemType, Lo, Hi);
     end;
     Exit;
   end;
@@ -156,7 +192,7 @@ begin
     ElemName := StrCopyTail(ATypeName, 9);
     ElemSym := ATable.Lookup(ElemName);
     if (ElemSym <> nil) and (ElemSym.Kind = skType) then
-      Result := ATable.NewDynArrayType(ElemSym.TypeDesc);
+      Result := InternedDynArrayType(ATable, ElemSym.TypeDesc);
     Exit;
   end;
 
