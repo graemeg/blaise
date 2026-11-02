@@ -51,7 +51,11 @@ of the target revision. A specific starting point can be forced with `--from`.
 
 == Usage
 
-Run from the project root.
+Run from the project root.  The script needs only bash 3.2 or later, so the
+stock `/bin/bash` that macOS ships is sufficient; a newer bash from Homebrew is
+not required.  Keep it that way when editing the script: avoid bash 4+ features
+such as `mapfile`/`readarray`, associative arrays and `${var,,}` case
+conversion.
 
 [source,shell]
 ----

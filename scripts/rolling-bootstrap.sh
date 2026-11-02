@@ -113,7 +113,13 @@ if ! git merge-base --is-ancestor "$START_SHA" "$TO_SHA"; then
 fi
 
 # Ordered list of commits to replay: every commit strictly after START up to TO.
-mapfile -t COMMITS < <(git rev-list --reverse --first-parent "${START_SHA}..${TO_SHA}")
+# A read loop rather than `mapfile`: mapfile is bash 4+, and macOS ships
+# bash 3.2 as /bin/bash (GH #256).  The loop body never runs for an empty
+# range, so COMMITS stays an empty -- but set -- array.
+COMMITS=()
+while IFS= read -r c; do
+  COMMITS+=("$c")
+done < <(git rev-list --reverse --first-parent "${START_SHA}..${TO_SHA}")
 
 echo "Rolling bootstrap"
 echo "  from : $START_REF ($START_SHA)"
