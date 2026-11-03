@@ -107,7 +107,6 @@ const
   POLLIN = 1;
   POLLERR = 8;
   POLLHUP = 16;
-  EINTR = 4;
   ReadChunk = 65536;
 
 type
@@ -136,21 +135,37 @@ function c_poll(AFds: Pointer; ANFds: Int64; ATimeout: Int32): Int32; external n
 { fcntl is C-variadic: the third argument must travel the variadic way. }
 function c_fcntl(AFd, ACmd: Int32): Int32; varargs; external name 'fcntl';
 function c_signal(ASignum: Int32; AHandler: Pointer): Pointer; external name 'signal';
-function c_strerror(AErr: Int32): Pointer; external name 'strerror';
-function c_strlen(S: Pointer): Int64; external name 'strlen';
-{$IFDEF DARWIN}
-function c_errno_ptr(): Pointer; external name '__error';
-{$ELSE}
-{$IFDEF FREEBSD}
-function c_errno_ptr(): Pointer; external name '__error';
-{$ELSE}
-function c_errno_ptr(): Pointer; external name '__errno_location';
-{$ENDIF}
-{$ENDIF}
+{ errno, per build profile (runtime.errno.*, chosen at link time): the
+  static, libc-free profile has no errno variable; its calls return -errno. }
+function Interrupted(N: Int64): Boolean; external name 'Interrupted';
+function GetOsErrno(): Int; external name 'GetOsErrno';
 
-function Errno(): Int32;
+{ The errno of a call that failed with result R, in either profile. }
+function FailureErrno(R: Int64): Int32;
 begin
-  Result := PInt32(c_errno_ptr())^;
+  Result := Int32(GetOsErrno());
+  if (Result = 0) and (R < 0) then
+    Result := Int32(-R);
+end;
+
+{ The text of the errors exec and chdir report; the numbers are the same on
+  Linux, FreeBSD and macOS.  strerror is not available without libc. }
+function ErrorText(AErr: Int32): string;
+begin
+  case AErr of
+    1: Result := 'Operation not permitted';
+    2: Result := 'No such file or directory';
+    5: Result := 'Input/output error';
+    7: Result := 'Argument list too long';
+    8: Result := 'Exec format error';
+    12: Result := 'Cannot allocate memory';
+    13: Result := 'Permission denied';
+    20: Result := 'Not a directory';
+    21: Result := 'Is a directory';
+    26: Result := 'Text file busy';
+  else
+    Result := 'error ' + IntToStr(AErr);
+  end;
 end;
 
 { A NUL-terminated copy of S on the heap. }
@@ -162,18 +177,6 @@ begin
   for I := 0 to Length(S) - 1 do
     PByte(UInt(Result) + UInt(I))^ := S[I];
   PByte(UInt(Result) + UInt(Length(S)))^ := 0;
-end;
-
-function FromCString(P: Pointer): string;
-var
-  N, I: Int;
-  SB: TStringBuilder;
-begin
-  N := c_strlen(P);
-  SB := TStringBuilder.Create();
-  for I := 0 to N - 1 do
-    SB.AppendByte(PByte(UInt(P) + UInt(I))^);
-  Result := SB.ToString();
 end;
 
 function BufToString(ABuf: Pointer; ACount: Int): string;
@@ -208,19 +211,22 @@ end;
   prepared by the parent.  Never returns. }
 procedure ChildExec(AStdin, AStdout, AStderr, AStatus: Int32; ACwd, AFile, AArgv: Pointer);
 var
-  E: Int32;
+  E, R: Int32;
 begin
   c_dup2(AStdin, 0);
   c_dup2(AStdout, 1);
   c_dup2(AStderr, 2);
-  if (ACwd <> nil) and (c_chdir(ACwd) <> 0) then
+  R := 0;
+  if ACwd <> nil then
+    R := c_chdir(ACwd);
+  if R <> 0 then
   begin
-    E := Errno();
+    E := FailureErrno(R);
     c_write(AStatus, @E, 4);
     c__exit(127);
   end;
-  c_execvp(AFile, AArgv);
-  E := Errno();
+  R := c_execvp(AFile, AArgv);
+  E := FailureErrno(R);
   c_write(AStatus, @E, 4);
   c__exit(127);
 end;
@@ -317,7 +323,7 @@ begin
   E := 0;
   repeat
     N := c_read(StR, @E, 4);
-  until (N >= 0) or (Errno() <> EINTR);
+  until not Interrupted(N);
   c_close(StR);
   if N = 4 then
   begin
@@ -325,7 +331,7 @@ begin
     c_close(OutR);
     c_close(ErrR);
     c_waitpid(Pid, @Got, 0);
-    Reason := FromCString(c_strerror(E));
+    Reason := ErrorText(E);
     if (FWorkingDirectory <> '') and (E = 2) then
       Reason := Reason + ' (program or working directory ' + FWorkingDirectory + ')';
     raise EProcessStartError.Create('cannot start ' + FExecutable + ': ' + Reason);
@@ -356,7 +362,7 @@ begin
       P := Pointer(UInt(P) + UInt(N));
       Left := Left - N;
     end
-    else if Errno() <> EINTR then
+    else if not Interrupted(N) then
       Exit(False);
   end;
   Result := True;
@@ -410,7 +416,7 @@ begin
     begin
       repeat
         N := c_read(Fds[I].Fd, Buf, ReadChunk);
-      until (N >= 0) or (Errno() <> EINTR);
+      until not Interrupted(N);
       if N > 0 then
       begin
         if Map[I] = 0 then
@@ -483,7 +489,7 @@ begin
     repeat
       Status := 0;
       R := c_waitpid(FPid, @Status, 0);
-    until (R = FPid) or ((R < 0) and (Errno() <> EINTR));
+    until (R = FPid) or ((R < 0) and not Interrupted(R));
     if R = FPid then
       Reap(Status)
     else

@@ -106,7 +106,10 @@ begin
     P.Start();
   except
     on E: EProcessStartError do
+    begin
       Raised := True;
+      AssertTrue(E.Message, Pos('No such file or directory', E.Message) >= 0);
+    end;
   end;
   AssertTrue('a missing program raises', Raised);
   P := Shell('true');

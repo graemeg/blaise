@@ -179,6 +179,10 @@ function execve(Path: PChar; Argv, Envp: Pointer): Int32;
 function wait4(Pid: Int32; Status: Pointer; Options: Int32;
                Rusage: Pointer): Int32;
 function kill(Pid, Sig: Int32): Int32;
+{ poll(2) over an array of struct pollfd (fd: Int32, events, revents: Int16):
+  the count of ready descriptors, 0 on timeout, -errno on error.  IO.Process
+  waits on a child's pipes with it. }
+function poll(Fds: Pointer; NFds: Int64; Timeout: Int32): Int32;
 { getrandom(buf, count, flags): fill buf with count random bytes; returns the
   count written or -errno.  Used by mkstemp's random suffix. }
 function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
@@ -957,6 +961,17 @@ asm
     jae  .Lok_kill
     negq %rax
 .Lok_kill:
+    ret
+end;
+
+function poll(Fds: Pointer; NFds: Int64; Timeout: Int32): Int32;
+  assembler; nostackframe;
+asm
+    movq $209, %rax          { SYS_poll }
+    syscall
+    jae  .Lok_poll
+    negq %rax
+.Lok_poll:
     ret
 end;
 

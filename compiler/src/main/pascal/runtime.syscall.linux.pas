@@ -139,6 +139,10 @@ function futex(Uaddr: Pointer; Op, Val: Int32; Timeout: Pointer;
 function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
 function arch_prctl(Code: Int32; Addr: Pointer): Int32;
 function kill(Pid, Sig: Int32): Int32;
+{ poll(2) over an array of struct pollfd (fd: Int32, events, revents: Int16):
+  the count of ready descriptors, 0 on timeout, -errno on error.  IO.Process
+  waits on a child's pipes with it. }
+function poll(Fds: Pointer; NFds: Int64; Timeout: Int32): Int32;
 { Raw time(2): returns seconds since the epoch; if T is non-nil it is also
   written there.  The kernel syscall handles the out-param itself. }
 function sys_time(T: Pointer): Int64;
@@ -565,6 +569,14 @@ function kill(Pid, Sig: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $62, %rax       { SYS_kill }
+    syscall
+    ret
+end;
+
+function poll(Fds: Pointer; NFds: Int64; Timeout: Int32): Int32;
+  assembler; nostackframe;
+asm
+    movq $7, %rax        { SYS_poll }
     syscall
     ret
 end;
