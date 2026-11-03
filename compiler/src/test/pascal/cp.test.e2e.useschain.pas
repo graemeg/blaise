@@ -63,6 +63,10 @@ type
       (FPC/Delphi scoping); the unit's stays reachable as Unit.Name.  It was
       "Duplicate identifier 'PadRight'" beside StrUtils.PadRight. }
     procedure TestRun_ProgramRoutine_ShadowsUnitRoutine;
+    { A unit's private routine is not ambiguous with a same-named routine
+      exported by a unit it does not use, even when that unit was compiled
+      first in the same build ("Ambiguous overload of 'JoinPath'"). }
+    procedure TestRun_PrivateRoutine_IgnoresUnusedUnitsExport;
     procedure TestRun_CrossUnitVar_LastWins;
     procedure TestRun_CrossUnitVar_LastWins_Reversed;
     { Unit-qualified VAR disambiguation: 'Unit.V' references that specific
@@ -566,6 +570,49 @@ begin
     CompileAndRunWithUnits(URA_Routine, URB_Routine, Prog, Output, RCode));
   AssertEquals('warm: the program''s own routine wins',
     'PA' + LE + 'prog 1' + LE + 'ura 2' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_PrivateRoutine_IgnoresUnusedUnitsExport;
+const
+  UJX = '''
+    unit ujx;
+    interface
+    function JoinPath(const A, B: string): string;
+    implementation
+    function JoinPath(const A, B: string): string;
+    begin
+      Result := A + '/' + B
+    end;
+    end.
+    ''';
+  UJY = '''
+    unit ujy;
+    interface
+    function Use(): string;
+    implementation
+    function JoinPath(const ADir, AName: string): string;
+    begin
+      Result := ADir + '|' + AName
+    end;
+    function Use(): string;
+    begin
+      Result := JoinPath('x', 'y')
+    end;
+    end.
+    ''';
+  Prog = '''
+    program P;
+    uses ujx, ujy;
+    begin
+      WriteLn(ujy.Use());
+      WriteLn(JoinPath('a', 'b'))
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output, CompileAndRunWithUnits(UJX, UJY, Prog, Output, RCode));
+  AssertEquals('each unit''s own JoinPath', 'x|y' + LE + 'a/b' + LE, Output);
 end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitVar_LastWins;

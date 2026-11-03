@@ -17616,6 +17616,13 @@ begin
           Continue;
         if (WinUnit <> '') and not SameText(Cand.OwningUnit, WinUnit) then
           Continue;
+        { An exported routine of a unit the current code does not use is not
+          visible here either: a unit compiled earlier in the same build must
+          not make another unit's call ambiguous. }
+        if (Cand.OwningUnit <> '') and (FCurrentUnitName <> '') and
+           not SameText(Cand.OwningUnit, FCurrentUnitName) and
+           not Self.IsUnitVisible(Cand.OwningUnit) then
+          Continue;
         { A generic function instance belongs to the module that
           instantiated it: each module emits its own weak copy, so another
           module's same-named instance is not a second candidate. }
