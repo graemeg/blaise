@@ -55,6 +55,10 @@ type
       the message, fails on NaN, and an infinity matches itself }
     procedure TestFloatAssertEquals_WithinDelta;
     procedure TestFloatAssertEquals_FailsOutsideDeltaAndOnNaN;
+    { Each test's outcome is kept, and --format=json prints it as one JSON
+      object per test for IDEs. }
+    procedure TestOutcomeIsRecorded;
+    procedure TestOutcomeAsJson;
   end;
 
 implementation
@@ -190,6 +194,33 @@ begin
       Raised := True;
   end;
   AssertTrue('a NaN fails whatever the delta', Raised);
+end;
+
+procedure TFrameworkTests.TestOutcomeIsRecorded;
+var
+  C: TSetUpBoomCase;
+  R: TTestResult;
+begin
+  C := TSetUpBoomCase.Create('TestBody');
+  C.SetClassName('TSetUpBoomCase');
+  R := TTestResult.Create();
+  C.Run(R);
+  AssertEquals('TSetUpBoomCase', R.LastOutcome.Suite);
+  AssertEquals('TestBody', R.LastOutcome.Test);
+  AssertEquals('error', R.LastOutcome.Outcome);
+  AssertTrue(R.LastOutcome.Message, Pos('boom in SetUp', R.LastOutcome.Message) >= 0);
+end;
+
+procedure TFrameworkTests.TestOutcomeAsJson;
+var
+  O: TTestOutcome;
+begin
+  O.Suite := 'TFoo';
+  O.Test := 'TestBar';
+  O.Outcome := 'fail';
+  O.Message := 'Expected: "a"' + #10 + 'Actual: \';
+  AssertEquals('{"suite":"TFoo","test":"TestBar","outcome":"fail","message":"Expected: \"a\"\nActual: \\"}',
+    TestOutcomeJson(O));
 end;
 
 initialization

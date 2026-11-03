@@ -97,7 +97,14 @@ type
   for unit testing. }
 function ParseRunnerArgs(AArgs: TList<String>; AFilters: TList<String>;
   out AVerbose: Boolean; out AExclCategory: string;
-  out AError: string): TRunnerArgsResult;
+  out AError: string): TRunnerArgsResult; overload;
+{ As above; AJson is True for --format=json. }
+function ParseRunnerArgs(AArgs: TList<String>; AFilters: TList<String>;
+  out AVerbose: Boolean; out AExclCategory: string; out AJson: Boolean;
+  out AError: string): TRunnerArgsResult; overload;
+{ Merge a [Threaded] suite subprocess's --format=json output into AResult,
+  writing each outcome line on. }
+procedure ParseSubprocessJson(const AOutput: string; AResult: TTestResult);
 
 { The usage text, naming the program as AProgName. }
 function RunnerUsage(const AProgName: string): string;
@@ -395,12 +402,22 @@ function ParseRunnerArgs(AArgs: TList<String>; AFilters: TList<String>;
   out AVerbose: Boolean; out AExclCategory: string;
   out AError: string): TRunnerArgsResult;
 var
+  Json: Boolean;
+begin
+  Result := ParseRunnerArgs(AArgs, AFilters, AVerbose, AExclCategory, Json, AError);
+end;
+
+function ParseRunnerArgs(AArgs: TList<String>; AFilters: TList<String>;
+  out AVerbose: Boolean; out AExclCategory: string; out AJson: Boolean;
+  out AError: string): TRunnerArgsResult;
+var
   I: Int;
   Arg: string;
   Value: string;
 begin
   AVerbose := False;
   AExclCategory := '';
+  AJson := False;
   AError := '';
   Result := raRun;
   I := 0;
@@ -414,6 +431,10 @@ begin
     end
     else if Arg = '--verbose' then
       AVerbose := True
+    else if Arg = '--format=json' then
+      AJson := True
+    else if Arg = '--format=text' then
+      AJson := False
     else if (Arg = '--suite') or (Arg = '--exclude-category') then
     begin
       Value := OptionValue(AArgs, I);
@@ -457,6 +478,8 @@ begin
     '                            repeat it, or separate names with commas' + #10 +
     '  --exclude-category Name   skip tests marked [Category(''Name'')]' + #10 +
     '  --verbose                 print one outcome line per test' + #10 +
+    '  --format=json             print each outcome, then a summary, as' + #10 +
+    '                            one JSON object per line (for IDEs)' + #10 +
     '  --help, -h                print this help and exit' + #10;
 end;
 
@@ -587,6 +610,39 @@ end;
   parallel while non-threaded suites run in-process.  After in-process
   tests finish, remaining subprocess output is collected.
   When --suite is given, the named suite runs directly (no subprocess). }
+var
+  { --format=json: outcomes and the summary as JSON lines. }
+  GJsonOutput: Boolean;
+
+procedure ParseSubprocessJson(const AOutput: string; AResult: TTestResult);
+var
+  Lines: TStringList;
+  I: Int;
+  Line: string;
+begin
+  Lines := TStringList.Create();
+  try
+    Lines.Text := AOutput;
+    for I := 0 to Lines.Count - 1 do
+    begin
+      Line := Lines.Strings[I];
+      if Copy(Line, 0, 9) <> '{"suite":' then
+        Continue;
+      WriteLn(Line);
+      AResult.StartTest('', '');
+      if Pos('"outcome":"fail"', Line) >= 0 then
+        AResult.AddFailure('', Line)
+      else if Pos('"outcome":"error"', Line) >= 0 then
+        AResult.AddError('', Line)
+      else if Pos('"outcome":"ignored"', Line) >= 0 then
+        AResult.AddIgnored('', '');
+      AResult.EndTest('');
+    end;
+  finally
+    Lines.Free();
+  end;
+end;
+
 function RunFilteredTests(AFilters: TList<String>; AVerbose: Boolean;
   const AExclCategory: string): TTestResult;
 var
@@ -618,6 +674,7 @@ var
 begin
   Result := TTestResult.Create();
   Result.Verbose := AVerbose;
+  Result.JsonOutput := GJsonOutput;
   ProcCount := 0;
   HasFilter := (AFilters <> nil) and (AFilters.Count > 0);
   for ClsIdx := 0 to GetRegisteredTestCount() - 1 do
@@ -639,7 +696,10 @@ begin
       Proc.Executable := ParamStr(0);
       Proc.Parameters.Add('--suite');
       Proc.Parameters.Add(CName);
-      Proc.Parameters.Add('--verbose');
+      if GJsonOutput then
+        Proc.Parameters.Add('--format=json')
+      else
+        Proc.Parameters.Add('--verbose');
       if AExclCategory <> '' then
       begin
         Proc.Parameters.Add('--exclude-category');
@@ -734,7 +794,10 @@ begin
     Proc.WaitOnExit();
     ExitCode := Proc.ExitCode;
     SubResult := TTestResult.Create();
-    ParseSubprocessOutput(Output, SubResult);
+    if GJsonOutput then
+      ParseSubprocessJson(Output, SubResult)
+    else
+      ParseSubprocessOutput(Output, SubResult);
     Result.MergeFrom(SubResult);
     { Crash / truncation guard.  A healthy suite subprocess always ends with a
       summary line ("OK (...)" or "FAIL (...)").  If that is missing the process
@@ -744,7 +807,8 @@ begin
       crash is named under "Errors:".  ProcessExitCode maps a signal death to 1
       and a clean exit to its real code, so a missing summary is the reliable
       signal regardless of exit code. }
-    HasSummary := (Pos('OK (', Output) >= 0) or (Pos('FAIL (', Output) >= 0);
+    HasSummary := (Pos('OK (', Output) >= 0) or (Pos('FAIL (', Output) >= 0) or
+      (Pos('{"summary":', Output) >= 0);
     if not HasSummary then
       Result.AddError(ProcNames[I],
         'suite subprocess crashed or was killed before finishing (no summary' +
@@ -755,7 +819,7 @@ begin
         surface it rather than trust the partial parse. }
       Result.AddError(ProcNames[I],
         'suite subprocess exited abnormally (code ' + IntToStr(ExitCode) + ')');
-    if AVerbose then
+    if AVerbose and not GJsonOutput then
       Write(Output);
   end;
 end;
@@ -821,7 +885,7 @@ begin
   for I := 1 to ParamCount() do
     Args.Add(ParamStr(I));
   ProgName := ExtractFileName(ParamStr(0));
-  case ParseRunnerArgs(Args, Filters, Verbose, ExclCat, ArgError) of
+  case ParseRunnerArgs(Args, Filters, Verbose, ExclCat, GJsonOutput, ArgError) of
     raHelp:
       begin
         Write(RunnerUsage(ProgName));
@@ -840,7 +904,12 @@ begin
     { raRun: fall through and run the tests }
   end;
   R := RunFilteredTests(Filters, Verbose, ExclCat);
-  PrintSummary(R);
+  if GJsonOutput then
+    WriteLn('{"summary":{"tests":' + IntToStr(R.NumberOfTests) + ',"failures":' +
+      IntToStr(R.NumberOfFailures) + ',"errors":' + IntToStr(R.NumberOfErrors) +
+      ',"ignored":' + IntToStr(R.NumberOfIgnored) + '}}')
+  else
+    PrintSummary(R);
   if (R.NumberOfFailures = 0) and (R.NumberOfErrors = 0) then
     Result := 0
   else

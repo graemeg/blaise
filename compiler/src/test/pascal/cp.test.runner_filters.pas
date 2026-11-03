@@ -47,6 +47,8 @@ type
     procedure TestArgs_NoneRunsEverything;
     procedure TestArgs_KnownOptions;
     procedure TestArgs_HelpLongAndShort;
+    procedure TestArgs_FormatJson;
+    procedure TestSubprocessJson_Counts;
     procedure TestArgs_UnknownOption_IsError;
     procedure TestArgs_ShortVerbose_IsError;
     procedure TestArgs_StrayArgument_IsError;
@@ -295,6 +297,32 @@ begin
   AssertEquals('filters', 2, F.Count);
   AssertEquals('first filter', 'TA', F.Get(0));
   AssertEquals('category', 'slow', C);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_FormatJson;
+var F: TList<String>; V, J: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('run', ParseRunnerArgs(ArgList(['--format=json']), F, V, C, J, E) = raRun);
+  AssertTrue('json', J);
+  AssertTrue('run', ParseRunnerArgs(ArgList([]), F, V, C, J, E) = raRun);
+  AssertFalse('text by default', J);
+end;
+
+procedure TRunnerFiltersTests.TestSubprocessJson_Counts;
+var R: TTestResult;
+begin
+  R := TTestResult.Create();
+  ParseSubprocessJson(
+    '{"suite":"TS","test":"TestA","outcome":"ok","message":""}' + LE +
+    '{"suite":"TS","test":"TestB","outcome":"fail","message":"m"}' + LE +
+    '{"suite":"TS","test":"TestC","outcome":"error","message":"e"}' + LE +
+    '{"suite":"TS","test":"TestD","outcome":"ignored","message":""}' + LE +
+    '{"summary":{"tests":4,"failures":1,"errors":1,"ignored":1}}' + LE, R);
+  AssertEquals('tests', 4, R.NumberOfTests);
+  AssertEquals('failures', 1, R.NumberOfFailures);
+  AssertEquals('errors', 1, R.NumberOfErrors);
+  AssertEquals('ignored', 1, R.NumberOfIgnored);
 end;
 
 procedure TRunnerFiltersTests.TestArgs_HelpLongAndShort;

@@ -69,6 +69,15 @@ type
     exception class is a name string rather than a TClass reference. }
   TAssertProc = reference to procedure;
 
+  { One test's outcome: 'ok', 'fail', 'error' or 'ignored', with the
+    failure or error message. }
+  TTestOutcome = record
+    Suite: string;
+    Test: string;
+    Outcome: string;
+    Message: string;
+  end;
+
   { TTestResult is declared first so TTest.Run can name it without the
     forward-class-declaration form that Blaise does not yet support. }
   TTestResult = class(TObject)
@@ -82,6 +91,9 @@ type
     FVerbose:          Boolean;
     FCurrentClassName: string;
     FCurrentTestName:  string;
+    FCurrentMessage:   string;
+    FLastOutcome:      TTestOutcome;
+    FJsonOutput:       Boolean;
   public
     constructor Create;
 
@@ -101,6 +113,11 @@ type
     property  Failures:         TList<String> read FFailureList;
     property  Errors:           TList<String> read FErrorList;
     property  Verbose:          Boolean read FVerbose write FVerbose;
+    { The outcome of the test that ended last. }
+    property  LastOutcome:      TTestOutcome read FLastOutcome;
+    { Print each outcome as JSON (TestOutcomeJson) as the test ends,
+      instead of the verbose text. }
+    property  JsonOutput:       Boolean read FJsonOutput write FJsonOutput;
   end;
 
   { TTest — abstract root of the test hierarchy.  Concrete subclasses
@@ -306,6 +323,9 @@ type
 { Global test registry.  RegisterTest stores classes; the runner (Step
   11e) iterates over them, walks each class's published-method table to
   build per-method TTestCase instances, and runs each one. }
+(* An outcome as one line of JSON:
+    {"suite":..,"test":..,"outcome":..,"message":..} *)
+function TestOutcomeJson(const AOutcome: TTestOutcome): string;
 procedure RegisterTest(ATestClass: TTestCaseClass);
 function  GetRegisteredTestCount: Int;
 function  GetRegisteredTest(AIndex: Int): TTestCaseClass;
@@ -913,13 +933,20 @@ begin
   Self.FNumberOfTests    := Self.FNumberOfTests + 1;
   Self.FCurrentClassName := AClassName;
   Self.FCurrentTestName  := ATestName;
-  if Self.FVerbose then
+  Self.FCurrentMessage   := '';
+  if Self.FVerbose and not Self.FJsonOutput then
     Write(AClassName + '.' + ATestName + ' ... ');
 end;
 
 procedure TTestResult.EndTest(AOutcome: string);
 begin
-  if Self.FVerbose then
+  Self.FLastOutcome.Suite   := Self.FCurrentClassName;
+  Self.FLastOutcome.Test    := Self.FCurrentTestName;
+  Self.FLastOutcome.Outcome := LowerCase(AOutcome);
+  Self.FLastOutcome.Message := Self.FCurrentMessage;
+  if Self.FJsonOutput then
+    WriteLn(TestOutcomeJson(Self.FLastOutcome))
+  else if Self.FVerbose then
     WriteLn(AOutcome);
 end;
 
@@ -927,17 +954,53 @@ procedure TTestResult.AddFailure(AName, AMessage: string);
 begin
   Self.FNumberOfFailures := Self.FNumberOfFailures + 1;
   Self.FFailureList.Add(AName + ': ' + AMessage);
+  Self.FCurrentMessage := AMessage;
 end;
 
 procedure TTestResult.AddError(AName, AMessage: string);
 begin
   Self.FNumberOfErrors := Self.FNumberOfErrors + 1;
   Self.FErrorList.Add(AName + ': ' + AMessage);
+  Self.FCurrentMessage := AMessage;
 end;
 
 procedure TTestResult.AddIgnored(AName, AMessage: string);
 begin
   Self.FNumberOfIgnored := Self.FNumberOfIgnored + 1;
+  Self.FCurrentMessage := AMessage;
+end;
+
+function JsonQuote(const S: string): string;
+var
+  I: Int;
+  B: Byte;
+begin
+  Result := '"';
+  for I := 0 to Length(S) - 1 do
+  begin
+    B := S[I];
+    if B = 34 then
+      Result := Result + '\"'
+    else if B = 92 then
+      Result := Result + '\\'
+    else if B = 10 then
+      Result := Result + '\n'
+    else if B = 13 then
+      Result := Result + '\r'
+    else if B = 9 then
+      Result := Result + '\t'
+    else if B < 32 then
+      Result := Result + ' '
+    else
+      Result := Result + Copy(S, I, 1);
+  end;
+  Result := Result + '"';
+end;
+
+function TestOutcomeJson(const AOutcome: TTestOutcome): string;
+begin
+  Result := '{"suite":' + JsonQuote(AOutcome.Suite) + ',"test":' + JsonQuote(AOutcome.Test) +
+    ',"outcome":' + JsonQuote(AOutcome.Outcome) + ',"message":' + JsonQuote(AOutcome.Message) + '}';
 end;
 
 procedure TTestResult.MergeFrom(ASource: TTestResult);
