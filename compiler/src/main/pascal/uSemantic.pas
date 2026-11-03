@@ -17963,7 +17963,9 @@ begin
     PROGRAM-LEVEL global of the same (case-insensitive) name must not: the
     class scope sits between locals and the unit scope (BUG-037; same rule
     the ident-expression path applies to class fields vs globals). }
-  if (FCurrentClass <> nil) and
+  { An explicit unit qualifier (qu.Save) names that unit's routine, never
+    the method (BUG-20261103-unit-qualified-call-hits-method). }
+  if (FCurrentClass <> nil) and (ACall.QualifierUnit = '') and
      ((Sym = nil) or
       (Sym.IsGlobal) or
       not (Sym.Kind in [skVariable, skParameter, skVarParameter])) then
@@ -18776,7 +18778,7 @@ begin
   Sym := FTable.Lookup(AExpr.Name);
   { A program-level global does not shadow an implicit-Self method — see
     the matching note in AnalyseProcCall (BUG-037). }
-  if (FCurrentClass <> nil) and
+  if (FCurrentClass <> nil) and (AExpr.QualifierUnit = '') and
      ((Sym = nil) or
       (Sym.IsGlobal) or
       not (Sym.Kind in [skVariable, skParameter, skVarParameter])) then

@@ -48,6 +48,10 @@ type
       'TOutcome'". }
     procedure TestRun_SameNamedRecord_GenericArgFromUnitInterface;
     procedure TestRun_SameNamedRecord_EachUnitsInstanceApart;
+    { Unit.Name(...) inside a method of the same name calls the unit's
+      routine (statement and expression forms); it was "No matching
+      overload for 'TW.Save' with 2 argument(s)". }
+    procedure TestRun_UnitQualifiedCall_InSameNamedMethod;
     { Unit-qualified const disambiguation: a 'Unit.Foo' reference resolves
       against that specific unit's exports, so it is never shadowed by a
       same-named const in another used unit, regardless of `uses` order. }
@@ -474,6 +478,62 @@ begin
     CompileAndRunWithUnits(UA_Outcome, UB_Outcome, DrvSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('mine 1 theirs 1' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_UnitQualifiedCall_InSameNamedMethod;
+const
+  QuSrc = '''
+    unit qu;
+    interface
+    procedure Save(const A: string; N: Int);
+    function Load(N: Int): Int;
+    implementation
+    procedure Save(const A: string; N: Int);
+    begin
+      WriteLn(A, N);
+    end;
+    function Load(N: Int): Int;
+    begin
+      Result := N * 2;
+    end;
+    end.
+    ''';
+  QvSrc = '''
+    unit qv;
+    interface
+    implementation
+    end.
+    ''';
+  DrvSrc = '''
+    program P;
+    uses qu, qv;
+    type
+      TW = class
+        procedure Save();
+        function Load(): Int;
+      end;
+    procedure TW.Save();
+    begin
+      qu.Save('x', 1);
+    end;
+    function TW.Load(): Int;
+    begin
+      Result := qu.Load(21);
+    end;
+    var W: TW;
+    begin
+      W := TW.Create();
+      W.Save();
+      WriteLn(W.Load());
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run',
+    CompileAndRunWithUnits(QuSrc, QvSrc, DrvSrc, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('x1' + LE + '42' + LE, Output);
 end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitConst_QualifiedDisambig;
