@@ -46,6 +46,11 @@ type
     Incremental: Boolean;
     UnitCacheDir: string;
     DumpAST: Boolean;
+    { --check: parse and analyse only; no code, no output file. }
+    Check: Boolean;
+    { --diagnostics=json: errors and warnings as JSON objects, one per line
+      on stdout, for IDEs. }
+    DiagnosticsJson: Boolean;
     SkipDepCodegen: Boolean;
 
     { Output-mode policy + selection input. EmitAsm picks the top driver (see

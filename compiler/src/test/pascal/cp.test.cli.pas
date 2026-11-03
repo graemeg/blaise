@@ -70,6 +70,14 @@ type
   published
     { ---- Step 0: FPC CLI removal ---- }
     procedure TestHelpStillWorks;
+    { --check: parse and analyse only (no output file, no toolchain);
+      --diagnostics=json: one JSON object per line. }
+    procedure TestCheck_CleanSourceSucceedsSilently;
+    procedure TestCheck_SemanticErrorAsJson;
+    procedure TestCheck_ParseErrorAsJson;
+    procedure TestCheck_WarningAsJson;
+    procedure TestCheck_TextDiagnosticsByDefault;
+    procedure TestCheck_UnitWritesNothing;
     procedure TestNormalCompileStillWorks;
     procedure TestFPCVersionProbeGone;
     { ---- Steps 2-5: driver option contract surfacing through the CLI ----
@@ -320,6 +328,104 @@ begin
   AssertEquals('--help exits 0', 0, EC);
   AssertTrue('usage banner present',
     Pos('Usage:', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestCheck_CleanSourceSucceedsSilently;
+var
+  Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program chk_ok;' + LineEnding + 'begin' + LineEnding +
+    '  WriteLn(1)' + LineEnding + 'end.');
+  EC := RunCompiler(['--check', '--diagnostics=json', '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  AssertEquals('nothing printed', '', Trim(Out_));
+end;
+
+procedure TCLIContractTests.TestCheck_SemanticErrorAsJson;
+var
+  Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program chk_sem;' + LineEnding + 'begin' + LineEnding +
+    '  Frob := 1' + LineEnding + 'end.');
+  EC := RunCompiler(['--check', '--diagnostics=json', '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 1: ' + Out_, 1, EC);
+  AssertTrue(Out_, Pos('"severity":"error"', Out_) >= 0);
+  AssertTrue(Out_, Pos('"kind":"semantic"', Out_) >= 0);
+  AssertTrue(Out_, Pos('"line":3', Out_) >= 0);
+  AssertTrue(Out_, Pos('"col":3', Out_) >= 0);
+  AssertTrue(Out_, Pos('"unit":"chk_sem"', Out_) >= 0);
+  AssertTrue('the bare message: ' + Out_, Pos('"message":"Undeclared variable ''Frob''"', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestCheck_ParseErrorAsJson;
+var
+  Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program chk_parse;' + LineEnding + 'begin' + LineEnding +
+    '  if then' + LineEnding + 'end.');
+  EC := RunCompiler(['--check', '--diagnostics=json', '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 1: ' + Out_, 1, EC);
+  AssertTrue(Out_, Pos('"kind":"parse"', Out_) >= 0);
+  AssertTrue(Out_, Pos('"line":3', Out_) >= 0);
+  AssertTrue('names the file: ' + Out_, Pos('"file":', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestCheck_WarningAsJson;
+var
+  Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program chk_warn;' + LineEnding + 'var I: UInt32;' + LineEnding +
+    '  N: Int;' + LineEnding + 'begin' + LineEnding + '  N := 0;' + LineEnding +
+    '  for I := N - 1 downto 0 do' + LineEnding + '    WriteLn(I)' + LineEnding + 'end.');
+  EC := RunCompiler(['--check', '--diagnostics=json', '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('a warning does not fail the check: ' + Out_, 0, EC);
+  AssertTrue(Out_, Pos('"severity":"warning"', Out_) >= 0);
+  AssertTrue(Out_, Pos('"line":6', Out_) >= 0);
+  AssertTrue('JSON only: ' + Out_, Pos('Warning:', Out_) < 0);
+end;
+
+procedure TCLIContractTests.TestCheck_TextDiagnosticsByDefault;
+var
+  Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program chk_text;' + LineEnding + 'begin' + LineEnding +
+    '  Frob := 1' + LineEnding + 'end.');
+  EC := RunCompiler(['--check', '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals(1, EC);
+  AssertTrue(Out_, Pos('Semantic error: Undeclared variable', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestCheck_UnitWritesNothing;
+var
+  Dir, Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('unit chk_unit;' + LineEnding + 'interface' + LineEnding +
+    'function Twice(N: Int): Int;' + LineEnding + 'implementation' + LineEnding +
+    'function Twice(N: Int): Int;' + LineEnding + 'begin' + LineEnding +
+    '  Result := N * 2' + LineEnding + 'end;' + LineEnding + 'end.');
+  Dir := GetCurrentDir();
+  EC := RunCompiler(['--check', '--diagnostics=json', '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('a clean unit: ' + Out_, 0, EC);
+  AssertFalse('no interface file left behind',
+    FileExists(IncludeTrailingPathDelimiter(Dir) + 'chk_unit.bif.tmp'));
 end;
 
 procedure TCLIContractTests.TestWithStatement_RejectedWithExplanation;

@@ -1414,6 +1414,9 @@ var
     narrower one, which keeps its low bits.  Opt-in: silent narrowing is the
     language rule, and the warning is a migration aid (Phase 5's worklist). }
   GWarnNarrowing: Boolean;
+  { Warnings are collected (GetWarnings) but not written to stderr: the
+    driver reports them itself (--diagnostics=json). }
+  GQuietWarnings: Boolean;
 
 implementation
 
@@ -1777,7 +1780,8 @@ begin
   else
     Full := Format('Warning: %s at line %d col %d', [AMsg, ALine, ACol]);
   FWarnings.Add(Full);
-  WriteLn(StdErr, Full);
+  if not GQuietWarnings then
+    WriteLn(StdErr, Full);
 end;
 
 function TSemanticAnalyser.GetWarnings: TStringList;

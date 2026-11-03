@@ -141,6 +141,10 @@ begin
     'Force the dynamic libc-linked binary (suppresses the auto decision)'));
   WriteLn(FormatFlagLine('--unit-cache <dir>',
     'Where per-unit .o files are written (default: alongside output)'));
+  WriteLn(FormatFlagLine('--check',
+    'Parse and analyse only: report problems, generate no code (no --output)'));
+  WriteLn(FormatFlagLine('--diagnostics=json',
+    'Errors and warnings as JSON objects on stdout, one per line'));
   WriteLn(FormatFlagLine('--dump-ast',
     'Print the resolved AST to stdout after semantic analysis'));
   WriteLn(FormatFlagLine('--debug',
@@ -185,6 +189,136 @@ end;
   that lexes a unit must apply the SAME set — the unit-cache staleness hash
   discovers EMBED directives by lexing, so a divergent define set there
   silently drops a define-gated asset from the cache key. }
+{ ------------------------------------------------------------------ }
+{ Diagnostics (--diagnostics=json)                                    }
+{ ------------------------------------------------------------------ }
+
+var
+  GDiagnosticsJson: Boolean;
+
+function JsonText(const S: string): string;
+var
+  I: Int;
+  B: Byte;
+begin
+  Result := '"';
+  for I := 0 to Length(S) - 1 do
+  begin
+    B := S[I];
+    if B = 34 then
+      Result := Result + '\"'
+    else if B = 92 then
+      Result := Result + '\\'
+    else if B = 10 then
+      Result := Result + '\n'
+    else if B = 13 then
+      Result := Result + '\r'
+    else if B = 9 then
+      Result := Result + '\t'
+    else if B < 32 then
+      Result := Result + '\u00' + Copy('0123456789abcdef', B div 16, 1) + Copy('0123456789abcdef', B mod 16, 1)
+    else
+      Result := Result + Copy(S, I, 1);
+  end;
+  Result := Result + '"';
+end;
+
+{ "<text> at line N col M[ in W]" -> its parts; False when AMsg has no
+  position. }
+function SplitLocation(const AMsg: string; out AText: string; out ALine, ACol: Int;
+  out AWhere: string): Boolean;
+var
+  I, At, P: Int;
+  Rest, Num: string;
+begin
+  Result := False;
+  AText := AMsg;
+  ALine := 0;
+  ACol := 0;
+  AWhere := '';
+  At := -1;
+  for I := Length(AMsg) - 9 downto 0 do
+    if Copy(AMsg, I, 9) = ' at line ' then
+    begin
+      At := I;
+      Break;
+    end;
+  if At < 0 then
+    Exit;
+  Rest := Copy(AMsg, At + 9, Length(AMsg) - At - 9);
+  P := Pos(' col ', Rest);
+  if P < 0 then
+    Exit;
+  ALine := StrToIntDef(Copy(Rest, 0, P), 0);
+  Rest := Copy(Rest, P + 5, Length(Rest) - P - 5);
+  P := Pos(' in ', Rest);
+  if P >= 0 then
+  begin
+    Num := Copy(Rest, 0, P);
+    AWhere := Copy(Rest, P + 4, Length(Rest) - P - 4);
+  end
+  else
+    Num := Rest;
+  ACol := StrToIntDef(Trim(Num), 0);
+  AText := Copy(AMsg, 0, At);
+  Result := ALine > 0;
+end;
+
+procedure WriteDiagnosticJson(const ASeverity, AKind, AMsg: string);
+var
+  Text, Where, J: string;
+  Line, Col: Int;
+begin
+  J := '{"severity":' + JsonText(ASeverity) + ',"kind":' + JsonText(AKind);
+  if SplitLocation(AMsg, Text, Line, Col, Where) then
+  begin
+    J := J + ',"message":' + JsonText(Text) + ',"line":' + IntToStr(Line) + ',"col":' + IntToStr(Col);
+    if Where <> '' then
+    begin
+      { A parse error names the file; analysis names the unit. }
+      if AKind = 'parse' then
+        J := J + ',"file":' + JsonText(Where)
+      else
+        J := J + ',"unit":' + JsonText(Where);
+    end;
+  end
+  else
+    J := J + ',"message":' + JsonText(AMsg);
+  WriteLn(J + '}');
+end;
+
+{ The warnings so far, as JSON (text mode printed them as they came). }
+procedure ReportWarnings(ASemantic: TSemanticAnalyser);
+var
+  W: TStringList;
+  I: Int;
+  S: string;
+begin
+  if (not GDiagnosticsJson) or (ASemantic = nil) then
+    Exit;
+  W := ASemantic.GetWarnings();
+  for I := 0 to W.Count - 1 do
+  begin
+    S := W[I];
+    if Copy(S, 0, 9) = 'Warning: ' then
+      S := Copy(S, 9, Length(S) - 9);
+    WriteDiagnosticJson('warning', 'semantic', S);
+  end;
+end;
+
+{ A fatal error: "<APrefix><AMsg>" on stderr, or the warnings so far and
+  the error as JSON on stdout. }
+procedure ReportFatal(const AKind, APrefix, AMsg: string; ASemantic: TSemanticAnalyser);
+begin
+  if not GDiagnosticsJson then
+  begin
+    WriteLn(StdErr, APrefix, AMsg);
+    Exit;
+  end;
+  ReportWarnings(ASemantic);
+  WriteDiagnosticJson('error', AKind, AMsg);
+end;
+
 procedure AddDefinesTo(ALexer: TLexer; ADefines: TStringList);
 begin
   ALexer.ApplyDefines(ADefines);
@@ -202,6 +336,8 @@ begin
   AFront.OutputFile     := '';
   AFront.EmitAsm        := False;
   AFront.DumpAST        := False;
+  AFront.Check          := False;
+  AFront.DiagnosticsJson := False;
   AFront.Backend        := bkNative;
   AFront.BackendExplicit := False;
   AFront.SkipDepCodegen := False;
@@ -300,6 +436,12 @@ begin
       AFront.EmitAsm := True
     else if Arg = '--dump-ast' then
       AFront.DumpAST := True
+    else if Arg = '--check' then
+      AFront.Check := True
+    else if Arg = '--diagnostics=json' then
+      AFront.DiagnosticsJson := True
+    else if Arg = '--diagnostics=text' then
+      AFront.DiagnosticsJson := False
     else if Arg = '--debug' then
       AOpts.DebugMode := True
     else if Arg = '--warn-narrowing' then
@@ -389,10 +531,10 @@ begin
     WriteLn(StdErr, 'Error: --source is required');
     Exit;
   end;
-  if (not AFront.EmitAsm) and (not AFront.DumpAST) and
+  if (not AFront.EmitAsm) and (not AFront.DumpAST) and (not AFront.Check) and
      (AFront.OutputFile = '') then
   begin
-    WriteLn(StdErr, 'Error: --output is required (or use --emit-asm / --dump-ast)');
+    WriteLn(StdErr, 'Error: --output is required (or use --emit-asm / --dump-ast / --check)');
     Exit;
   end;
 
@@ -745,6 +887,7 @@ var
   SrcDir:      string;
   EmitAsm:     Boolean;
   DumpAST:     Boolean;
+  CheckOnly:   Boolean;
   OPDFEnabled: Boolean;
   DebugMode:   Boolean;
   Backend:     TBackend;
@@ -878,6 +1021,9 @@ begin
   OutputFile     := Front.OutputFile;
   EmitAsm        := Front.EmitAsm;
   DumpAST        := Front.DumpAST;
+  CheckOnly      := Front.Check;
+  GDiagnosticsJson := Front.DiagnosticsJson;
+  GQuietWarnings := Front.DiagnosticsJson;
   Backend        := Front.Backend;
   SearchPaths    := Front.SearchPaths;
   SkipDepCodegen := Front.SkipDepCodegen;
@@ -1020,7 +1166,7 @@ begin
     missing tool surfaces immediately rather than after a full parse +
     semantic pass.  Stdout-only modes (--emit-asm / --dump-ast) produce no binary and need no external tools — they must
     never be blocked by a toolchain probe. }
-  if not (EmitAsm or DumpAST) then
+  if not (EmitAsm or DumpAST or CheckOnly) then
   begin
     ToolErr := Driver.CheckToolchain(Opts);
     if ToolErr <> '' then
@@ -1081,7 +1227,7 @@ begin
     except
       on E: Exception do
       begin
-        WriteLn(StdErr, 'Parse error: ', Exception(E).Message);
+        ReportFatal('parse', 'Parse error: ', Exception(E).Message, nil);
         Halt(1);
       end;
     end;
@@ -1172,9 +1318,11 @@ begin
           TopIfacePath := OutputFile + '.bif.tmp'
         else
           TopIfacePath := LowerCase(TopUnit.Name) + '.bif.tmp';
-        WriteUnitInterfaceToFile(
-          ExportUnitInterface(TopUnit, UnitIfaces, Semantic.GetSymbolTable()),
-          TopIfacePath);
+        { A check writes nothing. }
+        if not CheckOnly then
+          WriteUnitInterfaceToFile(
+            ExportUnitInterface(TopUnit, UnitIfaces, Semantic.GetSymbolTable()),
+            TopIfacePath);
         if EmitIfaceDir <> '' then
           WriteUnitInterfaceToFile(
             ExportUnitInterface(TopUnit, UnitIfaces, Semantic.GetSymbolTable()),
@@ -1192,25 +1340,35 @@ begin
           DumpProgram(Prog);
         Halt(0);
       end;
+      if CheckOnly then
+      begin
+        ReportWarnings(Semantic);
+        Halt(0);
+      end;
     except
       on E: ESemanticError do
       begin
-        WriteLn(StdErr, 'Semantic error: ', Exception(E).Message);
+        ReportFatal('semantic', 'Semantic error: ', Exception(E).Message, Semantic);
         Halt(1);
       end;
       on E: EUnitNotFound do
       begin
-        WriteLn(StdErr, 'Unit not found: ', Exception(E).Message);
+        ReportFatal('unit', 'Unit not found: ', Exception(E).Message, Semantic);
         Halt(1);
       end;
       on E: ECircularDependency do
       begin
-        WriteLn(StdErr, 'Circular dependency: ', Exception(E).Message);
+        ReportFatal('unit', 'Circular dependency: ', Exception(E).Message, Semantic);
         Halt(1);
       end;
       on E: Exception do
       begin
-        WriteLn(StdErr, 'Compiler error [', Exception(E).ClassName, ']: ', Exception(E).Message);
+        if Exception(E).ClassName = 'EParseError' then
+          ReportFatal('parse', 'Compiler error [' + Exception(E).ClassName + ']: ',
+            Exception(E).Message, Semantic)
+        else
+          ReportFatal('compiler', 'Compiler error [' + Exception(E).ClassName + ']: ',
+            Exception(E).Message, Semantic);
         Halt(1);
       end;
     end;
