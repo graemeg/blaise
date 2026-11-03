@@ -72,6 +72,9 @@ type
       code that reaches it through another unit's property (it linked
       against the never-emitted ua_TDerived_SetText). }
     procedure TestRun_InheritedPropertyAccessor_ThroughUnusedUnit;
+    { An inherited method is found on a receiver whose ancestors' units the
+      caller does not use ("Class 'TDerived' has no method 'Count'"). }
+    procedure TestRun_InheritedMethod_ThroughUnusedUnit;
     procedure TestRun_CrossUnitVar_LastWins;
     procedure TestRun_CrossUnitVar_LastWins_Reversed;
     { Unit-qualified VAR disambiguation: 'Unit.V' references that specific
@@ -638,6 +641,74 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run: ' + Output, CompileAndRunWithUnits(UPA, UPB, Prog, Output, RCode));
   AssertEquals('set' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_InheritedMethod_ThroughUnusedUnit;
+const
+  UMA = '''
+    unit uma;
+    interface
+    type
+      TBase = class
+      public
+        function Count(): Int;
+        function Twice(N: Int): Int; overload;
+        function Twice(const S: string): string; overload;
+      end;
+      TDerived = class(TBase)
+      end;
+    implementation
+    function TBase.Count(): Int;
+    begin
+      Result := 7
+    end;
+    function TBase.Twice(N: Int): Int;
+    begin
+      Result := N * 2
+    end;
+    function TBase.Twice(const S: string): string;
+    begin
+      Result := S + S
+    end;
+    end.
+    ''';
+  UMB = '''
+    unit umb;
+    interface
+    uses uma;
+    type
+      TLeaf = class(TDerived)
+      end;
+      THolder = class
+      private
+        FL: TLeaf;
+      public
+        constructor Create();
+        property L: TLeaf read FL;
+      end;
+    implementation
+    constructor THolder.Create();
+    begin
+      FL := TLeaf.Create()
+    end;
+    end.
+    ''';
+  Prog = '''
+    program P;
+    uses umb;
+    var H: THolder;
+    begin
+      H := THolder.Create();
+      WriteLn(H.L.Count());
+      WriteLn(H.L.Twice(4));
+      WriteLn(H.L.Twice('ab'))
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output, CompileAndRunWithUnits(UMA, UMB, Prog, Output, RCode));
+  AssertEquals('7' + LE + '8' + LE + 'abab' + LE, Output);
 end;
 
 procedure TE2EUsesChainTests.TestRun_PrivateRoutine_IgnoresUnusedUnitsExport;

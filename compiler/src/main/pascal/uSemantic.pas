@@ -10928,7 +10928,9 @@ var
   RT:       TRecordTypeDesc;
   OwnerUnit: string;
   Grp:      TObjectList;
+  Walk:     TRecordTypeDesc;
 begin
+  Walk := nil;
   CurrName := ATypeName;
   while CurrName <> '' do
   begin
@@ -10947,8 +10949,14 @@ begin
         the first-registered, which may belong to the OTHER unit; bind instead
         to the method on the type that actually resolved (its owning unit). }
       OwnerUnit := '';
-      Sym := FTable.Lookup(CurrName);
-      if Sym <> nil then OwnerUnit := Sym.OwningUnit;
+      Sym := nil;
+      if Walk <> nil then
+        OwnerUnit := Walk.OwningUnit
+      else
+      begin
+        Sym := FTable.Lookup(CurrName);
+        if Sym <> nil then OwnerUnit := Sym.OwningUnit;
+      end;
       if (OwnerUnit <> '') and not SameText(Result.OwningUnit, OwnerUnit) then
       begin
         Grp := GroupOf(FMethodGroups, Key);
@@ -10964,26 +10972,31 @@ begin
           slot lay past the end of the program class's vtable.  The resolved
           type's own descriptor records every method it declares, so when
           it has none of this name, look in its parent instead. }
-        if not SameText(Result.OwningUnit, OwnerUnit) and
-           (Sym.TypeDesc is TRecordTypeDesc) and
-           (TRecordTypeDesc(Sym.TypeDesc).FindMethodSym(AMethodName) = '') then
+        if Walk <> nil then
+          RT := Walk
+        else if (Sym <> nil) and (Sym.TypeDesc is TRecordTypeDesc) then
+          RT := TRecordTypeDesc(Sym.TypeDesc)
+        else
+          RT := nil;
+        if not SameText(Result.OwningUnit, OwnerUnit) and (RT <> nil) and
+           (RT.FindMethodSym(AMethodName) = '') then
           Result := nil;
       end;
       if Result <> nil then
         Exit;
     end;
-    { Walk to parent }
-    Sym := FTable.Lookup(CurrName);
-    if (Sym <> nil) and (Sym.TypeDesc is TRecordTypeDesc) then
+    { Walk to parent: by descriptor once the receiver is resolved, so an
+      ancestor from a unit the caller does not use is still found. }
+    if Walk = nil then
     begin
-      RT := TRecordTypeDesc(Sym.TypeDesc);
-      if RT.Parent <> nil then
-        CurrName := RT.Parent.Name
-      else
-        Break;
-    end
-    else
+      Sym := FTable.Lookup(CurrName);
+      if (Sym <> nil) and (Sym.TypeDesc is TRecordTypeDesc) then
+        Walk := TRecordTypeDesc(Sym.TypeDesc);
+    end;
+    if (Walk = nil) or (Walk.Parent = nil) then
       Break;
+    Walk := Walk.Parent;
+    CurrName := Walk.Name;
   end;
   Result := nil;
 end;
@@ -11033,6 +11046,8 @@ var
   Arity:       Int;
   SawHiding:   Boolean;
   LevelSym:    TSymbol;
+  LevelDesc:   TRecordTypeDesc;
+  Walk:        TRecordTypeDesc;
   LevelOwner:  string;
   HasOwn:      Boolean;
 begin
@@ -11044,6 +11059,7 @@ begin
   TotalCnt  := 0;
   ArityMatch := TObjectList.Create(False);
   try
+    Walk := nil;
     CurrName := ATypeName;
     while CurrName <> '' do
     begin
@@ -11060,10 +11076,23 @@ begin
       LevelOwner := '';
       HasOwn := False;
       LevelSym := nil;
-      if not ((OwnerHint <> '') and SameText(CurrName, ATypeName)) then
-        LevelSym := FTable.Lookup(CurrName);
-      if LevelSym <> nil then
-        LevelOwner := LevelSym.OwningUnit;
+      LevelDesc := nil;
+      if Walk <> nil then
+      begin
+        LevelDesc := Walk;
+        LevelOwner := Walk.OwningUnit;
+      end
+      else
+      begin
+        if not ((OwnerHint <> '') and SameText(CurrName, ATypeName)) then
+          LevelSym := FTable.Lookup(CurrName);
+        if LevelSym <> nil then
+        begin
+          LevelOwner := LevelSym.OwningUnit;
+          if LevelSym.TypeDesc is TRecordTypeDesc then
+            LevelDesc := TRecordTypeDesc(LevelSym.TypeDesc);
+        end;
+      end;
       if (Grp <> nil) and (LevelOwner <> '') then
         for K := 0 to Grp.Count - 1 do
           if SameText(TMethodDecl(Grp.Items[K]).OwningUnit, LevelOwner) then
@@ -11074,8 +11103,8 @@ begin
           Cand := TMethodDecl(Grp.Items[K]);
           if (LevelOwner <> '') and (Cand.OwningUnit <> '') and
              not SameText(Cand.OwningUnit, LevelOwner) and
-             (HasOwn or ((LevelSym.TypeDesc is TRecordTypeDesc) and
-               (TRecordTypeDesc(LevelSym.TypeDesc).FindMethodSym(AMethodName) = ''))) then
+             (HasOwn or ((LevelDesc <> nil) and
+               (LevelDesc.FindMethodSym(AMethodName) = ''))) then
             Continue;
           { Cross-unit last-wins: at the receiver's OWN type level the group can
             also hold a same-named method on another used unit's same-named type.
@@ -11100,17 +11129,17 @@ begin
         this level hides the inherited ones (stop).  Stop too once any class in
         the chain actually declares the name without `overload`. }
       if SawHiding then Break;
-      Sym := FTable.Lookup(CurrName);
-      if (Sym <> nil) and (Sym.TypeDesc is TRecordTypeDesc) then
+      { Walk to parent by descriptor (see FindMethodDecl). }
+      if Walk = nil then
       begin
-        RT := TRecordTypeDesc(Sym.TypeDesc);
-        if RT.Parent <> nil then
-          CurrName := RT.Parent.Name
-        else
-          Break;
-      end
-      else
+        Sym := FTable.Lookup(CurrName);
+        if (Sym <> nil) and (Sym.TypeDesc is TRecordTypeDesc) then
+          Walk := TRecordTypeDesc(Sym.TypeDesc);
+      end;
+      if (Walk = nil) or (Walk.Parent = nil) then
         Break;
+      Walk := Walk.Parent;
+      CurrName := Walk.Name;
     end;
 
     if TotalCnt = 0 then Exit;  { caller treats nil as "no method on class" }
