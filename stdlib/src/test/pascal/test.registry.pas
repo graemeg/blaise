@@ -58,6 +58,7 @@ uses
   Regex.Tests,
   IOFiles.Tests,
   IOProcess.Tests,
+  IOWatch.Tests,
   ClassicPascalTypes.Tests;
 
 implementation

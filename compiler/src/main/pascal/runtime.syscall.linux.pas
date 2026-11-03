@@ -143,6 +143,16 @@ function kill(Pid, Sig: Int32): Int32;
   the count of ready descriptors, 0 on timeout, -errno on error.  IO.Process
   waits on a child's pipes with it. }
 function poll(Fds: Pointer; NFds: Int64; Timeout: Int32): Int32;
+{ inotify(7), for IO.Watch: an instance, a watch on a path (its descriptor),
+  and the removal of one; -errno on error. }
+function inotify_init1(Flags: Int32): Int32;
+function inotify_add_watch(Fd: Int32; Path: PChar; Mask: UInt32): Int32;
+function inotify_rm_watch(Fd, Wd: Int32): Int32;
+{ signal(3) for SIG_DFL (0) and SIG_IGN (1), over rt_sigaction: a handler
+  routine would need an SA_RESTORER trampoline, which this profile does not
+  have, so any other handler fails with SIG_ERR (-1).  The previous handler
+  is returned.  IO.Process and Net.Sockets ignore SIGPIPE with it. }
+function signal(SigNum: Int; Handler: Pointer): Pointer;
 { Raw time(2): returns seconds since the epoch; if T is non-nil it is also
   written there.  The kernel syscall handles the out-param itself. }
 function sys_time(T: Pointer): Int64;
@@ -579,6 +589,63 @@ asm
     movq $7, %rax        { SYS_poll }
     syscall
     ret
+end;
+
+function inotify_init1(Flags: Int32): Int32;
+  assembler; nostackframe;
+asm
+    movq $294, %rax      { SYS_inotify_init1 }
+    syscall
+    ret
+end;
+
+function inotify_add_watch(Fd: Int32; Path: PChar; Mask: UInt32): Int32;
+  assembler; nostackframe;
+asm
+    movq $254, %rax      { SYS_inotify_add_watch }
+    syscall
+    ret
+end;
+
+function inotify_rm_watch(Fd, Wd: Int32): Int32;
+  assembler; nostackframe;
+asm
+    movq $255, %rax      { SYS_inotify_rm_watch }
+    syscall
+    ret
+end;
+
+function _sys_rt_sigaction(Sig: Int; Act, OAct: Pointer; SetSize: Int64): Int32;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $13, %rax       { SYS_rt_sigaction }
+    syscall
+    ret
+end;
+
+type
+  PPointer = ^Pointer;
+
+{ Kernel struct sigaction (x86_64): handler @0, sa_flags @8, sa_restorer
+  @16, sa_mask @24 (8 bytes). }
+function signal(SigNum: Int; Handler: Pointer): Pointer;
+var
+  Act: array[0..31] of Byte;
+  OAct: array[0..31] of Byte;
+  I: Int;
+begin
+  if UInt(Handler) > 1 then
+    Exit(Pointer(-1));
+  for I := 0 to 31 do
+  begin
+    Act[I] := 0;
+    OAct[I] := 0;
+  end;
+  PPointer(@Act[0])^ := Handler;
+  if _sys_rt_sigaction(SigNum, @Act[0], @OAct[0], 8) <> 0 then
+    Exit(Pointer(-1));
+  Result := PPointer(@OAct[0])^;
 end;
 
 function sys_time(T: Pointer): Int64;
