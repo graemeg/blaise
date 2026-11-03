@@ -97,6 +97,9 @@ type
     procedure TestOrderedDict_TryGetValue_Miss_ClearsValue;
     procedure TestDict_Remove_DropsTheKey;
     procedure TestDict_Keys_InInsertionOrder;
+    procedure TestList_Insert_AtStartMiddleAndEnd;
+    procedure TestList_Insert_OutOfRangeRaises;
+    procedure TestList_AddRange_AppendsInOrder;
     procedure TestDict_Values_MatchTheKeys;
     procedure TestDict_KeysAndValues_OfEmptyDict;
     procedure TestDict_Keys_AfterRemoveKeepOrder;
@@ -763,6 +766,47 @@ begin
   AssertFalse('key gone', D.ContainsKey('a'));
   AssertTrue('other key kept', D.ContainsKey('b'));
   AssertEquals('and its value', 2, D['b']);
+end;
+
+procedure TCollectionsTests.TestList_Insert_AtStartMiddleAndEnd;
+var L: TList<string>;
+begin
+  L := TList<string>.From(['b', 'd']);
+  L.Insert(0, 'a');
+  L.Insert(2, 'c');
+  L.Insert(4, 'e');
+  AssertEquals('count', 5, L.Count);
+  AssertEquals('a', L[0]);
+  AssertEquals('c', L[2]);
+  AssertEquals('d', L[3]);
+  AssertEquals('e', L[4]);
+end;
+
+procedure TCollectionsTests.TestList_Insert_OutOfRangeRaises;
+var L: TList<Int>; Raised: Boolean;
+begin
+  L := TList<Int>.Create();
+  Raised := False;
+  try
+    L.Insert(1, 7);
+  except
+    on E: EListError do Raised := True;
+  end;
+  AssertTrue('raised', Raised);
+  AssertEquals('unchanged', 0, L.Count);
+end;
+
+procedure TCollectionsTests.TestList_AddRange_AppendsInOrder;
+var A, B: TList<Int>;
+begin
+  A := TList<Int>.From([1, 2]);
+  B := TList<Int>.From([3, 4]);
+  A.AddRange(B);
+  AssertEquals(4, A.Count);
+  AssertEquals(3, A[2]);
+  AssertEquals(4, A[3]);
+  A.AddRange(nil);
+  AssertEquals(4, A.Count);
 end;
 
 procedure TCollectionsTests.TestDict_Keys_InInsertionOrder;

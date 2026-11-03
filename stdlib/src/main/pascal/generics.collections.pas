@@ -51,6 +51,10 @@ type
     function  Get(AIndex: Int): T;
     procedure SetItem(AIndex: Int; Value: T);
     function  IndexOf(const Value: T): Int;
+    { Insert Value before AIndex (0..Count; Count appends). }
+    procedure Insert(AIndex: Int; Value: T);
+    { Append every item of AItems, in order. }
+    procedure AddRange(AItems: TList<T>);
     procedure Delete(AIndex: Int);
     procedure Clear;
     destructor Destroy; override;
@@ -564,6 +568,38 @@ begin
     end;
     I := I + 1
   end
+end;
+
+procedure TList<T>.Insert(AIndex: Int; Value: T);
+var
+  Src: ^T;
+  Dst: ^T;
+  I:   Int;
+begin
+  if (AIndex < 0) or (AIndex > Self.FCount) then
+    raise EListError.Create('TList index out of range: ' + IntToStr(AIndex));
+  Self.Add(Value);
+  I := Self.FCount - 1;
+  while I > AIndex do
+  begin
+    Dst  := Self.FData + I * SizeOf(T);
+    Src  := Self.FData + (I - 1) * SizeOf(T);
+    Dst^ := Src^;
+    I    := I - 1
+  end;
+  Dst  := Self.FData + AIndex * SizeOf(T);
+  Dst^ := Value
+end;
+
+procedure TList<T>.AddRange(AItems: TList<T>);
+var
+  I, N: Int;
+begin
+  if AItems = nil then
+    Exit;
+  N := AItems.Count;
+  for I := 0 to N - 1 do
+    Self.Add(AItems.Get(I))
 end;
 
 procedure TList<T>.Delete(AIndex: Int);
