@@ -390,7 +390,8 @@ type
       one using the alias's underlying type share a single identity.  Has no
       effect on names without '<' or on arguments that are unresolved type
       parameters. }
-    function  CanonGenericArgs(const ATypeName: string): string;
+    function  CanonGenericArgs(const ATypeName: string; AQualify: Boolean = True): string;
+    function  LookupDeclaredType(const AName: string): TTypeDesc;
 
     { Generic function instantiation: resolves 'Identity<Integer>' on demand. }
     function  InstantiateGenericFunc(const AInstName: string): TMethodDecl;
@@ -2937,6 +2938,7 @@ begin
     lookup (current compilation's own symbols) finds them ahead of
     a use'd unit's same-named export. }
   FTable.DefineOwningUnit := AProg.Name;
+  GProgramOwner := AProg.Name;
   { The program's own name and the names of directly used units are
     reserved identifiers — no top-level declaration may redeclare
     them (issue #84, matching FPC/Delphi). }
@@ -3709,9 +3711,27 @@ begin
   AddGroupEntry(FMethodGroups, ATypeName + '.' + ADecl.Name, ADecl);
 end;
 
+{ A type named as written in a declaration: a generic instance is looked up
+  under its canonical name (FindTypeOrInstantiate), any other name as is. }
+function TSemanticAnalyser.LookupDeclaredType(const AName: string): TTypeDesc;
+begin
+  if StrPos('<', AName) >= 0 then
+    Result := FindTypeOrInstantiate(AName)
+  else
+    Result := FTable.FindType(AName);
+end;
+
 function TSemanticAnalyser.ResolveImportedTypeName(const AName: string): TTypeDesc;
 begin
-  Result := Self.FindTypeOrInstantiate(AName);
+  { An imported interface was checked when its unit was compiled: its type
+    names (unit-qualified generic arguments among them) are not judged by
+    the importer's own uses chain. }
+  FTable.SuppressVisibility := FTable.SuppressVisibility + 1;
+  try
+    Result := Self.FindTypeOrInstantiate(AName);
+  finally
+    FTable.SuppressVisibility := FTable.SuppressVisibility - 1;
+  end;
 end;
 
 procedure TSemanticAnalyser.RegisterUnitIface(AIface: TUnitInterface);
@@ -4862,7 +4882,7 @@ var
   TD, ElemTD: TTypeDesc;
   Expected: Int;
 begin
-  TD := FTable.FindType(CD.TypeName);
+  TD := LookupDeclaredType(CD.TypeName);
   if TD = nil then
     SemanticError(Format('Unknown type ''%s'' in typed constant ''%s''',
       [CD.TypeName, CD.Name]), CD.Line, CD.Col);
@@ -4955,9 +4975,13 @@ var
   TD: TTypeDesc;
 begin
   TD := FindTypeOrInstantiate(AName);
-  Result := FTable.Lookup(AName);
-  if (Result = nil) and (TD <> nil) then
+  { The canonical name first: the spelling may name another unit's
+    same-named argument type in this scope. }
+  Result := nil;
+  if TD <> nil then
     Result := FTable.Lookup(TD.Name);
+  if Result = nil then
+    Result := FTable.Lookup(AName);
 end;
 
 function TSemanticAnalyser.ResolveScopeBoundTypeParams(const ATypeName: string): string;
@@ -4997,7 +5021,7 @@ begin
         replace it with the concrete type name. }
       Sym := FTable.Lookup(Arg);
       if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) then
-        Arg := Sym.TypeDesc.Name;
+        Arg := TypeKeyName(Sym.TypeDesc);
       if OutArgs = '' then
         OutArgs := Arg
       else
@@ -5009,7 +5033,7 @@ begin
   Result := BasePart + '<' + OutArgs + '>';
 end;
 
-function TSemanticAnalyser.CanonGenericArgs(const ATypeName: string): string;
+function TSemanticAnalyser.CanonGenericArgs(const ATypeName: string; AQualify: Boolean = True): string;
 var
   BrOpen, BrClose, I: Int;
   BasePart, ArgsPart, OutArgs, Arg: string;
@@ -5050,9 +5074,13 @@ begin
         resolve (e.g. an in-scope generic type parameter T) so substitution
         still applies later. }
       ArgType := FindTypeOrInstantiate(Arg);
-      if (ArgType <> nil) and (ArgType.Name <> '') and
-         (not SameText(ArgType.Name, Arg)) then
-        Arg := ArgType.Name;
+      if (ArgType <> nil) and (ArgType.Name <> '') then
+      begin
+        if AQualify and not SameText(TypeKeyName(ArgType), Arg) then
+          Arg := TypeKeyName(ArgType)
+        else if not AQualify and not SameText(ArgType.Name, Arg) then
+          Arg := ArgType.Name;
+      end;
       if OutArgs = '' then
         OutArgs := Arg
       else
@@ -5458,8 +5486,13 @@ begin
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) then
       Exit(Sym.TypeDesc);
   end;
-  Result := FTable.FindType(AName);
-  if Result <> nil then Exit;
+  { A generic instance is found under its canonical name below: the bare
+    spelling may name another unit's same-named argument type. }
+  if StrPos('<', AName) < 0 then
+  begin
+    Result := FTable.FindType(AName);
+    if Result <> nil then Exit;
+  end;
   { A bare nested-type name, reached from inside the enclosing type (its own
     body, its methods, or a descendant's).  Registered qualified-only, so the
     flat lookup above cannot see it; nil when there is no enclosing type,
@@ -5479,7 +5512,7 @@ begin
     BaseType := FindTypeOrInstantiate(ElemName);
     if BaseType <> nil then
     begin
-      CanonName := 'array of ' + BaseType.Name;
+      CanonName := 'array of ' + TypeKeyName(BaseType);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
@@ -5520,7 +5553,7 @@ begin
       if (IdxTD.Kind = tyEnum) and not IdxTD.IsSubrange then
         Self.WarnIfEnumIndexSparse(IdxTD,
           Format('array[%s]', [IdxTD.Name]), 0, 0);
-      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, BaseType.Name]);
+      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, TypeKeyName(BaseType)]);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
@@ -5548,7 +5581,7 @@ begin
     begin
       LVal := ResolveArrayBound(LStr);
       HVal := ResolveArrayBound(HStr);
-      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, BaseType.Name]);
+      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, TypeKeyName(BaseType)]);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
@@ -5571,7 +5604,7 @@ begin
     BaseType := FindTypeOrInstantiate(BaseName);
     if BaseType <> nil then
     begin
-      CanonName := '^' + BaseType.Name;
+      CanonName := '^' + TypeKeyName(BaseType);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
@@ -5619,7 +5652,7 @@ begin
     if (BaseType <> nil) and (BaseType.Kind = tyEnum) then
     begin
       Self.CheckEnumSetBase(TEnumTypeDesc(BaseType), BaseType.Name, 0, 0);
-      CanonName := 'set of ' + BaseType.Name;
+      CanonName := 'set of ' + TypeKeyName(BaseType);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
@@ -5629,7 +5662,7 @@ begin
     end
     else if (BaseType <> nil) and (BaseType.Kind = tyByte) then
     begin
-      CanonName := 'set of ' + BaseType.Name;
+      CanonName := 'set of ' + TypeKeyName(BaseType);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
@@ -5639,7 +5672,7 @@ begin
     end
     else if (BaseType <> nil) and (BaseType.Kind = tyBoolean) then
     begin
-      CanonName := 'set of ' + BaseType.Name;
+      CanonName := 'set of ' + TypeKeyName(BaseType);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
@@ -5700,18 +5733,17 @@ begin
       identity with the underlying-type form (Foo<Integer>).  Re-check the
       table under the canonical name before instantiating. }
     CanonName := CanonGenericArgs(AName);
-    if not SameText(CanonName, AName) then
+    Result := FTable.FindType(CanonName);
+    if Result = nil then
     begin
-      Result := FTable.FindType(CanonName);
-      if Result <> nil then Exit;
+      Result := InstantiateGeneric(CanonName);
+      if Result = nil then
+        Result := InstantiateGenericRecord(CanonName);
+      if Result = nil then
+        Result := InstantiateGenericInterface(CanonName);
+      if Result = nil then
+        Result := InstantiateGenericProcType(CanonName);
     end;
-    Result := InstantiateGeneric(CanonName);
-    if Result = nil then
-      Result := InstantiateGenericRecord(CanonName);
-    if Result = nil then
-      Result := InstantiateGenericInterface(CanonName);
-    if Result = nil then
-      Result := InstantiateGenericProcType(CanonName);
   end;
 end;
 
@@ -7899,7 +7931,7 @@ end;
 
 function TSemanticAnalyser.ConstAwaitsTypes(CD: TConstDecl): Boolean;
 begin
-  Result := ((CD.TypeName <> '') and (FTable.FindType(CD.TypeName) = nil)) or
+  Result := ((CD.TypeName <> '') and (LookupDeclaredType(CD.TypeName) = nil)) or
             Self.ConstExprAwaitsTypes(CD.IntValueExpr);
 end;
 
@@ -8663,7 +8695,7 @@ begin
   begin
     { Declared set type: const X: TSomeSet = [...].  Must be a set, and its
       base enum must match the members. }
-    DeclTD := FTable.FindType(ACD.TypeName);
+    DeclTD := LookupDeclaredType(ACD.TypeName);
     if (DeclTD = nil) or (DeclTD.Kind <> tySet) then
     begin
       SemanticError(Format(
@@ -8685,7 +8717,7 @@ begin
   begin
     Self.CheckEnumSetBase(EnumDesc, EnumDesc.Name, ACD.Line, ACD.Col);
     { Inferred set type: find or create the canonical 'set of <Enum>'. }
-    CanonName := 'set of ' + EnumDesc.Name;
+    CanonName := 'set of ' + TypeKeyName(EnumDesc);
     ExistTD   := FTable.FindType(CanonName);
     if (ExistTD <> nil) and (ExistTD.Kind = tySet) then
       SetDesc := TSetTypeDesc(ExistTD)
@@ -8820,7 +8852,7 @@ begin
     Exit(nil);
   if CD.TypeName <> '' then
   begin
-    Result := FTable.FindType(CD.TypeName);
+    Result := LookupDeclaredType(CD.TypeName);
     if Result = nil then
       SemanticError(Format('Unknown type ''%s'' in typed constant ''%s''',
         [CD.TypeName, CD.Name]), CD.Line, CD.Col);
@@ -9229,7 +9261,7 @@ begin
     end
     else
     begin
-      ElemTD := FTable.FindType(CD.ArrayElemType);
+      ElemTD := LookupDeclaredType(CD.ArrayElemType);
       if ElemTD = nil then
         SemanticError(Format('Unknown element type ''%s'' in array const ''%s''',
           [CD.ArrayElemType, CD.Name]), CD.Line, CD.Col);
@@ -9237,7 +9269,7 @@ begin
         ArrTD := Self.BuildConstArrayType(CD, ElemTD)
       else
       begin
-        IdxTD := FTable.FindType(CD.ArrayIndexType);
+        IdxTD := LookupDeclaredType(CD.ArrayIndexType);
         if IdxTD = nil then
           SemanticError(Format('Unknown index type ''%s'' in array const ''%s''',
             [CD.ArrayIndexType, CD.Name]), CD.Line, CD.Col);
@@ -10532,7 +10564,7 @@ begin
       for J := 0 to PropList.Count - 1 do
       begin
         PropDecl := TPropertyDecl(PropList.Items[J]);
-        PropType := FTable.FindType(PropDecl.TypeName);
+        PropType := LookupDeclaredType(PropDecl.TypeName);
         if PropType = nil then
           SemanticError(
             Format('Unknown type ''%s'' for property ''%s''',
@@ -10567,7 +10599,7 @@ begin
         end;
         PropInfo.IndexParamName := PropDecl.IndexParamName;
         if PropDecl.IndexTypeName <> '' then
-          PropInfo.IndexTypeDesc := FTable.FindType(PropDecl.IndexTypeName);
+          PropInfo.IndexTypeDesc := LookupDeclaredType(PropDecl.IndexTypeName);
         PropInfo.IsDefault := PropDecl.IsDefault;
         PropInfo.IsStatic := PropDecl.IsStatic;
         PropInfo.Visibility    := PropDecl.Visibility;
@@ -10606,7 +10638,7 @@ begin
             ArrTD := Self.NamedArrayConstType(CD)
           else
           begin
-            ElemTD := FTable.FindType(CD.ArrayElemType);
+            ElemTD := LookupDeclaredType(CD.ArrayElemType);
             if ElemTD = nil then
               SemanticError(Format('Unknown element type ''%s'' in class array const ''%s''',
                 [CD.ArrayElemType, CD.Name]), CD.Line, CD.Col);
@@ -10614,7 +10646,7 @@ begin
               ArrTD := Self.BuildConstArrayType(CD, ElemTD)
             else
             begin
-              IdxTD := FTable.FindType(CD.ArrayIndexType);
+              IdxTD := LookupDeclaredType(CD.ArrayIndexType);
               if IdxTD = nil then
                 SemanticError(Format('Unknown index type ''%s'' in class array const ''%s''',
                   [CD.ArrayIndexType, CD.Name]), CD.Line, CD.Col);
@@ -11026,7 +11058,7 @@ var
   TDesc: TTypeDesc;
 begin
   Result := -1;
-  TDesc := FTable.FindType(ATypeName);
+  TDesc := LookupDeclaredType(ATypeName);
   if TDesc is TRecordTypeDesc then
     Result := TRecordTypeDesc(TDesc).FindVTableSlot(AMethodName);
 end;
@@ -15523,7 +15555,7 @@ begin
     Info.IsConst := Par.IsConstParam;
     Info.IsOpenArray := Par.IsOpenArray;
     if (not Info.IsOpenArray) and (StrPos('<', Info.TypeName) < 0) then
-      Info.TypeDesc := FTable.FindType(Info.TypeName);
+      Info.TypeDesc := LookupDeclaredType(Info.TypeName);
     Result.Add(Info);
   end;
 end;
@@ -18848,7 +18880,7 @@ begin
       symbol that is gone by codegen, so a backend resolving the cast's name
       found no type 'T' (BUG-20261028-arm64-typeparam-cast). }
     if (Sym.TypeDesc <> nil) and (FActiveTypeParams.IndexOf(Sym.Name) >= 0) then
-      AExpr.Name := Sym.TypeDesc.Name;
+      AExpr.Name := TypeKeyName(Sym.TypeDesc);
     ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
     { an ordinal cast of a float is no conversion at all -- the backends
       would reinterpret its bit pattern (Integer(3.7) was -1717986918) or,
@@ -22339,7 +22371,7 @@ begin
         [ObjType.Name]),
       AExpr.Line, AExpr.Col);
 
-  IntfType := FTable.FindType(AExpr.IntfTypeName);
+  IntfType := LookupDeclaredType(AExpr.IntfTypeName);
   if (IntfType = nil) or (IntfType.Kind <> tyInterface) then
     SemanticError(
       Format('Supports() second argument must be an interface type name, got ''%s''',
@@ -22431,7 +22463,8 @@ begin
       if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) then
       begin
         Names.Add(FActiveTypeParams.Strings[K]);
-        Args.Add(Sym.TypeDesc.Name);
+        { The canonical name: a bare one may name another unit's type here. }
+        Args.Add(TypeKeyName(Sym.TypeDesc));
       end;
     end;
     if Names.Count = 0 then Exit;
@@ -23846,7 +23879,7 @@ begin
         'not a variable or field (it would dangle)', AExpr.Line, AExpr.Col);
     InnerType := FTable.TypeByte;
   end;
-  PtrName := '^' + InnerType.Name;
+  PtrName := '^' + TypeKeyName(InnerType);
   Result := FindTypeOrInstantiate(PtrName);
   if Result = nil then
   begin

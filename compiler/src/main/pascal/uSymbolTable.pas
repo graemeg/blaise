@@ -970,6 +970,19 @@ type
   @_BlaiseGetMem, @TObject_Destroy, @_StartUp, @_StringRelease keep
   resolving.  The empty unit name is also unmangled — that's
   program-level code or builtins. }
+{ The name a type contributes to the identity of the types built from it
+  (generic instances, dynamic and static arrays, pointers, sets).  A record,
+  class, interface or enum declared in a unit is qualified with the unit
+  (ua.TOutcome), so two units' same-named types make distinct instances and
+  every spelling and scope names the same one; any other type is its Name.
+  BUG-20261103-generic-arg-same-name-cross-unit. }
+function TypeKeyName(AType: TTypeDesc): string;
+
+var
+  { The program being compiled: its own types are not qualified by
+    TypeKeyName (nothing can shadow them from outside). }
+  GProgramOwner: string;
+
 function IsUnmangledUnit(const AUnitName: string): Boolean;
 
 { Returns 'UnitName_' (dots collapse to underscores) for mangled
@@ -2133,7 +2146,7 @@ function TSymbolTable.NewOpenArrayType(AElementType: TTypeDesc): TOpenArrayTypeD
 begin
   Result             := TOpenArrayTypeDesc.Create();
   Result.Kind        := tyOpenArray;
-  Result.Name        := 'array of ' + AElementType.Name;
+  Result.Name        := 'array of ' + TypeKeyName(AElementType);
   Result.ElementType := AElementType;
   FAllTypes.Add(Result);
 end;
@@ -2152,7 +2165,7 @@ function TSymbolTable.NewStaticArrayType(AElementType: TTypeDesc;
 begin
   Result             := TStaticArrayTypeDesc.Create();
   Result.Kind        := tyStaticArray;
-  Result.Name        := Format('array[%d..%d] of %s', [ALow, AHigh, AElementType.Name]);
+  Result.Name        := Format('array[%d..%d] of %s', [ALow, AHigh, TypeKeyName(AElementType)]);
   Result.ElementType := AElementType;
   Result.LowBound    := ALow;
   Result.HighBound   := AHigh;
@@ -2163,7 +2176,7 @@ function TSymbolTable.NewDynArrayType(AElementType: TTypeDesc): TDynArrayTypeDes
 begin
   Result             := TDynArrayTypeDesc.Create();
   Result.Kind        := tyDynArray;
-  Result.Name        := 'array of ' + AElementType.Name;
+  Result.Name        := 'array of ' + TypeKeyName(AElementType);
   Result.ElementType := AElementType;
   FAllTypes.Add(Result);
 end;
@@ -3096,6 +3109,33 @@ begin
       Exit(Sym.TypeDesc);
   end;
   Result := nil;
+end;
+
+function IsPlainTypeIdent(const AName: string): Boolean;
+var
+  I: Int;
+  C: Int;
+begin
+  Result := AName <> '';
+  for I := 0 to Length(AName) - 1 do
+  begin
+    C := StrAt(AName, I);
+    if not (((C >= 65) and (C <= 90)) or ((C >= 97) and (C <= 122)) or ((C >= 48) and (C <= 57)) or (C = 95)) then
+      Exit(False);
+  end;
+end;
+
+function TypeKeyName(AType: TTypeDesc): string;
+begin
+  Result := AType.Name;
+  if (AType.OwningUnit = '') or SameText(AType.OwningUnit, 'System') or (AType.OwningUnit = '<program>') or
+    SameText(AType.OwningUnit, GProgramOwner) then
+    Exit;
+  if not (AType.Kind in [tyRecord, tyClass, tyInterface, tyEnum]) then
+    Exit;
+  if not IsPlainTypeIdent(AType.Name) then
+    Exit;
+  Result := AType.OwningUnit + '.' + AType.Name;
 end;
 
 function IsUnmangledUnit(const AUnitName: string): Boolean;

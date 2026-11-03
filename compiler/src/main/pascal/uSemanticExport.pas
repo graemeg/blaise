@@ -68,9 +68,21 @@ uses
 function ExportTypeSpelling(const ATypeName: string; ATD: TTypeDesc): string;
 begin
   Result := ATypeName;
-  if (ATD <> nil) and (ATD.Kind = tyStaticArray) and
+  if ATD = nil then
+    Exit;
+  if (ATD.Kind = tyStaticArray) and
      SameText(Copy(ATypeName, 0, 6), 'array[') and
      SameText(Copy(ATD.Name, 0, 6), 'array[') then
+    Result := ATD.Name
+  { A generic instance, dynamic array, pointer or set is exported under its
+    canonical name, whose unit-qualified arguments (TList<ub.TOutcome>) say
+    which same-named type the declaring unit meant; the importer's own
+    scope may resolve the bare spelling to another unit's
+    (BUG-20261103-generic-arg-same-name-cross-unit). }
+  else if (Pos('<', ATypeName) >= 0) and (Pos('<', ATD.Name) >= 0) then
+    Result := ATD.Name
+  else if (ATD.Kind = tyDynArray) and SameText(Copy(ATypeName, 0, 9), 'array of ') and
+     SameText(Copy(ATD.Name, 0, 9), 'array of ') then
     Result := ATD.Name;
 end;
 
@@ -439,12 +451,15 @@ begin
   end;
   { Carry visibility so cross-unit member access enforces private/protected. }
   Result.Visibility   := ASrc.Visibility;
-  Result.ReturnType   := ResolveTypeRef(ASrc.ReturnTypeName, AIface, ADeps);
+  Result.ReturnType   := ResolveTypeRef(ExportTypeSpelling(ASrc.ReturnTypeName, ASrc.ResolvedReturnType),
+    AIface, ADeps);
 
   for I := 0 to ASrc.Params.Count - 1 do
   begin
     PSrc  := TMethodParam(ASrc.Params.Items[I]);
     PCopy := CloneMethodParam(PSrc);
+    if not PSrc.IsOpenArray then
+      PCopy.TypeName := ExportTypeSpelling(PSrc.TypeName, PSrc.ResolvedType);
     Result.Params.Add(PCopy);
   end;
 end;

@@ -39,6 +39,15 @@ type
       the order flips the winner. }
     procedure TestRun_CrossUnitConst_LastWins;
     procedure TestRun_CrossUnitConst_LastWins_Reversed;
+    { Two used units each export a record TOutcome, and one uses its own as
+      a generic argument and an array element in its interface.  The generic
+      instance and the array type are those of the declaring unit's record,
+      whichever unit wins the bare name in the program; the program's own
+      TList<TOutcome> and array of TOutcome are of the winner's.  It was
+      "Type mismatch in pointer write: expected 'TOutcome' but got
+      'TOutcome'". }
+    procedure TestRun_SameNamedRecord_GenericArgFromUnitInterface;
+    procedure TestRun_SameNamedRecord_EachUnitsInstanceApart;
     { Unit-qualified const disambiguation: a 'Unit.Foo' reference resolves
       against that specific unit's exports, so it is never shadowed by a
       same-named const in another used unit, regardless of `uses` order. }
@@ -371,6 +380,100 @@ begin
     CompileAndRunWithUnits(UA_Const, UB_Const, DrvSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('last-in-uses (ua) wins', '100' + LE, Output);
+end;
+
+const
+  UA_Outcome = '''
+    unit ua;
+    interface
+    type
+      TOutcome = record
+        Name: string;
+        Code: Int;
+      end;
+    function NamedOutcome(const AName: string): TOutcome;
+    implementation
+    function NamedOutcome(const AName: string): TOutcome;
+    begin
+      Result.Name := AName;
+      Result.Code := 1;
+    end;
+    end.
+    ''';
+  UB_Outcome = '''
+    unit ub;
+    interface
+    uses Generics.Collections;
+    type
+      TOutcome = record
+        Suite: string;
+        Test: string;
+        Passed: Boolean;
+      end;
+      TOutcomes = array of TOutcome;
+    function Make(const S: string): TList<TOutcome>;
+    function MakeArray(const S: string): TOutcomes;
+    implementation
+    function Make(const S: string): TList<TOutcome>;
+    var
+      O: TOutcome;
+    begin
+      Result := TList<TOutcome>.Create();
+      O.Suite := S;
+      O.Test := 'T';
+      O.Passed := True;
+      Result.Add(O);
+    end;
+    function MakeArray(const S: string): TOutcomes;
+    begin
+      SetLength(Result, 1);
+      Result[0].Suite := S;
+    end;
+    end.
+    ''';
+
+procedure TE2EUsesChainTests.TestRun_SameNamedRecord_GenericArgFromUnitInterface;
+const
+  DrvSrc = '''
+    program P;
+    uses ub, ua;
+    begin
+      WriteLn(Make('s')[0].Suite, ' ', MakeArray('a')[0].Suite, ' ', NamedOutcome('n').Name)
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run',
+    CompileAndRunWithUnits(UA_Outcome, UB_Outcome, DrvSrc, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('s a n' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_SameNamedRecord_EachUnitsInstanceApart;
+const
+  DrvSrc = '''
+    program P;
+    uses Generics.Collections, ub, ua;
+    var
+      L: TList<TOutcome>;
+      A: array of TOutcome;
+    begin
+      { The bare name is ua's record here. }
+      L := TList<TOutcome>.Create();
+      L.Add(NamedOutcome('mine'));
+      SetLength(A, 1);
+      A[0] := NamedOutcome('arr');
+      WriteLn(L[0].Name, ' ', A[0].Code, ' ', Make('theirs')[0].Suite, ' ', Make('x').Count)
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run',
+    CompileAndRunWithUnits(UA_Outcome, UB_Outcome, DrvSrc, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('mine 1 theirs 1' + LE, Output);
 end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitConst_QualifiedDisambig;
