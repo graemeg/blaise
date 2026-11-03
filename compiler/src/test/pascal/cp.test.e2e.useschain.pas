@@ -67,6 +67,11 @@ type
       exported by a unit it does not use, even when that unit was compiled
       first in the same build ("Ambiguous overload of 'JoinPath'"). }
     procedure TestRun_PrivateRoutine_IgnoresUnusedUnitsExport;
+    { An inherited property's accessors are named after the class that
+      declares them, even when the derived class's unit is not used by the
+      code that reaches it through another unit's property (it linked
+      against the never-emitted ua_TDerived_SetText). }
+    procedure TestRun_InheritedPropertyAccessor_ThroughUnusedUnit;
     procedure TestRun_CrossUnitVar_LastWins;
     procedure TestRun_CrossUnitVar_LastWins_Reversed;
     { Unit-qualified VAR disambiguation: 'Unit.V' references that specific
@@ -570,6 +575,69 @@ begin
     CompileAndRunWithUnits(URA_Routine, URB_Routine, Prog, Output, RCode));
   AssertEquals('warm: the program''s own routine wins',
     'PA' + LE + 'prog 1' + LE + 'ura 2' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_InheritedPropertyAccessor_ThroughUnusedUnit;
+const
+  UPA = '''
+    unit upa;
+    interface
+    type
+      TBase = class
+      private
+        FText: string;
+        procedure SetText(const AValue: string);
+        function GetText(): string;
+      public
+        property Text: string read GetText write SetText;
+      end;
+      TDerived = class(TBase)
+      end;
+    implementation
+    procedure TBase.SetText(const AValue: string);
+    begin
+      FText := AValue
+    end;
+    function TBase.GetText(): string;
+    begin
+      Result := FText
+    end;
+    end.
+    ''';
+  UPB = '''
+    unit upb;
+    interface
+    uses upa;
+    type
+      THolder = class
+      private
+        FEd: TDerived;
+      public
+        constructor Create();
+        property Ed: TDerived read FEd;
+      end;
+    implementation
+    constructor THolder.Create();
+    begin
+      FEd := TDerived.Create()
+    end;
+    end.
+    ''';
+  Prog = '''
+    program P;
+    uses upb;
+    var H: THolder;
+    begin
+      H := THolder.Create();
+      H.Ed.Text := 'set';
+      WriteLn(H.Ed.Text)
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output, CompileAndRunWithUnits(UPA, UPB, Prog, Output, RCode));
+  AssertEquals('set' + LE, Output);
 end;
 
 procedure TE2EUsesChainTests.TestRun_PrivateRoutine_IgnoresUnusedUnitsExport;

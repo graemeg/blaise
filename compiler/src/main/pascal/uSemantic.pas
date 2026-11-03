@@ -973,15 +973,14 @@ type
 
     procedure AnalyseCompoundBody(ABody: TCompoundStmt);
     function  FindMethodDecl(const ATypeName, AMethodName: string): TMethodDecl;
-    { Walks the class hierarchy from ATypeName upward and returns the name
-      of the class that actually declares AMethodName.  Property accessors
-      are mangled as <owner>_<method>; when a child inherits a property
-      whose getter/setter lives in a parent, the call site must target the
-      parent's symbol, not the child's (which never gets emitted). }
-    function  PropAccessorOwner(const ATypeName, AMethodName: string): string;
-    { The class PropAccessorOwner names, found by walking ART's own parent
-      chain, so codegen can name the accessor from a descriptor rather than
-      re-resolving a type name. }
+    { Walks ART's class hierarchy upward and returns the class that actually
+      declares accessor AMethodName (ART itself when none does, e.g. an
+      abstract or forward accessor).  Property accessors are mangled as
+      <owner>_<method>; when a child inherits a property whose getter or
+      setter lives in a parent, the call site must target the parent's
+      symbol, not the child's (which is never emitted).  The walk follows
+      descriptors, not names: a class reached through another unit's
+      property need not be visible where it is used. }
     function  PropAccessorOwnerDesc(ART: TRecordTypeDesc;
       const AMethodName: string): TRecordTypeDesc;
     { Returns the vtable slot of property accessor AMethodName as seen from
@@ -10989,36 +10988,6 @@ begin
   Result := nil;
 end;
 
-function TSemanticAnalyser.PropAccessorOwner(
-  const ATypeName, AMethodName: string): string;
-{ See the interface-section comment.  Mirrors the chain walk in
-  FindMethodDecl; falls back to ATypeName when no declaring class is found
-  (e.g. abstract/forward) so the non-inherited case is unchanged. }
-var
-  CurrName: string;
-  Sym:      TSymbol;
-  RT:       TRecordTypeDesc;
-begin
-  CurrName := ATypeName;
-  while CurrName <> '' do
-  begin
-    if FMethodIndex.IndexOf(CurrName + '.' + AMethodName) >= 0 then
-      Exit(CurrName);
-    Sym := FTable.Lookup(CurrName);
-    if (Sym <> nil) and (Sym.TypeDesc is TRecordTypeDesc) then
-    begin
-      RT := TRecordTypeDesc(Sym.TypeDesc);
-      if RT.Parent <> nil then
-        CurrName := RT.Parent.Name
-      else
-        Break;
-    end
-    else
-      Break;
-  end;
-  Result := ATypeName;
-end;
-
 function TSemanticAnalyser.PropAccessorOwnerDesc(ART: TRecordTypeDesc;
   const AMethodName: string): TRecordTypeDesc;
 var
@@ -15845,7 +15814,7 @@ begin
   AAssign.RecordName        := '';
   AAssign.FieldName         := DefProp.Name;
   AAssign.PropWriteInfo     := DefProp;
-  AAssign.PropOwnerType     := PropAccessorOwner(DefRT.Name, DefProp.WriteMethod);
+  AAssign.PropOwnerType     := PropAccessorOwnerDesc(DefRT, DefProp.WriteMethod).Name;
   AAssign.PropOwnerDesc := PropAccessorOwnerDesc(DefRT, DefProp.WriteMethod);
   AAssign.PropAccessorVSlot := PropAccessorVSlot(DefRT.Name, DefProp.WriteMethod);
   IdxType := Self.AnalyseExprSlot(AAssign.PropIndexExpr);
@@ -15952,7 +15921,7 @@ begin
             AAssign.Line, AAssign.Col);
         AAssign.PropWriteInfo := PropInfo;
         AAssign.PropOwnerType :=
-          PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
+          PropAccessorOwnerDesc(RT, PropInfo.WriteMethod).Name;
         AAssign.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.WriteMethod);
         AAssign.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
@@ -16054,7 +16023,7 @@ begin
             end;
             AAssign.PropWriteInfo := PropInfo;
             AAssign.PropOwnerType :=
-              PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
+              PropAccessorOwnerDesc(RT, PropInfo.WriteMethod).Name;
             AAssign.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.WriteMethod);
             AAssign.PropAccessorVSlot :=
               PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
@@ -16229,7 +16198,7 @@ begin
         end;
         AAssign.PropWriteInfo := PropInfo;
         AAssign.PropOwnerType :=
-          PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
+          PropAccessorOwnerDesc(RT, PropInfo.WriteMethod).Name;
         AAssign.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.WriteMethod);
         AAssign.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
@@ -21099,7 +21068,7 @@ begin
         end;
         AAccess.PropRead := PropInfo;
         AAccess.PropOwnerType :=
-          PropAccessorOwner(RT.Name, PropInfo.ReadMethod);
+          PropAccessorOwnerDesc(RT, PropInfo.ReadMethod).Name;
         AAccess.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.ReadMethod);
         AAccess.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.ReadMethod);
@@ -21234,7 +21203,7 @@ begin
               end;
               AAccess.PropRead := PropInfo;
               AAccess.PropOwnerType :=
-                PropAccessorOwner(RT.Name, PropInfo.ReadMethod);
+                PropAccessorOwnerDesc(RT, PropInfo.ReadMethod).Name;
               AAccess.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.ReadMethod);
               AAccess.PropAccessorVSlot :=
                 PropAccessorVSlot(RT.Name, PropInfo.ReadMethod);
@@ -21580,7 +21549,7 @@ begin
         end;
         AAccess.PropRead := PropInfo;
         AAccess.PropOwnerType :=
-          PropAccessorOwner(RT.Name, PropInfo.ReadMethod);
+          PropAccessorOwnerDesc(RT, PropInfo.ReadMethod).Name;
         AAccess.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.ReadMethod);
         AAccess.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.ReadMethod);
@@ -21711,8 +21680,8 @@ begin
     begin
       Self.AnalyseExprSlot(AAccess.PropIndexExpr);
       AAccess.PropRead      := PropInfo;
-      AAccess.PropOwnerType := PropAccessorOwner(
-        TRecordTypeDesc(AFldType).Name, PropInfo.ReadMethod);
+      AAccess.PropOwnerType := PropAccessorOwnerDesc(
+        TRecordTypeDesc(AFldType), PropInfo.ReadMethod).Name;
       AAccess.PropOwnerDesc := PropAccessorOwnerDesc(TRecordTypeDesc(AFldType), PropInfo.ReadMethod);
       AAccess.PropAccessorVSlot := PropAccessorVSlot(
         TRecordTypeDesc(AFldType).Name, PropInfo.ReadMethod);
@@ -23480,7 +23449,7 @@ begin
   FA.FieldName := AProp.Name;
   FA.IsClassAccess := ART.Kind = tyClass;
   FA.PropRead := AProp;
-  FA.PropOwnerType := PropAccessorOwner(ART.Name, AProp.ReadMethod);
+  FA.PropOwnerType := PropAccessorOwnerDesc(ART, AProp.ReadMethod).Name;
   FA.PropOwnerDesc := PropAccessorOwnerDesc(ART, AProp.ReadMethod);
   FA.PropAccessorVSlot := PropAccessorVSlot(ART.Name, AProp.ReadMethod);
   FA.PropReadDecl := FindMethodDecl(ART.Name, AProp.ReadMethod);
@@ -24375,8 +24344,8 @@ begin
           AStmt.IsImplicitSelf    := True;
           AStmt.ImplicitFieldInfo := BaseInfo;
           AStmt.PropWriteInfo     := DefProp;
-          AStmt.PropOwnerType     := PropAccessorOwner(
-            TRecordTypeDesc(BaseInfo.TypeDesc).Name, DefProp.WriteMethod);
+          AStmt.PropOwnerType     := PropAccessorOwnerDesc(
+            TRecordTypeDesc(BaseInfo.TypeDesc), DefProp.WriteMethod).Name;
           AStmt.PropOwnerDesc := PropAccessorOwnerDesc(TRecordTypeDesc(BaseInfo.TypeDesc), DefProp.WriteMethod);
           AStmt.PropAccessorVSlot := PropAccessorVSlot(
             TRecordTypeDesc(BaseInfo.TypeDesc).Name, DefProp.WriteMethod);
@@ -24455,7 +24424,7 @@ begin
       AStmt.IsVarParam := Sym.Kind = skVarParameter;
       AStmt.PropWriteInfo := DefProp;
       AStmt.PropOwnerType :=
-        PropAccessorOwner(TRecordTypeDesc(Sym.TypeDesc).Name, DefProp.WriteMethod);
+        PropAccessorOwnerDesc(TRecordTypeDesc(Sym.TypeDesc), DefProp.WriteMethod).Name;
       AStmt.PropOwnerDesc := PropAccessorOwnerDesc(TRecordTypeDesc(Sym.TypeDesc), DefProp.WriteMethod);
       AStmt.PropAccessorVSlot :=
         PropAccessorVSlot(TRecordTypeDesc(Sym.TypeDesc).Name, DefProp.WriteMethod);
