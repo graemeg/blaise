@@ -2444,6 +2444,7 @@ var
   MethDecl:         TMethodDecl;
   ConstIdx:         Int;   { first const appended by this section's ParseConstBlock }
   CurrStatic:       Boolean;   { current section's static (class-level) association }
+  VisLine:          Int;       { line of the last visibility keyword }
   CurrStaticBlock:  Boolean;   { bare `static var`/`static const` block (see
                                  ParseClassDef; BUG-036) }
   CurrVisibility:   TMemberVisibility; { current section's visibility }
@@ -2484,8 +2485,12 @@ begin
           CurrVisibility := mvStrictProtected;
         CurrStatic := False;
         CurrStaticBlock := False;
+        VisLine := FCurrent.Line;
         Advance();  { consume private/protected }
+        { `static` on the keyword's own line qualifies the section; on a
+          later line it prefixes one member (handled below). }
         if Check(tkIdent) and SameText(FCurrent.Value, 'static') and
+           (FCurrent.Line = VisLine) and
            ((PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) or
             ((PeekKind() = tkIdent) and SameText(PeekValueAt(1), 'property'))) then
         begin
@@ -2515,8 +2520,10 @@ begin
           CurrVisibility := mvPublic;
         CurrStatic := False;
         CurrStaticBlock := False;
+        VisLine := FCurrent.Line;
         Advance();
         if Check(tkIdent) and SameText(FCurrent.Value, 'static') and
+           (FCurrent.Line = VisLine) and
            ((PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) or
             ((PeekKind() = tkIdent) and SameText(PeekValueAt(1), 'property'))) then
         begin
@@ -2656,6 +2663,7 @@ var
   ConstIdx:         Int;   { first const appended by this section's ParseConstBlock }
   CurrVisibility:   TMemberVisibility; { current section's visibility }
   CurrStatic:       Boolean;   { current section's static (class-level) association }
+  VisLine:          Int;       { line of the last visibility keyword }
   CurrStaticBlock:  Boolean;   { CurrStatic came from a bare `static var`/
                                  `static const` BLOCK (not a `public static`
                                  section) — such a block ends at the first
@@ -2737,9 +2745,13 @@ begin
           CurrVisibility := mvStrictProtected;
         CurrPublished := False;
         CurrStatic    := False;
+        VisLine := FCurrent.Line;
         Advance();  { consume the private/protected keyword }
-        { Optional trailing `static` section qualifier — `strict private static var`. }
+        { Optional trailing `static` section qualifier — `strict private static var`.
+          Only on the keyword's own line: `static` starting a later line is
+          the prefix of one member. }
         if Check(tkIdent) and SameText(FCurrent.Value, 'static') and
+           (FCurrent.Line = VisLine) and
            ((PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure,
                             tkConstructor, tkDestructor]) or
             ((PeekKind() = tkIdent) and SameText(PeekValueAt(1), 'property'))) then
@@ -2781,12 +2793,17 @@ begin
         CurrStatic    := False;  { a new visibility section is non-static unless
                                    `static` follows }
         CurrStaticBlock := False;
+        VisLine := FCurrent.Line;
         Advance();  { consume the visibility modifier }
         { Optional trailing `static` section qualifier.  `static` is a soft
           keyword: treat it as a qualifier only when it introduces a static
           member (followed by var/const/method/property), NOT when it is a
-          field literally named `Static` (`private Static: Boolean;`). }
+          field literally named `Static` (`private Static: Boolean;`), and
+          only on the visibility keyword's own line: `public` then, on the
+          next line, `static function F` makes F static, not the section
+          (language-rationale.adoc, "static"). }
         if Check(tkIdent) and SameText(FCurrent.Value, 'static') and
+           (FCurrent.Line = VisLine) and
            ((PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure,
                             tkConstructor, tkDestructor]) or
             ((PeekKind() = tkIdent) and SameText(PeekValueAt(1), 'property'))) then

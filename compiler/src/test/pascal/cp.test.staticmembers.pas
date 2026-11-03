@@ -47,6 +47,13 @@ type
     procedure TestParse_StaticProcedurePrefix_SetsIsStatic;
     procedure TestParse_StaticSection_AppliesToMethods;
     procedure TestParse_PlainMethodAfterStaticSection_NotStatic;
+    { A `static` member prefix on the line after a visibility keyword applies
+      to that member only; the section qualifier is `static` on the
+      visibility keyword's own line (`public static`). }
+    procedure TestParse_StaticPrefixAfterVisibility_OneMemberOnly;
+    procedure TestParse_StaticPropertyPrefixAfterVisibility_OneMemberOnly;
+    procedure TestParse_StaticPrefixAfterStrictPrivate_OneMemberOnly;
+    procedure TestParse_StaticPrefixAfterVisibilityInRecord_OneMemberOnly;
     { BUG-036: a bare `static var` BLOCK ends at the first method/property —
       a method declared right after it must NOT silently become static
       (that made instance fields invisible in its body). }
@@ -361,6 +368,111 @@ begin
     AssertTrue('A is static', TMethodDecl(C.Methods.Items[0]).IsStatic);
     AssertFalse('B is NOT static (section reset by public)',
       TMethodDecl(C.Methods.Items[1]).IsStatic);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TStaticMembersParseTests.TestParse_StaticPrefixAfterVisibility_OneMemberOnly;
+const
+  Src =
+    '''
+        program P;
+        type
+          TFoo = class
+          public
+            static function Make: TFoo;
+            function Count: Int;
+          end;
+        begin end.
+        ''';
+var Prog: TProgram; C: TClassTypeDef;
+begin
+  Prog := ParseSrc(Src);
+  try
+    C := ClassOf(Prog, 0);
+    AssertTrue('Make is static', TMethodDecl(C.Methods.Items[0]).IsStatic);
+    AssertFalse('Count is an instance method', TMethodDecl(C.Methods.Items[1]).IsStatic);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ The example in language-rationale.adoc ("static"): Instance is static,
+  Items is an ordinary property. }
+procedure TStaticMembersParseTests.TestParse_StaticPropertyPrefixAfterVisibility_OneMemberOnly;
+const
+  Src =
+    '''
+        program P;
+        type
+          TFoo = class
+          private
+            function GetItem(I: Int): Int;
+            static function GetInstance: TFoo;
+          public
+            static property Instance: TFoo read GetInstance;
+            property Items[I: Int]: Int read GetItem;
+          end;
+        begin end.
+        ''';
+var Prog: TProgram; C: TClassTypeDef;
+begin
+  Prog := ParseSrc(Src);
+  try
+    C := ClassOf(Prog, 0);
+    AssertTrue('Instance is static', TPropertyDecl(C.Properties.Items[0]).IsStatic);
+    AssertFalse('Items is not', TPropertyDecl(C.Properties.Items[1]).IsStatic);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TStaticMembersParseTests.TestParse_StaticPrefixAfterStrictPrivate_OneMemberOnly;
+const
+  Src =
+    '''
+        program P;
+        type
+          TFoo = class
+          strict private
+            static procedure Reset;
+            procedure Touch;
+          end;
+        begin end.
+        ''';
+var Prog: TProgram; C: TClassTypeDef;
+begin
+  Prog := ParseSrc(Src);
+  try
+    C := ClassOf(Prog, 0);
+    AssertTrue('Reset is static', TMethodDecl(C.Methods.Items[0]).IsStatic);
+    AssertFalse('Touch is not', TMethodDecl(C.Methods.Items[1]).IsStatic);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TStaticMembersParseTests.TestParse_StaticPrefixAfterVisibilityInRecord_OneMemberOnly;
+const
+  Src =
+    '''
+        program P;
+        type
+          TPt = record
+          public
+            static function Zero: TPt;
+            function Len: Int;
+          end;
+        begin end.
+        ''';
+var Prog: TProgram; R: TRecordTypeDef;
+begin
+  Prog := ParseSrc(Src);
+  try
+    R := RecordOf(Prog, 0);
+    AssertTrue('Zero is static', TMethodDecl(R.Methods.Items[0]).IsStatic);
+    AssertFalse('Len is not', TMethodDecl(R.Methods.Items[1]).IsStatic);
   finally
     Prog.Free();
   end;
