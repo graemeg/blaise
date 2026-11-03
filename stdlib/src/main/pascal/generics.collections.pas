@@ -222,6 +222,10 @@ type
     { Drop all entries; keeps the allocated capacity for reuse. }
     procedure Clear;
     function  GetCount: Int;
+    { The keys, and the values in the same order, as new lists in insertion
+      order (Remove keeps the order of the rest).  The caller owns them. }
+    function  Keys: TList<K>;
+    function  Values: TList<V>;
     destructor Destroy; override;
     { True when the container holds nothing.  Clearer at a call site than
       `Count = 0`, and the guard the raising accessors expect you to use. }
@@ -1302,6 +1306,32 @@ begin
       Value held. }
     Value  := Zero;
     Result := False
+  end
+end;
+
+function TDictionary<K, V>.Keys: TList<K>;
+var
+  I: Int;
+  P: ^K;
+begin
+  Result := TList<K>.Create();
+  for I := 0 to Self.FCount - 1 do
+  begin
+    P := Self.FKeys + I * SizeOf(K);
+    Result.Add(P^)
+  end
+end;
+
+function TDictionary<K, V>.Values: TList<V>;
+var
+  I: Int;
+  P: ^V;
+begin
+  Result := TList<V>.Create();
+  for I := 0 to Self.FCount - 1 do
+  begin
+    P := Self.FValues + I * SizeOf(V);
+    Result.Add(P^)
   end
 end;
 

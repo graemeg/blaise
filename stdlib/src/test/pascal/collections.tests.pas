@@ -96,6 +96,10 @@ type
     procedure TestDict_TryGetValue_Miss_ClearsManagedValue;
     procedure TestOrderedDict_TryGetValue_Miss_ClearsValue;
     procedure TestDict_Remove_DropsTheKey;
+    procedure TestDict_Keys_InInsertionOrder;
+    procedure TestDict_Values_MatchTheKeys;
+    procedure TestDict_KeysAndValues_OfEmptyDict;
+    procedure TestDict_Keys_AfterRemoveKeepOrder;
     procedure TestDict_Clear_EmptiesTheDict;
     procedure TestDict_GrowsPastHashThreshold;
     procedure TestDict_IntegerKeys;
@@ -759,6 +763,50 @@ begin
   AssertFalse('key gone', D.ContainsKey('a'));
   AssertTrue('other key kept', D.ContainsKey('b'));
   AssertEquals('and its value', 2, D['b']);
+end;
+
+procedure TCollectionsTests.TestDict_Keys_InInsertionOrder;
+var D: TDictionary<string, Int>; K: TList<string>;
+begin
+  D := TDictionary<string, Int>.From(['b', 'a', 'c'], [2, 1, 3]);
+  K := D.Keys();
+  AssertEquals('count', 3, K.Count);
+  AssertEquals('first', 'b', K[0]);
+  AssertEquals('last', 'c', K[2]);
+end;
+
+procedure TCollectionsTests.TestDict_Values_MatchTheKeys;
+var D: TDictionary<string, string>; K, V: TList<string>; I: Int;
+begin
+  D := TDictionary<string, string>.Create();
+  D['x'] := 'one';
+  D['y'] := 'two';
+  D['x'] := 'three';
+  K := D.Keys();
+  V := D.Values();
+  AssertEquals('same length', K.Count, V.Count);
+  for I := 0 to K.Count - 1 do
+    AssertEquals('paired', D[K[I]], V[I]);
+  AssertEquals('overwrite keeps its slot', 'three', V[0]);
+end;
+
+procedure TCollectionsTests.TestDict_KeysAndValues_OfEmptyDict;
+var D: TDictionary<Int, Int>;
+begin
+  D := TDictionary<Int, Int>.Create();
+  AssertEquals('no keys', 0, D.Keys().Count);
+  AssertEquals('no values', 0, D.Values().Count);
+end;
+
+procedure TCollectionsTests.TestDict_Keys_AfterRemoveKeepOrder;
+var D: TDictionary<string, Int>; K: TList<string>;
+begin
+  D := TDictionary<string, Int>.From(['a', 'b', 'c'], [1, 2, 3]);
+  D.Remove('a');
+  K := D.Keys();
+  AssertEquals('count', 2, K.Count);
+  AssertEquals('order kept', 'b', K[0]);
+  AssertEquals('order kept', 'c', K[1]);
 end;
 
 procedure TCollectionsTests.TestDict_Clear_EmptiesTheDict;
