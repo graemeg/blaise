@@ -378,6 +378,10 @@ type
     procedure TestRun_SetConstantParamDefault;
     { ...and declared in a unit's interface, used from a program. }
     procedure TestRun_SetConstantParamDefault_InUnit;
+    { A statement whose chain goes on past a call three links in --
+      W.A.Active().Sig.Emit(1), W.A.Active().Items[0] := 5 -- parses ("Expected
+      'end' but got '.'") and runs. }
+    procedure TestRun_ChainPastMultiLevelCall;
   end;
 
 implementation
@@ -5370,6 +5374,62 @@ begin
   AssertEquals('exit code', 0, ExitCode);
   AssertEquals('stdout', 'a False True' + LineEnding + 'b True False' + LineEnding,
     Output);
+end;
+
+procedure TE2EMiscTests.TestRun_ChainPastMultiLevelCall;
+const
+  Src = '''
+    program P;
+    type
+      TSig = class
+      public
+        procedure Emit(N: Int);
+      end;
+      TEd = class
+      public
+        Sig: TSig;
+        Items: array[0..1] of Int;
+        constructor Create();
+      end;
+      TArea = class
+      public
+        E: TEd;
+        function Active(): TEd;
+      end;
+      TWin = class
+      public
+        A: TArea;
+      end;
+    procedure TSig.Emit(N: Int);
+    begin
+      WriteLn('emit ', N);
+    end;
+    constructor TEd.Create();
+    begin
+      Sig := TSig.Create();
+    end;
+    function TArea.Active(): TEd;
+    begin
+      Result := E;
+    end;
+    var
+      W: TWin;
+    begin
+      W := TWin.Create();
+      W.A := TArea.Create();
+      W.A.E := TEd.Create();
+      W.A.Active().Sig.Emit(1);
+      W.A.Active().Items[1] := 5;
+      WriteLn(W.A.E.Items[1]);
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile + run: ' + Output, CompileAndRunNativeCLI(Src, False, '', Output, ExitCode));
+  AssertEquals('emit 1' + LE + '5' + LE, Output);
 end;
 
 initialization

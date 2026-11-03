@@ -4892,6 +4892,23 @@ begin
               if not Check(tkRParen) then
                 ParseMethodCallArgList(MCall);
               Expect(tkRParen);
+              { A.B.M(args).F.N(...), A.B.M(args)[I] := V, A.B.M(args)(X):
+                the chain goes on past the call -- carry on as in an
+                expression (the two-level Name.M(args). arm's twin). }
+              if Check(tkDot) or Check(tkLBracket) or Check(tkLParen) then
+              begin
+                MCallExpr        := TMethodCallExpr.Create();
+                MCallExpr.Line   := Line;
+                MCallExpr.Col    := Col;
+                MCallExpr.Name   := MCall.Name;
+                MCallExpr.ObjExpr := MCall.ObjExpr;
+                MCall.ObjExpr    := nil;
+                while MCall.Args.Count > 0 do
+                  MCallExpr.Args.Add(MCall.Args.Extract(MCall.Args.Items[0]));
+                MCall.Free();
+                MCall := nil;
+                Exit(Self.ChainTailStmt(MCallExpr, Name, Line, Col));
+              end;
             end;
             Break;
           end;
