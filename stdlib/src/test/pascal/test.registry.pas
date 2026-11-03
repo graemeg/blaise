@@ -57,6 +57,7 @@ uses
   Nntp.Tests,
   Regex.Tests,
   IOFiles.Tests,
+  IOProcess.Tests,
   ClassicPascalTypes.Tests;
 
 implementation
