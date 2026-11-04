@@ -34,6 +34,8 @@ type
       to its idle frame slot (G.Hi() then dispatched on the env's nil: a crash);
       arm64 refused the captured loop variable ("store to variable 'X'"). }
     procedure TestRun_CapturedManagedVars_SharedWithDeclaringRoutine;
+    { The enclosing routines' constants are visible in a literal's body. }
+    procedure TestRun_EnclosingLocalConsts_VisibleInClosure;
     { a [Weak] local (class or interface) captured by a closure or a nested
       routine stays weak: assigned in the body, in the declaring routine,
       and after the declaring routine has returned }
@@ -325,6 +327,53 @@ const Src =
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '42' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_EnclosingLocalConsts_VisibleInClosure;
+const Src =
+  '''
+  program P;
+  uses SysUtils;
+  type
+    TFn = reference to function(): string;
+  procedure Run;
+  const
+    Greeting = 'hello';
+    Count = 3;
+    Twice = Count * 2;
+  var
+    F: TFn;
+
+    procedure Inner;
+    const
+      Mark = '!';
+    var
+      G: TFn;
+    begin
+      G := function (): string
+      begin
+        Result := Greeting + Mark + IntToStr(Twice)
+      end;
+      WriteLn(G())
+    end;
+
+  begin
+    F := function (): string
+    const
+      Count = 7;
+    begin
+      Result := Greeting + ' ' + IntToStr(Count) + ' ' + IntToStr(Twice)
+    end;
+    WriteLn(F());
+    Inner()
+  end;
+  begin
+    Run()
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'hello 7 6' + LineEnding + 'hello!6' + LineEnding, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_ClosureWrite_VisibleInEnclosing;

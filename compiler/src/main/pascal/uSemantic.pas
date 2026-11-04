@@ -896,6 +896,7 @@ type
     procedure AnalyseArgSlot(AList: TObjectList; AIdx: Int);
     procedure ResolveDeferredArrowArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
     function  AnalyseAnonMethodExpr(AExpr: TAnonMethodExpr): TTypeDesc;
+    procedure InheritEnclosingConsts(ADecl: TMethodDecl);
     procedure AnalyseVarDeclStmt(AStmt: TVarDeclStmt);
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
     procedure RejectRecordSelfUse(AThunk: TMethodDecl);
@@ -23082,6 +23083,108 @@ begin
   AME.IsArrow := False;   { inferred — analyse as an ordinary literal }
 end;
 
+{ A literal's body is analysed later, at module scope (DrainPendingAnonDecls),
+  where the constants of the routines around it are out of sight.  They are
+  values, not storage, so the body gets copies of its own: each enclosing
+  routine's constants (outermost first), unless the literal declares the
+  name itself.  An integer or string constant is copied as its value, so it
+  means what it meant where it was declared even when the literal shadows a
+  name it was computed from.  Array constants are not copied. }
+procedure TSemanticAnalyser.InheritEnclosingConsts(ADecl: TMethodDecl);
+var
+  Chain: TObjectList;
+  D: TMethodDecl;
+  Copies, Mine: TObjectList;
+  Own: TStringList;
+  CD, Copy_: TConstDecl;
+  Sym: TSymbol;
+  I, J: Int;
+begin
+  if (ADecl = nil) or (ADecl.Body = nil) then
+    Exit;
+  D := FCurrentEnclosingDecl;
+  if D = nil then
+    D := FCurrentMethodDecl;
+  if D = nil then
+    Exit;
+  Own := TStringList.Create();
+  try
+    for I := 0 to ADecl.Params.Count - 1 do
+      Own.Add(LowerCase(TMethodParam(ADecl.Params.Items[I]).ParamName));
+    for I := 0 to ADecl.Body.ConstDecls.Count - 1 do
+      Own.Add(LowerCase(TConstDecl(ADecl.Body.ConstDecls.Items[I]).Name));
+    for I := 0 to ADecl.Body.Decls.Count - 1 do
+      if TObject(ADecl.Body.Decls.Items[I]) is TVarDecl then
+        for J := 0 to TVarDecl(ADecl.Body.Decls.Items[I]).Names.Count - 1 do
+          Own.Add(LowerCase(TVarDecl(ADecl.Body.Decls.Items[I]).Names.Strings[J]));
+    Chain := TObjectList.Create(False);
+    Copies := TObjectList.Create(False);
+    try
+      while D <> nil do
+      begin
+        Chain.Add(D);
+        D := D.EnclosingDecl;
+      end;
+      { Outermost first. }
+      for I := Chain.Count - 1 downto 0 do
+      begin
+        D := TMethodDecl(Chain.Items[I]);
+        if D.Body = nil then
+          Continue;
+        for J := 0 to D.Body.ConstDecls.Count - 1 do
+        begin
+          CD := TConstDecl(D.Body.ConstDecls.Items[J]);
+          if CD.IsArrayConst or (Own.IndexOf(LowerCase(CD.Name)) >= 0) then
+            Continue;
+          Own.Add(LowerCase(CD.Name));
+          Copy_ := CloneConstDecl(CD);
+          Sym := FTable.Lookup(CD.Name);
+          if (Sym <> nil) and (Sym.Kind = skConstant) and (Sym.TypeDesc <> nil) then
+          begin
+            if Sym.TypeDesc.IsString() then
+            begin
+              Copy_.ConstParts := nil;
+              Copy_.IntExprTokens := nil;
+              Copy_.IntValueExpr := nil;
+              Copy_.IsString := True;
+              Copy_.IsFloat := False;
+              Copy_.StrVal := Sym.ConstString;
+            end
+            else if Sym.TypeDesc.Kind in [tyInteger, tyInt64] then
+            begin
+              Copy_.ConstParts := nil;
+              Copy_.IntExprTokens := nil;
+              Copy_.IntValueExpr := nil;
+              Copy_.IsString := False;
+              Copy_.IsFloat := False;
+              Copy_.IntVal := Sym.ConstValue;
+            end;
+          end;
+          Copies.Add(Copy_);
+        end;
+      end;
+      { The copies go first (the literal's own may use them): take its own
+        out (Extract does not free), add the copies, then put them back. }
+      Mine := TObjectList.Create(False);
+      try
+        while ADecl.Body.ConstDecls.Count > 0 do
+          Mine.Add(ADecl.Body.ConstDecls.Extract(ADecl.Body.ConstDecls.Items[0]));
+        for I := 0 to Copies.Count - 1 do
+          ADecl.Body.ConstDecls.Add(Copies.Items[I]);
+        for I := 0 to Mine.Count - 1 do
+          ADecl.Body.ConstDecls.Add(Mine.Items[I]);
+      finally
+        Mine.Free();
+      end;
+    finally
+      Copies.Free();
+      Chain.Free();
+    end;
+  finally
+    Own.Free();
+  end;
+end;
+
 function TSemanticAnalyser.AnalyseAnonMethodExpr(AExpr: TAnonMethodExpr): TTypeDesc;
 { Anonymous procedure/function literal (docs/anonymous-methods-design.adoc,
   Phase 1: capture-free).  Two products:
@@ -23168,6 +23271,7 @@ begin
     MD.IsImplOnly := FCurrentUnit <> nil;
     AExpr.LiftedName := MD.Name;
     AExpr.LiftedDecl := MD;
+    Self.InheritEnclosingConsts(AExpr.Decl);
     MD.IsAnonThunk := True;
     { Hidden VALUE slot for argument-position materialisation: a 16-byte
       local of this literal's reference type in the enclosing frame.  The
