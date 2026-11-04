@@ -84,6 +84,9 @@ type
     procedure TestEmitXref_PlainNames;
     procedure TestEmitXref_InheritedPropertyAndExit;
     procedure TestEmitXref_Members;
+    { --emit-tokens FILE: the lexer's tokens for the source, as the parser
+      sees them (inactive conditional branches left out). }
+    procedure TestEmitTokens;
     procedure TestNormalCompileStillWorks;
     procedure TestFPCVersionProbeGone;
     { ---- Steps 2-5: driver option contract surfacing through the CLI ----
@@ -656,6 +659,65 @@ begin
       'line 3: declared (Int32), implemented (Byte)', Out_) >= 0);
   AssertTrue('points at the implementation: ' + Out_,
     Pos('at line 5 col 1 in uimpl215', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestEmitTokens;
+var
+  Src, Out_, TokPath, X: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource(
+    'program tk;' + LineEnding +                         { 1 }
+    '{$IFDEF NOPE}' + LineEnding +                       { 2 }
+    'var Hidden: Int;' + LineEnding +                    { 3 }
+    '{$ENDIF}' + LineEnding +                            { 4 }
+    'begin' + LineEnding +                               { 5 }
+    '  WriteLn(''it''''s'', 42 + 1.5);' + LineEnding +   { 6 }
+    'end.');
+  TokPath := Src + '.tokens';
+  EC := RunCompiler(['--check', '--emit-tokens', TokPath, '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  AssertTrue('written', FileExists(TokPath));
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(TokPath);
+    X := L.Text;
+  finally
+    L.Free();
+  end;
+  { line, col (1-based), kind, value. }
+  AssertTrue('a keyword: ' + X, Pos('1'#9'1'#9'program'#9'program', X) >= 0);
+  AssertTrue('an identifier: ' + X, Pos('1'#9'9'#9'identifier'#9'tk', X) >= 0);
+  AssertTrue('an inactive branch is left out: ' + X, Pos('Hidden', X) < 0);
+  AssertTrue('a string, unescaped: ' + X, Pos('6'#9'11'#9'string literal'#9'it''s', X) >= 0);
+  AssertTrue('an integer: ' + X, Pos('6'#9'20'#9'integer literal'#9'42', X) >= 0);
+  AssertTrue('a float: ' + X, Pos('6'#9'25'#9'float literal'#9'1.5', X) >= 0);
+  AssertTrue('the end: ' + X, Pos('7'#9'4'#9'.', X) >= 0);
+  { A value's line breaks are escaped: one token, one line. }
+  Src := WriteScratchSource('program tb; const S = ''''''' + LineEnding +
+    '  a\b' + LineEnding + '  c' + LineEnding + '  ''''''; begin end.');
+  TokPath := Src + '.tokens';
+  EC := RunCompiler(['--emit-tokens', TokPath, '--source', Src], Out_);
+  AssertEquals('text block, exit 0: ' + Out_, 0, EC);
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(TokPath);
+    X := L.Text;
+    AssertTrue('escaped: ' + X, Pos('string literal'#9'a\\b\nc', X) >= 0);
+    AssertEquals('one line a token: ' + X, 11, L.Count);
+  finally
+    L.Free();
+  end;
+  { On its own it only lexes: no --output needed, and a source that would
+    not compile is still lexed. }
+  Src := WriteScratchSource('program bad; begin Undeclared := 1 end.');
+  TokPath := Src + '.tokens';
+  EC := RunCompiler(['--emit-tokens', TokPath, '--source', Src], Out_);
+  AssertEquals('lex only, exit 0: ' + Out_, 0, EC);
+  AssertTrue('written', FileExists(TokPath));
 end;
 
 { A member after a dot is recorded at its own name, not the access's. }

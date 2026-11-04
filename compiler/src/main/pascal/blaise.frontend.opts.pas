@@ -46,6 +46,9 @@ type
     { --emit-xref FILE: each name use (a member after a dot too) and the declaration it
       resolves to, one tab-separated line each (an IDE's resolver oracle). }
     EmitXrefFile: string;
+    { --emit-tokens FILE: the source's tokens from the lexer, one per line
+      (an IDE's lexer oracle). }
+    EmitTokensFile: string;
     { --print-unit-paths: print the unit search directories, one per line,
       and stop (no --source needed). }
     PrintUnitPaths: Boolean;

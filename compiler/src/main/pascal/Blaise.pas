@@ -149,6 +149,10 @@ begin
     'Errors and warnings as JSON objects on stdout, one per line'));
   WriteLn(FormatFlagLine('--emit-xref <file>',
     'Write each name use (members too) and its declaration (tab-separated)'));
+  WriteLn(FormatFlagLine('--emit-tokens <file>',
+    'Write the source''s tokens, as the parser sees them (tab-separated);'));
+  WriteLn(FormatFlagLine('',
+    'on its own, lex only'));
   WriteLn(FormatFlagLine('--dump-ast',
     'Print the resolved AST to stdout after semantic analysis'));
   WriteLn(FormatFlagLine('--debug',
@@ -328,6 +332,51 @@ begin
   ALexer.ApplyDefines(ADefines);
 end;
 
+{ A token's value on one line: backslash, tab, CR and LF as \\, \t, \r, \n. }
+function EscapeTokenValue(const AValue: string): string;
+var
+  I: Int;
+begin
+  Result := '';
+  for I := 0 to Length(AValue) - 1 do
+    case AValue[I] of
+      92: Result := Result + '\\';
+      9:  Result := Result + '\t';
+      13: Result := Result + '\r';
+      10: Result := Result + '\n';
+    else
+      Result := Result + Copy(AValue, I, 1);
+    end;
+end;
+
+{ --emit-tokens: one line per token of ASource, as the parser receives
+  them (conditional directives applied, inactive branches gone): line,
+  column (1-based), kind and value (an identifier's text, a literal's
+  value -- a string unescaped, then its line breaks, tabs and backslashes
+  escaped).  Tokens an EMBED directive stands for sit at the directive. }
+procedure WriteTokens(const ASource, AFileName: string; ADefines: TStringList; const APath: string);
+var
+  L: TLexer;
+  T: TToken;
+  Out_: TStringList;
+begin
+  L := TLexer.Create(ASource, AFileName);
+  AddDefinesTo(L, ADefines);
+  Out_ := TStringList.Create();
+  try
+    repeat
+      T := L.Next();
+      if T.Kind = tkEOF then
+        Break;
+      Out_.Add(IntToStr(T.Line) + #9 + IntToStr(T.Col) + #9 + TokenKindName(T.Kind) + #9 +
+        EscapeTokenValue(T.Value));
+    until False;
+    Out_.SaveToFile(APath);
+  finally
+    Out_.Free();
+  end;
+end;
+
 function ParseArgs(AFront: TFrontEndOpts; AOpts: TBackendOpts;
   APendingFlags, APendingArgs: TStringList): Boolean;
 var
@@ -391,6 +440,11 @@ begin
         for later use as a separate-compilation cache. }
       Inc(I);
       AFront.EmitIfaceDir := ParamStr(I);
+    end
+    else if (Arg = '--emit-tokens') and (I < ParamCount()) then
+    begin
+      Inc(I);
+      AFront.EmitTokensFile := ParamStr(I);
     end
     else if (Arg = '--emit-xref') and (I < ParamCount()) then
     begin
@@ -546,7 +600,7 @@ begin
     Exit;
   end;
   if (not AFront.EmitAsm) and (not AFront.DumpAST) and (not AFront.Check) and
-     (AFront.OutputFile = '') then
+     (AFront.OutputFile = '') and (AFront.EmitTokensFile = '') then
   begin
     WriteLn(StdErr, 'Error: --output is required (or use --emit-asm / --dump-ast / --check)');
     Exit;
@@ -1242,6 +1296,13 @@ begin
   UnitIfaces := nil;
   try
     try
+      if Front.EmitTokensFile <> '' then
+      begin
+        WriteTokens(Source.Text, SourceFile, Front.Defines, Front.EmitTokensFile);
+        { On its own (no --check, --output or --emit-asm) it only lexes. }
+        if (not EmitAsm) and (not DumpAST) and (not CheckOnly) and (OutputFile = '') then
+          Halt(0);
+      end;
       Lexer  := TLexer.Create(Source.Text, SourceFile);
       AddDefinesTo(Lexer, Front.Defines);
       Parser := TParser.Create(Lexer);
