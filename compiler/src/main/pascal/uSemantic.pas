@@ -196,6 +196,9 @@ type
     FXref:                 TStringList;
     FXrefSeen:             TStringList;
     FXrefSource:           string;
+    { The scopes holding a unit's (or program's) own declarations; a name
+      found in any other scope below the global one is a routine's local. }
+    FXrefUnitScopes:       TList<TScope>;
     FMethodOwnerHint:      string;       { receiver owning-unit hint for the NEXT
                                            ResolveMethodOverload call, consumed and
                                            cleared at its start.  Disambiguates a
@@ -1094,6 +1097,7 @@ type
       it (an ancestor, for an inherited one). }
     procedure NotePropertyXref(ALine, ACol: Int; const AName: string; AProp: TPropertyInfo);
     property XrefSource: string read FXrefSource write FXrefSource;
+    procedure NoteUnitScope;
     { Record that two units in scope export module var AName (the cached-
       interface import path's last-wins collision). }
     procedure NoteContestedGlobal(const AName: string);
@@ -3005,6 +3009,7 @@ begin
   FCurrentUnit := AUnit;
   FlushPendingGenericInstances();
   FTable.PushScope();
+  NoteUnitScope();
   try
     { The unit's own name and the names of directly used units are
       reserved identifiers — no interface or implementation decl may
@@ -3344,6 +3349,13 @@ begin
   FXrefSeen := TStringList.Create();
   FXrefSeen.Sorted := True;
   FXrefSeen.Duplicates := dupIgnore;
+  FXrefUnitScopes := TList<TScope>.Create();
+end;
+
+procedure TSemanticAnalyser.NoteUnitScope;
+begin
+  if FXrefUnitScopes <> nil then
+    FXrefUnitScopes.Add(FTable.CurrentScope);
 end;
 
 procedure TSemanticAnalyser.WriteXref(const APath: string);
@@ -3386,16 +3398,22 @@ begin
     NoteXref(ALine, ACol, AName, 'local', '', ASym.Name);
     Exit;
   end;
-  { A variable's IsGlobal says; for the rest, the scope holding it. }
+  { A variable's IsGlobal says; a unit's symbols carry its name (those of
+  its implementation sit in a scope of their own); for the rest, the
+  scope holding it. }
   S := FTable.CurrentScope;
-  if ASym.Kind = skVariable then
+  if (ASym.Kind = skVariable) or (ASym.OwningUnit <> '') then
     S := nil;
   while (S <> nil) and (S <> FTable.GlobalScope()) do
   begin
     if S.LookupLocal(ASym.Name) = ASym then
     begin
-      NoteXref(ALine, ACol, AName, 'local', '', ASym.Name);
-      Exit;
+      if FXrefUnitScopes.IndexOf(S) < 0 then
+      begin
+        NoteXref(ALine, ACol, AName, 'local', '', ASym.Name);
+        Exit;
+      end;
+      Break;
     end;
     S := S.Parent;
   end;
@@ -3407,7 +3425,11 @@ begin
     have none either. }
   if (U = '') and (FTable.GlobalScope().LookupLocal(ASym.Name) <> ASym) then
     U := FCurrentUnitName;
-  NoteXref(ALine, ACol, AName, 'global', U, Q);
+  { A type's own const or static var is its member. }
+  if ASym.OwnerTypeName <> '' then
+    NoteXref(ALine, ACol, AName, 'member', U, Q)
+  else
+    NoteXref(ALine, ACol, AName, 'global', U, Q);
 end;
 
 procedure TSemanticAnalyser.NotePropertyXref(ALine, ACol: Int; const AName: string; AProp: TPropertyInfo);
@@ -3645,6 +3667,7 @@ begin
     impl-only helpers (e.g. TStringList.SetText -> SplitIntoList).
     (Impl-section type decls were already processed above.) }
   FTable.PushScope();
+  NoteUnitScope();
   try
     { Register impl-section consts + global variables.  Consts stay in this
       pushed scope (layer-1 visible to the unit's own bodies); globals are
@@ -7548,6 +7571,8 @@ begin
     methods can call free functions declared in the same block. }
   AnalyseStandaloneDecls(ABlock);
   FTable.PushScope();
+  if AIsProgramTop then
+    NoteUnitScope();
   Inc(FScopeDepth);
   try
     { The program's top-level block gets its own pushed scope, so the

@@ -464,15 +464,16 @@ begin
     '    property Size: Int read FSize;' + LineEnding + { 5 }
     '  end;' + LineEnding +                             { 6 }
     '  TBox = class(TBase)' + LineEnding +              { 7 }
-    '    function Twice(): Int;' + LineEnding +         { 8 }
-    '  end;' + LineEnding +                             { 9 }
-    'function TBox.Twice(): Int;' + LineEnding +        { 10 }
-    'begin' + LineEnding +                              { 11 }
-    '  if Size > 9 then' + LineEnding +                 { 12 }
-    '    Exit(0);' + LineEnding +                       { 13 }
-    '  Result := Size * 2' + LineEnding +               { 14 }
-    'end;' + LineEnding +                               { 15 }
-    'begin' + LineEnding +                              { 16 }
+    '    const Limit = 9;' + LineEnding +               { 8 }
+    '    function Twice(): Int;' + LineEnding +         { 9 }
+    '  end;' + LineEnding +                             { 10 }
+    'function TBox.Twice(): Int;' + LineEnding +        { 11 }
+    'begin' + LineEnding +                              { 12 }
+    '  if Size > Limit then' + LineEnding +             { 13 }
+    '    Exit(0);' + LineEnding +                       { 14 }
+    '  Result := Size * 2' + LineEnding +               { 15 }
+    'end;' + LineEnding +                               { 16 }
+    'begin' + LineEnding +                              { 17 }
     'end.');
   XrefPath := Src + '.xref';
   EC := RunCompiler(['--check', '--emit-xref', XrefPath, '--source', Src,
@@ -486,9 +487,11 @@ begin
     L.Free();
   end;
   AssertTrue('an inherited property: its declaring class: ' + X,
-    Pos(#9'12'#9'6'#9'Size'#9'member'#9'xr2'#9'TBase.Size', X) >= 0);
-  AssertTrue('Result written: ' + X, Pos(#9'14'#9'3'#9'Result'#9'local', X) >= 0);
-  AssertTrue('Exit(V) writes no Result: ' + X, Pos(ExpandFileName(Src) + #9'13'#9, X) < 0);
+    Pos(#9'13'#9'6'#9'Size'#9'member'#9'xr2'#9'TBase.Size', X) >= 0);
+  AssertTrue('a class''s const: ' + X,
+    Pos(#9'13'#9'13'#9'Limit'#9'member'#9'xr2'#9'TBox.Limit', X) >= 0);
+  AssertTrue('Result written: ' + X, Pos(#9'15'#9'3'#9'Result'#9'local', X) >= 0);
+  AssertTrue('Exit(V) writes no Result: ' + X, Pos(ExpandFileName(Src) + #9'14'#9, X) < 0);
 end;
 
 procedure TCLIContractTests.TestCheck_SemanticErrorAsJson;
