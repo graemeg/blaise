@@ -113,6 +113,7 @@ TNegExpr.LoweredCall  safe
 TAssignment.Name  serialise
 TAssignment.QualifierUnit  serialise
 TAssignment.Expr  serialise
+TAssignment.IsSynthetic  safe
 TAssignment.IsVarParam  safe
 TAssignment.IsGlobal  safe
 TAssignment.IsThreadVar  safe

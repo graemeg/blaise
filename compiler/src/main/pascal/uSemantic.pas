@@ -1090,6 +1090,9 @@ type
       ASym is what the table found; inside a method an implicit Self member
       comes first, as it does for the statement itself. }
     procedure NoteNameXref(ALine, ACol: Int; const AName: string; ASym: TSymbol; AIsCall: Boolean);
+    { A property of the current class: named after the class that declares
+      it (an ancestor, for an inherited one). }
+    procedure NotePropertyXref(ALine, ACol: Int; const AName: string; AProp: TPropertyInfo);
     property XrefSource: string read FXrefSource write FXrefSource;
     { Record that two units in scope export module var AName (the cached-
       interface import path's last-wins collision). }
@@ -2238,6 +2241,7 @@ begin
   Asn.Line := AUse.Line;
   Asn.Col  := AUse.Col;
   Asn.Name := 'Result';
+  Asn.IsSynthetic := True;
   Asn.Expr := Call;
   MD := TMethodDecl.Create();
   MD.Line           := AUse.Line;
@@ -3406,6 +3410,20 @@ begin
   NoteXref(ALine, ACol, AName, 'global', U, Q);
 end;
 
+procedure TSemanticAnalyser.NotePropertyXref(ALine, ACol: Int; const AName: string; AProp: TPropertyInfo);
+var
+  Walk: TRecordTypeDesc;
+begin
+  if FXref = nil then
+    Exit;
+  Walk := FCurrentClass;
+  while (Walk <> nil) and (Walk.Properties.IndexOf(AProp) < 0) do
+    Walk := Walk.Parent;
+  if Walk = nil then
+    Walk := FCurrentClass;
+  NoteXref(ALine, ACol, AName, 'member', Walk.OwningUnit, Walk.Name + '.' + AProp.Name);
+end;
+
 procedure TSemanticAnalyser.NoteNameXref(ALine, ACol: Int; const AName: string; ASym: TSymbol;
   AIsCall: Boolean);
 var
@@ -3442,7 +3460,7 @@ begin
     P := FCurrentClass.FindProperty(AName);
     if P <> nil then
     begin
-      NoteXref(ALine, ACol, AName, 'member', FCurrentClass.OwningUnit, FCurrentClass.Name + '.' + P.Name);
+      NotePropertyXref(ALine, ACol, AName, P);
       Exit;
     end;
   end;
@@ -14395,6 +14413,7 @@ begin
       ExitAssign.Line := AStmt.Line;
       ExitAssign.Col  := AStmt.Col;
       ExitAssign.Name := 'Result';
+      ExitAssign.IsSynthetic := True;
       ExitAssign.Expr := TExitStmt(AStmt).Value;
       TExitStmt(AStmt).Value := nil;   { ownership moves into the assignment }
       AnalyseStmt(ExitAssign);          { fills ResolvedLhsType + checks types }
@@ -15121,7 +15140,8 @@ begin
   else
   begin
     VarSym := FTable.Lookup(AAssign.Name);
-    NoteNameXref(AAssign.Line, AAssign.Col, AAssign.Name, VarSym, False);
+    if not AAssign.IsSynthetic then
+      NoteNameXref(AAssign.Line, AAssign.Col, AAssign.Name, VarSym, False);
   end;
   { BUG-001: assigning to a for-in loop variable writes a per-iteration COPY
     that never reaches the collection element — almost always a mistake.
@@ -20621,8 +20641,7 @@ begin
       { Property of current class, method-backed: rewrite to the read method }
       PropInfo := FCurrentClass.FindProperty(TIdentExpr(AExpr).Name);
       if PropInfo <> nil then
-        NoteXref(AExpr.Line, AExpr.Col, TIdentExpr(AExpr).Name, 'member', FCurrentClass.OwningUnit,
-          FCurrentClass.Name + '.' + PropInfo.Name);
+        NotePropertyXref(AExpr.Line, AExpr.Col, TIdentExpr(AExpr).Name, PropInfo);
       if (PropInfo <> nil) and PropInfo.IsStatic then
       begin
         Result := Self.LowerBareStaticPropRead(TIdentExpr(AExpr), FCurrentClass);
@@ -22759,6 +22778,7 @@ begin
       Asn.Line := AME.ArrowExpr.Line;
       Asn.Col  := AME.ArrowExpr.Col;
       Asn.Name := 'Result';
+      Asn.IsSynthetic := True;
       Asn.Expr := AME.ArrowExpr;
       Blk.Stmts.Add(Asn);
     end
@@ -23803,6 +23823,7 @@ begin
     Asn.Line := AExpr.Line;
     Asn.Col  := AExpr.Col;
     Asn.Name := 'Result';
+    Asn.IsSynthetic := True;
     Asn.Expr := FCall;
     NewDecl.Body.Stmts.Add(Asn);
   end

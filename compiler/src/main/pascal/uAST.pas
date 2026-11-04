@@ -305,6 +305,9 @@ type
   TAssignment = class(TASTStmt)
   public
     Name:            string;
+    { Made by the compiler (Exit(V), an arrow body: Result := V), not
+      written: not a use of Result in the source. }
+    IsSynthetic:     Boolean;
     QualifierUnit:   string;     { set by the parser — non-empty when the target
                                    is written unit-qualified, 'Unit.Var := ...';
                                    uSemantic resolves it against that unit's own

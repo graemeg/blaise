@@ -78,8 +78,11 @@ type
     procedure TestCheck_WarningAsJson;
     procedure TestCheck_TextDiagnosticsByDefault;
     procedure TestCheck_UnitWritesNothing;
+    { A unit compiled as the top level loads its implementation's uses. }
+    procedure TestCheck_UnitWithImplementationUses;
     { --emit-xref FILE: each plain identifier use and its declaration. }
     procedure TestEmitXref_PlainNames;
+    procedure TestEmitXref_InheritedPropertyAndExit;
     procedure TestNormalCompileStillWorks;
     procedure TestFPCVersionProbeGone;
     { ---- Steps 2-5: driver option contract surfacing through the CLI ----
@@ -346,6 +349,35 @@ begin
   AssertEquals('nothing printed', '', Trim(Out_));
 end;
 
+procedure TCLIContractTests.TestCheck_UnitWithImplementationUses;
+var
+  Dep, Top, Out_: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Dep := FScratch + 'implusesdep.pas';
+  Top := FScratch + 'implusestop.pas';
+  L := TStringList.Create();
+  try
+    L.Text := 'unit implusesdep;' + LineEnding + 'interface' + LineEnding + 'type' + LineEnding +
+      '  TA = class' + LineEnding + '    N: Int;' + LineEnding + '  end;' + LineEnding +
+      'implementation' + LineEnding + 'end.';
+    L.SaveToFile(Dep);
+    L.Text := 'unit implusestop;' + LineEnding + 'interface' + LineEnding + 'function Get(): Int;' +
+      LineEnding + 'implementation' + LineEnding + 'uses implusesdep;' + LineEnding +
+      'function Get(): Int;' + LineEnding + 'var' + LineEnding + '  A: TA;' + LineEnding + 'begin' +
+      LineEnding + '  A := TA.Create();' + LineEnding + '  Result := A.N' + LineEnding + 'end;' +
+      LineEnding + 'end.';
+    L.SaveToFile(Top);
+  finally
+    L.Free();
+  end;
+  EC := RunCompiler(['--check', '--source', Top, '--unit-path', FScratch,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+end;
+
 procedure TCLIContractTests.TestEmitXref_PlainNames;
 var
   Src, Out_, XrefPath, X: string;
@@ -415,6 +447,48 @@ begin
   AssertTrue('a method called on Self: ' + X,
     Pos(#9'26'#9'3'#9'Reset'#9'member'#9'xr'#9'TBox.Reset', X) >= 0);
   AssertTrue('the file: ' + X, Pos(ExpandFileName(Src) + #9'29'#9'3'#9'G', X) >= 0);
+end;
+
+procedure TCLIContractTests.TestEmitXref_InheritedPropertyAndExit;
+var
+  Src, Out_, XrefPath, X: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource(
+    'program xr2;' + LineEnding +                       { 1 }
+    'type' + LineEnding +                               { 2 }
+    '  TBase = class' + LineEnding +                    { 3 }
+    '    FSize: Int;' + LineEnding +                    { 4 }
+    '    property Size: Int read FSize;' + LineEnding + { 5 }
+    '  end;' + LineEnding +                             { 6 }
+    '  TBox = class(TBase)' + LineEnding +              { 7 }
+    '    function Twice(): Int;' + LineEnding +         { 8 }
+    '  end;' + LineEnding +                             { 9 }
+    'function TBox.Twice(): Int;' + LineEnding +        { 10 }
+    'begin' + LineEnding +                              { 11 }
+    '  if Size > 9 then' + LineEnding +                 { 12 }
+    '    Exit(0);' + LineEnding +                       { 13 }
+    '  Result := Size * 2' + LineEnding +               { 14 }
+    'end;' + LineEnding +                               { 15 }
+    'begin' + LineEnding +                              { 16 }
+    'end.');
+  XrefPath := Src + '.xref';
+  EC := RunCompiler(['--check', '--emit-xref', XrefPath, '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(XrefPath);
+    X := L.Text;
+  finally
+    L.Free();
+  end;
+  AssertTrue('an inherited property: its declaring class: ' + X,
+    Pos(#9'12'#9'6'#9'Size'#9'member'#9'xr2'#9'TBase.Size', X) >= 0);
+  AssertTrue('Result written: ' + X, Pos(#9'14'#9'3'#9'Result'#9'local', X) >= 0);
+  AssertTrue('Exit(V) writes no Result: ' + X, Pos(ExpandFileName(Src) + #9'13'#9, X) < 0);
 end;
 
 procedure TCLIContractTests.TestCheck_SemanticErrorAsJson;
