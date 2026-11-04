@@ -5681,7 +5681,7 @@ begin
   finally
     FIn.Free();
   end;
-  MagicAt := Pos('OPDF' + #1 + #0, ObjOut);
+  MagicAt := Pos('OPDF' + #2 + #0, ObjOut);
   AssertTrue('dependency .o carries an OPDF payload', MagicAt >= 0);
   if HostTarget().CPU = cpuArm64 then
     WantArch := 4
@@ -5777,7 +5777,7 @@ begin
   finally
     FIn.Free();
   end;
-  MagicAt := Pos('OPDF' + #1 + #0, ObjOut);
+  MagicAt := Pos('OPDF' + #2 + #0, ObjOut);
   AssertTrue('unit object carries an OPDF payload', MagicAt >= 0);
   if HostTarget().CPU = cpuArm64 then
     WantArch := 4

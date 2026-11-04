@@ -908,7 +908,11 @@ procedure TOPDFEmitter.EmitHeader;
 begin
   L('    # OPDF header (32 bytes)');
   L('    .byte 79, 80, 68, 70           # Magic: OPDF');
-  L('    .2byte 1                        # Version');
+  { The format version pdr checks (opdf_types.OPDF_VERSION).  Bump it with
+    every layout change an older reader would misread, so a mismatched
+    pdr says so instead of showing wrong values.  2: LocalVar
+    LocationData/CompanionData and Constant ValueLen are 4 bytes. }
+  L('    .2byte 2                        # Version');
   L('    .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  # BuildID (zeroed)');
   if FTargetArch = 4 then
     L('    .byte 4                        # TargetArch: archAArch64')

@@ -165,7 +165,9 @@ var
   IR: string;
 begin
   IR := GenOPDF('program P; begin end.');
-  AssertTrue('version word present', Contains(IR, '.2byte 1'));
+  { Version 2: LocalVar LocationData/CompanionData and Constant ValueLen
+    are 4 bytes.  pdr reads this version only, and names a mismatch. }
+  AssertTrue('version 2', Contains(IR, '.2byte 2                        # Version'));
 end;
 
 procedure TOPDFTests.TestOPDF_HeaderTargetArch;
