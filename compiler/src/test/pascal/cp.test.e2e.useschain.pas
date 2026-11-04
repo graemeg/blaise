@@ -52,6 +52,11 @@ type
       routine (statement and expression forms); it was "No matching
       overload for 'TW.Save' with 2 argument(s)". }
     procedure TestRun_UnitQualifiedCall_InSameNamedMethod;
+    { A unit's property typed TList<TFrame> over its own record reads from
+      the unit cache: the property's type was exported under its source
+      spelling, which the importer could not resolve, and the compiler
+      crashed on S.Frames.Count (nil property type). }
+    procedure TestRun_GenericPropertyOfUnitRecord_FromUnitCache;
     { Unit-qualified const disambiguation: a 'Unit.Foo' reference resolves
       against that specific unit's exports, so it is never shadowed by a
       same-named const in another used unit, regardless of `uses` order. }
@@ -534,6 +539,61 @@ begin
     CompileAndRunWithUnits(QuSrc, QvSrc, DrvSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('x1' + LE + '42' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_GenericPropertyOfUnitRecord_FromUnitCache;
+const
+  UfSrc = '''
+    unit uf;
+    interface
+    uses Generics.Collections;
+    type
+      TFrame = record
+        Name: string;
+      end;
+      TSession = class
+      private
+        FFrames: TList<TFrame>;
+      public
+        constructor Create();
+        property Frames: TList<TFrame> read FFrames;
+      end;
+    implementation
+    constructor TSession.Create();
+    var
+      F: TFrame;
+    begin
+      FFrames := TList<TFrame>.Create();
+      F.Name := 'main';
+      FFrames.Add(F);
+    end;
+    end.
+    ''';
+  UgSrc = '''
+    unit ug;
+    interface
+    implementation
+    end.
+    ''';
+  DrvSrc = '''
+    program P;
+    uses uf, ug;
+    var S: TSession;
+    begin
+      S := TSession.Create();
+      if S.Frames.Count > 0 then
+        WriteLn(S.Frames.Count, ' ', S.Frames[0].Name);
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('cold: ' + Output,
+    CompileAndRunWithUnits(UfSrc, UgSrc, DrvSrc, Output, RCode));
+  AssertEquals('cold', '1 main' + LE, Output);
+  AssertTrue('warm (uf from the unit cache): ' + Output,
+    CompileAndRunWithUnits(UfSrc, UgSrc, DrvSrc, Output, RCode));
+  AssertEquals('warm', '1 main' + LE, Output);
 end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitConst_QualifiedDisambig;

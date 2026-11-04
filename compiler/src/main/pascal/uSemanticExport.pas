@@ -98,6 +98,33 @@ begin
       TFieldDecl(ASrc.Items[I]).TypeName, TFieldDecl(ASrc.Items[I]).ResolvedType);
 end;
 
+{ Rewrite the cloned property list's types under their canonical names
+  (see ExportTypeSpelling), from ADesc's analysed properties: a property
+  typed TList<TFrame> over the unit's own record was exported as spelt,
+  which an importer cannot resolve, and S.Frames.Count crashed the
+  compiler (BUG-20261104-generic-property-type-from-unit-cache). }
+procedure CanonicalisePropertyTypes(AClone: TObjectList; ADesc: TTypeDesc);
+var
+  I: Int;
+  P: TPropertyDecl;
+  Info: TPropertyInfo;
+begin
+  if (AClone = nil) or (ADesc = nil) then Exit;
+  for I := 0 to AClone.Count - 1 do
+  begin
+    P := TPropertyDecl(AClone.Items[I]);
+    Info := nil;
+    if ADesc is TRecordTypeDesc then
+      Info := TRecordTypeDesc(ADesc).FindProperty(P.Name)
+    else if ADesc is TInterfaceTypeDesc then
+      Info := TInterfaceTypeDesc(ADesc).FindProperty(P.Name);
+    if Info = nil then Continue;
+    P.TypeName := ExportTypeSpelling(P.TypeName, Info.TypeDesc);
+    if P.IndexTypeName <> '' then
+      P.IndexTypeName := ExportTypeSpelling(P.IndexTypeName, Info.IndexTypeDesc);
+  end;
+end;
+
 { ----- Type-reference resolution ---------------------------------
 
   Given a type name appearing in a declaration, figure out which unit
@@ -340,6 +367,16 @@ begin
   else if ASrc.Def is TClassTypeDef then
     CanonicaliseFieldTypes(TClassTypeDef(ASrc.Def).Fields,
       TClassTypeDef(Result.Def).Fields);
+  if ASymbolTable <> nil then
+  begin
+    AliasDesc := ASymbolTable.FindType(ASrc.Name);
+    if ASrc.Def is TRecordTypeDef then
+      CanonicalisePropertyTypes(TRecordTypeDef(Result.Def).Properties, AliasDesc)
+    else if ASrc.Def is TClassTypeDef then
+      CanonicalisePropertyTypes(TClassTypeDef(Result.Def).Properties, AliasDesc)
+    else if ASrc.Def is TInterfaceTypeDef then
+      CanonicalisePropertyTypes(TInterfaceTypeDef(Result.Def).Properties, AliasDesc);
+  end;
 
   if ASrc.Def is TClassTypeDef then
     PopulateClassEntry(Result, TClassTypeDef(ASrc.Def), AIface, ADeps, ASymbolTable)
