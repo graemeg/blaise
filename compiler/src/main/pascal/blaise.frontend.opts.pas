@@ -43,6 +43,9 @@ type
     SearchPaths: TStringList;   { owned }
     Defines: TStringList;       { owned — conditional-compilation symbols from -d }
     EmitIfaceDir: string;
+    { --emit-xref FILE: each plain identifier use and the declaration it
+      resolves to, one tab-separated line each (an IDE's resolver oracle). }
+    EmitXrefFile: string;
     Incremental: Boolean;
     UnitCacheDir: string;
     DumpAST: Boolean;

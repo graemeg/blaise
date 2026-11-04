@@ -145,6 +145,8 @@ begin
     'Parse and analyse only: report problems, generate no code (no --output)'));
   WriteLn(FormatFlagLine('--diagnostics=json',
     'Errors and warnings as JSON objects on stdout, one per line'));
+  WriteLn(FormatFlagLine('--emit-xref <file>',
+    'Write each plain identifier use and its declaration (tab-separated)'));
   WriteLn(FormatFlagLine('--dump-ast',
     'Print the resolved AST to stdout after semantic analysis'));
   WriteLn(FormatFlagLine('--debug',
@@ -342,6 +344,7 @@ begin
   AFront.BackendExplicit := False;
   AFront.SkipDepCodegen := False;
   AFront.EmitIfaceDir   := '';
+  AFront.EmitXrefFile   := '';
   AFront.Incremental    := True;   { default-on; --no-incremental opts out }
   AFront.UnitCacheDir   := '';
   AOpts.OPDFEnabled     := False;
@@ -386,6 +389,11 @@ begin
         for later use as a separate-compilation cache. }
       Inc(I);
       AFront.EmitIfaceDir := ParamStr(I);
+    end
+    else if (Arg = '--emit-xref') and (I < ParamCount()) then
+    begin
+      Inc(I);
+      AFront.EmitXrefFile := ParamStr(I);
     end
     else if Arg = '--no-incremental' then
       { Incremental compilation is the default: each source-loaded dep
@@ -895,6 +903,7 @@ var
   OPDFAsmFile: string;
   SkipDepCodegen: Boolean;
   EmitIfaceDir: string;
+  EmitXrefFile: string;
   Incremental:    Boolean;
   UnitCacheDir:   string;
   Source:   TStringList;
@@ -1028,6 +1037,7 @@ begin
   SearchPaths    := Front.SearchPaths;
   SkipDepCodegen := Front.SkipDepCodegen;
   EmitIfaceDir   := Front.EmitIfaceDir;
+  EmitXrefFile   := Front.EmitXrefFile;
   Incremental    := Front.Incremental;
   UnitCacheDir   := Front.UnitCacheDir;
   OPDFEnabled    := Opts.OPDFEnabled;
@@ -1234,6 +1244,8 @@ begin
 
     try
       Semantic := TSemanticAnalyser.Create();
+      if EmitXrefFile <> '' then
+        Semantic.EnableXref();
       if (SearchPaths <> nil) then
       begin
         if IsUnitMode and (TopUnit.UsedUnits.Count > 0) then
@@ -1304,6 +1316,7 @@ begin
         { Unit-as-top-level: same analysis pass deps go through, no
           program 'main' to wrap.  Sym tables and class layouts
           end up in Semantic's FTable just like for a regular dep. }
+        Semantic.XrefSource := ExpandFileName(SourceFile);
         Semantic.AnalyseUnitForExport(TopUnit);
         { Always produce the iface — it's about to be embedded into
           the .o by CompileUnitToObject.  The dedicated --emit-iface
@@ -1330,7 +1343,12 @@ begin
               LowerCase(TopUnit.Name) + '.bif');
       end
       else
+      begin
+        Semantic.XrefSource := ExpandFileName(SourceFile);
         Semantic.Analyse(Prog);
+      end;
+      if EmitXrefFile <> '' then
+        Semantic.WriteXref(EmitXrefFile);
 
       if DumpAST then
       begin

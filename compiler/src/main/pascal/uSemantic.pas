@@ -191,6 +191,11 @@ type
     FArrayConstCounter:    Int;      { counter for generating unique array-const data labels }
     FAnonEnumCounter:      Int;      { counter for unique anonymous-enum type names (inline 'set of (a,b,c)') }
     FCurrentUnitName:      string;       { name of the unit/program currently being analysed }
+    { --emit-xref: one line per plain identifier use (nil when off), the
+      uses already recorded, and the source file being analysed. }
+    FXref:                 TStringList;
+    FXrefSeen:             TStringList;
+    FXrefSource:           string;
     FMethodOwnerHint:      string;       { receiver owning-unit hint for the NEXT
                                            ResolveMethodOverload call, consumed and
                                            cleared at its start.  Disambiguates a
@@ -1074,6 +1079,18 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    { --emit-xref: record each plain identifier use and the declaration it
+      resolves to; WriteXref saves them.  XrefSource is the file the next
+      analysis reads (a unit's own SourceFile is used for a unit). }
+    procedure EnableXref;
+    procedure WriteXref(const APath: string);
+    procedure NoteXref(ALine, ACol: Int; const AName, AKind, AUnit, AQualified: string);
+    procedure NoteSymbolXref(ALine, ACol: Int; const AName: string; ASym: TSymbol);
+    { A name at the start of a statement or a call (X := ..., Run(...)):
+      ASym is what the table found; inside a method an implicit Self member
+      comes first, as it does for the statement itself. }
+    procedure NoteNameXref(ALine, ACol: Int; const AName: string; ASym: TSymbol; AIsCall: Boolean);
+    property XrefSource: string read FXrefSource write FXrefSource;
     { Record that two units in scope export module var AName (the cached-
       interface import path's last-wins collision). }
     procedure NoteContestedGlobal(const AName: string);
@@ -3317,6 +3334,122 @@ begin
   FCurrentUnit := nil;
 end;
 
+procedure TSemanticAnalyser.EnableXref;
+begin
+  FXref := TStringList.Create();
+  FXrefSeen := TStringList.Create();
+  FXrefSeen.Sorted := True;
+  FXrefSeen.Duplicates := dupIgnore;
+end;
+
+procedure TSemanticAnalyser.WriteXref(const APath: string);
+begin
+  if FXref <> nil then
+    FXref.SaveToFile(APath);
+end;
+
+{ One line: file, line, col, the name as written, kind (local, global,
+  member, enum), the declaring unit ('' for a program's own and for
+  builtins) and the qualified name (TBox.FSize).  A generic instance's
+  body is skipped: its positions are the template's, in another file. }
+procedure TSemanticAnalyser.NoteXref(ALine, ACol: Int; const AName, AKind, AUnit, AQualified: string);
+var
+  Key: string;
+  N: Int;
+begin
+  if (FXref = nil) or (FXrefSource = '') or InGenericInstanceBody() then
+    Exit;
+  Key := FXrefSource + #9 + IntToStr(ALine) + #9 + IntToStr(ACol);
+  N := FXrefSeen.Count;
+  FXrefSeen.Add(Key);
+  if FXrefSeen.Count = N then
+    Exit;
+  FXref.Add(Key + #9 + AName + #9 + AKind + #9 + AUnit + #9 + AQualified);
+end;
+
+{ A symbol found by name: local when a scope inside the global one holds
+  it (parameters, locals, a routine's own consts and types). }
+procedure TSemanticAnalyser.NoteSymbolXref(ALine, ACol: Int; const AName: string; ASym: TSymbol);
+var
+  S: TScope;
+  Q, U: string;
+begin
+  if (FXref = nil) or (ASym = nil) then
+    Exit;
+  if (ASym.Kind in [skParameter, skVarParameter]) or
+     ((ASym.Kind = skVariable) and not ASym.IsGlobal) then
+  begin
+    NoteXref(ALine, ACol, AName, 'local', '', ASym.Name);
+    Exit;
+  end;
+  { A variable's IsGlobal says; for the rest, the scope holding it. }
+  S := FTable.CurrentScope;
+  if ASym.Kind = skVariable then
+    S := nil;
+  while (S <> nil) and (S <> FTable.GlobalScope()) do
+  begin
+    if S.LookupLocal(ASym.Name) = ASym then
+    begin
+      NoteXref(ALine, ACol, AName, 'local', '', ASym.Name);
+      Exit;
+    end;
+    S := S.Parent;
+  end;
+  Q := ASym.Name;
+  if (ASym.OwnerTypeName <> '') and (Pos('.', Q) < 0) then
+    Q := ASym.OwnerTypeName + '.' + Q;
+  U := ASym.OwningUnit;
+  { A program's variables carry no unit; builtins (in the global scope)
+    have none either. }
+  if (U = '') and (FTable.GlobalScope().LookupLocal(ASym.Name) <> ASym) then
+    U := FCurrentUnitName;
+  NoteXref(ALine, ACol, AName, 'global', U, Q);
+end;
+
+procedure TSemanticAnalyser.NoteNameXref(ALine, ACol: Int; const AName: string; ASym: TSymbol;
+  AIsCall: Boolean);
+var
+  F: TFieldInfo;
+  P: TPropertyInfo;
+  M: TMethodDecl;
+  U: string;
+  T: TTypeDesc;
+begin
+  if FXref = nil then
+    Exit;
+  if (FCurrentClass <> nil) and
+     ((ASym = nil) or ASym.IsGlobal or not (ASym.Kind in [skVariable, skParameter, skVarParameter])) then
+  begin
+    if not AIsCall then
+    begin
+      F := FCurrentClass.FindField(AName);
+      if F <> nil then
+      begin
+        NoteXref(ALine, ACol, AName, 'member', F.DeclaringUnit, F.DeclaringType + '.' + F.Name);
+        Exit;
+      end;
+    end;
+    M := FindMethodDecl(FCurrentClass.Name, AName);
+    if M <> nil then
+    begin
+      U := FCurrentClass.OwningUnit;
+      T := FTable.FindType(M.OwnerTypeName);
+      if T <> nil then
+        U := T.OwningUnit;
+      NoteXref(ALine, ACol, AName, 'member', U, M.OwnerTypeName + '.' + M.Name);
+      Exit;
+    end;
+    P := FCurrentClass.FindProperty(AName);
+    if P <> nil then
+    begin
+      NoteXref(ALine, ACol, AName, 'member', FCurrentClass.OwningUnit, FCurrentClass.Name + '.' + P.Name);
+      Exit;
+    end;
+  end;
+  if ASym <> nil then
+    NoteSymbolXref(ALine, ACol, AName, ASym);
+end;
+
 procedure TSemanticAnalyser.AnalyseUnitForExport(AUnit: TUnit);
 var
   I, J:     Int;
@@ -3328,6 +3461,8 @@ var
   Sym:      TSymbol;
   VDecl:    TVarDecl;
 begin
+  if AUnit.SourceFile <> '' then
+    FXrefSource := AUnit.SourceFile;
   FCurrentUnitName := AUnit.Name;
   FCurrentUnit := AUnit;
   { Per-unit accumulator: the caller snapshots it immediately after this
@@ -7546,6 +7681,8 @@ begin
       EnumRef := ResolveEnumMember(TIdentExpr(AExpr).Name, nil);
       if EnumRef <> nil then
       begin
+        NoteXref(AExpr.Line, AExpr.Col, TIdentExpr(AExpr).Name, 'enum', EnumRef.EnumDesc.OwningUnit,
+          EnumRef.EnumDesc.Name + '.' + TIdentExpr(AExpr).Name);
         if EnumMemberCandidateCount(TIdentExpr(AExpr).Name) > 1 then
           SemanticError(Format(
             'cannot determine which enum ''%s'' refers to: it is declared by ' +
@@ -14982,7 +15119,10 @@ begin
         [AAssign.Name, AAssign.QualifierUnit]), AAssign.Line, AAssign.Col);
   end
   else
+  begin
     VarSym := FTable.Lookup(AAssign.Name);
+    NoteNameXref(AAssign.Line, AAssign.Col, AAssign.Name, VarSym, False);
+  end;
   { BUG-001: assigning to a for-in loop variable writes a per-iteration COPY
     that never reaches the collection element — almost always a mistake.
     Standard Pascal (FPC/Delphi) treats for-in as read-only, so the behaviour
@@ -17966,6 +18106,8 @@ begin
          version, even when the enclosing class declared its own.
       3. Unit-level proc / function (program-level or uses-clause). }
   Sym := FTable.Lookup(ACall.Name);
+  if ACall.QualifierUnit = '' then
+    NoteNameXref(ACall.Line, ACall.Col, ACall.Name, Sym, True);
   { Only a LOCAL variable/parameter shadows the implicit-Self method — a
     PROGRAM-LEVEL global of the same (case-insensitive) name must not: the
     class scope sits between locals and the unit scope (BUG-037; same rule
@@ -18783,6 +18925,8 @@ begin
     Local vars/parameters win over implicit-Self method, which wins
     over unit-level. }
   Sym := FTable.Lookup(AExpr.Name);
+  if AExpr.QualifierUnit = '' then
+    NoteNameXref(AExpr.Line, AExpr.Col, AExpr.Name, Sym, True);
   { A program-level global does not shadow an implicit-Self method — see
     the matching note in AnalyseProcCall (BUG-037). }
   if (FCurrentClass <> nil) and (AExpr.QualifierUnit = '') and
@@ -20460,6 +20604,8 @@ begin
       FldInfo := FCurrentClass.FindField(TIdentExpr(AExpr).Name);
       if FldInfo <> nil then
       begin
+        NoteXref(AExpr.Line, AExpr.Col, TIdentExpr(AExpr).Name, 'member', FldInfo.DeclaringUnit,
+          FldInfo.DeclaringType + '.' + FldInfo.Name);
         TIdentExpr(AExpr).IsImplicitSelf    := True;
         TIdentExpr(AExpr).ImplicitFieldInfo := FldInfo;
         Result := FldInfo.TypeDesc;
@@ -20474,6 +20620,9 @@ begin
           AExpr.Line, AExpr.Col);
       { Property of current class, method-backed: rewrite to the read method }
       PropInfo := FCurrentClass.FindProperty(TIdentExpr(AExpr).Name);
+      if PropInfo <> nil then
+        NoteXref(AExpr.Line, AExpr.Col, TIdentExpr(AExpr).Name, 'member', FCurrentClass.OwningUnit,
+          FCurrentClass.Name + '.' + PropInfo.Name);
       if (PropInfo <> nil) and PropInfo.IsStatic then
       begin
         Result := Self.LowerBareStaticPropRead(TIdentExpr(AExpr), FCurrentClass);
@@ -20537,6 +20686,7 @@ begin
       Sym := Self.LookupMemberConst(FCurrentClass, TIdentExpr(AExpr).Name);
       if Sym <> nil then
       begin
+        NoteSymbolXref(AExpr.Line, AExpr.Col, TIdentExpr(AExpr).Name, Sym);
         AssertStaticVarVisible(Sym.Visibility, Sym.OwningUnit,
                                Sym.OwnerTypeName, TIdentExpr(AExpr).Name,
                                AExpr.Line, AExpr.Col);
@@ -20579,6 +20729,7 @@ begin
         AExpr.Line, AExpr.Col);
     end;
     end;  { end else: unqualified resolution (qualified set Sym above) }
+    NoteSymbolXref(AExpr.Line, AExpr.Col, TIdentExpr(AExpr).Name, Sym);
     { Var-params and value-record/array params are both passed by reference at
       the ABI level: the local slot holds a pointer, not the aggregate
       bytes.  Codegen must dereference the slot before reading fields. }

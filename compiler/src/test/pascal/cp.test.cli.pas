@@ -78,6 +78,8 @@ type
     procedure TestCheck_WarningAsJson;
     procedure TestCheck_TextDiagnosticsByDefault;
     procedure TestCheck_UnitWritesNothing;
+    { --emit-xref FILE: each plain identifier use and its declaration. }
+    procedure TestEmitXref_PlainNames;
     procedure TestNormalCompileStillWorks;
     procedure TestFPCVersionProbeGone;
     { ---- Steps 2-5: driver option contract surfacing through the CLI ----
@@ -342,6 +344,77 @@ begin
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
   AssertEquals('exit 0: ' + Out_, 0, EC);
   AssertEquals('nothing printed', '', Trim(Out_));
+end;
+
+procedure TCLIContractTests.TestEmitXref_PlainNames;
+var
+  Src, Out_, XrefPath, X: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource(
+    'program xr;' + LineEnding +                   { 1 }
+    'const' + LineEnding +                         { 2 }
+    '  Limit = 3;' + LineEnding +                  { 3 }
+    'var' + LineEnding +                           { 4 }
+    '  G: Int;' + LineEnding +                     { 5 }
+    'type' + LineEnding +                          { 6 }
+    '  TBox = class' + LineEnding +                { 7 }
+    '    FSize: Int;' + LineEnding +               { 8 }
+    '    procedure Grow();' + LineEnding +         { 9 }
+    '    procedure Reset();' + LineEnding +        { 10 }
+    '  end;' + LineEnding +                        { 11 }
+    'function Twice(N: Int): Int;' + LineEnding +  { 12 }
+    'begin' + LineEnding +                         { 13 }
+    '  Result := N * 2' + LineEnding +             { 14 }
+    'end;' + LineEnding +                          { 15 }
+    'procedure TBox.Reset();' + LineEnding +       { 16 }
+    'begin' + LineEnding +                         { 17 }
+    'end;' + LineEnding +                          { 18 }
+    'procedure TBox.Grow();' + LineEnding +        { 19 }
+    'var' + LineEnding +                           { 20 }
+    '  L: Int;' + LineEnding +                     { 21 }
+    'begin' + LineEnding +                         { 22 }
+    '  L := Limit;' + LineEnding +                 { 23 }
+    '  L := FSize + G;' + LineEnding +             { 24 }
+    '  FSize := Twice(L);' + LineEnding +          { 25 }
+    '  Reset()' + LineEnding +                     { 26 }
+    'end;' + LineEnding +                          { 27 }
+    'begin' + LineEnding +                         { 28 }
+    '  G := Limit' + LineEnding +                  { 29 }
+    'end.');
+  XrefPath := Src + '.xref';
+  EC := RunCompiler(['--check', '--emit-xref', XrefPath, '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  AssertTrue('written', FileExists(XrefPath));
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(XrefPath);
+    X := L.Text;
+  finally
+    L.Free();
+  end;
+  { file, line, col (1-based), the name as written, kind, the declaring
+    unit (or program) and the qualified name. }
+  AssertTrue('a global const: ' + X,
+    Pos(#9'23'#9'8'#9'Limit'#9'global'#9'xr'#9'Limit', X) >= 0);
+  AssertTrue('an implicit Self field: ' + X,
+    Pos(#9'24'#9'8'#9'FSize'#9'member'#9'xr'#9'TBox.FSize', X) >= 0);
+  AssertTrue('a global var: ' + X,
+    Pos(#9'24'#9'16'#9'G'#9'global'#9'xr'#9'G', X) >= 0);
+  AssertTrue('a parameter: ' + X,
+    Pos(#9'14'#9'13'#9'N'#9'local'#9#9'N', X) >= 0);
+  AssertTrue('an assignment''s target field: ' + X,
+    Pos(#9'25'#9'3'#9'FSize'#9'member'#9'xr'#9'TBox.FSize', X) >= 0);
+  AssertTrue('a function called: ' + X,
+    Pos(#9'25'#9'12'#9'Twice'#9'global'#9'xr'#9'Twice', X) >= 0);
+  AssertTrue('a local argument: ' + X,
+    Pos(#9'25'#9'18'#9'L'#9'local'#9#9'L', X) >= 0);
+  AssertTrue('a method called on Self: ' + X,
+    Pos(#9'26'#9'3'#9'Reset'#9'member'#9'xr'#9'TBox.Reset', X) >= 0);
+  AssertTrue('the file: ' + X, Pos(ExpandFileName(Src) + #9'29'#9'3'#9'G', X) >= 0);
 end;
 
 procedure TCLIContractTests.TestCheck_SemanticErrorAsJson;
