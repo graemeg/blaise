@@ -148,7 +148,7 @@ begin
   WriteLn(FormatFlagLine('--diagnostics=json',
     'Errors and warnings as JSON objects on stdout, one per line'));
   WriteLn(FormatFlagLine('--emit-xref <file>',
-    'Write each plain identifier use and its declaration (tab-separated)'));
+    'Write each name use (members too) and its declaration (tab-separated)'));
   WriteLn(FormatFlagLine('--dump-ast',
     'Print the resolved AST to stdout after semantic analysis'));
   WriteLn(FormatFlagLine('--debug',

@@ -143,6 +143,9 @@ type
   public
     RecordName:        string;         { used when Base = nil (leaf access) }
     FieldName:         string;
+    { Where the member's name is written (0 when unknown), for --emit-xref:
+      Line and Col are the whole access's. }
+    MemberLine, MemberCol: Int;
     QualifierUnit:     string;         { set by the parser — non-empty when the
                                          base type was written unit-qualified, e.g.
                                          'Unit.TEnum.Member' or 'Unit.TFoo.StaticVar'.
@@ -517,6 +520,9 @@ type
   public
     RecordName:    string;
     FieldName:     string;
+    { Where the member's name is written (0 when unknown), for --emit-xref:
+      Line and Col are the whole access's. }
+    MemberLine, MemberCol: Int;
     Expr:          TASTExpr;   { owned }
     ObjExpr:       TASTExpr;   { owned — when non-nil, receiver is this expression (e.g. typecast) }
     FieldInfo:     TFieldInfo; { set by uSemantic — carries offset + type }
@@ -742,6 +748,9 @@ type
   public
     ObjectName: string;
     Name:       string;   { method name }
+    { Where the member's name is written (0 when unknown), for --emit-xref:
+      Line and Col are the whole access's. }
+    MemberLine, MemberCol: Int;
     Args:       TObjectList;   { owned TASTExpr items }
     ObjExpr:    TASTExpr;  { owned — when non-nil, receiver is this expression }
     { Set by uSemantic: }
@@ -1321,6 +1330,9 @@ type
   public
     ObjectName:        string;
     Name:              string;     { method name }
+    { Where the member's name is written (0 when unknown), for --emit-xref:
+      Line and Col are the whole access's. }
+    MemberLine, MemberCol: Int;
     QualifierUnit:     string;     { set by the parser — unit of a qualified
                                      receiver type 'Unit.Type.Method(...)', so a
                                      constructor on a cross-unit same-named type

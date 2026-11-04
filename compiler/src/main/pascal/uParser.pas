@@ -3945,6 +3945,8 @@ begin
     FldAssign.Line := ALine;
     FldAssign.Col := ACol;
     FldAssign.FieldName := Fld.FieldName;
+    FldAssign.MemberLine := Fld.MemberLine;
+    FldAssign.MemberCol := Fld.MemberCol;
     FldAssign.ObjExpr := Fld.Base;
     Fld.Base := nil;
     { ...Field[I] := V: the postfix chain folds a subscript straight after a
@@ -3971,6 +3973,8 @@ begin
     FldAssign.Line := ALine;
     FldAssign.Col := ACol;
     FldAssign.FieldName := Fld.FieldName;
+    FldAssign.MemberLine := Fld.MemberLine;
+    FldAssign.MemberCol := Fld.MemberCol;
     FldAssign.ObjExpr := Fld.Base;
     Fld.Base := nil;
     FldAssign.PropIndexExpr := Sub.IndexExpr;
@@ -4083,6 +4087,8 @@ begin
   Fld.RecordName := AAssign.RecordName;
   Fld.Base := AAssign.ObjExpr;
   Fld.FieldName := AAssign.FieldName;
+  Fld.MemberLine := AAssign.MemberLine;
+  Fld.MemberCol := AAssign.MemberCol;
   Fld.PropIndexExpr := AAssign.PropIndexExpr;
   AAssign.ObjExpr := nil;
   AAssign.PropIndexExpr := nil;
@@ -4116,6 +4122,8 @@ begin
     MCall.Col := ACol;
     MCall.ObjectName := ME.ObjectName;
     MCall.Name := ME.Name;
+    MCall.MemberLine := ME.MemberLine;
+    MCall.MemberCol := ME.MemberCol;
     MCall.ObjExpr := ME.ObjExpr;
     ME.ObjExpr := nil;
     while ME.Args.Count > 0 do
@@ -4143,6 +4151,7 @@ var
   PtrIdNode:   TIdentExpr;
   DerefNode:   TDerefExpr;
   SecondIdent: string;
+  SecondLine, SecondCol: Int;
   FldNode:     TFieldAccessExpr;
   ParenExpr:   TASTExpr;
   InnerFld:    TFieldAccessExpr;
@@ -4436,6 +4445,8 @@ begin
               FldAssign.Line := Line;
               FldAssign.Col := Col;
               FldAssign.FieldName := FldNode.FieldName;
+              FldAssign.MemberLine := FldNode.MemberLine;
+              FldAssign.MemberCol := FldNode.MemberCol;
               FldAssign.ObjExpr := FldNode.Base;
               FldNode.Base := nil;
               FldAssign.PropIndexExpr := SubNode.IndexExpr;
@@ -4490,6 +4501,8 @@ begin
             'Expected field or method name at line %d col %d in %s',
             [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
         SecondIdent := FCurrent.Value;
+        SecondLine := FCurrent.Line;
+        SecondCol := FCurrent.Col;
         Advance();  { consume ident }
         if Check(tkAssign) then
         begin
@@ -4499,6 +4512,8 @@ begin
           FldAssign.Line := Line;
           FldAssign.Col := Col;
           FldAssign.FieldName := SecondIdent;
+          FldAssign.MemberLine := SecondLine;
+          FldAssign.MemberCol := SecondCol;
           FldAssign.ObjExpr := ChainBase;
           ChainBase := nil;
           FldAssign.Expr := ParseExpr();
@@ -4512,6 +4527,8 @@ begin
           MCall.Col := Col;
           MCall.ObjectName := '';
           MCall.Name := SecondIdent;
+          MCall.MemberLine := SecondLine;
+          MCall.MemberCol := SecondCol;
           MCall.ObjExpr := ChainBase;
           ChainBase := nil;
           Advance();  { consume '(' }
@@ -4528,6 +4545,8 @@ begin
           FldNode.Col := Col;
           FldNode.Base := ChainBase;
           FldNode.FieldName := SecondIdent;
+          FldNode.MemberLine := SecondLine;
+          FldNode.MemberCol := SecondCol;
           ChainBase := FldNode;
           Continue;
         end;
@@ -4537,6 +4556,8 @@ begin
         MCall.Col := Col;
         MCall.ObjectName := '';
         MCall.Name := SecondIdent;
+        MCall.MemberLine := SecondLine;
+        MCall.MemberCol := SecondCol;
         MCall.ObjExpr := ChainBase;
         ChainBase := nil;
         Exit(MCall);
@@ -4587,6 +4608,8 @@ begin
         raise EParseError.Create(Format('Expected field name after ''^.'' at line %d col %d in %s',
           [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
       SecondIdent := FCurrent.Value;
+      SecondLine := FCurrent.Line;
+      SecondCol := FCurrent.Col;
       Advance();  { consume field name }
       { Build chain: handle further A^.B.C.D chaining }
       PtrIdNode        := TIdentExpr.Create();
@@ -4602,6 +4625,8 @@ begin
       FldNode.Col      := Col;
       FldNode.Base     := DerefNode;
       FldNode.FieldName := SecondIdent;
+      FldNode.MemberLine := SecondLine;
+      FldNode.MemberCol := SecondCol;
       while Check(tkDot) and (PeekKind() = tkIdent) do
       begin
         Advance();
@@ -4609,6 +4634,8 @@ begin
         InnerFld.Line      := FCurrent.Line;
         InnerFld.Col       := FCurrent.Col;
         InnerFld.FieldName := FCurrent.Value;
+        InnerFld.MemberLine := FCurrent.Line;
+        InnerFld.MemberCol := FCurrent.Col;
         InnerFld.Base      := FldNode;
         FldNode            := InnerFld;
         Advance();
@@ -4622,6 +4649,8 @@ begin
         MCall.Col := Col;
         MCall.ObjectName := '';
         MCall.Name := FldNode.FieldName;
+        MCall.MemberLine := FldNode.MemberLine;
+        MCall.MemberCol := FldNode.MemberCol;
         MCall.ObjExpr := FldNode.Base;
         FldNode.Base := nil;
         FldNode.Free();
@@ -4639,6 +4668,8 @@ begin
       FldAssign.Col     := Col;
       FldAssign.ObjExpr := FldNode.Base;
       FldAssign.FieldName := FldNode.FieldName;
+      FldAssign.MemberLine := FldNode.MemberLine;
+      FldAssign.MemberCol := FldNode.MemberCol;
       FldNode.Base      := nil;
       FldNode.Free();
       if Check(tkLBracket) then
@@ -4676,6 +4707,8 @@ begin
       raise EParseError.Create(Format('Expected field or method name at line %d col %d in %s',
         [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
     SecondIdent := FCurrent.Value;
+    SecondLine := FCurrent.Line;
+    SecondCol := FCurrent.Col;
     Advance();
 
     if Check(tkLBracket) then
@@ -4693,6 +4726,8 @@ begin
       FldNode.Col      := Col;
       FldNode.Base     := PtrIdNode;
       FldNode.FieldName := SecondIdent;
+      FldNode.MemberLine := SecondLine;
+      FldNode.MemberCol := SecondCol;
       SubNode            := TStringSubscriptExpr.Create();
       SubNode.Line       := Line;
       SubNode.Col        := Col;
@@ -4713,6 +4748,8 @@ begin
         FldAssign.Col := Col;
         FldAssign.RecordName := Name;
         FldAssign.FieldName := SecondIdent;
+        FldAssign.MemberLine := SecondLine;
+        FldAssign.MemberCol := SecondCol;
         FldAssign.PropIndexExpr := SubNode.IndexExpr;
         SubNode.IndexExpr := nil;
         SubNode.Free();
@@ -4742,6 +4779,8 @@ begin
                   'Expected field or method name at line %d col %d in %s',
                   [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
               SecondIdent := FCurrent.Value;
+              SecondLine := FCurrent.Line;
+              SecondCol := FCurrent.Col;
               Advance();
               if Check(tkAssign) then
               begin
@@ -4750,6 +4789,8 @@ begin
                 FldAssign.Line := Line;
                 FldAssign.Col := Col;
                 FldAssign.FieldName := SecondIdent;
+                FldAssign.MemberLine := SecondLine;
+                FldAssign.MemberCol := SecondCol;
                 FldAssign.ObjExpr := ChainBase;
                 ChainBase := nil;
                 FldAssign.Expr := ParseExpr();
@@ -4762,6 +4803,8 @@ begin
                 MCall.Col := Col;
                 MCall.ObjectName := '';
                 MCall.Name := SecondIdent;
+                MCall.MemberLine := SecondLine;
+                MCall.MemberCol := SecondCol;
                 MCall.ObjExpr := ChainBase;
                 ChainBase := nil;
                 Advance();  { consume '(' }
@@ -4775,6 +4818,8 @@ begin
               InnerFld.Col := FCurrent.Col;
               InnerFld.Base := ChainBase;
               InnerFld.FieldName := SecondIdent;
+              InnerFld.MemberLine := SecondLine;
+              InnerFld.MemberCol := SecondCol;
               ChainBase := InnerFld;
             end
             else if Check(tkLBracket) then
@@ -4812,6 +4857,8 @@ begin
                   FldAssign.Line := Line;
                   FldAssign.Col := Col;
                   FldAssign.FieldName := FldNode.FieldName;
+                  FldAssign.MemberLine := FldNode.MemberLine;
+                  FldAssign.MemberCol := FldNode.MemberCol;
                   FldAssign.ObjExpr := FldNode.Base;
                   FldNode.Base := nil;
                   FldAssign.PropIndexExpr := SubNode.IndexExpr;
@@ -4863,6 +4910,8 @@ begin
       FldAssign.Col := Col;
       FldAssign.RecordName := Name;
       FldAssign.FieldName := SecondIdent;
+      FldAssign.MemberLine := SecondLine;
+      FldAssign.MemberCol := SecondCol;
       Expect(tkAssign);
       FldAssign.Expr := ParseExpr();
       Result := FldAssign;
@@ -4889,6 +4938,8 @@ begin
         FldNode.Col      := Col;
         FldNode.Base     := PtrIdNode;
         FldNode.FieldName:= SecondIdent;
+        FldNode.MemberLine := SecondLine;
+        FldNode.MemberCol := SecondCol;
         MCall.ObjExpr    := FldNode;
         while Check(tkDot) do
         begin
@@ -4897,6 +4948,8 @@ begin
             raise EParseError.Create(Format('Expected field or method name at line %d col %d in %s',
               [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
           SecondIdent := FCurrent.Value;
+          SecondLine := FCurrent.Line;
+          SecondCol := FCurrent.Col;
           Advance();
           if Check(tkDot) then
           begin
@@ -4906,6 +4959,8 @@ begin
             FldNode.Col      := Col;
             FldNode.Base     := MCall.ObjExpr;
             FldNode.FieldName:= SecondIdent;
+            FldNode.MemberLine := SecondLine;
+            FldNode.MemberCol := SecondCol;
             MCall.ObjExpr    := FldNode;
           end
           else if Check(tkLBracket) then
@@ -4918,6 +4973,8 @@ begin
             FldAssign.Line      := Line;
             FldAssign.Col       := Col;
             FldAssign.FieldName := SecondIdent;
+            FldAssign.MemberLine := SecondLine;
+            FldAssign.MemberCol := SecondCol;
             FldAssign.ObjExpr   := MCall.ObjExpr;
             MCall.ObjExpr       := nil;  { transfer ownership }
             MCall.Free();
@@ -4936,6 +4993,8 @@ begin
               FldNode.Col := Col;
               FldNode.Base := FldAssign.ObjExpr;
               FldNode.FieldName := FldAssign.FieldName;
+              FldNode.MemberLine := FldAssign.MemberLine;
+              FldNode.MemberCol := FldAssign.MemberCol;
               FldAssign.ObjExpr := nil;
               FldNode.PropIndexExpr := FldAssign.PropIndexExpr;
               FldAssign.PropIndexExpr := nil;
@@ -4949,6 +5008,8 @@ begin
           else
           begin
             MCall.Name := SecondIdent;
+            MCall.MemberLine := SecondLine;
+            MCall.MemberCol := SecondCol;
             if Check(tkLParen) then
             begin
               Advance();
@@ -4964,6 +5025,8 @@ begin
                 MCallExpr.Line   := Line;
                 MCallExpr.Col    := Col;
                 MCallExpr.Name   := MCall.Name;
+                MCallExpr.MemberLine := MCall.MemberLine;
+                MCallExpr.MemberCol := MCall.MemberCol;
                 MCallExpr.ObjExpr := MCall.ObjExpr;
                 MCall.ObjExpr    := nil;
                 while MCall.Args.Count > 0 do
@@ -4984,6 +5047,8 @@ begin
           FldAssign.Line      := Line;
           FldAssign.Col       := Col;
           FldAssign.FieldName := MCall.Name;
+          FldAssign.MemberLine := MCall.MemberLine;
+          FldAssign.MemberCol := MCall.MemberCol;
           FldAssign.ObjExpr   := MCall.ObjExpr;
           MCall.ObjExpr       := nil;  { transfer ownership — prevent double-free }
           MCall.Free();
@@ -5000,6 +5065,8 @@ begin
         MCall.Col        := Col;
         MCall.ObjectName := Name;
         MCall.Name       := SecondIdent;
+        MCall.MemberLine := SecondLine;
+        MCall.MemberCol := SecondCol;
         if Check(tkLParen) then
         begin
           Advance();
@@ -5031,6 +5098,8 @@ begin
           MCallExpr.Col        := Col;
           MCallExpr.ObjectName := MCall.ObjectName;
           MCallExpr.Name       := MCall.Name;
+          MCallExpr.MemberLine := MCall.MemberLine;
+          MCallExpr.MemberCol := MCall.MemberCol;
           while MCall.Args.Count > 0 do
             MCallExpr.Args.Add(MCall.Args.Extract(MCall.Args.Items[0]));
           MCall.Free();
@@ -5045,6 +5114,8 @@ begin
           MCallExpr.Col        := Col;
           MCallExpr.ObjectName := MCall.ObjectName;
           MCallExpr.Name       := MCall.Name;
+          MCallExpr.MemberLine := MCall.MemberLine;
+          MCallExpr.MemberCol := MCall.MemberCol;
           while MCall.Args.Count > 0 do
             MCallExpr.Args.Add(MCall.Args.Extract(MCall.Args.Items[0]));
           MCall.Free();
@@ -5059,6 +5130,8 @@ begin
           MCallExpr.Col        := Col;
           MCallExpr.ObjectName := MCall.ObjectName;
           MCallExpr.Name       := MCall.Name;
+          MCallExpr.MemberLine := MCall.MemberLine;
+          MCallExpr.MemberCol := MCall.MemberCol;
           while MCall.Args.Count > 0 do
             MCallExpr.Args.Add(MCall.Args.Extract(MCall.Args.Items[0]));
           MCall.Free();
@@ -5072,6 +5145,8 @@ begin
                 'Expected identifier after ''.'' at line %d col %d in %s',
                 [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
             SecondIdent := FCurrent.Value;
+            SecondLine := FCurrent.Line;
+            SecondCol := FCurrent.Col;
             Advance();
             if Check(tkLParen) then
             begin
@@ -5080,6 +5155,8 @@ begin
               MCall.Col        := Col;
               MCall.ObjectName := '';
               MCall.Name       := SecondIdent;
+              MCall.MemberLine := SecondLine;
+              MCall.MemberCol := SecondCol;
               MCall.ObjExpr    := CastRcv;
               Advance();
               if not Check(tkRParen) then
@@ -5092,6 +5169,8 @@ begin
             FldNode.Col       := Col;
             FldNode.Base      := CastRcv;
             FldNode.FieldName := SecondIdent;
+            FldNode.MemberLine := SecondLine;
+            FldNode.MemberCol := SecondCol;
             CastRcv := FldNode;
           end;
           if Check(tkAssign) and (CastRcv is TFieldAccessExpr) then
@@ -5101,6 +5180,8 @@ begin
             FldAssign.Line      := Line;
             FldAssign.Col       := Col;
             FldAssign.FieldName := TFieldAccessExpr(CastRcv).FieldName;
+            FldAssign.MemberLine := TFieldAccessExpr(CastRcv).MemberLine;
+            FldAssign.MemberCol := TFieldAccessExpr(CastRcv).MemberCol;
             FldAssign.ObjExpr   := TFieldAccessExpr(CastRcv).Base;
             TFieldAccessExpr(CastRcv).Base := nil;
             CastRcv.Free();
@@ -5217,6 +5298,8 @@ begin
             raise EParseError.Create(Format('Expected field or method name at line %d col %d in %s',
               [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
           SecondIdent := FCurrent.Value;
+          SecondLine := FCurrent.Line;
+          SecondCol := FCurrent.Col;
           Advance();
           if Check(tkLParen) then
           begin
@@ -5225,6 +5308,8 @@ begin
             MCall.Col        := Col;
             MCall.ObjectName := '';
             MCall.Name       := SecondIdent;
+            MCall.MemberLine := SecondLine;
+            MCall.MemberCol := SecondCol;
             MCall.ObjExpr    := CastRcv;
             Advance();  { consume '(' }
             if not Check(tkRParen) then
@@ -5237,6 +5322,8 @@ begin
           FldNode.Col        := Col;
           FldNode.Base       := CastRcv;
           FldNode.FieldName  := SecondIdent;
+          FldNode.MemberLine := SecondLine;
+          FldNode.MemberCol := SecondCol;
           CastRcv            := FldNode;
           if Check(tkLBracket) then
           begin
@@ -5247,6 +5334,8 @@ begin
             FldAssign.Line := Line;
             FldAssign.Col := Col;
             FldAssign.FieldName := FldNode.FieldName;
+            FldAssign.MemberLine := FldNode.MemberLine;
+            FldAssign.MemberCol := FldNode.MemberCol;
             FldAssign.ObjExpr := FldNode.Base;
             FldNode.Base := nil;
             FldNode.Free();
@@ -5268,6 +5357,8 @@ begin
           FldAssign.Line     := Line;
           FldAssign.Col      := Col;
           FldAssign.FieldName := TFieldAccessExpr(CastRcv).FieldName;
+          FldAssign.MemberLine := TFieldAccessExpr(CastRcv).MemberLine;
+          FldAssign.MemberCol := TFieldAccessExpr(CastRcv).MemberCol;
           FldAssign.ObjExpr  := TFieldAccessExpr(CastRcv).Base;
           TFieldAccessExpr(CastRcv).Base := nil; { transfer ownership }
           CastRcv.Free();
@@ -5282,6 +5373,8 @@ begin
           MCall.Col        := Col;
           MCall.ObjectName := '';
           MCall.Name       := TFieldAccessExpr(CastRcv).FieldName;
+          MCall.MemberLine := TFieldAccessExpr(CastRcv).MemberLine;
+          MCall.MemberCol := TFieldAccessExpr(CastRcv).MemberCol;
           MCall.ObjExpr    := TFieldAccessExpr(CastRcv).Base;
           TFieldAccessExpr(CastRcv).Base := nil;
           CastRcv.Free();
@@ -6534,6 +6627,7 @@ var
   Inner:      TASTExpr;
   Name:       string;
   SecondName: string;
+  SecondLine, SecondCol: Int;
   QualUnit:   string;
   Line, Col:  Int;
   NegNode:    TNegExpr;
@@ -6735,6 +6829,8 @@ begin
             raise EParseError.Create(Format('Expected field or method name at line %d col %d in %s',
               [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
           SecondName := FCurrent.Value;
+          SecondLine := FCurrent.Line;
+          SecondCol := FCurrent.Col;
           Advance();
           { Generic-method call: IDENT '.' IDENT '<' TypeArgs '>' '(' ... ')'.
             Fold the explicit type arguments into the method name
@@ -6760,6 +6856,8 @@ begin
             MCallNode.Col        := Col;
             MCallNode.ObjectName := Name;
             MCallNode.Name       := SecondName;
+            MCallNode.MemberLine := SecondLine;
+            MCallNode.MemberCol := SecondCol;
             MCallNode.QualifierUnit := QualUnit;
             Advance();
             if not Check(tkRParen) then
@@ -6782,6 +6880,8 @@ begin
             FldNode.Col        := Col;
             FldNode.RecordName := Name;
             FldNode.FieldName  := SecondName;
+            FldNode.MemberLine := SecondLine;
+            FldNode.MemberCol := SecondCol;
             FldNode.QualifierUnit := QualUnit;
             Result := FldNode;
             { Indexed property read: Ident.Prop[idx] }
@@ -6796,6 +6896,8 @@ begin
             begin
               Advance();  { consume '.' }
               SecondName := FCurrent.Value;
+              SecondLine := FCurrent.Line;
+              SecondCol := FCurrent.Col;
               Advance();  { consume field/method name }
               if Check(tkLParen) then
               begin
@@ -6805,6 +6907,8 @@ begin
                 MCallNode.Col         := FCurrent.Col;
                 MCallNode.ObjectName  := '';
                 MCallNode.Name        := SecondName;
+                MCallNode.MemberLine := SecondLine;
+                MCallNode.MemberCol := SecondCol;
                 MCallNode.ObjExpr     := Result;
                 Advance();  { consume '(' }
                 if not Check(tkRParen) then
@@ -6826,6 +6930,8 @@ begin
                 FldNode.Col        := FCurrent.Col;
                 FldNode.Base       := Result;
                 FldNode.FieldName  := SecondName;
+                FldNode.MemberLine := SecondLine;
+                FldNode.MemberCol := SecondCol;
                 Result := FldNode;
                 { Indexed property on chained access: A.B.Prop[idx] }
                 if Check(tkLBracket) then
@@ -6863,12 +6969,16 @@ begin
           begin
             Advance();  { consume '.' }
             SecondName := FCurrent.Value;
+            SecondLine := FCurrent.Line;
+            SecondCol := FCurrent.Col;
             Advance();  { consume field/method name }
             FldNode            := TFieldAccessExpr.Create();
             FldNode.Line       := FCurrent.Line;
             FldNode.Col        := FCurrent.Col;
             FldNode.Base       := Result;
             FldNode.FieldName  := SecondName;
+            FldNode.MemberLine := SecondLine;
+            FldNode.MemberCol := SecondCol;
             Result := FldNode;
             if Check(tkLParen) then
             begin
@@ -6888,6 +6998,8 @@ begin
               MCallNode.Col         := FldNode.Col;
               MCallNode.ObjectName  := '';  { empty — receiver is Base expr }
               MCallNode.Name        := SecondName;
+              MCallNode.MemberLine := SecondLine;
+              MCallNode.MemberCol := SecondCol;
               MCallNode.ObjExpr     := FldNode.Base;
               FldNode.Base          := nil;  { transfer ownership }
               FldNode.Free();
@@ -6998,6 +7110,7 @@ var
   MCallNode:   TMethodCallExpr;
   DerefNode:   TDerefExpr;
   SecondName:  string;
+  SecondLine, SecondCol: Int;
   SubNode:     TStringSubscriptExpr;
   IndCallNode: TIndirectFuncCallExpr;
 begin
@@ -7040,6 +7153,8 @@ begin
           'Expected field or method name at line %d col %d in %s',
           [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
       SecondName := FCurrent.Value;
+      SecondLine := FCurrent.Line;
+      SecondCol := FCurrent.Col;
       Advance();  { consume ident }
       if Check(tkLParen) then
       begin
@@ -7048,6 +7163,8 @@ begin
         MCallNode.Col        := FCurrent.Col;
         MCallNode.ObjectName := '';
         MCallNode.Name       := SecondName;
+        MCallNode.MemberLine := SecondLine;
+        MCallNode.MemberCol := SecondCol;
         MCallNode.ObjExpr    := Result;
         Advance();  { consume '(' }
         if not Check(tkRParen) then
@@ -7069,6 +7186,8 @@ begin
         FldNode.Col       := FCurrent.Col;
         FldNode.Base      := Result;
         FldNode.FieldName := SecondName;
+        FldNode.MemberLine := SecondLine;
+        FldNode.MemberCol := SecondCol;
         Result := FldNode;
         if Check(tkLBracket) then
         begin

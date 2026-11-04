@@ -83,6 +83,7 @@ type
     { --emit-xref FILE: each plain identifier use and its declaration. }
     procedure TestEmitXref_PlainNames;
     procedure TestEmitXref_InheritedPropertyAndExit;
+    procedure TestEmitXref_Members;
     procedure TestNormalCompileStillWorks;
     procedure TestFPCVersionProbeGone;
     { ---- Steps 2-5: driver option contract surfacing through the CLI ----
@@ -655,6 +656,80 @@ begin
       'line 3: declared (Int32), implemented (Byte)', Out_) >= 0);
   AssertTrue('points at the implementation: ' + Out_,
     Pos('at line 5 col 1 in uimpl215', Out_) >= 0);
+end;
+
+{ A member after a dot is recorded at its own name, not the access's. }
+procedure TCLIContractTests.TestEmitXref_Members;
+var
+  Src, Out_, XrefPath, X: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource(
+    'program xm;' + LineEnding +                              { 1 }
+    'type' + LineEnding +                                     { 2 }
+    '  TColour = (cRed, cBlue);' + LineEnding +               { 3 }
+    '  TBase = class' + LineEnding +                          { 4 }
+    '    FSize: Int;' + LineEnding +                          { 5 }
+    '    property Size: Int read FSize;' + LineEnding +       { 6 }
+    '  end;' + LineEnding +                                   { 7 }
+    '  TBox = class(TBase)' + LineEnding +                    { 8 }
+    '    Next: TBox;' + LineEnding +                          { 9 }
+    '    const Limit = 9;' + LineEnding +                     { 10 }
+    '    procedure Grow();' + LineEnding +                    { 11 }
+    '    function Twice(): Int;' + LineEnding +               { 12 }
+    '  end;' + LineEnding +                                   { 13 }
+    'procedure TBox.Grow();' + LineEnding +                   { 14 }
+    'begin' + LineEnding +                                    { 15 }
+    'end;' + LineEnding +                                     { 16 }
+    'function TBox.Twice(): Int;' + LineEnding +              { 17 }
+    'begin' + LineEnding +                                    { 18 }
+    '  Result := 2' + LineEnding +                            { 19 }
+    'end;' + LineEnding +                                     { 20 }
+    'var' + LineEnding +                                      { 21 }
+    '  B: TBox;' + LineEnding +                               { 22 }
+    '  C: TColour;' + LineEnding +                            { 23 }
+    'begin' + LineEnding +                                    { 24 }
+    '  B := TBox.Create();' + LineEnding +                    { 25 }
+    '  B.FSize := TBox.Limit;' + LineEnding +                 { 26 }
+    '  B.Grow();' + LineEnding +                              { 27 }
+    '  WriteLn(B.Twice() + B.Size);' + LineEnding +           { 28 }
+    '  B.Next := B;' + LineEnding +                           { 29 }
+    '  WriteLn(B.Next.FSize);' + LineEnding +                 { 30 }
+    '  C := TColour.cBlue' + LineEnding +                     { 31 }
+    'end.');
+  XrefPath := Src + '.xref';
+  EC := RunCompiler(['--check', '--emit-xref', XrefPath, '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(XrefPath);
+    X := L.Text;
+  finally
+    L.Free();
+  end;
+  AssertTrue('a type before the dot: ' + X,
+    Pos(#9'25'#9'8'#9'TBox'#9'global'#9'xm'#9'TBox', X) >= 0);
+  AssertTrue('a variable before the dot: ' + X,
+    Pos(#9'27'#9'3'#9'B'#9'global'#9'xm'#9'B', X) >= 0);
+  AssertTrue('a field assigned: ' + X,
+    Pos(#9'26'#9'5'#9'FSize'#9'member'#9'xm'#9'TBase.FSize', X) >= 0);
+  AssertTrue('a class constant: ' + X,
+    Pos(#9'26'#9'19'#9'Limit'#9'member'#9'xm'#9'TBox.Limit', X) >= 0);
+  AssertTrue('a method statement: ' + X,
+    Pos(#9'27'#9'5'#9'Grow'#9'member'#9'xm'#9'TBox.Grow', X) >= 0);
+  AssertTrue('a method in an expression: ' + X,
+    Pos(#9'28'#9'13'#9'Twice'#9'member'#9'xm'#9'TBox.Twice', X) >= 0);
+  AssertTrue('an inherited property: ' + X,
+    Pos(#9'28'#9'25'#9'Size'#9'member'#9'xm'#9'TBase.Size', X) >= 0);
+  AssertTrue('a field in a chain: ' + X,
+    Pos(#9'30'#9'13'#9'Next'#9'member'#9'xm'#9'TBox.Next', X) >= 0);
+  AssertTrue('the end of the chain: ' + X,
+    Pos(#9'30'#9'18'#9'FSize'#9'member'#9'xm'#9'TBase.FSize', X) >= 0);
+  AssertTrue('an enum value: ' + X,
+    Pos(#9'31'#9'16'#9'cBlue'#9'enum'#9'xm'#9'TColour.cBlue', X) >= 0);
 end;
 
 procedure TCLIContractTests.TestNormalCompileStillWorks;

@@ -77,6 +77,8 @@ TFieldAccessExpr.ClassVarEmitName  safe
 TFieldAccessExpr.IsStaticPropGet  safe
 TFieldAccessExpr.BackingFieldRedirect  safe
 TFieldAccessExpr.LoweredSubscript  safe
+TFieldAccessExpr.MemberLine  safe
+TFieldAccessExpr.MemberCol  safe
 
 # TIsExpr (uAST.pas:203)
 TIsExpr.Obj  serialise
@@ -216,6 +218,8 @@ TFieldAssignment.IsElemWrite  safe
 TFieldAssignment.IsClassVarWrite  safe
 TFieldAssignment.ClassVarEmitName  safe
 TFieldAssignment.SetterCall  safe
+TFieldAssignment.MemberLine  safe
+TFieldAssignment.MemberCol  safe
 
 # TStaticSubscriptAssign (uAST.pas:554)
 TStaticSubscriptAssign.ArrayName  serialise
@@ -294,6 +298,8 @@ TMethodCallStmt.IsMetaclassDispatch  safe
 TMethodCallStmt.IsStaticCall  safe
 TMethodCallStmt.IsProcFieldCall  safe
 TMethodCallStmt.LoweredCall  safe
+TMethodCallStmt.MemberLine  safe
+TMethodCallStmt.MemberCol  safe
 
 # TInheritedCallStmt (uAST.pas:780)
 TInheritedCallStmt.Name  serialise
@@ -322,6 +328,8 @@ TMethodCallExpr.IsBuiltinToString  safe
 TMethodCallExpr.IsBuiltinInheritsFrom  safe
 TMethodCallExpr.IsProcFieldCall  safe
 TMethodCallExpr.LoweredCall  safe
+TMethodCallExpr.MemberLine  safe
+TMethodCallExpr.MemberCol  safe
 
 # === Interface-container types (uUnitInterface.pas + TMethodParam) ===
 #   serialise  must appear in the encoder AND decoder of uUnitInterfaceIO.pas

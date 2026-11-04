@@ -1096,6 +1096,10 @@ type
     { A property of the current class: named after the class that declares
       it (an ancestor, for an inherited one). }
     procedure NotePropertyXref(ALine, ACol: Int; const AName: string; AProp: TPropertyInfo);
+    function  XrefReceiverType(ABase: TASTExpr; const AName: string): TTypeDesc;
+    procedure NoteReceiverXref(ALine, ACol: Int; const AName: string);
+    procedure NoteMemberXref(ALine, ACol: Int; const AName: string; AOwner: TTypeDesc;
+      AField: TFieldInfo; AMethod: TObject);
     property XrefSource: string read FXrefSource write FXrefSource;
     procedure NoteUnitScope;
     { Record that two units in scope export module var AName (the cached-
@@ -3370,17 +3374,32 @@ end;
   body is skipped: its positions are the template's, in another file. }
 procedure TSemanticAnalyser.NoteXref(ALine, ACol: Int; const AName, AKind, AUnit, AQualified: string);
 var
-  Key: string;
-  N: Int;
+  Key, Q, U, Base: string;
+  N, Lt, Gt: Int;
 begin
   if (FXref = nil) or (FXrefSource = '') or InGenericInstanceBody() then
     Exit;
+  { A generic instance's member is its template's: TList<Int>.Add is
+    TList.Add, in the unit declaring TList. }
+  Q := AQualified;
+  U := AUnit;
+  Lt := Pos('<', Q);
+  if Lt >= 0 then
+  begin
+    Gt := Length(Q) - 1;
+    while (Gt > Lt) and (Q[Gt] <> Ord('>')) do
+      Gt := Gt - 1;
+    Base := Copy(Q, 0, Lt);
+    Q := Base + Copy(Q, Gt + 1, Length(Q) - Gt - 1);
+    if FTable.GenericDeclUnit(Base) <> '' then
+      U := FTable.GenericDeclUnit(Base);
+  end;
   Key := FXrefSource + #9 + IntToStr(ALine) + #9 + IntToStr(ACol);
   N := FXrefSeen.Count;
   FXrefSeen.Add(Key);
   if FXrefSeen.Count = N then
     Exit;
-  FXref.Add(Key + #9 + AName + #9 + AKind + #9 + AUnit + #9 + AQualified);
+  FXref.Add(Key + #9 + AName + #9 + AKind + #9 + U + #9 + Q);
 end;
 
 { A symbol found by name: local when a scope inside the global one holds
@@ -3444,6 +3463,114 @@ begin
   if Walk = nil then
     Walk := FCurrentClass;
   NoteXref(ALine, ACol, AName, 'member', Walk.OwningUnit, Walk.Name + '.' + AProp.Name);
+end;
+
+{ The type a member is looked up in: ABase's, or that of the name before
+  the dot (a type, a variable, or a field of Self). }
+function TSemanticAnalyser.XrefReceiverType(ABase: TASTExpr; const AName: string): TTypeDesc;
+var
+  Sym: TSymbol;
+  F: TFieldInfo;
+begin
+  Result := nil;
+  if ABase <> nil then
+    Exit(ABase.ResolvedType);
+  if AName = '' then
+    Exit;
+  if SameText(AName, 'Self') and (FCurrentClass <> nil) then
+    Exit(FCurrentClass);
+  Sym := FTable.Lookup(AName);
+  if (Sym <> nil) and (Sym.TypeDesc <> nil) then
+    Exit(Sym.TypeDesc);
+  if FCurrentClass <> nil then
+  begin
+    F := FCurrentClass.FindField(AName);
+    if F <> nil then
+      Result := F.TypeDesc;
+  end;
+end;
+
+{ The name before a member's dot, when the parser kept it as a name (a
+  variable, a field of Self, a type) rather than an expression. }
+procedure TSemanticAnalyser.NoteReceiverXref(ALine, ACol: Int; const AName: string);
+begin
+  if (AName = '') or SameText(AName, 'Self') or (Pos('.', AName) >= 0) then
+    Exit;
+  NoteNameXref(ALine, ACol, AName, FTable.Lookup(AName), False);
+end;
+
+{ A member after a dot, at its own name: a property of AOwner, the method
+  or field analysis resolved, an enum's value, or a type's const or static
+  var.  Nothing when none of them is known (better none than a wrong one). }
+procedure TSemanticAnalyser.NoteMemberXref(ALine, ACol: Int; const AName: string; AOwner: TTypeDesc;
+  AField: TFieldInfo; AMethod: TObject);
+var
+  N, U: string;
+  P: TPropertyInfo;
+  M: TMethodDecl;
+  T: TTypeDesc;
+  Walk: TTypeDesc;
+  Sym: TSymbol;
+  I: Int;
+begin
+  if (FXref = nil) or (ALine <= 0) then
+    Exit;
+  N := AName;
+  I := Pos('<', N);
+  if I >= 0 then
+    N := Copy(N, 0, I);
+  if AOwner is TRecordTypeDesc then
+  begin
+    P := TRecordTypeDesc(AOwner).FindProperty(N);
+    if P <> nil then
+    begin
+      NoteXref(ALine, ACol, N, 'member', P.DeclaringUnit, P.DeclaringType + '.' + P.Name);
+      Exit;
+    end;
+  end;
+  if AMethod is TMethodDecl then
+  begin
+    M := TMethodDecl(AMethod);
+    U := '';
+    T := FTable.FindType(M.OwnerTypeName);
+    if T <> nil then
+      U := T.OwningUnit;
+    NoteXref(ALine, ACol, N, 'member', U, M.OwnerTypeName + '.' + M.Name);
+    Exit;
+  end;
+  if (AField <> nil) and SameText(AField.Name, N) then
+  begin
+    { A field of an anonymous type has no name to give. }
+    if AField.DeclaringType <> '' then
+      NoteXref(ALine, ACol, N, 'member', AField.DeclaringUnit, AField.DeclaringType + '.' + AField.Name);
+    Exit;
+  end;
+  if AOwner = nil then
+    Exit;
+  if (AOwner is TEnumTypeDesc) and (TEnumTypeDesc(AOwner).OrdinalOf(N) >= 0) then
+  begin
+    NoteXref(ALine, ACol, N, 'enum', AOwner.OwningUnit, AOwner.Name + '.' + N);
+    Exit;
+  end;
+  Walk := AOwner;
+  while Walk <> nil do
+  begin
+    Sym := FTable.Lookup(Walk.Name + '.' + N);
+    if (Sym <> nil) and (Sym.Kind in [skConstant, skVariable]) then
+    begin
+      U := Sym.OwningUnit;
+      if U = '' then
+        U := Walk.OwningUnit;
+      if U = '' then
+        U := FCurrentUnitName;
+      NoteXref(ALine, ACol, N, 'member', U, Walk.Name + '.' + N);
+      Exit;
+    end;
+    if Walk is TRecordTypeDesc then
+      Walk := TRecordTypeDesc(Walk).Parent
+    else
+      Walk := nil;
+  end;
 end;
 
 procedure TSemanticAnalyser.NoteNameXref(ALine, ACol: Int; const AName: string; ASym: TSymbol;
@@ -13950,6 +14077,8 @@ end;
 
 procedure TSemanticAnalyser.AnalyseStmtCore(AStmt: TASTStmt);
 var
+  XRecv, XMember: string;     { --emit-xref: a member's names as written }
+  XCall: TMethodCallStmt;
   IfS:    TIfStmt;
   CmpS:   TCompoundStmt;
   SavedBlockSite: TObject;
@@ -14571,12 +14700,39 @@ begin
     end;
   end
   else if AStmt is TFieldAssignment then
-    AnalyseFieldAssignment(TFieldAssignment(AStmt))
+  begin
+    XRecv := TFieldAssignment(AStmt).RecordName;
+    XMember := TFieldAssignment(AStmt).FieldName;
+    AnalyseFieldAssignment(TFieldAssignment(AStmt));
+    if (FXref <> nil) and (TFieldAssignment(AStmt).MemberLine > 0) then
+    begin
+      NoteMemberXref(TFieldAssignment(AStmt).MemberLine, TFieldAssignment(AStmt).MemberCol, XMember,
+        XrefReceiverType(TFieldAssignment(AStmt).ObjExpr, XRecv), TFieldAssignment(AStmt).FieldInfo, nil);
+      if TFieldAssignment(AStmt).ObjExpr = nil then
+        NoteReceiverXref(AStmt.Line, AStmt.Col, XRecv);
+    end;
+  end
   else if AStmt is TAssignment then
     AnalyseAssignment(TAssignment(AStmt))
   else if AStmt is TMethodCallStmt then
   begin
+    XRecv := TMethodCallStmt(AStmt).ObjectName;
+    XMember := TMethodCallStmt(AStmt).Name;
     AnalyseMethodCall(TMethodCallStmt(AStmt));
+    if FXref <> nil then
+    begin
+      XCall := TMethodCallStmt(AStmt);
+      if XCall.IsProcFieldCall then
+        NoteMemberXref(XCall.MemberLine, XCall.MemberCol, XMember, nil, XCall.ProcFieldInfo, nil)
+      else if XCall.ResolvedClassType <> nil then
+        NoteMemberXref(XCall.MemberLine, XCall.MemberCol, XMember, XCall.ResolvedClassType, nil,
+          XCall.ResolvedMethod)
+      else
+        NoteMemberXref(XCall.MemberLine, XCall.MemberCol, XMember,
+          XrefReceiverType(XCall.ObjExpr, XRecv), nil, XCall.ResolvedMethod);
+      if (XCall.ObjExpr = nil) and (XCall.MemberLine > 0) then
+        NoteReceiverXref(AStmt.Line, AStmt.Col, XRecv);
+    end;
     if not TMethodCallStmt(AStmt).IsConstructorCall then
       Self.CheckCtorAsMethod(TMethodCallStmt(AStmt).ResolvedMethod,
         SameText(TMethodCallStmt(AStmt).ObjectName, 'Self') and
@@ -20572,9 +20728,78 @@ begin
 end;
 
 function TSemanticAnalyser.AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
+var
+  Recv, Member: string;
+  FA: TFieldAccessExpr;
+  MC: TMethodCallExpr;
+  RT: TTypeDesc;
+  Inner: TASTExpr;
 begin
+  if FXref = nil then
+  begin
+    Result := Self.AnalyseExprCore(AExpr);
+    Self.NoteRoutineUse(AExpr);
+    Exit;
+  end;
+  { --emit-xref: the names as written (analysis rewrites them). }
+  Recv := '';
+  Member := '';
+  if AExpr is TFieldAccessExpr then
+  begin
+    Recv := TFieldAccessExpr(AExpr).RecordName;
+    Member := TFieldAccessExpr(AExpr).FieldName;
+  end
+  else if AExpr is TMethodCallExpr then
+  begin
+    Recv := TMethodCallExpr(AExpr).ObjectName;
+    Member := TMethodCallExpr(AExpr).Name;
+  end;
   Result := Self.AnalyseExprCore(AExpr);
   Self.NoteRoutineUse(AExpr);
+  if AExpr is TFieldAccessExpr then
+  begin
+    FA := TFieldAccessExpr(AExpr);
+    RT := XrefReceiverType(FA.Base, Recv);
+    { A field-backed property's read is rewritten to its field. }
+    if SameText(FA.FieldName, Member) or
+       ((RT is TRecordTypeDesc) and (TRecordTypeDesc(RT).FindProperty(Member) <> nil)) then
+    begin
+      NoteMemberXref(FA.MemberLine, FA.MemberCol, Member, RT, FA.FieldInfo, FA.ResolvedMethod);
+      if (FA.Base = nil) and (FA.MemberLine > 0) then
+        NoteReceiverXref(FA.Line, FA.Col, Recv);
+    end
+    else if FA.MemberLine > 0 then
+    begin
+      { Rewritten to another member (R.F[I] to R.F.Items[I]): the name as
+        written is on the access now inside it.  The position goes with it,
+        so another pass over this node does not record the synthetic one. }
+      Inner := FA.Base;
+      if (Inner is TFieldAccessExpr) and SameText(TFieldAccessExpr(Inner).FieldName, Member) then
+      begin
+        NoteMemberXref(FA.MemberLine, FA.MemberCol, Member,
+          XrefReceiverType(TFieldAccessExpr(Inner).Base, Recv),
+          TFieldAccessExpr(Inner).FieldInfo, TFieldAccessExpr(Inner).ResolvedMethod);
+        if TFieldAccessExpr(Inner).Base = nil then
+          NoteReceiverXref(FA.Line, FA.Col, Recv);
+        TFieldAccessExpr(Inner).MemberLine := FA.MemberLine;
+        TFieldAccessExpr(Inner).MemberCol := FA.MemberCol;
+      end;
+      FA.MemberLine := 0;
+    end;
+  end
+  else if AExpr is TMethodCallExpr then
+  begin
+    MC := TMethodCallExpr(AExpr);
+    if MC.IsProcFieldCall then
+      NoteMemberXref(MC.MemberLine, MC.MemberCol, Member, nil, MC.ProcFieldInfo, nil)
+    else if MC.ResolvedClassType <> nil then
+      NoteMemberXref(MC.MemberLine, MC.MemberCol, Member, MC.ResolvedClassType, nil, MC.ResolvedMethod)
+    else
+      NoteMemberXref(MC.MemberLine, MC.MemberCol, Member, XrefReceiverType(MC.ObjExpr, Recv),
+        nil, MC.ResolvedMethod);
+    if (MC.ObjExpr = nil) and (MC.MemberLine > 0) then
+      NoteReceiverXref(MC.Line, MC.Col, Recv);
+  end;
 end;
 
 function TSemanticAnalyser.AnalyseExprCore(AExpr: TASTExpr): TTypeDesc;
