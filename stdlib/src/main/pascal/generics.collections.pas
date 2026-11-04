@@ -190,13 +190,22 @@ type
   TDictionary<K, V> = class(IMap<K, V>)
     FKeys:      ^K;
     FValues:    ^V;
+    { Live entries. }
     FCount:     Int;
+    { Slots in use, removed ones included: a removed entry stays as a
+      tombstone (FDead[I] = 1) until the arrays are compacted, so the index
+      never renumbers and a Remove is O(1) amortised. }
+    FUsed:      Int;
+    FDead:      ^Byte;
     FCapacity:  Int;
     FHashSlots: ^Int;
     FHashCap:   Int;
     procedure Grow;
+    procedure Compact;
+    function  IsDead(AIdx: Int): Boolean;
     procedure HashInvalidate;
     procedure HashInsertIdx(AIdx: Int);
+    procedure HashRemoveIdx(AIdx: Int);
     procedure HashRebuild;
     function  FindKey(const Key: K): Int;
     procedure ReleaseEntries;
@@ -1166,9 +1175,53 @@ begin
   ZeroMem(Self.FKeys + OldCap * SizeOf(K), (NewCap - OldCap) * SizeOf(K));
   Self.FValues   := ReallocMem(Self.FValues, NewCap * SizeOf(V));
   ZeroMem(Self.FValues + OldCap * SizeOf(V), (NewCap - OldCap) * SizeOf(V));
+  Self.FDead     := ReallocMem(Self.FDead, NewCap);
+  ZeroMem(Self.FDead + OldCap, NewCap - OldCap);
   Self.FCapacity := NewCap
 end;
 
+function TDictionary<K, V>.IsDead(AIdx: Int): Boolean;
+var
+  P: ^Byte;
+begin
+  P := Self.FDead + AIdx;
+  Result := P^ <> 0;
+end;
+
+{ Squeeze the tombstones out, keeping the live entries' order: each moves
+  down as raw bytes (its references move with it; a tombstone holds none),
+  and the index is rebuilt on the next lookup. }
+procedure TDictionary<K, V>.Compact;
+var
+  I, J: Int;
+  BSrc, BDst: ^Byte;
+  Raw: Pointer;
+begin
+  J := 0;
+  for I := 0 to Self.FUsed - 1 do
+    if not Self.IsDead(I) then
+    begin
+      if I <> J then
+      begin
+        Raw := Self.FKeys + I * SizeOf(K);
+        BSrc := Raw;
+        Raw := Self.FKeys + J * SizeOf(K);
+        BDst := Raw;
+        Move(BSrc^, BDst^, SizeOf(K));
+        Raw := Self.FValues + I * SizeOf(V);
+        BSrc := Raw;
+        Raw := Self.FValues + J * SizeOf(V);
+        BDst := Raw;
+        Move(BSrc^, BDst^, SizeOf(V));
+      end;
+      J := J + 1;
+    end;
+  ZeroMem(Self.FKeys + J * SizeOf(K), (Self.FUsed - J) * SizeOf(K));
+  ZeroMem(Self.FValues + J * SizeOf(V), (Self.FUsed - J) * SizeOf(V));
+  ZeroMem(Self.FDead, Self.FUsed);
+  Self.FUsed := J;
+  Self.HashInvalidate();
+end;
 procedure TDictionary<K, V>.HashInvalidate;
 begin
   if Self.FHashSlots <> nil then
@@ -1199,6 +1252,52 @@ begin
   end;
 end;
 
+{ Entry AIdx leaves the index: its slot is emptied by backward-shift
+  deletion, which keeps every probe chain unbroken (the entry itself stays
+  where it is, a tombstone, so no other index changes).  Dropping the whole
+  index instead made the next lookup rehash every key: remove and look up
+  in turn was quadratic. }
+procedure TDictionary<K, V>.HashRemoveIdx(AIdx: Int);
+var
+  Mask, Hole, J, Home: Int;
+  SlotP, HoleP: ^Int;
+  KPtr: ^K;
+begin
+  Mask := Self.FHashCap - 1;
+  KPtr := Self.FKeys + AIdx * SizeOf(K);
+  Hole := GCHashOf(KPtr^) and Mask;
+  while True do
+  begin
+    SlotP := Self.FHashSlots + Hole * SizeOf(Int);
+    if SlotP^ = AIdx then
+      Break;
+    if SlotP^ = -1 then
+      Exit;
+    Hole := (Hole + 1) and Mask;
+  end;
+  J := Hole;
+  while True do
+  begin
+    J := (J + 1) and Mask;
+    SlotP := Self.FHashSlots + J * SizeOf(Int);
+    if SlotP^ = -1 then
+      Break;
+    KPtr := Self.FKeys + SlotP^ * SizeOf(K);
+    Home := GCHashOf(KPtr^) and Mask;
+    { The entry at J may fill the hole when its home is not in (Hole, J],
+      cyclically. }
+    if ((Hole <= J) and ((Home <= Hole) or (Home > J))) or
+       ((Hole > J) and (Home <= Hole) and (Home > J)) then
+    begin
+      HoleP := Self.FHashSlots + Hole * SizeOf(Int);
+      HoleP^ := SlotP^;
+      Hole := J;
+    end;
+  end;
+  HoleP := Self.FHashSlots + Hole * SizeOf(Int);
+  HoleP^ := -1;
+end;
+
 { Keys are unique, so occupancy equals FCount; rebuilt at <= 50% load so
   an empty slot terminates every probe chain. }
 procedure TDictionary<K, V>.HashRebuild;
@@ -1219,8 +1318,9 @@ begin
     P  := Self.FHashSlots + I * SizeOf(Int);
     P^ := -1;
   end;
-  for I := 0 to Self.FCount - 1 do
-    Self.HashInsertIdx(I);
+  for I := 0 to Self.FUsed - 1 do
+    if not Self.IsDead(I) then
+      Self.HashInsertIdx(I);
 end;
 
 function TDictionary<K, V>.FindKey(const Key: K): Int;
@@ -1248,10 +1348,10 @@ begin
   end;
   Result := -1;
   I      := 0;
-  while I < Self.FCount do
+  while I < Self.FUsed do
   begin
     Ptr := Self.FKeys + I * SizeOf(K);
-    if Ptr^ = Key then
+    if (Ptr^ = Key) and not Self.IsDead(I) then
     begin
       Result := I;
       break
@@ -1294,13 +1394,17 @@ begin
   end
   else
   begin
-    { Insert new entry }
-    if Self.FCount = Self.FCapacity then
+    { Insert new entry: at the end, after squeezing out tombstones when
+      they fill the arrays. }
+    if (Self.FUsed = Self.FCapacity) and (Self.FUsed > Self.FCount) then
+      Self.Compact();
+    if Self.FUsed = Self.FCapacity then
       Self.Grow();
-    KPtr  := Self.FKeys   + Self.FCount * SizeOf(K);
-    VPtr  := Self.FValues + Self.FCount * SizeOf(V);
+    KPtr  := Self.FKeys   + Self.FUsed * SizeOf(K);
+    VPtr  := Self.FValues + Self.FUsed * SizeOf(V);
     KPtr^ := Key;
     VPtr^ := Value;
+    Self.FUsed := Self.FUsed + 1;
     Self.FCount := Self.FCount + 1;
     { Keep the hash live across appends; past 50% load drop it and let the
       next lookup rebuild at double size. }
@@ -1309,7 +1413,7 @@ begin
       if Self.FCount * 2 > Self.FHashCap then
         Self.HashInvalidate()
       else
-        Self.HashInsertIdx(Self.FCount - 1);
+        Self.HashInsertIdx(Self.FUsed - 1);
     end;
   end
 end;
@@ -1351,11 +1455,12 @@ var
   P: ^K;
 begin
   Result := TList<K>.Create();
-  for I := 0 to Self.FCount - 1 do
-  begin
-    P := Self.FKeys + I * SizeOf(K);
-    Result.Add(P^)
-  end
+  for I := 0 to Self.FUsed - 1 do
+    if not Self.IsDead(I) then
+    begin
+      P := Self.FKeys + I * SizeOf(K);
+      Result.Add(P^)
+    end
 end;
 
 function TDictionary<K, V>.Values: TList<V>;
@@ -1364,11 +1469,12 @@ var
   P: ^V;
 begin
   Result := TList<V>.Create();
-  for I := 0 to Self.FCount - 1 do
-  begin
-    P := Self.FValues + I * SizeOf(V);
-    Result.Add(P^)
-  end
+  for I := 0 to Self.FUsed - 1 do
+    if not Self.IsDead(I) then
+    begin
+      P := Self.FValues + I * SizeOf(V);
+      Result.Add(P^)
+    end
 end;
 
 function TDictionary<K, V>.ContainsKey(const Key: K): Boolean;
@@ -1379,45 +1485,48 @@ end;
 procedure TDictionary<K, V>.Remove(const Key: K);
 var
   Idx:      Int;
-  I:        Int;
   KDst:     ^K;
-  KSrc:     ^K;
   VDst:     ^V;
-  VSrc:     ^V;
+  D:        ^Byte;
   EmptyKey: K;
   EmptyVal: V;
 begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    { Compact: shift entries after Idx one slot left }
-    I := Idx;
-    while I < Self.FCount - 1 do
-    begin
-      KDst  := Self.FKeys   + I * SizeOf(K);
-      KSrc  := Self.FKeys   + (I + 1) * SizeOf(K);
-      VDst  := Self.FValues + I * SizeOf(V);
-      VSrc  := Self.FValues + (I + 1) * SizeOf(V);
-      KDst^ := KSrc^;
-      VDst^ := VSrc^;
-      I     := I + 1
-    end;
-    Self.FCount := Self.FCount - 1;
-    { The shift leaves the vacated tail slots holding duplicates of the last
-      entry; clear both axes so their managed refs are released. }
-    KDst  := Self.FKeys   + Self.FCount * SizeOf(K);
-    VDst  := Self.FValues + Self.FCount * SizeOf(V);
+    if Self.FHashCap > 0 then
+      Self.HashRemoveIdx(Idx);
+    { Release the entry and leave a tombstone: the others keep their
+      places (and their order). }
+    KDst  := Self.FKeys   + Idx * SizeOf(K);
+    VDst  := Self.FValues + Idx * SizeOf(V);
     KDst^ := EmptyKey;
     VDst^ := EmptyVal;
-    { Indexes shifted — rebuild lazily on the next lookup. }
-    Self.HashInvalidate()
+    D     := Self.FDead + Idx;
+    D^    := 1;
+    Self.FCount := Self.FCount - 1;
+    if Self.FCount = 0 then
+    begin
+      ZeroMem(Self.FDead, Self.FUsed);
+      Self.FUsed := 0;
+      Self.HashInvalidate();
+    end
+    { Tombstones outnumbering the live: squeeze them out (amortised O(1)). }
+    else if (Self.FUsed - Self.FCount > Self.FCount) and (Self.FUsed >= GCHashThreshold) then
+      Self.Compact()
+    { Below the threshold lookups scan; the index is rebuilt when it is
+      reached again. }
+    else if Self.FCount < GCHashThreshold then
+      Self.HashInvalidate()
   end
 end;
-
 procedure TDictionary<K, V>.Clear;
 begin
   Self.ReleaseEntries();
+  if Self.FUsed > 0 then
+    ZeroMem(Self.FDead, Self.FUsed);
   Self.FCount := 0;
+  Self.FUsed := 0;
   Self.HashInvalidate();
 end;
 
@@ -1461,7 +1570,7 @@ var
   EmptyVal: V;
 begin
   I := 0;
-  while I < Self.FCount do
+  while I < Self.FUsed do
   begin
     KSlot  := Self.FKeys   + I * SizeOf(K);
     VSlot  := Self.FValues + I * SizeOf(V);
@@ -1482,9 +1591,12 @@ begin
   Self.HashInvalidate();
   FreeMem(Self.FKeys);
   FreeMem(Self.FValues);
+  FreeMem(Self.FDead);
   Self.FKeys     := nil;
   Self.FValues   := nil;
+  Self.FDead     := nil;
   Self.FCount    := 0;
+  Self.FUsed     := 0;
   Self.FCapacity := 0
 end;
 

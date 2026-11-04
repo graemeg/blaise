@@ -103,6 +103,9 @@ type
     procedure TestDict_Values_MatchTheKeys;
     procedure TestDict_KeysAndValues_OfEmptyDict;
     procedure TestDict_Keys_AfterRemoveKeepOrder;
+    { Removing from a hashed dictionary keeps every other key findable,
+      with its value, in order (the index is patched, not rebuilt). }
+    procedure TestDict_RemoveAmongLookups_KeepsTheRest;
     procedure TestDict_Clear_EmptiesTheDict;
     procedure TestDict_GrowsPastHashThreshold;
     procedure TestDict_IntegerKeys;
@@ -851,6 +854,54 @@ begin
   AssertEquals('count', 2, K.Count);
   AssertEquals('order kept', 'b', K[0]);
   AssertEquals('order kept', 'c', K[1]);
+end;
+
+procedure TCollectionsTests.TestDict_RemoveAmongLookups_KeepsTheRest;
+var
+  D: TDictionary<string, Int>;
+  N: TDictionary<Int, Int>;
+  K: TList<string>;
+  I, V, Prev: Int;
+begin
+  D := TDictionary<string, Int>.Create();
+  N := TDictionary<Int, Int>.Create();
+  for I := 0 to 1999 do
+  begin
+    D.Add('k' + IntToStr(I), I);
+    { Multiples of 64 crowd a few probe chains. }
+    N.Add(I * 64, I);
+  end;
+  for I := 0 to 1999 do
+    if I mod 3 = 0 then
+    begin
+      D.Remove('k' + IntToStr(I));
+      N.Remove(I * 64);
+      AssertTrue('a later key still found', D.ContainsKey('k' + IntToStr(1999 - (I mod 7))) or
+        ((1999 - (I mod 7)) mod 3 = 0));
+    end;
+  AssertEquals('count', 1333, D.Count);
+  AssertEquals('count (int keys)', 1333, N.Count);
+  for I := 0 to 1999 do
+  begin
+    AssertEquals('present ' + IntToStr(I), I mod 3 <> 0, D.TryGetValue('k' + IntToStr(I), V));
+    if I mod 3 <> 0 then
+      AssertEquals('value ' + IntToStr(I), I, V);
+    AssertEquals('present (int) ' + IntToStr(I), I mod 3 <> 0, N.TryGetValue(I * 64, V));
+    if I mod 3 <> 0 then
+      AssertEquals('value (int) ' + IntToStr(I), I, V);
+  end;
+  K := D.Keys();
+  Prev := -1;
+  for I := 0 to K.Count - 1 do
+  begin
+    V := D[K[I]];
+    AssertTrue('insertion order', V > Prev);
+    Prev := V;
+  end;
+  { Adding after removing uses the patched index too. }
+  D.Add('k0', 42);
+  AssertEquals('re-added', 42, D['k0']);
+  AssertEquals('k1 kept', 1, D['k1']);
 end;
 
 procedure TCollectionsTests.TestDict_Clear_EmptiesTheDict;
