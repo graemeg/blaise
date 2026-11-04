@@ -121,6 +121,7 @@ type
       These are contextual identifiers, so a nested `type` section must stop
       on them rather than read them as the next type's name. }
     function AtMemberSectionKeyword: Boolean;
+    function SectionOpensBody(): Boolean;
     procedure ParseConstBlock(AList: TObjectList);
     { Stamp AVis onto every TConstDecl appended to AList from AFromIdx onward.
       ParseConstBlock appends without knowing the enclosing visibility section,
@@ -1123,6 +1124,66 @@ begin
   if SameText(FCurrent.Value, 'static') and
      (PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) then
     Exit(True);
+end;
+
+{ At a var, const or type straight after a method heading in a type
+  declaration: True when it opens the method's inline body (its locals,
+  then `begin`), False when it opens the next section of the type.  Scans
+  ahead without consuming: the first `begin` outside a local record or
+  class means a body; the type's `end`, or the start of another member (a
+  routine after a `;`, a constructor, a visibility section, a property)
+  means a section. }
+function TParser.SectionOpensBody(): Boolean;
+var
+  N, Depth: Int;
+  K, Prev: TTokenKind;
+  V: string;
+begin
+  Depth := 0;
+  N := 1;
+  Prev := PeekKindAt(0);
+  while True do
+  begin
+    K := PeekKindAt(N);
+    case K of
+      tkEOF:
+        Exit(False);
+      tkBegin:
+        if Depth = 0 then
+          Exit(True);
+      tkRecord:
+        Depth := Depth + 1;
+      tkClass:
+        if (Prev = tkEquals) and not (PeekKindAt(N + 1) in [tkOf, tkSemicolon]) then
+          Depth := Depth + 1
+        else if (Depth = 0) and (Prev = tkSemicolon) then
+          Exit(False);
+      tkEnd:
+        if Depth = 0 then
+          Exit(False)
+        else
+          Depth := Depth - 1;
+      tkConstructor, tkDestructor:
+        if Depth = 0 then
+          Exit(False);
+      tkProcedure, tkFunction:
+        if (Depth = 0) and (Prev = tkSemicolon) then
+          Exit(False);
+      tkIdent:
+        if (Depth = 0) and (Prev = tkSemicolon) and
+           not (PeekKindAt(N + 1) in [tkColon, tkEquals, tkComma]) then
+        begin
+          V := PeekValueAt(N);
+          if SameText(V, 'private') or SameText(V, 'protected') or
+             SameText(V, 'public') or SameText(V, 'published') or
+             SameText(V, 'strict') or SameText(V, 'property') or
+             SameText(V, 'static') then
+            Exit(False);
+        end;
+    end;
+    Prev := K;
+    N := N + 1;
+  end;
 end;
 
 procedure TParser.ParseNestedTypeSection(AList: TObjectList;
@@ -3350,7 +3411,9 @@ begin
       Expect(tkSemicolon);
     end
     else if (not Result.IsExternal) and (not IsForward) and
-       (Check(tkBegin) or Check(tkVar) or Check(tkType) or Check(tkConst) or
+       (Check(tkBegin) or
+        ((Check(tkVar) or Check(tkType) or Check(tkConst)) and
+         (ACanHaveNestedProcs or SectionOpensBody())) or
         (ACanHaveNestedProcs and (Check(tkProcedure) or Check(tkFunction)))) then
     begin
       Result.Body := ParseBlock();

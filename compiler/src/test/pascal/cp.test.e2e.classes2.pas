@@ -62,6 +62,9 @@ type
     procedure TestRun_MultiTypeBlock_BothClassesWork;
     procedure TestRun_ForwardClass_CaseDifferentSpelling_RunsClean;
     procedure TestRun_ForwardClass_InUnitImplementation_RunsClean;
+    { A const, var or type section straight after a method heading in a class
+      is the class's, unless a `begin` follows it (an inline body's locals). }
+    procedure TestRun_ClassSectionsAfterMethod_RunsClean;
     procedure TestRun_ToString_DefaultReturnsClassName;
     procedure TestRun_ToString_OverrideDispatchedVirtually;
     procedure TestRun_ToString_InheritedOverrideStillReached;
@@ -1279,6 +1282,58 @@ begin
   AssertTrue('compile+run', CompileAndRunWithUnitNative('mu_fwd', UnitSrc, ProgSrc, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('42' + LE, Output);
+end;
+
+procedure TE2EClasses2Tests.TestRun_ClassSectionsAfterMethod_RunsClean;
+const
+  Src = '''
+    program Prg;
+    type
+      TBox = class
+        procedure Grow();
+      const
+        Limit = 3;
+      var
+        FSize: Int;
+        function Twice(): Int;
+        type
+          TPair = record A: Int; end;
+        var
+          R: TPair;
+        const
+          K = 2;
+        begin
+          R.A := FSize;
+          Result := R.A * K;
+        end;
+      type
+        TSpot = record X: Int; end;
+        procedure Show();
+      end;
+    procedure TBox.Grow();
+    begin
+      FSize := FSize + Limit;
+    end;
+    procedure TBox.Show();
+    var
+      S: TSpot;
+    begin
+      S.X := 1;
+      WriteLn(S.X);
+    end;
+    var
+      B: TBox;
+    begin
+      B := TBox.Create();
+      B.Grow();
+      WriteLn(B.Twice());
+      WriteLn(TBox.Limit);
+      B.Show();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '6' + LE + '3' + LE + '1' + LE, 0);
 end;
 
 procedure TE2EClasses2Tests.TestRun_ToString_DefaultReturnsClassName;
