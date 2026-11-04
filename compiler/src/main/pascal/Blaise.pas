@@ -917,6 +917,7 @@ var
                                 survives past TopUnit.Free() in the finally
                                 block, so the post-codegen output dispatch
                                 can pick CompileUnitToObject. }
+  TopUses: TStringList;       { a top-level unit's two uses clauses }
   TopIfacePath: string;       { Temp .bif file produced for the top
                                 unit, embedded into the output .o by
                                 CompileUnitToObject and then deleted.
@@ -1248,10 +1249,17 @@ begin
         Semantic.EnableXref();
       if (SearchPaths <> nil) then
       begin
-        if IsUnitMode and (TopUnit.UsedUnits.Count > 0) then
+        if IsUnitMode and ((TopUnit.UsedUnits.Count > 0) or (TopUnit.ImplUsedUnits.Count > 0)) then
         begin
+          { Both uses clauses: a unit compiled as the top level needs its
+            implementation's units as much as its interface's. }
+          TopUses := TStringList.Create();
+          TopUses.AddStrings(TopUnit.UsedUnits);
+          for I := 0 to TopUnit.ImplUsedUnits.Count - 1 do
+            if TopUses.IndexOf(TopUnit.ImplUsedUnits.Strings[I]) < 0 then
+              TopUses.Add(TopUnit.ImplUsedUnits.Strings[I]);
           Loader := TUnitLoader.Create(SearchPaths, Front.Defines);
-          Units  := Loader.LoadAll(TopUnit.UsedUnits);
+          Units  := Loader.LoadAll(TopUses);
         end
         else if (Prog <> nil) and (Prog.UsedUnits.Count > 0) then
         begin
