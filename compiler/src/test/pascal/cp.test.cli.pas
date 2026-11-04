@@ -177,6 +177,9 @@ type
     procedure TestInstall_ReadOnlyInstall_CachesUnderHome;
     procedure TestInstall_RtlCacheFlag_PlacesTheCache;
     procedure TestInstall_RtlCacheEnv_PlacesTheCache;
+    { --print-unit-paths: the directories the unit loader searches, in
+      order, for tools that look up a unit's source as the compiler would. }
+    procedure TestPrintUnitPaths_FlagsThenConfigThenRtl;
   end;
 
 implementation
@@ -1730,6 +1733,37 @@ begin
   AssertTrue('RTL cached where $BLAISE_RTL_CACHE says',
     DirectoryExists(R + 'cache'));
   AssertFalse('nothing cached beside the binary', DirectoryExists(R + 'inst/rtl'));
+end;
+
+procedure TCLIContractTests.TestPrintUnitPaths_FlagsThenConfigThenRtl;
+var
+  R, Out_, Extra: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  R := MakeInstall('paths');
+  Extra := R + 'work';
+  EC := RunShell('cd ''' + R + 'work'' && env -u BLAISE_RTL_SRC ' +
+    'HOME=''' + R + 'home'' ''' + R + 'inst/blaise'' --print-unit-paths ' +
+    '--unit-path ''' + Extra + '''', Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  L := TStringList.Create();
+  try
+    L.Text := Out_;
+    AssertEquals('one line per directory: ' + Out_, 3, L.Count);
+    AssertEquals('the --unit-path first', Extra, ExcludeTrailingPathDelimiter(L[0]));
+    AssertEquals('then the config''s unit-path',
+      ExcludeTrailingPathDelimiter(FStdlibPath), ExcludeTrailingPathDelimiter(L[1]));
+    AssertEquals('then the RTL source',
+      ExcludeTrailingPathDelimiter(FRTLPath), ExcludeTrailingPathDelimiter(L[2]));
+  finally
+    L.Free();
+  end;
 end;
 
 initialization

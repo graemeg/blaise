@@ -90,6 +90,8 @@ begin
   WriteLn(FormatFlagLine('--output <path>', 'Output binary path'));
   WriteLn(FormatFlagLine('--unit-path <dir>',
     'Add directory to unit search path (repeatable)'));
+  WriteLn(FormatFlagLine('--print-unit-paths',
+    'Print the unit search directories in search order, then stop'));
   WriteLn(FormatFlagLine('--lib-path <dir>',
     'Add directory to C-library search path (-Fl; repeatable)'));
   WriteLn(FormatFlagLine('--rtl-src <dir>',
@@ -446,6 +448,8 @@ begin
       AFront.DumpAST := True
     else if Arg = '--check' then
       AFront.Check := True
+    else if Arg = '--print-unit-paths' then
+      AFront.PrintUnitPaths := True
     else if Arg = '--diagnostics=json' then
       AFront.DiagnosticsJson := True
     else if Arg = '--diagnostics=text' then
@@ -534,6 +538,8 @@ begin
           '); using the default');
   end;
 
+  if AFront.PrintUnitPaths then
+    Exit(True);
   if AFront.SourceFile = '' then
   begin
     WriteLn(StdErr, 'Error: --source is required');
@@ -1090,7 +1096,9 @@ begin
     objects its FIRST compile wrote — which is the point of the incremental
     cache, and is guarded by
     TSepCompileTests.TestObjectBesideProgram_UsableWithoutSource. }
-  SrcDir := ExtractFilePath(ExpandFileName(SourceFile));
+  SrcDir := '';
+  if SourceFile <> '' then
+    SrcDir := ExtractFilePath(ExpandFileName(SourceFile));
   if (SrcDir <> '') and DirectoryExists(SrcDir)
      and (SearchPaths.IndexOf(SrcDir) < 0) then
     SearchPaths.Add(SrcDir);
@@ -1115,6 +1123,23 @@ begin
   if (RTLSrc <> '') and DirectoryExists(RTLSrc)
      and (SearchPaths.IndexOf(RTLSrc) < 0) then
     SearchPaths.Add(RTLSrc);
+
+  { --print-unit-paths: what an IDE needs to find a unit's source the way
+    the loader does (blaise.cfg beside the binary and in ~, the RTL
+    default), without reimplementing that lookup. }
+  if Front.PrintUnitPaths then
+  begin
+    { Expanded, and each directory once (a config's relative path can name
+      one a --unit-path already did). }
+    ConfigPaths := TStringList.Create();
+    for I := 0 to SearchPaths.Count - 1 do
+      if ConfigPaths.IndexOf(ExcludeTrailingPathDelimiter(
+        ExpandFileName(SearchPaths.Strings[I]))) < 0 then
+        ConfigPaths.Add(ExcludeTrailingPathDelimiter(ExpandFileName(SearchPaths.Strings[I])));
+    for I := 0 to ConfigPaths.Count - 1 do
+      WriteLn(ConfigPaths.Strings[I]);
+    Halt(0);
+  end;
 
   { The .bif writer needs these to locate a generic dependency's source and
     hash it — that dependency is usually NOT beside the unit being written

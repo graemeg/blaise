@@ -46,6 +46,9 @@ type
     { --emit-xref FILE: each plain identifier use and the declaration it
       resolves to, one tab-separated line each (an IDE's resolver oracle). }
     EmitXrefFile: string;
+    { --print-unit-paths: print the unit search directories, one per line,
+      and stop (no --source needed). }
+    PrintUnitPaths: Boolean;
     Incremental: Boolean;
     UnitCacheDir: string;
     DumpAST: Boolean;
