@@ -61,6 +61,7 @@ type
     procedure TestRun_Phase3Milestone_Valgrind;
     procedure TestRun_MultiTypeBlock_BothClassesWork;
     procedure TestRun_ForwardClass_CaseDifferentSpelling_RunsClean;
+    procedure TestRun_ForwardClass_InUnitImplementation_RunsClean;
     procedure TestRun_ToString_DefaultReturnsClassName;
     procedure TestRun_ToString_OverrideDispatchedVirtually;
     procedure TestRun_ToString_InheritedOverrideStillReached;
@@ -1234,6 +1235,50 @@ begin
         end.
         ''',
     'hello' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_ForwardClass_InUnitImplementation_RunsClean;
+var
+  UnitSrc, ProgSrc, Output: string;
+  RCode: Int;
+begin
+  { A forward class declaration in a unit's implementation section: the
+    completing declaration must carry its descriptor to codegen, which runs
+    after the implementation scope is gone.  Before the fix the unit failed
+    with `internal error: class 'TA' with no class descriptor`. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  UnitSrc := '''
+    unit mu_fwd;
+    interface
+    function Run(): Int;
+    implementation
+    type
+      TA = class;
+      IB = interface;
+      TA = class
+        N: Int;
+      end;
+      IB = interface
+        function Get(): Int;
+      end;
+    function Run(): Int;
+    var
+      A: TA;
+    begin
+      A := TA.Create();
+      A.N := 42;
+      Result := A.N;
+    end;
+    end.
+    ''';
+  ProgSrc := '''
+    program Prg;
+    uses mu_fwd;
+    begin WriteLn(Run()); end.
+    ''';
+  AssertTrue('compile+run', CompileAndRunWithUnitNative('mu_fwd', UnitSrc, ProgSrc, Output, RCode));
+  AssertEquals('exit code 0', 0, RCode);
+  AssertEquals('42' + LE, Output);
 end;
 
 procedure TE2EClasses2Tests.TestRun_ToString_DefaultReturnsClassName;

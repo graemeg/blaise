@@ -9670,6 +9670,11 @@ begin
         FwdType := FTable.FindType(TD.Name);
         if FwdType <> nil then
           FwdType.Name := TD.Name;
+        { Record the shared descriptor on the completing declaration, as
+          DefineTypeLastWins does for any other: codegen reads it after the
+          scope is gone, so a forward class in a unit's implementation
+          section otherwise has no descriptor there. }
+        TD.ResolvedDesc := FwdType;
         ForwardDecls.Delete(FwdIdx);
         Continue;
       end;
@@ -9735,10 +9740,12 @@ begin
         ForwardDecls.AddObject(TD.Name, TD);
         Continue;
       end;
-      { Full interface completing a pending forward: reuse the placeholder. }
+      { Full interface completing a pending forward: reuse the placeholder
+        (and record it on this declaration, as for a class). }
       FwdIdx := ForwardDecls.IndexOf(TD.Name);
       if FwdIdx >= 0 then
       begin
+        TD.ResolvedDesc := FTable.FindType(TD.Name);
         ForwardDecls.Delete(FwdIdx);
         Continue;
       end;
