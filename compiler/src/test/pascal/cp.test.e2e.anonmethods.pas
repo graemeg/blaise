@@ -156,6 +156,11 @@ type
       the receiver base is the pointer's value.  x86-64 rejected the
       dereference as an "unsupported receiver expression" }
     procedure TestRun_ProcFieldInRecord_ThroughPointer;
+    { for P in TList<TProc>: the enumerator's Current returns a closure,
+      through the hidden result buffer like any function of that type.
+      arm64 called it as a scalar function, so the getter wrote through a
+      stale x8 and crashed. }
+    procedure TestRun_ForInOverClosureList;
     { BUG-20260922-record-closure-field-not-managed: a record whose only
       managed member is a 'reference to' field was reported "managed clean",
       so a whole-record copy shared the env with NO retain and the scope-exit
@@ -1918,6 +1923,40 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, 'show 3' + LineEnding + 'fn 15' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ForInOverClosureList;
+const
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    type
+      TProc = reference to procedure;
+      TFn = reference to function(N: Int): Int;
+    var
+      L: TList<TProc>;
+      F: TList<TFn>;
+      Pr: TProc;
+      Fn: TFn;
+      K: Int;
+    begin
+      K := 10;
+      L := TList<TProc>.Create();
+      L.Add(procedure begin WriteLn('a') end);
+      L.Add(procedure begin WriteLn('b ', K) end);
+      for Pr in L do
+        Pr();
+      F := TList<TFn>.Create();
+      F.Add(function(N: Int): Int begin Result := N + K end);
+      F.Add(function(N: Int): Int begin Result := N * K end);
+      for Fn in F do
+        WriteLn(Fn(3))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'a' + LineEnding + 'b 10' + LineEnding + '13' + LineEnding +
+    '30' + LineEnding, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_RecordCopy_ClosureField_EnvSurvivesCopy;

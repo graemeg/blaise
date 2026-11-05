@@ -12118,11 +12118,14 @@ begin
     EmitLoadSlot('x0', AStmt.EnumVarName);
     EmitMethodCallCommon(MN, 'MoveNext', EmptyArgs);
     Self.Emit(Format(#9'cbz x0, %s', [EndL]));
-    if IsAgg then
+    if IsAgg or IsMethodPtrType(AStmt.ResolvedVarType) then
     begin
-      { a record / interface Current comes back through x8 (or x0:x1 for a
-        small record) into a per-site scratch, OWNED, and moves into the
-        loop variable without a retain }
+      { a record / interface / closure Current comes back through x8 (or
+        x0:x1 for a small record) into a per-site scratch, OWNED, and moves
+        into the loop variable without a retain.  A closure is returned
+        through x8 like a function result of its type: the scalar call
+        below passed no buffer, and the getter wrote through a stale x8
+        (for P in TList<TProc> crashed). }
       Tmp := '__ficur_' + IntToStr(FJArgN);
       FJArgN := FJArgN + 1;
       if not FFrame.ContainsKey(Tmp) then
