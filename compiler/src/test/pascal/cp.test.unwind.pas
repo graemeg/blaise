@@ -1231,6 +1231,9 @@ begin
         S: string;
         function Echo(N: Int): Int;
       end;
+      TStr = class
+        function ToString(): string; override;
+      end;
     constructor TThing.Create(const N: string); begin FN := N; end;
     function TThing.Echo(N: Int): Int; begin Result := N; end;
     procedure TThing.Put(const T: IThing; N: Int); begin WriteLn(N); end;
@@ -1239,6 +1242,7 @@ begin
     function TObj.Echo(N: Int): Int; begin Result := N; end;
     procedure TObj.Put(N: Int); begin WriteLn(N); end;
     function TVal.Echo(N: Int): Int; begin Result := N; end;
+    function TStr.ToString(): string; begin raise Exception.Create('ts'); end;
     function Mk(const N: string): IThing; begin Result := TThing.Create(N); end;
     function MkO(): TObj; begin Result := TObj.Create(); end;
     function MkV(N: Int): TVal; begin Result.S := IntToStr(N) + 'v'; end;
@@ -1250,6 +1254,7 @@ begin
     procedure E; begin WriteLn(MkO().Echo(Boom())); end;
     procedure F; begin MkO().Put(Boom()); end;
     procedure G; begin WriteLn(MkV(7).Echo(Boom())); end;
+    procedure H; var S: string; begin S := TStr.Create().ToString(); end;
     begin
       try A(); except on X: Exception do WriteLn('a ', X.Message); end;
       try B(); except on X: Exception do WriteLn('b ', X.Message); end;
@@ -1258,10 +1263,11 @@ begin
       try E(); except on X: Exception do WriteLn('e ', X.Message); end;
       try F(); except on X: Exception do WriteLn('f ', X.Message); end;
       try G(); except on X: Exception do WriteLn('g ', X.Message); end;
+      try H(); except on X: Exception do WriteLn('h ', X.Message); end;
       WriteLn(Mk('h').Echo(8), MkO().Echo(9), MkV(1).Echo(10));
     end.
     ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + 'e b' + #10 +
-      'f b' + #10 + 'g b' + #10 + '8910');
+      'f b' + #10 + 'g b' + #10 + 'h ts' + #10 + '8910');
 end;
 
 procedure TUnwindE2ETests.TestDebug_UnitSectionTryExcept;

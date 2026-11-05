@@ -19339,6 +19339,8 @@ var
   I: Int;
   Sym: string;
   Owned: Boolean;
+  RecvH: Int;
+  RecvSlot: string;
 begin
   if AExpr.IsConstructorCall then
   begin
@@ -19443,13 +19445,28 @@ begin
       (offset 16 past the typeinfo back-pointer).  Returns an owned +1
       string. }
     Owned := EmitBuiltinReceiverToX0(AExpr);
+    RecvH := -1;
     if Owned then
-      EmitPushX0();               { copy for the post-call release }
+    begin
+      { the copy for the post-call release, in an x29-relative operand slot:
+        an override may raise }
+      RecvSlot := OpndSlot(FOpndTop);
+      FOpndTop := FOpndTop + 1;
+      EmitStoreSlot('x0', RecvSlot);
+      RecvH := UnwClassSlotOpen(RecvSlot);
+    end;
     Self.Emit(#9'ldr x9, [x0]');
     Self.Emit(#9'ldr x9, [x9, #16]');
     Self.Emit(#9'blr x9');
     if Owned then
-      EmitReleaseParkedReceiver();
+    begin
+      UnwStrOpndClose(RecvH);
+      EmitPushX0();               { park the result }
+      EmitLoadSlot('x0', RecvSlot);
+      EmitCallSym('_ClassRelease');
+      EmitPopTo('x0');
+      FOpndTop := FOpndTop - 1;
+    end;
     Exit;
   end;
   if AExpr.IsBuiltinInheritsFrom then
