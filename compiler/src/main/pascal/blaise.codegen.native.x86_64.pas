@@ -1342,6 +1342,7 @@ type
     procedure RecordUnwindSlots(ADecl: TMethodDecl; ASlots: TList<TUnwSlot>);
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure UnwHoistOpen(AKind: Int);
+    function UnwRecArgRanged(AArg: TASTExpr): Boolean;
     function UnwStrTempOpen(AExpr: TASTExpr): Int;
     function UnwCtorOpen(): Int;
     function EmitCtorHoldBegin(): Int;
@@ -23108,6 +23109,8 @@ function TX86_64Backend.EmitArgHoist(AParams: TObjectList;
   AIntfParams: TObjectList): Int;
 var
   I: Int;
+  H: Int;
+  Lbl: string;
   Par: TMethodParam;
   PP: TProcParamInfo;
   Arg: TASTExpr;
@@ -23244,6 +23247,15 @@ begin
         Result - depth) is unchanged. }
       Self.Emit(#9'subq $8, %rsp');
       Self.Emit(#9'pushq %rax');
+      { a managed record's buffer is the frame's until the epilogue releases
+        it: the saved pointer at (%rsp) is an indirect aggregate range }
+      if Self.UnwRecArgRanged(Arg) then
+      begin
+        H := FUnw.OpenRange(UNW_AGG, FSPDepth, UNW_F_INDIRECT,
+          Self.UnwAggHookPtr(Arg.ResolvedType), True, Lbl);
+        if Lbl <> '' then inherited Emit(Lbl + ':');
+        FUnwHoist.Add(H);
+      end;
       Result := Result + Self.RecArgBufBytes(Arg) + 16;
       ADepths.Add(Result);
       AKinds.Add(akRecCall);
@@ -23424,8 +23436,10 @@ begin
   NRanged := 0;
   if FUnw <> nil then
     for I := 0 to AKinds.Count - 1 do
-      if AKinds.Get(I) in [akStrPin, akStrConsume, akIntfConsume,
-                           akClassConsume, akDynConsume] then
+      if (AKinds.Get(I) in [akStrPin, akStrConsume, akIntfConsume,
+                            akClassConsume, akDynConsume]) or
+         ((AKinds.Get(I) = akRecCall) and
+          Self.UnwRecArgRanged(TASTExpr(AArgs.Items[I]))) then
         NRanged := NRanged + 1;
   RBase := FUnwHoist.Count - NRanged;
   if RBase < 0 then
@@ -23477,6 +23491,8 @@ begin
           itself is stack memory reclaimed below.  (A hoisted jumbo-set
           bitmap has no managed fields -- nothing to release.) }
         Self.Emit(Format(#9'movq %d(%%rsp), %%rbx', [Off]));
+        if (K = akRecCall) and Self.UnwRecArgRanged(TASTExpr(AArgs.Items[I])) then
+          CloseNext();
         Self.EmitRecordFieldReleases(
           TRecordTypeDesc(TASTExpr(AArgs.Items[I]).ResolvedType), '%rbx');
       end;
@@ -26703,6 +26719,15 @@ begin
   FUnw.CloseRange(AHandle, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
   AHandle := -1;
+end;
+
+{ A record-call argument whose hoisted buffer holds references the caller
+  releases after the call (EmitHoistEpilogue), so the tables cover it. }
+function TX86_64Backend.UnwRecArgRanged(AArg: TASTExpr): Boolean;
+begin
+  Result := (FUnw <> nil) and (AArg <> nil) and (AArg.ResolvedType <> nil) and
+    (AArg.ResolvedType.Kind = tyRecord) and
+    ArcTypeHasManagedContent(AArg.ResolvedType);
 end;
 
 procedure TX86_64Backend.UnwHoistOpen(AKind: Int);

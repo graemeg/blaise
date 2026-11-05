@@ -83,6 +83,11 @@ type
       a metaclass) and a nested constructor call, and one that registered
       Self elsewhere before it raised }
     procedure TestDebug_RaisingConstructor_ReleasesInstance;
+    { a managed record built by a call for an argument (TakeRec(MkRec())) is
+      released when a later argument raises or the callee does: const and
+      by-value parameters, a large and a small (register-returned) record,
+      a method callee }
+    procedure TestDebug_RecordCallArgs_ReleasedOnUnwind;
   end;
 
 implementation
@@ -1098,6 +1103,80 @@ begin
     ''', 'plain base 11' + #10 + 'virt base 11' + #10 + 'byvalue base 11' + #10 + 'nested holder 101' + #10 +
       'caught base True' + #10 + 'caught freed 11' + #10 +
       'registered base 0 1' + #10 + 'cleared 11');
+end;
+
+procedure TUnwindE2ETests.TestDebug_RecordCallArgs_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwRecArgs;
+    uses SysUtils;
+    type
+      TRec = record
+        S: string;
+        N: Int;
+        T: string;
+      end;
+      TSmall = record
+        S: string;
+      end;
+      TSink = class
+        procedure Take(const A: TRec; const B: TRec; N: Int);
+      end;
+    function MkRec(N: Int): TRec;
+    begin
+      Result.S := IntToStr(N) + 's';
+      Result.T := IntToStr(N) + 't';
+      Result.N := N;
+    end;
+    function MkSmall(N: Int): TSmall;
+    begin
+      Result.S := IntToStr(N) + 'm';
+    end;
+    function Boom(): Int;
+    begin
+      raise Exception.Create('b');
+    end;
+    procedure TakeRec(const R: TRec; N: Int);
+    begin
+      WriteLn(R.S, N);
+    end;
+    procedure TakeRecV(R: TRec; N: Int);
+    begin
+      WriteLn(R.S, N);
+    end;
+    procedure TakeSmall(const R: TSmall; N: Int);
+    begin
+      WriteLn(R.S, N);
+    end;
+    procedure RaiseIn(const R: TRec);
+    begin
+      raise Exception.Create('in');
+    end;
+    procedure TSink.Take(const A: TRec; const B: TRec; N: Int);
+    begin
+      WriteLn(A.S, B.S, N);
+    end;
+    procedure A; begin TakeRec(MkRec(1), Boom()); end;
+    procedure B; begin TakeRecV(MkRec(2), Boom()); end;
+    procedure C; begin TakeSmall(MkSmall(3), Boom()); end;
+    procedure D; begin RaiseIn(MkRec(4)); end;
+    procedure E;
+    var K: TSink;
+    begin
+      K := TSink.Create();
+      K.Take(MkRec(5), MkRec(6), Boom());
+    end;
+    procedure F; begin TakeRec(MkRec(7), 7); end;
+    begin
+      try A(); except on X: Exception do WriteLn('a ', X.Message); end;
+      try B(); except on X: Exception do WriteLn('b ', X.Message); end;
+      try C(); except on X: Exception do WriteLn('c ', X.Message); end;
+      try D(); except on X: Exception do WriteLn('d ', X.Message); end;
+      try E(); except on X: Exception do WriteLn('e ', X.Message); end;
+      F();
+    end.
+    ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd in' + #10 + 'e b' + #10 + '7s7');
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;

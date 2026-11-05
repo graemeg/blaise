@@ -339,6 +339,7 @@ type
     function UnwStrOpndOpen(AExpr: TASTExpr; const ASlot: string): Int;
     procedure UnwStrOpndClose(var AHandle: Int);
     procedure EmitCtorBodyCall(AMethod: TMethodDecl; AArgs: TObjectList);
+    function UnwRecArgOpen(AArg: TASTExpr): Int;
     function NextIntArgDest(var ANInt, AStackOff: Int): string;
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
@@ -1761,6 +1762,28 @@ begin
   UnwStrOpndClose(H);
   EmitLoadSlot('x0', Slot);
   FOpndTop := FOpndTop - 1;
+end;
+
+{ x0 = the address of a record-CALL argument's buffer (sp-relative, in the
+  outgoing area's RecBase region) just filled with the producing call's
+  references.  The address goes into an x29-relative operand slot, covered
+  as an indirect aggregate until the caller's release after the call, so a
+  later argument or the callee that raises releases the record's managed
+  fields.  Returns the range (-1: an unmanaged record, nothing parked). }
+function TArm64Backend.UnwRecArgOpen(AArg: TASTExpr): Int;
+var
+  Slot, Lbl: string;
+  Off: Int;
+begin
+  Result := -1;
+  if RecretManagedClean(TRecordTypeDesc(AArg.ResolvedType)) then Exit;
+  Slot := OpndSlot(FOpndTop);
+  FOpndTop := FOpndTop + 1;
+  EmitStoreSlot('x0', Slot);
+  if (FUnw = nil) or not FFrame.TryGetValue(Slot, Off) then Exit;
+  Result := FUnw.OpenRange(UNW_AGG, -Off, UNW_F_INDIRECT,
+    UnwAggHookPtr(AArg.ResolvedType), False, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
 end;
 
 function TArm64Backend.StrTransSlot(AIdx: Int): string;
@@ -16196,7 +16219,14 @@ var
   JNB: Int;
   IndSlot: string;
   IntfT: TTypeDesc;
+  RecH: array of Int;
+  RecOpndTop: Int;
+  Lbl: string;
 begin
+  SetLength(RecH, AArgs.Count);
+  for I := 0 to AArgs.Count - 1 do
+    RecH[I] := -1;
+  RecOpndTop := FOpndTop;
   { an indirect call's target slot, captured now -- a closure call among the
     arguments re-sets FIndirectSlot for itself }
   IndSlot := '';
@@ -16493,6 +16523,7 @@ begin
               PopRegs.Count * 16 + RecBase + RecOff);
             EmitAddSubImm('add', 'x0', 'sp',
               PopRegs.Count * 16 + RecBase + RecOff);
+            RecH[I] := UnwRecArgOpen(Arg);
             EmitPushX0();
             if NInt >= 8 then
             begin
@@ -16513,6 +16544,9 @@ begin
           EmitAddSubImm('add', 'x9', 'sp',
             PopRegs.Count * 16 + RecBase + RecOff);
           EmitRecRegsStore(Shape, Arg.ResolvedType.RawSize());
+          EmitAddSubImm('add', 'x0', 'sp',
+            PopRegs.Count * 16 + RecBase + RecOff);
+          RecH[I] := UnwRecArgOpen(Arg);
           { now push the buffer's contents per shape, exactly like an
             lvalue record — the buffer address is re-derived each time
             because intervening pushes move sp but not the buffer }
@@ -17203,6 +17237,12 @@ begin
         Self.Emit(#9'str x19, [sp, #-16]!');
         RecSaved := True;
       end;
+      if (FUnw <> nil) and (RecH[I] >= 0) then
+      begin
+        FUnw.CloseRange(RecH[I], Lbl);
+        if Lbl <> '' then Self.Emit(Lbl + ':');
+        RecH[I] := -1;
+      end;
       EmitAddSubImm('add', 'x19', 'sp', 64 + RecBase + RecOff);
       Self.EmitRecordFieldReleases(TRecordTypeDesc(Arg.ResolvedType), 'x19',
         False);
@@ -17216,6 +17256,7 @@ begin
     Self.Emit(#9'ldp d0, d1, [sp], #16');
     Self.Emit(#9'ldp x0, x1, [sp], #16');
   end;
+  FOpndTop := RecOpndTop;
   if StackArea > 0 then
     EmitAddSubImm('add', 'sp', 'sp', StackArea);
 end;
