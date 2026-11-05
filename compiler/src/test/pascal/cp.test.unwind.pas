@@ -1439,18 +1439,22 @@ begin
     procedure C; begin S := Format(MkF(), [Boom(), 'x']); end;
     procedure D; begin S := Format('%s %d', [MkS(), Boom()]); end;
     procedure E; begin S := ChangeFileExt(MkS(), BoomS()); end;
+    procedure F; begin S := Copy(MkS(), Boom(), 2); end;
+    procedure G; begin X := PosEx(MkS(), MkS() + BoomS(), 1); end;
     begin
       try A(); except on X: Exception do WriteLn('a ', X.Message); end;
       try B(); except on X: Exception do WriteLn('b ', X.Message); end;
       try C(); except on X: Exception do WriteLn('c ', X.Message); end;
       try D(); except on X: Exception do WriteLn('d ', X.Message); end;
       try E(); except on X: Exception do WriteLn('e ', X.Message); end;
+      try F(); except on X: Exception do WriteLn('f ', X.Message); end;
+      try G(); except on X: Exception do WriteLn('g ', X.Message); end;
       S := Format(MkF(), [3, MkS()]);
       X := OrdAt(MkS(), 1);
       WriteLn(S, ' ', X);
     end.
     ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + 'e s' + #10 +
-      '3-7abc1 97');
+      'f b' + #10 + 'g s' + #10 + '3-7abc1 97');
 end;
 
 procedure TUnwindE2ETests.TestDebug_ClosureCalleeCopy_ReleasedOnUnwind;

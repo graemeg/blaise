@@ -5626,7 +5626,7 @@ var
   Idx: Int;
   EmptyArgs: TObjectList;
   Owned: Boolean;
-  ShadowTop, ShadowH: Int;
+  ShadowTop, ShadowH, ShadowH2: Int;
 begin
   { ClassCreate carries the resolved CONSTRUCTOR in ResolvedDecl, so it must
     be claimed before any arm that lowers a resolved call as a plain call }
@@ -6686,10 +6686,22 @@ begin
       string transients — full parking bracket like the 2-arg helper }
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     EmitPushX0();
+    { owned string operands are shadowed while the rest is evaluated }
+    ShadowTop := FOpndTop;
+    ShadowH := -1;
+    ShadowH2 := -1;
+    if ArcBuiltinStrArgOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
+      ShadowH := UnwShadowOpen(
+        UnwStrKindOf(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])));
     if SameText(TFuncCallExpr(AExpr).Name, 'Copy') then
       EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]))
     else
+    begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
+      if ArcBuiltinStrArgOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1])) then
+        ShadowH2 := UnwShadowOpen(
+          UnwStrKindOf(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1])));
+    end;
     EmitPushX0();
     EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[2]));
     Self.Emit(#9'mov x2, x0');
@@ -6701,6 +6713,9 @@ begin
     begin
       EmitCallSym('_StringPosEx');
     end;
+    UnwStrOpndClose(ShadowH2);
+    UnwStrOpndClose(ShadowH);
+    FOpndTop := ShadowTop;
     EmitPushX0();
     if ArcBuiltinStrArgOwnsRef(
          TASTExpr(TFuncCallExpr(AExpr).Args.Items[1])) then

@@ -1354,6 +1354,7 @@ type
     function UnwCtorOpen(): Int;
     function UnwIntfRecvOpen(): Int;
     function UnwRefEnvOpen(AIsRef: Boolean): Int;
+    function UnwStrAtOpen(AExpr: TASTExpr; AOff: Int): Int;
     function UnwRecvBufOpen(AObjExpr: TASTExpr): Int;
     function EmitCtorHoldBegin(): Int;
     procedure EmitCtorHoldEnd(var AHandle: Int);
@@ -9176,6 +9177,7 @@ end;
 procedure TX86_64Backend.EmitExprToEax(AExpr: TASTExpr);
 var
   UnwH: Int;
+  UnwH2: Int;
   UnwLbl: string;
   BE:  TBinaryExpr;
   FC:  TFuncCallExpr;
@@ -9663,6 +9665,8 @@ begin
         Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
         Self.Emit(#9'subq $16, %rsp');
         Self.Emit(#9'movq %rax, (%rsp)');
+        { the frame's while the counts are evaluated }
+        UnwH := Self.UnwStrAtOpen(TASTExpr(FC.Args.Items[0]), 0);
         Self.Emit(#9'pushq %rax');
         Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[1]));
         Self.Emit(#9'pushq %rax');
@@ -9671,6 +9675,7 @@ begin
         Self.Emit(#9'popq %rsi');
         Self.Emit(#9'popq %rdi');
         Self.Emit(#9'callq _StringCopy');
+        Self.UnwStrTempClose(UnwH);
         Self.Emit(#9'movq %rax, 8(%rsp)');
         Self.EmitStrDisposeFromSlot(TASTExpr(FC.Args.Items[0]), '(%rsp)');
         Self.Emit(#9'movq 8(%rsp), %rax');
@@ -10038,13 +10043,18 @@ begin
         Self.Emit(#9'subq $32, %rsp');
         Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
         Self.Emit(#9'movq %rax, (%rsp)');
+        { each owned operand is the frame's while the rest is evaluated }
+        UnwH := Self.UnwStrAtOpen(TASTExpr(FC.Args.Items[0]), 0);
         Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
         Self.Emit(#9'movq %rax, 8(%rsp)');
+        UnwH2 := Self.UnwStrAtOpen(TASTExpr(FC.Args.Items[1]), 8);
         Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[2]));
         Self.Emit(#9'movq %rax, %rdx');
         Self.Emit(#9'movq (%rsp), %rdi');
         Self.Emit(#9'movq 8(%rsp), %rsi');
         Self.Emit(#9'callq _StringPosEx');
+        Self.UnwStrTempClose(UnwH2);
+        Self.UnwStrTempClose(UnwH);
         Self.Emit(#9'movq %rax, 16(%rsp)');
         if ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[0])) then
           Self.EmitStrDisposeFromSlot(TASTExpr(FC.Args.Items[0]), '(%rsp)');
@@ -26806,6 +26816,20 @@ begin
   Result := -1;
   if FUnw = nil then Exit;
   Result := FUnw.OpenRange(UNW_CLASS, FSPDepth, 0, 0, True, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ An owned string transient just stored at AOff(%rsp): a range at its stack
+  depth until its disposal (-1: borrowed). }
+function TX86_64Backend.UnwStrAtOpen(AExpr: TASTExpr; AOff: Int): Int;
+var
+  K: Int;
+  Lbl: string;
+begin
+  Result := -1;
+  if (FUnw = nil) or not ArcBuiltinStrArgOwnsRef(AExpr) then Exit;
+  if ArcExprOwnsRef(AExpr) then K := UNW_STR else K := UNW_STR0;
+  Result := FUnw.OpenRange(K, FSPDepth - AOff, 0, 0, True, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
 end;
 
