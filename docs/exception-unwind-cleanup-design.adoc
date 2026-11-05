@@ -980,8 +980,7 @@ Each of these is a leak when an exception passes, never a double release:
   release).  Unit sections without a try/except need nothing: a raise there
   is never caught.
 * Other arm64 operand temporaries still pushed below `sp`, outside the
-  string operators, call arguments, constructors and receivers (for
-  example the owned receiver of a built-in `ToString`).
+  string operators, call arguments, constructors and receivers.
 
 [[risks]]
 == Risks
