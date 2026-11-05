@@ -65,6 +65,13 @@ type
       nested calls among the arguments; a result moved into a variable is
       released once }
     procedure TestDebug_CallArgTemporaries_ReleasedOnUnwind;
+    { a deferred-release base (a field read off an owned temporary) is
+      released by the walk; one whose statement spans a try that catches is
+      left to that statement }
+    procedure TestDebug_DeferredBases_ReleasedOnUnwind;
+    { a raise statement's own deferred base is not released under the
+      exception it owns (BUG-049: it is left to leak) }
+    procedure TestRun_RaiseOperandBase_NotFreedUnderIt;
   end;
 
 implementation
@@ -823,6 +830,97 @@ begin
     end.
     ''',
     'passes 1xp[2x] 1' + #10 + 'caught 3x4x 1 1' + #10 + 'moved 1');
+end;
+
+procedure TUnwindE2ETests.TestDebug_DeferredBases_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwPend;
+    uses SysUtils, Generics.Collections;
+    type
+      TTrack = class
+        Name: string;
+        List: TList<string>;
+        constructor Create(const AName: string);
+        destructor Destroy; override;
+      end;
+    var
+      Freed: Int;
+    constructor TTrack.Create(const AName: string);
+    begin
+      Name := AName;
+      List := TList<string>.Create();
+      List.Add('a');
+      List.Add('b');
+    end;
+    destructor TTrack.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    function MkObj(const AName: string): TTrack;
+    begin
+      Result := TTrack.Create(AName);
+    end;
+    procedure Take(const S: string);
+    begin
+      raise Exception.Create(S);
+    end;
+    procedure FieldArg;
+    begin
+      Take(MkObj('f').Name);
+    end;
+    procedure LoopCatches;
+    var S: string;
+    begin
+      for S in MkObj('l').List do
+        try
+          Take(S);
+        except
+          on E: Exception do Write(E.Message, ' ');
+        end;
+    end;
+    begin
+      try FieldArg(); except on E: Exception do WriteLn('field ', E.Message, ' ', Freed); end;
+      Freed := 0;
+      LoopCatches();
+      WriteLn('loop ', Freed);
+    end.
+    ''', 'field f 1' + #10 + 'a b loop 1');
+end;
+
+procedure TUnwindE2ETests.TestRun_RaiseOperandBase_NotFreedUnderIt;
+begin
+  { the walk releases no deferred base of a raise statement's own operand:
+    the exception it raises is owned through that base (BUG-049) }
+  AssertRunsOnAll(
+    '''
+    program UnwRaiseBase;
+    uses SysUtils;
+    type
+      TFactory = class
+        Exc: Exception;
+      end;
+    function MakeFactory(): TFactory;
+    begin
+      Result := TFactory.Create();
+      Result.Exc := Exception.Create('owned');
+    end;
+    procedure RaiseField;
+    var S: string;
+    begin
+      S := 'local';
+      raise MakeFactory().Exc;
+    end;
+    begin
+      try
+        RaiseField();
+      except
+        on E: Exception do WriteLn('raise ', E.Message, ' ', E.ClassName);
+      end;
+    end.
+    ''', 'raise owned Exception' + #10, 0);
 end;
 
 initialization

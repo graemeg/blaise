@@ -105,6 +105,8 @@ type
     { open unwind ranges of hoisted owned call arguments, innermost call
       last (EmitArgHoist pushes, EmitHoistEpilogue closes and pops) }
     FUnwHoist: TList<Int>;
+    { the open unwind range of each '_pendrel_<n>' frame slot (-1: none) }
+    FUnwPend: TList<Int>;
     { --- Stage-1 register promotion (two-pass) -----------------------
       Hot, safe scalar locals/params live in callee-saved %r14/%r15 for
       the whole function instead of frame slots.  Pass 1 emits the
@@ -1340,6 +1342,9 @@ type
     procedure RecordUnwindSlots(ADecl: TMethodDecl; ASlots: TList<TUnwSlot>);
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure UnwHoistOpen(AKind: Int);
+    procedure UnwPendOpen(AIdx: Int);
+    procedure UnwPendClose(AIdx: Int);
+    procedure UnwPendCloseAll;
     procedure EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
     procedure EmitUnwindBlock;
     { Prologue init for a promoted param that arrived on the STACK (7th+
@@ -1788,6 +1793,7 @@ begin
   FUnwAggTypes := TList<TTypeDesc>.Create();
   FUnwAggLbls := TStringList.Create();
   FUnwHoist := TList<Int>.Create();
+  FUnwPend := TList<Int>.Create();
   FLabelCount          := 0;
   FDataGlobals         := TOrderedDictionary<string, TTypeDesc>.Create();
   FGlobalOwners        := TDictionary<string, string>.Create();
@@ -1860,6 +1866,7 @@ begin
   FUnwAggTypes.Free();
   FUnwAggLbls.Free();
   FUnwHoist.Free();
+  FUnwPend.Free();
   FProgScratch.Free();
   FProgScratchSz.Free();
   FIntfSplitHalf.Free();
@@ -8022,6 +8029,7 @@ begin
   end;
   Self.Emit(Format(#9'movq %%rax, %s',
     [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
+  Self.UnwPendOpen(FPendingRelCount);
   if not Self.IsLocal(Format('_pendrel_%d', [FPendingRelCount])) then
     FProgHasPendRel := True    { $main body uses a .bss pendrel slot }
   else
@@ -8043,6 +8051,7 @@ begin
   while FPendingRelCount > AMark do
   begin
     FPendingRelCount := FPendingRelCount - 1;
+    Self.UnwPendClose(FPendingRelCount);
     if FPendingRelTypes[FPendingRelCount] <> nil then
     begin
       { an aggregate scratch: release its managed content in place (a nil
@@ -17268,6 +17277,9 @@ var
   LblFinExc: string;
   LblEnd:    string;
 begin
+  { a temporary open across this try belongs to the statement around it,
+    which a handler here lets carry on }
+  if FUnw <> nil then FUnw.NoteTry();
   LblTry    := Self.NewLabel('try_body');
   LblFinExc := Self.NewLabel('fin_exc');
   LblEnd    := Self.NewLabel('fin_end');
@@ -17309,6 +17321,7 @@ var
   I:         Int;
   H:         TExceptHandlerClause;
 begin
+  if FUnw <> nil then FUnw.NoteTry();
   LblTry    := Self.NewLabel('try_body');
   LblExcept := Self.NewLabel('except_handler');
   LblEnd    := Self.NewLabel('except_end');
@@ -17450,6 +17463,9 @@ begin
       Self.Emit(#9'popq %rax');
     end;
     Self.Emit(#9'movq %rax, %rdi');
+    { the operand's deferred base stays in its _pendrel slot (BUG-049): the
+      walk must not release it either, or the exception it owns is freed }
+    Self.UnwPendCloseAll();
     Self.Emit(#9'callq _Raise');
   end
   else
@@ -26573,6 +26589,56 @@ end;
   EmitHoistEpilogue releases it after the call.  The label is written past
   the pending-push peephole (it marks a position, not an instruction), so
   it may precede the push it follows -- no call lies between them. }
+procedure TX86_64Backend.UnwPendOpen(AIdx: Int);
+var
+  Off, H: Int;
+  Lbl: string;
+begin
+  { a deferred release armed in a frame '_pendrel_<AIdx>' (main and unit
+    initialisation keep theirs in .bss and are not described) }
+  if (FUnw = nil) or (FFrame = nil) then Exit;
+  if not FFrame.TryGetValue(Format('_pendrel_%d', [AIdx]), Off) then Exit;
+  H := FUnw.OpenRange(0, Off, 0, 0, False, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  while FUnwPend.Count <= AIdx do FUnwPend.Add(-1);
+  FUnwPend.SetItem(AIdx, H);
+end;
+
+procedure TX86_64Backend.UnwPendClose(AIdx: Int);
+var
+  H: Int;
+  Lbl: string;
+begin
+  if (FUnw = nil) or (AIdx >= FUnwPend.Count) then Exit;
+  H := FUnwPend.Get(AIdx);
+  if H < 0 then Exit;
+  if FPendingRelTypes[AIdx] <> nil then
+    FUnw.SetRangeShape(H, UNW_AGG, UNW_F_INDIRECT,
+      UnwAggHookPtr(FPendingRelTypes[AIdx]))
+  else
+    FUnw.SetRangeShape(H, UnwReleaseSymKind(FPendingRelSyms[AIdx]), 0, 0);
+  FUnw.CloseRange(H, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  FUnwPend.SetItem(AIdx, -1);
+end;
+
+procedure TX86_64Backend.UnwPendCloseAll;
+var
+  I, H: Int;
+  Lbl: string;
+begin
+  if FUnw = nil then Exit;
+  for I := 0 to FUnwPend.Count - 1 do
+  begin
+    H := FUnwPend.Get(I);
+    if H < 0 then Continue;
+    FUnw.SetRangeShape(H, 0, 0, 0);
+    FUnw.CloseRange(H, Lbl);
+    if Lbl <> '' then Self.Emit(Lbl + ':');
+    FUnwPend.SetItem(I, -1);
+  end;
+end;
+
 procedure TX86_64Backend.UnwHoistOpen(AKind: Int);
 var
   H: Int;

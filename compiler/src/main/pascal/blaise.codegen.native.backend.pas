@@ -309,6 +309,9 @@ function UnwKindCode(AKind: TUnwSlotKind): Int;
   instead): False when the type owns nothing -- an 'of object' method
   pointer holds its receiver unretained. }
 function UnwResultKind(AType: TTypeDesc; out AKind: TUnwSlotKind): Boolean;
+{ The unwind kind of a deferred release by its RTL routine (0: none the
+  tables describe). }
+function UnwReleaseSymKind(const ASym: string): Int;
 
 implementation
 
@@ -326,6 +329,14 @@ begin
           ArcTypeHasManagedContent(AType) then AKind := uskAgg
   else
     Result := False;
+end;
+
+function UnwReleaseSymKind(const ASym: string): Int;
+begin
+  if ASym = '_ClassRelease' then Result := UNW_CLASS
+  else if ASym = '_DynArrayRelease' then Result := UNW_DYN
+  else if ASym = '_StringRelease' then Result := UNW_STR
+  else Result := 0;
 end;
 
 function UnwKindCode(AKind: TUnwSlotKind): Int;

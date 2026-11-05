@@ -96,6 +96,8 @@ type
     FUnwAggLbls: TStringList;
     { the open unwind range of each '__strtrans_<n>' park slot (-1: none) }
     FUnwTrans: TList<Int>;
+    { the open unwind range of each '_pendrel_<n>' slot (-1: none) }
+    FUnwPend: TList<Int>;
     [Unretained] FDbgCur: TDbgFunc;   { facts entry for the routine being emitted }
     FDbgSeq: Int;                 { .Ldbg_N label counter }
     { enclosing routine while its nested routines are emitted, so
@@ -570,6 +572,9 @@ type
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure UnwParkOpen(AIdx: Int);
     procedure UnwParkClose(AIdx: Int; const AShape: string);
+    procedure UnwPendOpen(AIdx: Int);
+    procedure UnwPendClose(AIdx: Int);
+    procedure UnwPendCloseAll;
     procedure EmitUnwindBlock;
     procedure EmitFunctionDef(ADecl: TMethodDecl;
       AWeakBind: Boolean = False);
@@ -1069,6 +1074,7 @@ begin
   FUnwAggTypes := TList<TTypeDesc>.Create();
   FUnwAggLbls := TStringList.Create();
   FUnwTrans := TList<Int>.Create();
+  FUnwPend := TList<Int>.Create();
   FFrame       := TDictionary<string, Int>.Create();
   FGlobalNames := TStringList.Create();
   FStrLits     := TStringList.Create();
@@ -1133,6 +1139,7 @@ begin
   FUnwAggTypes.Free();
   FUnwAggLbls.Free();
   FUnwTrans.Free();
+  FUnwPend.Free();
   FEnvCaps.Free();
   FEnvPacked.Free();
   FHandlerVars.Free();
@@ -1723,6 +1730,7 @@ begin
     SetLength(FPendingRelTypes, FPendingRelCount + PENDREL_SLOTS);
   end;
   EmitStoreSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
+  UnwPendOpen(FPendingRelCount);
   FPendingRelSyms[FPendingRelCount] := AReleaseSym;
   FPendingRelTypes[FPendingRelCount] := nil;
   FPendingRelCount := FPendingRelCount + 1;
@@ -1768,6 +1776,7 @@ begin
   begin
     FPendingRelCount := FPendingRelCount - 1;
     EmitLoadSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
+    UnwPendClose(FPendingRelCount);
     if FPendingRelTypes[FPendingRelCount] <> nil then
     begin
       { an aggregate scratch: release its managed content in place (a nil
@@ -10847,6 +10856,9 @@ var
   I, FinForN: Int;
   FrameSlot, ExcL, TryL, EndL: string;
 begin
+  { a temporary open across this try belongs to the statement around it,
+    which a handler here lets carry on }
+  if FUnw <> nil then FUnw.NoteTry();
   FrameSlot := NewExcFrameSlot();
   ExcL := NewLabel('finexc');
   TryL := NewLabel('trybody');
@@ -10895,6 +10907,7 @@ var
   H: TExceptHandlerClause;
   FrameSlot, ExcL, TryL, EndL, BodyL, NextL: string;
 begin
+  if FUnw <> nil then FUnw.NoteTry();
   FrameSlot := NewExcFrameSlot();
   ExcL := NewLabel('exch');
   TryL := NewLabel('trybody');
@@ -11466,6 +11479,9 @@ begin
     EmitCallSym('_ClassAddRef');
     EmitPopTo('x0');
   end;
+  { the operand's deferred base stays in its _pendrel slot (BUG-049): the
+    walk must not release it either, or the exception it owns is freed }
+  UnwPendCloseAll();
   EmitCallSym('_Raise');
 end;
 
@@ -14846,6 +14862,63 @@ begin
   FUnw.CloseRange(H, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
   FUnwTrans.SetItem(AIdx, -1);
+end;
+
+{ A deferred release just armed in '_pendrel_<AIdx>': the frame owns the
+  base until the statement-end flush.  Its kind is known at the flush. }
+procedure TArm64Backend.UnwPendOpen(AIdx: Int);
+var
+  Off, H: Int;
+  Lbl: string;
+begin
+  if FUnw = nil then Exit;
+  if not FFrame.TryGetValue(Format('_pendrel_%d', [AIdx]), Off) then Exit;
+  H := FUnw.OpenRange(0, -Off, 0, 0, False, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  while FUnwPend.Count <= AIdx do FUnwPend.Add(-1);
+  FUnwPend.SetItem(AIdx, H);
+end;
+
+{ The flush is about to release '_pendrel_<AIdx>': the range ends here, with
+  the kind of its release (an aggregate scratch: the slot holds its address). }
+procedure TArm64Backend.UnwPendClose(AIdx: Int);
+var
+  H, K: Int;
+  Lbl: string;
+begin
+  if (FUnw = nil) or (AIdx >= FUnwPend.Count) then Exit;
+  H := FUnwPend.Get(AIdx);
+  if H < 0 then Exit;
+  if FPendingRelTypes[AIdx] <> nil then
+    FUnw.SetRangeShape(H, UNW_AGG, UNW_F_INDIRECT,
+      UnwAggHookPtr(FPendingRelTypes[AIdx]))
+  else
+  begin
+    K := UnwReleaseSymKind(FPendingRelSyms[AIdx]);
+    FUnw.SetRangeShape(H, K, 0, 0);
+  end;
+  FUnw.CloseRange(H, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  FUnwPend.SetItem(AIdx, -1);
+end;
+
+{ A raise statement: its operand's deferred bases are left to leak, as the
+  flush after the raise never runs; their ranges end (unreleased) here. }
+procedure TArm64Backend.UnwPendCloseAll;
+var
+  I, H: Int;
+  Lbl: string;
+begin
+  if FUnw = nil then Exit;
+  for I := 0 to FUnwPend.Count - 1 do
+  begin
+    H := FUnwPend.Get(I);
+    if H < 0 then Continue;
+    FUnw.SetRangeShape(H, 0, 0, 0);
+    FUnw.CloseRange(H, Lbl);
+    if Lbl <> '' then Self.Emit(Lbl + ':');
+    FUnwPend.SetItem(I, -1);
+  end;
 end;
 
 { The pointer-table index of AType's unwind release hook, one per distinct

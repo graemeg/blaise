@@ -142,6 +142,7 @@ type
     procedure CloseRange(AHandle: Int; out ALbl: string);
     { The kind of a range opened before its value's kind was known. }
     procedure SetRangeKind(AHandle, AKind: Int);
+    procedure SetRangeShape(AHandle, AKind, AFlags, AAux: Int);
     { Mark every open range as spanning a try (the backend is emitting one). }
     procedure NoteTry;
     { An emitted line: a call that can raise marks every open range. }
@@ -341,6 +342,17 @@ begin
   FCur.Ranges.Get(AHandle).Kind := AKind;
 end;
 
+procedure TUnwindFacts.SetRangeShape(AHandle, AKind, AFlags, AAux: Int);
+var
+  R: TUnwFactRange;
+begin
+  if (AHandle < 0) or (FCur = nil) then Exit;
+  R := FCur.Ranges.Get(AHandle);
+  R.Kind := AKind;
+  R.Flags := (R.Flags and UNW_F_SPANS_TRY) or AFlags;
+  R.Aux := AAux;
+end;
+
 procedure TUnwindFacts.NoteTry;
 var
   I: Int;
@@ -373,9 +385,10 @@ begin
       R.IsDepth := False;
     end;
   end;
-  { ranges no raise can happen in are of no use to the walk }
+  { ranges no raise can happen in, or that release nothing (kind 0: a
+    raise statement's operand base, left to leak), are of no use }
   for I := FCur.Ranges.Count - 1 downto 0 do
-    if not FCur.Ranges.Get(I).MayRaise then
+    if (not FCur.Ranges.Get(I).MayRaise) or (FCur.Ranges.Get(I).Kind = 0) then
       FCur.Ranges.Delete(I);
   FCur.EndLbl := AEndLbl;
   { a routine that owns nothing needs no record: the walk finds no routine
