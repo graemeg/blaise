@@ -109,6 +109,9 @@ type
       emits code (field-cleanup and env-cleanup functions) after its data
       section, which the block's text range must cover }
     FUnwBlockLater: Boolean;
+    { program variables whose names are also program routines' labels
+      (GlobalSymName gives them '__pv_' labels); nil outside a program }
+    FProgVarClash: TStringList;
     { open unwind ranges of hoisted owned call arguments, innermost call
       last (EmitArgHoist pushes, EmitHoistEpilogue closes and pops) }
     FUnwHoist: TList<Int>;
@@ -1350,6 +1353,7 @@ type
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure UnwHoistOpen(AKind: Int);
     function UnwRecArgRanged(AArg: TASTExpr): Boolean;
+    function ProgRoutineNamed(ABlock: TBlock; const AName: string): Boolean;
     function UnwStrTempOpen(AExpr: TASTExpr): Int;
     function UnwCtorOpen(): Int;
     function UnwIntfRecvOpen(): Int;
@@ -1882,6 +1886,7 @@ begin
   FUnw.Free();
   FUnwAggTypes.Free();
   FUnwAggLbls.Free();
+  FProgVarClash.Free();
   FUnwHoist.Free();
   FUnwPend.Free();
   FProgScratch.Free();
@@ -2184,6 +2189,11 @@ var
   Sym: TSymbol;
 begin
   Result := AName;
+  { a program variable named like one of the program's routines (an
+    exception handler's 'on E:' beside a procedure E) would define the
+    routine's label twice: it takes a label of its own }
+  if (FProgVarClash <> nil) and (FProgVarClash.IndexOf(AName) >= 0) then
+    Exit('__pv_' + AName);
   { (0) A module var the EMITTING unit declares belongs to that unit: its own
         declaration shadows a same-named var of any unit it uses.  The flat
         symbol table holds only the last-wins winner across the whole session,
@@ -21802,6 +21812,8 @@ var
   V:    TASTExpr;
   I:    Int;
   Dst:  string;
+  ArrH: Int;
+  Lbl:  string;
 begin
   { SetLength from nil allocates the elements zeroed, so each store sees an
     empty slot and releases nothing: a borrowed managed value is retained,
@@ -21819,6 +21831,17 @@ begin
   Self.Emit(Format(#9'movl $%d, %%esi', [ALit.Elements.Count]));
   Self.EmitDynSetLengthCall(Elem);
   Self.Emit(#9'movq %rax, %rbx');
+  { the new array (and the elements stored so far) is the frame's while
+    the later elements are evaluated: a copy in a 16-byte stack slot
+    (alignment kept), the walk cannot see %rbx }
+  Self.Emit(#9'subq $16, %rsp');
+  Self.Emit(#9'movq %rax, (%rsp)');
+  ArrH := -1;
+  if FUnw <> nil then
+  begin
+    ArrH := FUnw.OpenRange(UNW_DYN, FSPDepth, 0, 0, True, Lbl);
+    if Lbl <> '' then Self.Emit(Lbl + ':');
+  end;
   for I := 0 to ALit.Elements.Count - 1 do
   begin
     V := TASTExpr(ALit.Elements.Items[I]);
@@ -21878,6 +21901,8 @@ begin
       Self.EmitStoreVar(Dst, Elem);
     end;
   end;
+  Self.UnwStrTempClose(ArrH);
+  Self.Emit(#9'addq $16, %rsp');
   Self.Emit(#9'movq %rbx, %rax');
   Self.Emit(#9'popq %r15');
   Self.Emit(#9'popq %rbx');
@@ -26905,6 +26930,23 @@ begin
   AHandle := -1;
 end;
 
+{ True when the program block declares a standalone routine named AName
+  (its label is the bare name). }
+function TX86_64Backend.ProgRoutineNamed(ABlock: TBlock;
+  const AName: string): Boolean;
+var
+  I: Int;
+  D: TMethodDecl;
+begin
+  Result := False;
+  for I := 0 to ABlock.ProcDecls.Count - 1 do
+  begin
+    D := TMethodDecl(ABlock.ProcDecls.Items[I]);
+    if (D.OwnerTypeName = '') and SameText(D.Name, AName) then
+      Exit(True);
+  end;
+end;
+
 { A record-call argument whose hoisted buffer holds references the caller
   releases after the call (EmitHoistEpilogue), so the tables cover it. }
 function TX86_64Backend.UnwRecArgRanged(AArg: TASTExpr): Boolean;
@@ -27660,6 +27702,16 @@ begin
   FCurrentUnitName := AProg.Name;
   FDbgSrcFile := '';
   FProgramName := AProg.Name;
+  { program variables that share a name with a program routine }
+  FProgVarClash.Free();
+  FProgVarClash := TStringList.Create();
+  for I := 0 to AProg.Block.Decls.Count - 1 do
+  begin
+    VD := TVarDecl(AProg.Block.Decls.Items[I]);
+    for J := 0 to VD.Names.Count - 1 do
+      if Self.ProgRoutineNamed(AProg.Block, VD.Names.Strings[J]) then
+        FProgVarClash.Add(VD.Names.Strings[J]);
+  end;
   { Register declared program-level variables as global slots -- the same
     kinds the unit registration below takes.  An interface global missing from
     this list was only DEFINED when some assignment happened to register it, so

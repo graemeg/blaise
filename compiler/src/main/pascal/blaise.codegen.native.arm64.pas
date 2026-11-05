@@ -13670,6 +13670,7 @@ procedure TArm64Backend.EmitDynArrayLiteral(AExpr: TArrayLiteralExpr);
 var
   Elem: TTypeDesc;
   I:    Int;
+  ShadowTop, ShadowH: Int;
 begin
   { x0 := a fresh array (refcount 1) of the elements.  SetLength from nil
     allocates them zeroed, so each element store sees an empty slot: a
@@ -13684,6 +13685,10 @@ begin
   EmitIntLiteral('x1', AExpr.Elements.Count);
   EmitDynSetLengthCall(Elem);
   EmitPushX0();                                  { [data] }
+  { the new array (and the elements stored so far) is the frame's while
+    the later elements are evaluated }
+  ShadowTop := FOpndTop;
+  ShadowH := UnwShadowOpen(UNW_DYN);
   for I := 0 to AExpr.Elements.Count - 1 do
   begin
     Self.Emit(#9'ldr x0, [sp]');
@@ -13692,6 +13697,8 @@ begin
     EmitPushX0();                                { [data][elemaddr] }
     EmitElemStoreStacked(Elem, TASTExpr(AExpr.Elements.Items[I]), AExpr);
   end;
+  UnwStrOpndClose(ShadowH);
+  FOpndTop := ShadowTop;
   EmitPopTo('x0');
 end;
 

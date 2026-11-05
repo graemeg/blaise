@@ -26,6 +26,10 @@ type
     { Regression for the alloc16-32 exception-frame bug:
       a bare try/finally with no locals, virtuals, or RTL use. }
     procedure TestRun_BareTryFinally;
+    { an 'on E:' handler in the main program beside a procedure E: x86-64
+      kept main's handler variable as a global labelled like the procedure
+      ("duplicate label: E") }
+    procedure TestRun_MainHandlerVarNamedLikeRoutine;
     { A class declared in a UNIT must reach the one TObject. }
     procedure TestRun_OnTObject_CatchesUnitDeclaredException;
 
@@ -442,6 +446,23 @@ begin
   AssertTrue('compile+run', CompileAndRun(SrcBareTryFinally, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('stdout', 'in_try' + LE + 'in_finally' + LE, Output);
+end;
+
+procedure TE2EExceptionTests.TestRun_MainHandlerVarNamedLikeRoutine;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output, CompileAndRun('''
+    program HandlerVarClash;
+    uses SysUtils;
+    procedure E; begin raise Exception.Create('x'); end;
+    begin
+      try E(); except on E: Exception do WriteLn('caught ', E.Message); end;
+      try E(); except on E: Exception do WriteLn('again ', E.Message); end;
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', 'caught x' + LE + 'again x' + LE, Output);
 end;
 
 procedure TE2EExceptionTests.TestRun_TryFinally_PreservesLocals;

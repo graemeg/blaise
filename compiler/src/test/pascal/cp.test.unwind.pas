@@ -1441,6 +1441,7 @@ begin
     procedure E; begin S := ChangeFileExt(MkS(), BoomS()); end;
     procedure F; begin S := Copy(MkS(), Boom(), 2); end;
     procedure G; begin X := PosEx(MkS(), MkS() + BoomS(), 1); end;
+    procedure H; var A: array of string; begin A := [MkS(), BoomS()]; WriteLn(Length(A)); end;
     begin
       try A(); except on X: Exception do WriteLn('a ', X.Message); end;
       try B(); except on X: Exception do WriteLn('b ', X.Message); end;
@@ -1449,12 +1450,13 @@ begin
       try E(); except on X: Exception do WriteLn('e ', X.Message); end;
       try F(); except on X: Exception do WriteLn('f ', X.Message); end;
       try G(); except on X: Exception do WriteLn('g ', X.Message); end;
+      try H(); except on X: Exception do WriteLn('h ', X.Message); end;
       S := Format(MkF(), [3, MkS()]);
       X := OrdAt(MkS(), 1);
       WriteLn(S, ' ', X);
     end.
     ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + 'e s' + #10 +
-      'f b' + #10 + 'g s' + #10 + '3-7abc1 97');
+      'f b' + #10 + 'g s' + #10 + 'h s' + #10 + '3-7abc1 97');
 end;
 
 procedure TUnwindE2ETests.TestDebug_ClosureCalleeCopy_ReleasedOnUnwind;
