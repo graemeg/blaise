@@ -107,6 +107,11 @@ type
                                            analysed in module scope, where they
                                            are not (BUG-20261022-anon-calls-
                                            nested-routine) }
+    { non-owning, in step: each anonymous-method thunk given a method's Self
+      (directly, or shared from an outer literal) and its enclosing decl;
+      ReleaseUnusedSelfCaptures checks them once their bodies are analysed }
+    FSelfEnvThunks:       TObjectList;
+    FSelfEnvEncls:        TObjectList;
     FPendingAnonDecls:    TObjectList;   { non-owning — lifted anonymous-method
                                            thunks awaiting registration + body
                                            analysis; drained in module scope by
@@ -901,6 +906,12 @@ type
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
     procedure RejectRecordSelfUse(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
+    { Whether AThunk's analysed body uses its method's Self: a bare member, an
+      explicit Self, inherited, or a nested routine or literal that does. }
+    function ThunkUsesSelf(AThunk, AEncl: TMethodDecl): Boolean;
+    { A frame whose literals all leave Self unused holds it unretained in
+      their shared env, so the closures do not keep the object alive. }
+    procedure ReleaseUnusedSelfCaptures();
     procedure RecordAnonNestedRoutines(AThunk: TMethodDecl);
     procedure BindHandlersToHiddenVars(ATry: TTryExceptStmt);
     function  HandlerBodyReleasesVar(H: TExceptHandlerClause): Boolean;
@@ -1632,6 +1643,8 @@ begin
   FPendingGenericIntfInstances   := TObjectList.Create(False);
   FInstDeps                      := TObjectList.Create(True);
   FPendingAnonDecls     := TObjectList.Create(False);
+  FSelfEnvThunks        := TObjectList.Create(False);
+  FSelfEnvEncls         := TObjectList.Create(False);
   FAnonNestedRoutines   := TObjectList.Create(True);
   FNestedRoutineAddrs   := TObjectList.Create(False);
   FAnonMethodCount      := 0;
@@ -1657,6 +1670,8 @@ begin
   FPendingGenericIntfInstances.Free();
   FInstDeps.Free();
   FPendingAnonDecls.Free();
+  FSelfEnvThunks.Free();
+  FSelfEnvEncls.Free();
   FAnonNestedRoutines.Free();
   FNestedRoutineAddrs.Free();
   FPendingGenericRecordInstances.Free();
@@ -23560,6 +23575,11 @@ begin
       if AThunk.CapturedVars.IndexOf('Self') < 0 then
         AThunk.CapturedVars.Add('Self');
     end;
+    if (AThunk.CapturedVars <> nil) and (AThunk.CapturedVars.IndexOf('Self') >= 0) then
+    begin
+      FSelfEnvThunks.Add(AThunk);
+      FSelfEnvEncls.Add(Encl);
+    end;
     if (AThunk.CapturedVars <> nil) and (AThunk.CapturedVars.Count > 0) then
     begin
       { The value is built in the enclosing thunk's frame from its hidden
@@ -23656,6 +23676,10 @@ begin
       AThunk.CapturedVars := TStringList.Create();
     if AThunk.CapturedVars.IndexOf('Self') < 0 then
       AThunk.CapturedVars.Add('Self');
+    { conservative until the body is analysed: ReleaseUnusedSelfCaptures
+      drops the env's reference when no literal of the frame uses Self }
+    FSelfEnvThunks.Add(AThunk);
+    FSelfEnvEncls.Add(Encl);
   end;
   if AThunk.CapturedVars = nil then Exit;
   if AThunk.CapturedVars.Count = 0 then
@@ -23821,6 +23845,85 @@ begin
     end;
     if MD.RecordMethodHost <> nil then
       RejectRecordSelfUse(MD);
+  end;
+  { every literal queued so far is analysed: decide each frame's Self }
+  ReleaseUnusedSelfCaptures();
+end;
+
+function TSemanticAnalyser.ThunkUsesSelf(AThunk, AEncl: TMethodDecl): Boolean;
+var
+  Saved: TStringList;
+  SavedNested: Boolean;
+begin
+  { The capture walker on the ANALYSED body: implicit member uses carry their
+    IsImplicitSelf annotations now.  FInNestedOfMethod puts Self among the
+    outer names (and forwards a nested routine's Self use), exactly as for a
+    classic nested routine of a method.  CapturedVars is the nested-routine
+    channel, empty for a thunk; borrow it and put it back. }
+  Saved := AThunk.CapturedVars;
+  SavedNested := FInNestedOfMethod;
+  AThunk.CapturedVars := nil;
+  FInNestedOfMethod := True;
+  try
+    CollectCaptures(AThunk, AEncl, False, AEncl.IsAnonThunk);
+    Result := (AThunk.CapturedVars <> nil) and
+              (AThunk.CapturedVars.IndexOf('Self') >= 0);
+  finally
+    if AThunk.CapturedVars <> nil then
+      AThunk.CapturedVars.Free();
+    AThunk.CapturedVars := Saved;
+    FInNestedOfMethod := SavedNested;
+  end;
+end;
+
+procedure TSemanticAnalyser.ReleaseUnusedSelfCaptures();
+{ A literal written in an instance method captures Self CONSERVATIVELY when
+  it is lifted (bare member uses are only known once its body is analysed),
+  and Self is what gives the body its class context.  Once every literal of
+  a frame is analysed, a frame none of whose literals uses Self keeps the
+  capture (the context, and the field layout) but holds Self UNRETAINED: no
+  literal reads it, so it can never dangle in use, and the closures no
+  longer keep the object alive -- a closure stored in the object's own graph
+  (a signal's slot list) was a reference cycle.  [Weak Self] frames are
+  left as they are. }
+var
+  Envs, Used: TObjectList;
+  I, K: Int;
+  Thunk, Encl: TMethodDecl;
+  Env: TRecordTypeDesc;
+  Fld: TFieldInfo;
+begin
+  if FSelfEnvThunks.Count = 0 then
+    Exit;
+  Envs := TObjectList.Create(False);
+  Used := TObjectList.Create(False);
+  try
+    for I := 0 to FSelfEnvThunks.Count - 1 do
+    begin
+      Thunk := TMethodDecl(FSelfEnvThunks.Items[I]);
+      Encl := TMethodDecl(FSelfEnvEncls.Items[I]);
+      if not (Thunk.EnvType is TRecordTypeDesc) then
+        Continue;
+      Env := TRecordTypeDesc(Thunk.EnvType);
+      if Envs.IndexOf(Env) < 0 then
+        Envs.Add(Env);
+      if (Used.IndexOf(Env) < 0) and ThunkUsesSelf(Thunk, Encl) then
+        Used.Add(Env);
+    end;
+    for K := 0 to Envs.Count - 1 do
+    begin
+      Env := TRecordTypeDesc(Envs.Items[K]);
+      if Used.IndexOf(Env) >= 0 then
+        Continue;
+      Fld := Env.FindField('Self');
+      if (Fld <> nil) and not Fld.IsWeak then
+        Fld.IsUnretained := True;
+    end;
+  finally
+    Used.Free();
+    Envs.Free();
+    FSelfEnvThunks.Clear();
+    FSelfEnvEncls.Clear();
   end;
 end;
 

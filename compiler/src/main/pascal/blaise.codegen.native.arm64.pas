@@ -3554,7 +3554,11 @@ begin
       EmitLoadSlot('x0', 'Self');
       EmitLoadSlot('x9', '_cap_Self');
       Self.Emit(#9'str x0, [x9]');
-      EmitCallSym('_ClassAddRef');
+      { an unretained Self (no literal in the frame uses it --
+        ReleaseUnusedSelfCaptures) takes no reference: the env cleanup
+        skips it too }
+      if not Env.FindField('Self').IsUnretained then
+        EmitCallSym('_ClassAddRef');
     end;
   end;
   { captured VALUE parameters: copy the spilled param into its env field;

@@ -105,6 +105,18 @@ type
       propagating out of the routine is BUG-20261028-money-mismatch-raise-
       leaks. }
     procedure TestDebug_ForInOwnedCollection_ExitPaths_NoLeak;
+    { a literal written in a method that never uses Self, kept in the
+      object's own graph (a signal wrapping its handlers in its own
+      methods): the closures do not keep the object alive.  Self was
+      captured strongly whatever the body used, a reference cycle. }
+    procedure TestDebug_MethodLiteral_SelfUnused_NoCycle;
+    { every way a literal reaches its method's Self -- field read and
+      write, method call as statement and expression, property, explicit
+      Self, inherited, @Method, a nested literal, for-in over a field, a
+      field as a var argument, an array field, Self as an argument, a
+      field as receiver, a function literal's Result -- still keeps the
+      object alive while only the closure holds it }
+    procedure TestDebug_MethodLiteral_SelfUses_KeepAlive;
     { an interface-returning call as a scalar operand (GetI() <> nil,
       Assigned(O.GetI()), O.GetI() = L) and an interface read through an
       owned transient receiver (MkObj().GetI(), MkObj().FIntf, MkObj().P[I]):
@@ -4114,6 +4126,204 @@ begin
     'exit 3 alive=0' + #10 +
     'break 3 alive=0' + #10 +
     'retries 3 alive=0');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_MethodLiteral_SelfUnused_NoCycle;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program Unused;
+    uses SysUtils, Generics.Collections;
+    type
+      TProc = reference to procedure;
+      { a signal that wraps handlers in its own methods, as TNotifySignal does }
+      TSig = class
+        Slots: TList<TProc>;
+        constructor Create();
+        destructor Destroy; override;
+        procedure Connect(const AMsg: string);
+        procedure ConnectN(N: Int);
+        procedure Emit();
+      end;
+    var Alive: Int;
+    constructor TSig.Create(); begin Slots := TList<TProc>.Create(); Alive := Alive + 1 end;
+    destructor TSig.Destroy; begin Alive := Alive - 1; inherited Destroy() end;
+    procedure TSig.Connect(const AMsg: string);
+    begin
+      Slots.Add(procedure begin WriteLn(AMsg) end);
+    end;
+    procedure TSig.ConnectN(N: Int);
+    var K: Int;
+    begin
+      K := N * 2;
+      Slots.Add(procedure begin WriteLn(K) end);
+      Slots.Add(procedure begin WriteLn(K + 1) end);
+    end;
+    procedure TSig.Emit();
+    var P: TProc;
+    begin
+      for P in Slots do P();
+    end;
+    var S: TSig;
+    begin
+      Alive := 0;
+      S := TSig.Create();
+      S.Connect('one');
+      S.ConnectN(5);
+      S.Emit();
+      S := nil;
+      WriteLn('alive=', Alive);
+    end.
+    ''',
+    'one' + #10 + '10' + #10 + '11' + #10 + 'alive=0');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_MethodLiteral_SelfUses_KeepAlive;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program Forms;
+    uses SysUtils, Generics.Collections;
+    type
+      TProc = reference to procedure;
+      TFn = reference to function: Int;
+      TMeth = procedure of object;
+      TOther = class
+        procedure Foo(N: Int);
+      end;
+      TBase = class
+        procedure Hello(); virtual;
+      end;
+      THolder = class(TBase)
+      private
+        FName: string;
+        FCount: Int;
+        FItems: TList<Int>;
+        FArr: array[0..1] of Int;
+        FOther: TOther;
+        function GetName(): string;
+      public
+        constructor Create(const AName: string);
+        destructor Destroy; override;
+        procedure Hello(); override;
+        procedure Greet();
+        function Twice(N: Int): Int;
+        property Name: string read GetName;
+        procedure FieldRead();
+        procedure FieldWrite();
+        procedure CallStmt();
+        procedure CallExpr();
+        procedure PropRead();
+        procedure ExplicitSelf();
+        procedure Inherited_();
+        procedure AddrOfMethod();
+        procedure Nested();
+        procedure ForInField();
+        procedure VarArg();
+        procedure ArrayField();
+        procedure SelfAsArg();
+        procedure FieldReceiver();
+        procedure FuncResult();
+      end;
+    var
+      Alive: Int;
+      G: TList<TProc>;
+      GF: TList<TFn>;
+    procedure TOther.Foo(N: Int); begin WriteLn('foo ', N, ' alive=', Alive) end;
+    procedure TBase.Hello(); begin WriteLn('base hello alive=', Alive) end;
+    procedure Bump(var N: Int); begin N := N + 1 end;
+    procedure Show(H: THolder); begin WriteLn('show ', H.FName, ' alive=', Alive) end;
+    constructor THolder.Create(const AName: string);
+    begin
+      FName := AName; FItems := TList<Int>.Create(); FItems.Add(7);
+      FArr[0] := 5; FOther := TOther.Create(); Alive := Alive + 1;
+    end;
+    destructor THolder.Destroy; begin Alive := Alive - 1; inherited Destroy() end;
+    function THolder.GetName(): string; begin Result := 'n:' + FName end;
+    procedure THolder.Hello(); begin WriteLn('hello') end;
+    procedure THolder.Greet(); begin WriteLn('greet ', FName, ' alive=', Alive) end;
+    function THolder.Twice(N: Int): Int; begin Result := 2 * N end;
+    procedure THolder.FieldRead(); begin G.Add(procedure begin WriteLn('read ', FName, ' alive=', Alive) end) end;
+    procedure THolder.FieldWrite(); begin G.Add(procedure begin FCount := FCount + 3; WriteLn('write ', FCount, ' alive=', Alive) end) end;
+    procedure THolder.CallStmt(); begin G.Add(procedure begin Greet() end) end;
+    procedure THolder.CallExpr(); begin G.Add(procedure begin WriteLn('twice ', Twice(4), ' alive=', Alive) end) end;
+    procedure THolder.PropRead(); begin G.Add(procedure begin WriteLn('prop ', Name, ' alive=', Alive) end) end;
+    procedure THolder.ExplicitSelf(); begin G.Add(procedure begin WriteLn('self ', Self.FName, ' alive=', Alive) end) end;
+    procedure THolder.Inherited_(); begin G.Add(procedure begin inherited Hello() end) end;
+    procedure THolder.AddrOfMethod();
+    begin
+      G.Add(procedure var M: TMeth; begin M := @Greet; M() end);
+    end;
+    procedure THolder.Nested();
+    begin
+      G.Add(procedure var Q: TProc; begin Q := procedure begin WriteLn('nested ', FName, ' alive=', Alive) end; Q() end);
+    end;
+    procedure THolder.ForInField();
+    begin
+      G.Add(procedure var X: Int; begin for X in FItems do WriteLn('forin ', X, ' alive=', Alive) end);
+    end;
+    procedure THolder.VarArg(); begin G.Add(procedure begin Bump(FCount); WriteLn('vararg ', FCount, ' alive=', Alive) end) end;
+    procedure THolder.ArrayField(); begin G.Add(procedure begin WriteLn('array ', FArr[0], ' alive=', Alive) end) end;
+    procedure THolder.SelfAsArg(); begin G.Add(procedure begin Show(Self) end) end;
+    procedure THolder.FieldReceiver(); begin G.Add(procedure begin FOther.Foo(9) end) end;
+    procedure THolder.FuncResult(); begin GF.Add(function: Int begin Result := FCount + 100 end) end;
+
+    procedure Run(AForm: Int);
+    var H: THolder; P: TProc; F: TFn;
+    begin
+      H := THolder.Create('h' + IntToStr(AForm));
+      case AForm of
+        0: H.FieldRead(); 1: H.FieldWrite(); 2: H.CallStmt(); 3: H.CallExpr();
+        4: H.PropRead(); 5: H.ExplicitSelf(); 6: H.Inherited_(); 7: H.AddrOfMethod();
+        8: H.Nested(); 9: H.ForInField(); 10: H.VarArg(); 11: H.ArrayField();
+        12: H.SelfAsArg(); 13: H.FieldReceiver(); 14: H.FuncResult();
+      end;
+      H := nil;
+      for P in G do P();
+      for F in GF do WriteLn('func ', F(), ' alive=', Alive);
+      G.Clear(); GF.Clear();
+    end;
+
+    var I: Int;
+    begin
+      G := TList<TProc>.Create(); GF := TList<TFn>.Create();
+      for I := 0 to 14 do
+      begin
+        Run(I);
+        WriteLn('  after run alive=', Alive);
+      end;
+    end.
+    ''',
+    'read h0 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'write 3 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'greet h2 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'twice 8 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'prop n:h4 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'self h5 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'base hello alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'greet h7 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'nested h8 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'forin 7 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'vararg 1 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'array 5 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'show h12 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'foo 9 alive=1' + #10 +
+    '  after run alive=0' + #10 +
+    'func 100 alive=1' + #10 +
+    '  after run alive=0');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_ForInForms_NoLeak;

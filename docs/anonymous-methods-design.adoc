@@ -658,6 +658,12 @@ registry, auto-nil'd when the referent dies, and *skipped* by
 weakly-captured `Self` that has died reads back as `nil`; the closure body is
 responsible for a `nil` check (same contract as any `[Weak]` field deref).
 
+A literal that does NOT use `Self` (no member, explicit `Self` or
+`inherited`) forms no cycle: once every literal of the frame is analysed,
+a frame none of whose literals uses `Self` holds it unretained in the env
+(`ReleaseUnusedSelfCaptures`, uSemantic; see language-rationale.adoc, "An
+unused `Self` is held unretained").
+
 Rationale for an explicit annotation over auto-weak-Self: Blaise's ARC is
 *explicit about cycle-breaking everywhere* (`[Weak]` on fields is never
 inferred); inferring weak capture would be surprising and inconsistent. The

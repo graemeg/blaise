@@ -2154,6 +2154,47 @@ Consequence (documented, pinned by a leak test): a closure capturing
 (`Self → field → env → Self`) and leaks — the same rule as `[Weak]` class
 fields, with the same escape:
 
+==== An unused `Self` is held unretained
+
+*Decision.*  The conservative capture is settled once every literal of the
+frame has been analysed.  If no literal in the frame uses `Self` -- no bare
+member, explicit `Self`, `inherited`, or nested routine or literal that
+does -- the env keeps its `Self` field (the class context and the layout
+are unchanged) but holds it *unretained*: the frame stores it without a
+retain and the env cleanup skips it.  A frame where any literal uses `Self`
+keeps the strong capture, so a callback that uses its receiver still keeps
+it alive.
+
+*Alternatives rejected.*
+
+* *Keep the conservative strong capture.*  A literal that never touches
+  `Self` still kept the object alive, so a closure stored in the object's
+  own graph was a cycle even though nothing in it referred to the object --
+  a signal wrapping each handler in a literal written in its own `Connect`
+  method could never be freed.  Nothing in the source shows the cycle.
+* *Treat `Self` like a `const` parameter (borrowed, never retained).*  A
+  `const` parameter is safe to borrow because the caller's reference
+  outlives the call.  A closure is usually stored and run after the method
+  returns, when nothing guarantees `Self` is alive: a borrowed `Self` that
+  the closure reads would dangle.  Borrowing is sound only for closures
+  that cannot escape, which needs non-escaping closure parameters (a
+  possible later step), not a change to every capture.
+* *Drop `Self` from the env entirely.*  The captured `Self` is what gives a
+  literal's body its class context, so it would have to be removed after
+  analysis, changing the env layout late; and a use the check missed would
+  read an unset slot.  An unretained field keeps the context and layout,
+  and a missed use reads a valid `Self` for as long as the object lives.
+* *Infer `[Weak Self]`.*  Weakness changes what a used `Self` means (it can
+  read back `nil`); this rule never applies to a used `Self`.
+
+*Rationale.*  A reference no code can read keeps nothing alive that the
+program can observe, so not owning it changes no behaviour except
+lifetime, and only in the direction of freeing objects that nothing uses.
+The check reuses the capture walker that nested routines of a method
+already rely on (the `IsImplicitSelf` annotations), run on the analysed
+bodies.  The explicit `[Weak Self]` remains the escape for a closure that
+does use `Self`.
+
 === `[Weak Self]` capture (Phase 5)
 
 `procedure [Weak Self] begin ... end` inside an instance method promotes
@@ -2163,7 +2204,7 @@ the shared env's `Self` field as WEAK: stored via the weak registry
 inherited from the `[Weak]` class-field machinery unchanged.  A weakly
 captured `Self` that has died reads back as `nil`; the closure body is
 responsible for the `nil` check (same contract as any `[Weak]` field).
-The default remains STRONG capture — Blaise never infers weakness; the
+The default remains STRONG capture of a used `Self` — Blaise never infers weakness; the
 annotation is the explicit opt-in for the self-storing case, mirroring
 `[Weak]` fields.  Because the env's `Self` field is shared by every
 literal in one frame, all literals in that frame must agree on

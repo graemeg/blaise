@@ -3662,8 +3662,14 @@ begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
       Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_Self')]));
       Self.Emit(#9'movq %rax, (%rcx)');
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
+      { an unretained Self (no literal in the frame uses it --
+        ReleaseUnusedSelfCaptures) takes no reference: the env cleanup
+        skips it too }
+      if (Env.FindField('Self') = nil) or not Env.FindField('Self').IsUnretained then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _ClassAddRef');
+      end;
     end;
   end;
   for J := 0 to ADecl.Params.Count - 1 do
