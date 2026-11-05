@@ -1,0 +1,987 @@
+= Exception Unwind Cleanup: Table-Driven Design and Implementation Plan
+:toc: left
+:sectnums:
+:toclevels: 3
+:source-highlighter: rouge
+
+[NOTE]
+====
+Status:: ACCEPTED 2026-11-05; the owner's decisions on the open questions
+are recorded in <<owner-decisions>>.  Implementation follows <<commits>>.
+Bug:: `BUG-20261028-money-mismatch-raise-leaks` (BUGS.md).
+Decision already taken:: option (c), table-driven unwinding (BUGS.md,
+2026-10-28).  This document does not revisit it; it plans it.
+Baseline:: `master` at `bcf2110b`, compiler `compiler/target/blaise` built
+2026-11-05.
+====
+
+== Purpose and scope
+
+An exception that propagates out of a routine skips that routine's scope-exit
+release code, so every managed value the routine owns is leaked: managed
+locals, by-value managed parameters, a managed `Result`, closure and block
+environments, and owned argument and operand temporaries.  This document
+specifies a fix with no cost on the normal (non-raising) path:
+
+* the compiler emits, per object file, a read-only description of every
+  routine's managed frame slots and of the live ranges of its owned
+  temporaries;
+* `_Raise` walks the frame-pointer chain from the raise point to the frame
+  that owns the target exception frame and, for each frame it passes,
+  releases what the description lists, before it `longjmp`s as it does today.
+
+In scope: both native backends (arm64, x86-64), both container formats
+(Mach-O, ELF, which also covers FreeBSD), the internal assemblers and
+linkers, the external-toolchain path (`--assembler external`,
+`--linker external`, `fixpoint-native.sh`), separate compilation and the unit
+and RTL caches.
+
+Out of scope: Windows (no target yet), shared libraries built by Blaise
+(<<owner-decisions>>, D7), and walking through foreign (non-Blaise) frames
+(<<owner-decisions>>, D3).
+
+== Current mechanism (verified in code)
+
+=== Try frames and raise
+
+* `runtime.exc` (`compiler/src/main/pascal/runtime.exc.pas`) keeps two
+  threadvars, `g_exc_top` (innermost exception frame) and
+  `g_current_exception` (line 116).  `_PushExcFrame` (line 143) links a frame
+  in, `_PopExcFrame` unlinks it.
+* `_Raise` (line 186) stores the exception in `g_current_exception` and in the
+  frame's exception slot, then calls `_blaise_longjmp(g_exc_top, 1)`.  With no
+  frame it calls `abort()`.  `_Reraise` (line 198) is `_Raise`.
+* `runtime.setjmp.pas`: the jump buffer saves the frame pointer of the routine
+  that executed the `try`: x29 at offset 80 (arm64, 168-byte buffer), %rbp at
+  offset 8 (x86-64, 64-byte buffer).  `_blaise_setjmp` is `nostackframe`, so
+  the saved value is exactly the caller's frame pointer.  This is the walk's
+  termination key.
+* Fibres (`stdlib/src/main/pascal/async.fibers.context.pas`) snapshot and
+  restore `g_exc_top` / `g_current_exception` on every switch (lines 438–450),
+  and a fresh fibre starts with an empty chain and x29 = 0 in its first frame.
+  Threads have their own threadvars and stacks.
+* No signal handler converts a hardware fault into an exception.  Division by
+  zero is a compiled check that calls a Pascal routine
+  (`SysUtils._RaiseDivByZero`), so every exception enters `_Raise` through a
+  normal call.
+
+=== Try statement lowering
+
+arm64 `EmitTryFinally` / `EmitTryExcept` (`blaise.codegen.native.arm64.pas`
+lines 10802 / 10849) and x86-64 `EmitTryFinallyStmt` / `EmitTryExceptStmt`
+(`blaise.codegen.native.x86_64.pas` lines 17216 / 17253):
+
+* the landing pad captures `_CurrentException`, parks it on the stack, pops
+  the frame, then runs the finally body and calls `_Reraise`, or tests each
+  handler with `_IsInstance`;
+* a handler variable takes over the in-flight reference; a bare `raise;`
+  clears the variable before re-raising (`TArm64Backend.EmitRaise`,
+  line 11367);
+* *no code on any exception path releases the routine's own locals.*  The
+  function named `EmitExcPathArcCleanup` in BUGS.md does not exist in either
+  backend, and `docs/design.adoc` ("ARC cleanup on exception paths",
+  line ~426) describes a design that was never implemented.
+
+=== Scope-exit release (the epilogue)
+
+Both backends release at a single exit label (`FExitLabel`), which `Exit`,
+`Break`-out-of-try and the fall-through all reach.
+
+[cols="1,3,3",options="header"]
+|===
+| | arm64 (`EmitFunctionDef`, line 14697) | x86-64 (`EmitFunctionCore`, line 26307)
+
+| Inventory
+| built in `RegisterFrameSlots` (line 14332) as name lists: `FStrLocals`,
+  `FObjLocals`, `FWeakLocals`, `FIntfLocals`, `FDynLocals`, `FRefLocals`,
+  `FRecLocals` (+ type), plus `__envp`, `__envp_b<N>`
+| derived at the epilogue from `ADecl.Body.Decls` through the shared
+  `ArcScopeExitReleaseKind` classifier, plus a parameter walk, plus `__envp`,
+  `__envp_b<N>`
+
+| Release code
+| lines 15369–15428 (after `FExitLabel`)
+| lines 26845–27040 (after `FExitLabel`)
+
+| Aggregates
+| `EmitManagedReleaseAt(T, 'x19', False)` (shared, `blaise.codegen.native.backend.pas`)
+| `EmitRecordFieldReleases` / `EmitStaticArrayReleaseElems` / `EmitManagedReleaseAt`
+
+| Exclusions
+| `const`, `var`/`out`, open-array params; `[Unretained]`; by-value closure
+  params (borrowed); `Result` (transfers to caller); a thunk's `__envp`
+  (borrowed); `_cap_` pointers
+| the same
+|===
+
+The epilogue does not store nil into the slots it releases.
+
+=== Frame layout facts
+
+* Every routine except `nostackframe` inline-assembler routines builds a
+  frame record: arm64 `stp x29, x30, [sp, #-16]!; mov x29, sp`, x86-64
+  `pushq %rbp; movq %rsp, %rbp`.  In both, `[fp]` is the caller's frame
+  pointer and `[fp + 8]` the return address into the caller.  The
+  `nostackframe` routines in the tree (`runtime.setjmp`, the fibre switch,
+  `_start`) never call code that raises.
+* Locals live at fixed negative offsets from the frame pointer: arm64
+  `AddLocal` (line 1285) records a positive distance below x29; x86-64
+  `FFrame` holds signed `%rbp` offsets.  A by-value record or static-array
+  parameter on x86-64 is copied into a `<Name>_data` block in the frame, and
+  the parameter slot is repointed at it (prologue phase 2, ~line 26585).
+* Prologue order (both ISAs): spill parameters → retain by-value managed
+  parameters → copy aggregate parameters → zero `Result` and every declared
+  local (records by `memset`) → environment prologue (`_ClassAlloc`) → zero
+  block-environment slots (arm64 zeroes these *after* the environment
+  allocation, lines 15358–15362).  A managed slot is therefore not guaranteed
+  zero until the end of that sequence.
+* x86-64 register promotion moves only unmanaged scalars into callee-saved
+  registers (`PromoEligibleType`, line 22600); the `%r13` cross-call pin is
+  used by the integer binary-operator bracket only.  x86-64 inlining is
+  restricted to small leaf candidates with primitive parameters.  No managed
+  value is register-resident across a call, which is what makes a
+  frame-slot table sufficient.
+* Nested routines and lifted anonymous methods are emitted as separate
+  top-level symbols with their own frames.  A nested routine reaches outer
+  variables through `_cap_` pointers; it owns none of them.
+* Block-scoped `var` statements (`TVarDecl.IsBlockScoped`) are ordinary
+  `Body.Decls` slots, zeroed in the prologue; the for-in enumerator
+  (`__forin_N`) and owned collection (`__ficoll_N`) are synthesised managed
+  locals (`uSemantic.pas` ~line 14342).
+* x86-64 tracks the stack depth below `%rbp` of every emitted instruction in
+  `FSPDepth` (Emit override, line 22223; `TrackRspAdjust`, line 22981), for
+  call-site alignment.  arm64 has no equivalent.
+* On x86-64 the program main and unit initialisation sections keep their
+  `_pendrel_N` slots, scratch buffers and exception frames in `.bss`
+  (commit `42ba621b`), not in the frame.
+
+=== Temporaries (verified with `--emit-asm`, both ISAs)
+
+[cols="2,2,2",options="header"]
+|===
+| Temporary | arm64 | x86-64
+
+| Owned string / class / interface-object call argument (`F(Mk())`)
+| fixed x29-relative park slot `__strtrans_N` (`ReservePendRelSlots`,
+  line 1593; `StrTransSlot`, line 1665); never zeroed, not nil'd after its
+  release
+| pushed (`pushq %rax`), released after the call; addressable through
+  `FSPDepth`
+
+| Deferred release of an owned transient base (BUG-048/049)
+| fixed `_pendrel_N` slots, zeroed in the prologue when used
+  (`EmitPendRelSlotsZero`, line 1719), re-nil'd after each flush
+  (`FlushNativePendingReleases`, line 1735); the release kind varies per use
+| same scheme; `.bss` in main and unit init
+
+| Owned operand held across a later call (`Mk() + G()`)
+| pushed `str x0, [sp, #-16]!` (sp-relative)
+| `subq $N, %rsp` area or `pushq`; `FSPDepth`-addressable
+
+| Record (sret) argument temporary (`TakeRec(MkRec())`)
+| `sub sp, sp, #16; add x8, sp, #0` area (sp-relative)
+| sp area; `FSPDepth`-addressable
+
+| Interface / closure / record result scratches
+| fixed `__iret`, `__rret`, `__fret_N`, `__jarg_N`, `__iarg_N`, `__rtmp_N`
+| `_sacall_N` frame scratch (`NewScratchOperand`, line 13850)
+
+| New instance across its constructor call
+| pushed (sp-relative) across `blr` to the constructor
+| pushed
+|===
+
+=== Experiments (macOS arm64, `--debug`)
+
+The programs below were run during the investigation; each becomes a
+leakcheck test in the step that covers it.
+
+[cols="3,2",options="header"]
+|===
+| Program | Leak report
+
+| r1: BUGS.md repros (string local; `const` param with temporary argument;
+  by-value string param)
+| 3 strings
+
+| r2: class local in a routine with `try..finally` (A1), with a matching
+  `except` (A2), with a non-matching `except` (A3), without `try` (A4)
+| A1, A3, A4 leak; A2 does not (it returns normally)
+
+| r3: `TakeObj(MkObj())`, `TakeIntf(MkIntf())`, `TakeRec(MkRec())`,
+  `MkStr() + IntToStr(Boom())`
+| all four leak
+
+| r4: dynamic-array locals, string local under `try..finally`, by-value
+  record param, managed `Result`
+| 5 values; the dynamic arrays are *not* reported (see <<findings>>)
+
+| r5: constructor body raises after assigning a string field
+| the instance and its field
+|===
+
+[[findings]]
+== Findings that differ from the BUGS.md sketch
+
+. *There is no exception-path ARC cleanup.*  `EmitExcPathArcCleanup` does not
+  exist.  The target frame must still not be cleaned, but for a different
+  reason: it continues executing.  When it re-raises (finally body,
+  unmatched handler, `raise;`), the re-raise walk starts inside that frame,
+  which is then *not* the target, so the table releases its locals.  This is
+  why "a frame with its own `try`" leaks today for every managed kind, not
+  only class locals (r2: A1 and A3).
+. *The nil store does not make re-raise safe; coverage bounds do.*  A
+  re-raise never revisits frames an earlier walk cleaned.  What can release a
+  slot twice is a raise from a destructor that the *epilogue* runs: the
+  epilogue does not nil slots, so a walk passing that frame would release
+  them again.  Each routine's coverage therefore ends at `FExitLabel`; a
+  return address in the epilogue gets no slot cleanup.  Nil-before-release is
+  kept inside the unwinder for a different case: a destructor that raises
+  while the unwinder itself is releasing.
+. *Coverage must also start late.*  Slots are not all zero at the first
+  instruction (prologue order above); coverage starts after the last
+  prologue zeroing.
+. *The RTL cannot reference linker-synthesised symbols directly.*  Stage 1 is
+  linked by the release binary's linker, which defines neither
+  `__start_blaise_unwind` nor `section$start$…`.  A strong reference from
+  `runtime.exc` would break the cold bootstrap.  The bounds are passed in by
+  `_main`, which only a new compiler generates (<<discovery>>).
+. *Not every call temporary is below the frame.*  On arm64, owned string,
+  class and interface call arguments are already parked in fixed x29-relative
+  `__strtrans_N` slots, and `_pendrel_N` slots are fixed and zero-tracked.
+  The sp-pushed temporaries are expression operands, constructor instances
+  and sret areas.  On x86-64 the pushed temporaries are statically
+  addressable through the existing `FSPDepth` tracker.
+. *Dynamic arrays do leak; the leak tracker cannot see them.*  `_DynArrayAddRef`
+  registers a block only on a 0→1 transition (`runtime.arc.pas` ~line 562);
+  a block created by `SetLength` starts at 1 and is never registered.  Tests
+  for dynamic arrays must observe element destructors.
+. *Weak copies of generic instances need no special handling.*  Both internal
+  linkers keep every copy's bytes and bind references to one
+  (`TMachOLinker.CollectSymbols`, line 353; ELF strong-over-weak, line ~1124);
+  Blaise emits no `.subsections_via_symbols` and no COMDAT groups, so ld64 and
+  GNU ld do not discard bytes either.  A per-object table that addresses its
+  own code through local labels describes whichever copy executes.
+. *`of object` method-pointer results are not owned.*  The rejected cleanup
+  chain released the `+8` word of every `IsMethodPtrType` `Result`; only a
+  `reference to` closure owns its Env (`ArcTypeIsRefClosure`).
+. *`_Raise` must re-establish its state after cleanup.*  A destructor run by
+  the unwinder may execute its own `try`/`raise`, which overwrites
+  `g_current_exception`.  The landing pad reads `_CurrentException`, so
+  `_Raise` must store the exception after the walk, not before.
+. *Constructor failure leaks the instance* (r5).  The instance is an owned
+  sp-resident temporary in the caller across the constructor call; covering
+  it releases the instance and runs its destructor (<<owner-decisions>>, D2).
+
+== Design overview
+
+----
+raise E
+  └─ _Raise(E)
+       ├─ if g_exc_top = nil → abort            (unchanged)
+       ├─ _UnwindCleanup(g_exc_top)              (new)
+       │    for each frame from the raise point up to the target frame:
+       │      locate the routine by return address in the unwind tables
+       │      not the target → release its frame slots (coverage permitting)
+       │      every frame    → release temporaries live at its call site
+       ├─ g_current_exception := E; frame.exc := E   (moved after the walk)
+       └─ _blaise_longjmp(g_exc_top, 1)           (unchanged)
+----
+
+Normal-path cost: none.  No instruction is added to, or changed in, any
+routine that existed before; the tables are data, and the only new code is
+`_UnwindCleanup`, one call in `_main` and small per-type aggregate release
+hooks (<<agg-hooks>>).  This is checked mechanically (<<text-identity>>).
+
+== Runtime design
+
+[[discovery]]
+=== Table discovery
+
+Every object the new compiler writes contributes one *block* to a dedicated
+section: ELF `blaise_unwind` (`"aw"`, `@progbits`, 8-aligned), Mach-O
+`__DATA,__blaise_unw`.  `_main`, right after `_BlaiseInit` and before the
+unit initialisation calls, calls `_UnwindInit(Start, Stop)` with the
+linker-defined bounds: ELF `__start_blaise_unwind` / `__stop_blaise_unwind`,
+Mach-O `section$start$__DATA$__blaise_unw` / `section$end$__DATA$__blaise_unw`.
+The backend spells these names itself (no `DarwinSym` prefix).  `_UnwindInit`
+stores them in two ordinary globals of `runtime.exc`; while they are nil the
+walk does nothing.
+
+.Decision: linker-defined section bounds, handed to the RTL by `_main`
+[NOTE]
+====
+Decision:: dedicated section per object; bounds synthesised by the linker
+under the GNU and ld64 conventional names; passed to the RTL by generated
+`_main` code.
+
+Alternatives rejected::
+* RTL references the bounds directly — breaks stage 1, which the release
+  binary's linker links (<<findings>> item 4).
+* Per-unit registration from `<Unit>_init` — exceptions raised in an earlier
+  unit's initialisation are not covered, RTL units have no init routine, and
+  a call per unit changes every initialisation.
+* An index of per-unit table symbols written into the program object by the
+  driver — the same list-drift failure class as the 2026-07-23
+  `NoteDepInitUnit` incident (dependency inits never called), and it must
+  also enumerate RTL and cached objects.
+* Reading OPDF at run time — only present with `--debug-opdf`, not
+  addressable by the RTL, and it omits internal slots, ownership and kinds.
+* Darwin `getsectiondata(_dyld_get_image_header(0), …)` — viable and kept as
+  the fallback if `$` in symbol names proves troublesome; the primary design
+  keeps both formats symmetric.
+
+Rationale:: zero driver bookkeeping; works for every object in the link,
+including cached and RTL objects; identical behaviour under the internal
+and external linkers (GNU ld, lld and ld64 all synthesise these names when
+the section exists, and it always exists because every object emits a
+block); bootstrap-safe in a single commit.
+====
+
+=== Table format
+
+All offsets are bytes; all multi-byte fields little-endian.  Code positions
+are 32-bit offsets from a per-object anchor label, emitted as same-section
+label differences (`.4byte La - Lb` / `.word La - Lb`), so the only
+relocated words are the anchor and the hook pointers.
+
+----
+Block (8-aligned, one per object)
+  u32  Magic        'BUW1'  (format version in the low byte)
+  u32  Bytes        size of the block, header included
+  u64  Anchor       .quad Lunw_text_lo      (first byte of the object's text)
+  u32  TextLen      Lunw_text_hi - Lunw_text_lo
+  u32  NRoutines
+  u32  NPtrs
+  u32  Reserved
+  u64  Ptrs[NPtrs]  aggregate hooks, then absolute locations (x86-64 .bss temps)
+  Routine[NRoutines]   sorted by Start
+  Slot[...]            per routine, contiguous
+  Range[...]           per routine, contiguous
+
+Routine (24 bytes)
+  u32 Start, Len         routine label .. end label (offsets from Anchor)
+  u32 CovLo, CovHi       slot coverage, offsets from Start (CovHi = FExitLabel)
+  u32 First              index of the routine's first Slot and first Range
+  u16 NSlots, NRanges
+
+Slot (8 bytes)     frame-resident managed value released for a passed frame
+  i32 Loc               offset from the frame pointer
+  u8  Kind              STR=1 CLASS=2 INTF=3 DYN=4 REFENV=5 WEAK=6 AGG=7
+  u8  Flags             INDIRECT=1 (slot holds the address of the value)
+  u16 Aux               AGG: index into Ptrs
+
+Range (16 bytes)   owned temporary live over [Lo, Hi)
+  u32 Lo, Hi            offsets from Start
+  i32 Loc               fp offset, or index into Ptrs when Flags.ABS
+  u8  Kind
+  u8  Flags             INDIRECT=1, SPANS_TRY=2, ABS=4
+  u16 Aux
+----
+
+Every object emits a block, including one with no routines, so that
+`[Anchor, Anchor + TextLen)` over all blocks covers all Blaise code in the
+image (the foreign-frame test below).  The magic carries a version; the
+walker skips blocks it does not understand.
+
+.Decision: interpreted data tables, not per-routine cleanup routines
+[NOTE]
+====
+Decision:: the tables describe slots by kind and location; `runtime.exc`
+interprets them.  The only generated code is one release hook per aggregate
+type per object.
+
+Alternatives rejected::
+* A generated cleanup routine per frame, referenced from the table (the
+  rejected chain's `Fn`, reached by table instead of by chain) — roughly the
+  same size per slot but in `.text`; duplicates every release emitter per
+  routine; needs nil stores for idempotency; cannot be inspected or unit
+  tested as data; live-range checks for temporaries would become generated
+  compare chains.
+* DWARF CFI / `.eh_frame` with a personality and LSDA — the full zero-cost
+  ABI machinery, including a CFI interpreter in the RTL, for no benefit:
+  every Blaise frame already has a frame record and no managed value is
+  register-resident across a call.
+
+Rationale:: smallest normal-path and code-size footprint; tables are
+directly assertable in `GenAsm` unit tests on both ISAs; one release
+implementation per kind.
+====
+
+=== Lookup
+
+For a return address `RA`, the key is `PC = RA - 1` (a call that is the last
+instruction before `FExitLabel` returns exactly to it).
+
+. Scan blocks from `Start` to `Stop`, stepping by `Bytes` (skipping zero
+  padding and unknown magics); select the block with
+  `Anchor <= PC < Anchor + TextLen`.  No block: *foreign frame*.
+. Binary-search the block's routines for the greatest `Start <= PC - Anchor`;
+  if that routine does not contain `PC`, step backwards to the innermost one
+  that does (tolerates a routine whose text was emitted inside another's
+  buffered body, should the collector assertion in <<collector>> ever be
+  relaxed).  No routine: a frame with nothing to release.
+
+Cost per frame: one pass over the block headers (about 150 for the compiler)
+plus a binary search.  A per-thread one-entry cache of the last block is an
+optional refinement; it is not needed for correctness.
+
+=== Walk
+
+[source,pascal]
+----
+procedure _UnwindCleanup(ATarget: Pointer);
+  { TargetFP = the try frame's saved fp: jmp_buf + 80 (arm64), + 8 (x86-64) }
+  TargetFP := PPointer(ATarget + JB_FP_OFS)^;
+  Callee := _UnwGetFP();          { nostackframe asm: returns its caller's fp }
+  loop
+    FP := PPointer(Callee)^;
+    RA := PPointer(Callee + 8)^;
+    if (FP = nil) or (FP <= Callee) or (FP > TargetFP)
+       or ((UInt(FP) and 7) <> 0) then Exit;   { broken chain: stop }
+    Blk := FindBlock(RA - 1);
+    if Blk = nil then Exit;                     { foreign frame: stop }
+    Rtn := FindRoutine(Blk, RA - 1);
+    if Rtn <> nil then
+      CleanFrame(Blk, Rtn, FP, RA - 1, FP = TargetFP);
+    if FP = TargetFP then Exit;
+    Callee := FP;
+  end;
+----
+
+`CleanFrame` releases, in this order:
+
+. every Range with `Lo <= Off < Hi`, where `Off = PC - Anchor - Rtn.Start`,
+  except a `SPANS_TRY` range in the target frame;
+. when the frame is *not* the target and `CovLo <= Off < CovHi`, every Slot,
+  in table order (which mirrors the backend's epilogue order).
+
+The walker keeps all of its state in its own frame (no threadvars), so it is
+re-entrant, safe across a fibre switch inside a destructor, and needs no
+per-fibre snapshot.  It allocates nothing and holds no managed values.
+
+=== Release semantics
+
+[cols="1,3",options="header"]
+|===
+| Kind | Action at address `A` (= FP + Loc, or the pointer at `A` when INDIRECT)
+
+| STR    | `V := A^; A^ := nil; _StringRelease(V)`
+| CLASS  | `V := A^; A^ := nil; _ClassRelease(V)`
+| DYN    | `V := A^; A^ := nil; _DynArrayRelease(V)`
+| INTF   | `V := A^; A^ := nil; (A+8)^ := nil; _ClassRelease(V)` (obj half)
+| REFENV | `V := (A+8)^; (A+8)^ := nil; _ClassRelease(V)` (closure Env)
+| WEAK   | `_WeakClear(A)` (deregister the stack slot from the weak table)
+| AGG    | `Hook(A)`; the hook releases and zeroes every managed field
+|===
+
+Nil-before-release makes every scalar release idempotent, so a raise from a
+destructor that the unwinder runs finds those slots already empty.  The
+release helpers are reached by `external name` from `runtime.exc`; no new RTL
+unit is introduced, because a new RTL unit is unknown to the previous
+compiler's `BuildRTLUnitList` and would break the bootstrap.
+
+[[agg-hooks]]
+=== Aggregate hooks
+
+A record with managed fields or a static array of managed elements is
+released by an object-local routine `__UnwAgg_<n>(Addr)` that the backend
+emits once per distinct aggregate type it lists, using the shared
+`EmitManagedReleaseAt(T, base, AZero = True)` walk.  The existing
+`__DynElems_<n>` hooks are not reused: they release without zeroing, which
+loses idempotency, and changing them would alter every dynamic-array
+element hook.
+
+=== Target-frame rule
+
+The target frame continues executing, so its frame slots are never touched.
+Its expression temporaries that are live at the abandoned call are dead (an
+expression cannot contain a `try`), so they are released.  A temporary whose
+live range spans a nested statement that contains a `try` is flagged
+`SPANS_TRY` and is left alone in the target frame; the statement it belongs
+to is still running and will release it.  The collector sets the flag on
+every range that is open when the backend emits a `try`.  The motivating
+case is a `_pendrel` base deferred across a `for X in MkObj().List do try …
+except … end` loop body: releasing it in the target frame would free the list
+under the running loop.
+
+=== `_Raise` and `_Reraise`
+
+[source,pascal]
+----
+procedure _Raise(Obj: Pointer);
+begin
+  if g_exc_top = nil then _libc_abort();
+  _UnwindCleanup(g_exc_top);           { may run destructors }
+  g_current_exception := Obj;          { after: a destructor's own raise }
+  PPointer(g_exc_top + OFS_EXCEPTION)^ := Obj;   { overwrites both }
+  _blaise_longjmp(g_exc_top, 1);
+end;
+----
+
+`_Reraise` stays a call to `_Raise`.  The walk of a re-raise starts in the
+re-raising frame, which is how frames with their own `try` get cleaned.
+
+=== Threads, fibres, foreign and broken frames
+
+* The target is always on the current stack: `g_exc_top` is per thread and
+  per fibre.  The `FP > TargetFP` and `FP <= Callee` guards stop a walk that
+  would leave the stack; x29 = 0 ends a fibre stack.
+* *Foreign frames.*  A return address outside every block is C code (libc,
+  libSystem, AppKit through the Objective-C runtime).  The walk stops there:
+  the frames above leak exactly as today.  glibc on Linux omits frame
+  pointers, so continuing would follow garbage.  Darwin arm64 guarantees a
+  frame record in every frame, but continuing there is deliberately not done
+  (<<owner-decisions>>, D3): an exception raised through AppKit is undefined
+  behaviour, and a Blaise callback must catch before returning to it.
+* Freestanding Linux and FreeBSD links contain no foreign code at all.
+
+== Code generation design
+
+[[collector]]
+=== Unwind facts collector
+
+A new unit `uUnwindFacts.pas`, modelled on `uDebugFacts.pas`
+(`TDbgFacts`/`TDbgFunc`), owned by the backend and independent of
+`--debug-opdf`:
+
+* `BeginRoutine(StartLabel)`, `SetCoverage(CovLoLabel, ExitLabel)`,
+  `EndRoutine(EndLabel)`;
+* `AddSlot(FpOffset, Kind, Flags, AggType)`;
+* `OpenRange(Kind, Location, Flags, AggType): Handle` → emits a local label;
+  `CloseRange(Handle)` → emits a local label; ranges open when a `try` is
+  emitted get `SPANS_TRY`;
+* `DiscardRoutine` for the x86-64 two-pass register promotion
+  (`AsmRollback` re-emits the function; facts from pass 1 must not survive).
+
+Assertions (`InternalError`): every opened range is closed before
+`EndRoutine`; no routine begins while another's facts are open (text
+contiguity).  Emission order is deterministic (lists, never dictionary
+iteration), as `fixpoint-binary.sh` requires.
+
+=== Per-routine emission points
+
+[cols="1,3,3",options="header"]
+|===
+| Point | arm64 | x86-64
+
+| Start
+| `Sym:` in `EmitFunctionDef` (~line 14858)
+| `Sym:` in `EmitFunctionCore` (~line 26355)
+
+| CovLo
+| after `TvArmMark()` (line 15366), i.e. after local zeroing, environment
+  prologue and block-environment zeroing
+| after the zero-initialisation loop and `EmitEnvPrologue`, before the body
+
+| CovHi
+| `FExitLabel` (line 15369)
+| `FExitLabel` (line 26845)
+
+| End
+| after the final `ret`
+| after the final `ret`
+
+| Also
+| `EmitProgram` (line 19118), `EmitUnitSection` (line 19909)
+| `EmitProgram` (line 27087), unit sections (~27430)
+|===
+
+Labels are local (`Lunw_…` on Darwin, `.Lunw_…` on ELF), so the x86-64
+Emit override does not reset `FSPDepth` for them.  They are written through a
+path that does *not* flush the pending-push peephole (`FPendingPush`), so a
+`pushq`/`popq` pair separated by a label still fuses; otherwise the label
+would change the instruction stream.
+
+=== Slot inventory (single source of truth)
+
+Each backend computes one ordered list of `TUnwSlot` (name, fp offset, kind,
+flags, type) per routine, from the facts it already has: arm64 from the
+`F*Locals` lists plus `__envp` / `__envp_b<N>` / managed `Result`; x86-64
+from `Body.Decls` with `ArcScopeExitReleaseKind`, the parameter walk, the
+environments and managed `Result`.  The epilogue is re-expressed as a loop
+over this list (the rejected patch's `EmitLocalReleases` extraction is the
+template); the table is a second consumer.  The epilogue and the table
+cannot then disagree about which slots are owned.
+
+=== Temporaries
+
+Live ranges are opened at the instruction that makes the frame own the value
+(after the value is stored) and closed where ownership ends: the release
+after the call, or the store that *moves* the value into a variable, field
+or `Result`.  Closing at a move is load-bearing: a range that extends past a
+move would release the value a second time through the variable's slot.
+Location forms:
+
+[cols="1,3",options="header"]
+|===
+| Form | Computation
+| fixed slot | the slot's fp offset (arm64 `__strtrans_N`, `_pendrel_N`,
+  `__iret`, `__rret`, `__fret_N`, …; x86-64 `_pendrel_N`, `_sacall_N`)
+| x86-64 stack depth | `-(FrameReserve + D)`, where `D` is `FSPDepth` just
+  after the push or `subq` that created the location; `FrameReserve` is final
+  when the table is written, because tables are emitted after the body
+| arm64 park slot | arm64 operand, sret and new-instance temporaries move
+  from `sp` pushes into fixed x29-relative park slots (<<commits>> step 10,
+  <<owner-decisions>>, D4), so arm64 needs no stack-depth tracker
+| absolute | x86-64 main and unit-init `.bss` temporaries: a `Ptrs` entry
+|===
+
+Ranges are only required where a call that can raise lies inside them.  A
+size optimisation (step 13) drops a range whose interior calls only RTL
+helpers known not to raise (`_StringAddRef`, `_StringRelease`,
+`_StringConcat`, `memcpy`, …).
+
+=== Table emission
+
+At the end of each object: arm64 `FinalizeEmit` (line 20203) and the
+`EmitProgram` tail (after `EmitDynElemHooks`, line 19493); x86-64
+`FinalizeEmit` (line 27564) and its program tail.  Order: aggregate hooks
+into `.text`, then `Lunw_text_hi:` as the last `.text` byte, then the block
+in the unwind section.  `Lunw_text_lo:` is emitted first thing in the
+object's text (start of `GenerateUnit` / `GenerateProgram`, and once for a
+whole-program build).  Data directive spelling is per ISA (arm64 `.word`,
+x86-64 `.long`).
+
+[[text-identity]]
+=== Invariant: `.text` unchanged
+
+A diagnostic option `--no-unwind-tables` suppresses blocks, labels, hooks and
+the `_main` call.  A unit test, on both ISAs, compiles fixtures with and
+without it and asserts the assembly is identical after removing unwind-only
+lines.  This guards against labels perturbing a peephole and against any
+accidental code change.  The option also gives the benchmark its baseline.
+
+=== Assembler, object writer and linker work
+
+[cols="1,3",options="header"]
+|===
+| Component | Change
+
+| `blaise.container.writer.pas` (line 58)
+| new `cskUnwind` section kind
+
+| `blaise.assembler.arm64.pas`
+| map `.section __DATA,__blaise_unw` and `blaise_unwind` to `cskUnwind`
+  (ahead of the `__data` / `.data` arm, ~line 1028); label differences
+  already exist (`LabelDifference`, line 856)
+
+| `blaise.assembler.x86_64.pas`
+| map `.section blaise_unwind,"aw",@progbits` (line 2967); *add*
+  same-section label differences to `.long` / `.4byte` / `.quad`
+  (line 3112).  Today `A - B` is parsed as symbol `A` with a bad
+  displacement, silently
+
+| `blaise.elfwriter.pas` (line 392)
+| section name, `SHF_ALLOC or SHF_WRITE`, alignment 8
+
+| `blaise.linker.elf.pas`
+| place the merged section in the RW `PT_LOAD`; `DefineSynthSymbols`
+  (line 1156) defines `__start_<name>` / `__stop_<name>` for every merged
+  section whose name is a C identifier (GNU behaviour); absolute words get
+  the same PIE treatment as `.data`
+
+| `blaise.machowriter.pas` (lines 343–400)
+| `cskUnwind` → `(__DATA,__blaise_unw)` in objects; the image writer emits
+  the section in the `__DATA` segment load command
+
+| `blaise.linker.macho.pas` (`StreamOfSection`, line 248)
+| a new stream in `__DATA` with rebases for `ARM64_RELOC_UNSIGNED`; define
+  `section$start$__DATA$__blaise_unw` / `section$end$…`; today an unknown
+  section is a hard error, so this must land before any object carries it
+|===
+
+Separate compilation and caches need nothing further: blocks travel inside
+each `.o`; the unit cache (`.bif` carries `EffectiveCompilerId`) and the RTL
+object cache (directory keyed by compiler identity, `RTLCacheKey`) never mix
+objects from compilers with different table formats.
+
+== Inventory of managed values
+
+=== Frame slots
+
+[cols="3,2,1",options="header"]
+|===
+| Value | Kind | Step
+| `string` local; by-value `string` param | STR | 5
+| class local (strong); by-value class param | CLASS | 5
+| `[Weak]` class or interface local | WEAK | 5
+| interface local; by-value interface param | INTF | 5
+| dynamic-array local; by-value dynamic-array param | DYN | 5
+| `reference to` closure local | REFENV | 5
+| closure environment `__envp` (not in a thunk); block envs `__envp_b<N>` | CLASS | 5
+| synthesised locals: for-in enumerator and owned collection, handler variables | per type | 5
+| record with managed fields, static array of managed (local) | AGG | 6
+| by-value record / static-array param (arm64 slot; x86-64 `<Name>_data`) | AGG | 6
+| managed `Result`: string, class, dynamic array, interface, `reference to` | per type | 7
+| record `Result` (arm64 local; x86-64 when not sret) | AGG | 7
+| `[Unretained]`; `const`, `var`, `out`, open-array params; by-value closure params; `of object` values; `_cap_` pointers; a thunk's `__envp`; x86-64 sret `Result` (caller's buffer) | excluded | —
+|===
+
+=== Temporaries
+
+[cols="3,2,1",options="header"]
+|===
+| Temporary | Location | Step
+| owned call arguments (string, class, interface object) | arm64 park slot; x86-64 stack depth | 8
+| deferred releases `_pendrel_N` (class, dynamic array, aggregate scratch) | fixed slot (INDIRECT for aggregates); x86-64 main/init absolute | 9
+| result scratches `__iret`, `__rret`, `__fret_N`, `__jarg_N`, `__iarg_N`, `__rtmp_N`, `_sacall_N` | fixed slot | 11
+| operands across a call (`Mk() + G()`), sret argument areas, new instance across its constructor | arm64 park slot (step 10); x86-64 stack depth | 11
+| in-flight exception parked during a finally body or a variable-less handler body | stack depth | 12
+| raise operand's deferred base (BUG-049) | deliberately excluded (range closes before `_Raise`) | 9
+|===
+
+After step 12 the known residuals are: frames above a foreign frame; code
+in the prologue before CovLo (only an out-of-memory raise from the
+environment allocation can occur there); frames of a Blaise shared library;
+any temporary kind discovered later.  Each is a leak, never a double release.
+
+== Size and performance
+
+* Measured on the compiler's own arm64 assembly (whole program, 22 MB):
+  about 3,900 routines, 1,867 of them with scope-exit releases, about 5,000
+  release calls in those epilogues.  Locals tables: about 1,900 × 24 bytes
+  plus about 5,000 × 8 bytes ≈ 85–100 KB, under 2 % of the 5.3 MB binary.
+* Temporaries: the compiler emits about 14,000 `_StringRelease` and 13,500
+  `_ClassRelease` calls in total; subtracting epilogues leaves on the order of
+  10,000–20,000 candidate ranges, 160–320 KB at 16 bytes (3–6 %).  The
+  no-raising-call filter (step 13) is expected to remove most of them.
+  The budget is 5 % of the binary (<<owner-decisions>>, D5): if the ranges
+  of steps 8–11 take the tables past it, step 13 moves ahead of the
+  remaining temporary steps.
+* Mach-O launch cost: one rebase per block plus one per hook.
+* Raise cost: one walk over the frames between the raise and the handler,
+  each a block scan plus a binary search; measured by a microbenchmark.
+* Normal path: no instruction changes (<<text-identity>>).
+
+[[commits]]
+== Commit sequence (TDD)
+
+Each commit adds its tests first, sees them fail, then implements.  Every
+commit runs the full "Fixpoint verification" sequence (native, internal,
+warm-cache, binary, init-order, then the suite with the stage-2 compiler);
+stage 2 and stage 3 must stay byte-identical throughout.  An e2e test runs
+only on the host ISA, so a commit that adds one implements it on *both*
+ISAs; `GenAsm` unit tests cover both ISAs on every host.  Tests that need an
+x86-64 run use `scripts/linux-vm.sh`; on Linux the temporary-range steps also
+run the new e2e programs under `RunUnderValgrind` to catch use-after-free.
+
+[cols="1,4,4,2",options="header"]
+|===
+| # | Change | Tests first | Generated code
+
+| 1
+| x86-64 internal assembler: same-section label differences in `.long`,
+  `.4byte`, `.quad` (text labels referenced from a data section)
+| `cp.test.assembler`: bytes for forward and backward differences, a
+  cross-section difference rejected; internal vs external assembler agree
+| unchanged
+
+| 2
+| `cskUnwind`; both assemblers' section directives; ELF writer and linker
+  (placement, `__start_`/`__stop_`); Mach-O writer and linker (stream,
+  rebases, `section$start$`/`$end$`, image section header)
+| `cp.test.linker`, `cp.test.macho`: an object with the section links; the
+  bounds resolve to the section start and end; an anchor `.quad` is
+  relocated or rebased; an image with no such section still links
+| unchanged
+
+| 3
+| slot inventory refactor on both backends; epilogues consume it
+| none new: emitted assembly of the compiler and of the leakcheck fixtures
+  is identical before and after (recorded in the commit message)
+| unchanged
+
+| 4
+| `uUnwindFacts`; blocks with routine records and coverage, no slots;
+  `--no-unwind-tables`; `_UnwindInit` call in `_main`; walker and lookup in
+  `runtime.exc` (no release yet)
+| `GenAsm` both ISAs: block shape, label placement (CovLo after zeroing,
+  CovHi at the exit label); `.text` identity test; e2e: a raise through
+  1,000 frames is still caught; exceptions, fibres and threading e2e suites
+  unchanged
+| data section, `_main`, `runtime.exc`
+
+| 4a
+| leak tracker: a dynamic-array block created by `SetLength` is registered
+  (D8), so `--debug` leak reports show dynamic arrays
+| leakcheck e2e: a leaked dynamic array of strings and of a record type is
+  reported; a released one is not; the existing leakcheck suite is unchanged
+| `runtime.arc` only
+
+| 5
+| scalar slots (STR, CLASS, INTF, DYN, REFENV, WEAK, environments)
+| leakcheck e2e: BUGS.md repros (local, by-value param); class and interface
+  locals; dynamic arrays observed by element destructors; `[Weak]` local
+  deregistered (target freed after the raise, no write to a dead slot);
+  three intermediate frames; `try..finally` frame; unmatched `except`;
+  `raise;` and `raise E` from a handler; a frame that catches its own raise
+  keeps its locals (value printed after the handler); raise inside a fibre
+  and inside a thread; closure env and block env released; the rejected
+  patch's `TestDebug_ExceptionUnwind_ReleasesLocals_NoLeak` program
+| tables
+
+| 6
+| AGG slots; `__UnwAgg_<n>` hooks
+| record local, nested record, static array of strings, by-value record
+  param (x86-64 `_data`), record with a `[Weak]` field
+| tables, new hooks appended
+
+| 7
+| managed `Result`
+| `F(): string` raising after assigning `Result`; interface, closure and
+  record results; `X := F()` leaves `X` unchanged; an `of object` result is
+  not released (receiver survives)
+| tables
+
+| 8
+| call-argument ranges: arm64 park slots, x86-64 stack-depth pushes
+| `Fail2(Mk())`, `TakeObj(MkObj())`, `TakeIntf(MkIntf())`; nested calls in
+  arguments; argument temporaries in a frame whose own `try` catches (target
+  release); an owned result moved into a local before a raise (no double
+  release: destructor counter never negative)
+| tables
+
+| 9
+| `_pendrel` ranges; `SPANS_TRY`; raise-operand exclusion
+| owned-transient field read in an argument of a raising callee; BUG-049
+  guard `raise MakeFactory().ExcField` stays free of use-after-free;
+  for-in over `MkObj().List` with a caught exception in the body
+| tables
+
+| 10
+| arm64: operand, sret-argument and new-instance temporaries that are pushed
+  below `sp` today move into fixed x29-relative park slots, reserved like
+  `__strtrans_N` (D4)
+| `GenAsm` arm64: the temporaries are addressed from x29, not pushed; the
+  existing arm64 e2e and leakcheck suites unchanged
+| arm64 code changes (fixpoints must hold)
+
+| 11
+| stack-resident and scratch temporaries, both ISAs
+| `MkStr() + IntToStr(Boom())`; `TakeRec(MkRec())`; interface and closure
+  result scratches; a raising constructor releases its instance and runs its
+  destructor (D2)
+| tables
+
+| 12
+| in-flight exception parked in finally and variable-less handler bodies;
+  x86-64 main and unit-init absolute locations
+| a finally body that raises a second exception; a bare `except` body that
+  raises; a temporary in the main program caught in main
+| tables
+
+| 13
+| range filter for calls that cannot raise
+| table size before and after (asserted upper bound on a fixture); all
+  previous unwind tests still pass
+| tables smaller
+
+| 14
+| benchmark, documentation, BUGS.md entry removed (record in the commit
+  message)
+| self-build: stage 2 built with and without `--no-unwind-tables`, each
+  building the same input five times (median user time within noise, about
+  1 %); raise/catch microbenchmark through 10 frames; binary size delta
+| docs only
+|===
+
+Documentation updated alongside: `docs/design.adoc` ("ARC cleanup on exception
+paths"), the repository CLAUDE.md "Exception frames are an RTL contract"
+note, and this document.
+
+[[risks]]
+== Risks
+
+[cols="2,3",options="header"]
+|===
+| Risk | Mitigation
+
+| A wrong location releases a borrowed value (use-after-free), especially for
+  x86-64 stack-depth temporaries
+| fixed park slots on arm64 (step 10); destructor counters in every test;
+  valgrind runs on Linux; ranges introduced one temporary family per commit
+
+| A range left open across a move releases twice
+| `CloseRange` at every move; explicit move-then-raise tests
+
+| Labels perturb a peephole and change code
+| `.text` identity test on both ISAs; labels bypass the pending-push flush
+
+| x86-64 label differences meet branch relaxation
+| differences evaluated in the final pass only; unit tests with relaxed
+  branches between the labels
+
+| Mach-O linker: new `__DATA` section, rebases, synthesised symbols; `$` in
+  symbol names in the internal assembler
+| linker unit tests in step 2; `getsectiondata` fallback
+
+| External toolchains (`fixpoint-native.sh`, `--linker external`) treat the
+  section or names differently
+| conventional names only; the internal-assembler conformance script and
+  `TInternalAsmE2ETests` in every commit
+
+| Raise cost in exception-heavy code
+| microbenchmark; optional last-block cache
+
+| Existing `GenAsm` tests that match whole-output text
+| expected; adjust in step 4, or strip unwind lines in the harness
+
+| A destructor raises while the unwinder releases
+| nil-before-release and zeroing hooks keep the walk idempotent; the new
+  exception replaces the original (D1)
+
+| Table size
+| step 13 filter; owner-set budget
+|===
+
+[[owner-decisions]]
+== Decisions on the open questions (2026-11-05)
+
+D1. *An exception escaping a destructor during unwinding* replaces the
+in-flight exception, and unwinding continues with the new one
+(Delphi-like); the original exception object leaks.
+Alternative rejected: `abort()` (C++-like), which turns a recoverable error
+in cleanup code into a process exit.
+
+D2. *A raising constructor* releases its partly constructed instance, which
+runs the destructor, as Delphi does.  Fields are zeroed before the
+constructor body runs, so the destructor sees nil for anything not yet
+assigned.  Alternative rejected: releasing the memory without running user
+destructors, which leaks whatever the constructor had already acquired.
+
+D3. *Foreign frames*: the walk stops at the first frame outside every
+unwind block, on every platform.  Raising through C or AppKit frames is
+undefined; Blaise code called back from foreign code must catch before
+returning to it.  Continuing through Darwin frame records may be revisited.
+
+D4. *arm64 stack-resident temporaries* move into fixed x29-relative park
+slots (step 10) instead of being addressed through a new stack-depth
+tracker.  A fixed slot cannot be mis-addressed by a depth miscount, which
+is the highest-consequence failure in <<risks>>; the cost is an arm64 code
+change in one step, held by the fixpoints.
+
+D5. *Size budget*: the tables may take up to 5 % of the binary.  The
+step-13 filter moves ahead of the remaining temporary steps if the ranges
+exceed that.
+
+D6. *`--no-unwind-tables`* is an undocumented diagnostic option, for the
+`.text` identity test and the benchmark baseline.  It is not listed in
+`--help`.
+
+D7. *Shared libraries* built by Blaise are out of scope; covering them
+(calling `_UnwindInit` from the library initialiser) is a follow-up.
+
+D8. *The leak tracker's dynamic-array blind spot* is recorded as its own
+BUGS.md entry and fixed early (step 4a), so that the leak tests from step 5
+onward can rely on the leak report for dynamic arrays.
+
+== Reference: the rejected cleanup chain
+
+`tmp/unwind-cleanup-chain.patch` (against `8016e753`) remains useful for:
+the `EmitLocalReleases` / `NeedsUnwindCleanup` extraction on both backends
+(step 3), its per-kind release list including the managed `Result` cases
+(step 7, minus the `of object` over-release), and its leakcheck programs
+(steps 5–7).  Its `_ExcGetCleanup` / `_ExcSetCleanup` fibre hooks are not
+needed: the walker is stateless.  Its for-in collection change has since
+landed on `master` (`CollVarName`).
