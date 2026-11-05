@@ -16664,7 +16664,12 @@ begin
       SynthCur.Free();
     end;
   end
-  else if CurDecl.ResolvedReturnType.Kind = tyInterface then
+  else if (CurDecl.ResolvedReturnType.Kind = tyInterface) or
+          IsMethodPtrType(CurDecl.ResolvedReturnType) then
+    { (a closure / method-pointer Current comes back as a (code, data) pair
+      in rax:rdx; the scalar store below kept only the code half, so a
+      capturing closure ran with a garbage env -- for P in TList<TProc>
+      crashed.  The assignment path knows the pair and the owned +1.) }
   begin
     { Interface-returning Current: the getter returns its (obj, itab) pair
       through a hidden sret buffer (%rdi = buffer, %rsi = Self).  The scalar

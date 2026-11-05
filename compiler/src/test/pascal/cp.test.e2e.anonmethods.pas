@@ -156,10 +156,11 @@ type
       the receiver base is the pointer's value.  x86-64 rejected the
       dereference as an "unsupported receiver expression" }
     procedure TestRun_ProcFieldInRecord_ThroughPointer;
-    { for P in TList<TProc>: the enumerator's Current returns a closure,
-      through the hidden result buffer like any function of that type.
-      arm64 called it as a scalar function, so the getter wrote through a
-      stale x8 and crashed. }
+    { for P in TList<TProc>, the closures capturing a local: the
+      enumerator's Current returns a closure, a (code, env) pair.  arm64
+      called it as a scalar function, so the getter wrote through a stale
+      x8 and crashed; x86-64 stored only the code half, so a capturing
+      closure ran with a garbage env and crashed. }
     procedure TestRun_ForInOverClosureList;
     { a literal nested in a literal of a method reaches the method's
       members bare (FName, FCount := ..., Greet()) as well as through
@@ -1938,14 +1939,13 @@ const
     type
       TProc = reference to procedure;
       TFn = reference to function(N: Int): Int;
+    procedure Run(K: Int);
     var
       L: TList<TProc>;
       F: TList<TFn>;
       Pr: TProc;
       Fn: TFn;
-      K: Int;
     begin
-      K := 10;
       L := TList<TProc>.Create();
       L.Add(procedure begin WriteLn('a') end);
       L.Add(procedure begin WriteLn('b ', K) end);
@@ -1956,6 +1956,9 @@ const
       F.Add(function(N: Int): Int begin Result := N * K end);
       for Fn in F do
         WriteLn(Fn(3))
+    end;
+    begin
+      Run(10)
     end.
     ''';
 begin
