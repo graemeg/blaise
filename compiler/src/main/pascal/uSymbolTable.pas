@@ -2634,6 +2634,19 @@ begin
   Sym := TSymbol.Create('IsInfinite', skFunction, FTypeBoolean); Define(Sym);
 end;
 
+{ Whether a symbol defined now is private to the unit being analysed: a name
+  that unit's implementation section declares.  Never a generic instance
+  (TBox<Int>, TBox<Int>.TNode), though one may be first written there: an
+  instance is shared by its spelling with every unit that writes it, owned by
+  whichever unit created it first (see IsPlainIdentName).  Marked private, a
+  later unit could not see it, built it again and could not register the copy
+  under the taken name, so the copy's own methods that name the instance
+  instantiated it again until the compiler's stack overflowed. }
+function MarksImplPrivate(AImplPrivate: Boolean; ASymbol: TSymbol): Boolean;
+begin
+  Result := AImplPrivate and (StrPos('<', ASymbol.Name) < 0);
+end;
+
 function TSymbolTable.DefineGlobal(ASymbol: TSymbol): Boolean;
 var
   DOU: string;
@@ -2641,7 +2654,7 @@ begin
   DOU := Self.GetDefineOwningUnit();
   if (ASymbol.OwningUnit = '') and (DOU <> '') then
     ASymbol.OwningUnit := DOU;
-  if FDefineImplPrivate then
+  if MarksImplPrivate(FDefineImplPrivate, ASymbol) then
     ASymbol.IsImplPrivate := True;
   Result := TScope(FScopeStack.Items[0]).Define(ASymbol);
 end;
@@ -2756,7 +2769,7 @@ begin
   if (ASymbol.OwningUnit = '') and (DOU <> '')
      and (FScopeStack.Count = 1) then
     ASymbol.OwningUnit := DOU;
-  if FDefineImplPrivate and (FScopeStack.Count = 1) then
+  if MarksImplPrivate(FDefineImplPrivate, ASymbol) and (FScopeStack.Count = 1) then
     ASymbol.IsImplPrivate := True;
   { Propagate the owning unit onto the type descriptor so codegen can mangle a
     type's storage symbols by the declaring unit even after a same-named type

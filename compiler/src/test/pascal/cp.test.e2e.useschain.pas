@@ -128,6 +128,10 @@ type
     procedure TestRun_CrossUnitIntf_MultiHopAndIntfAncestor;
     { Generic INSTANCE inheriting its interface from a generic ancestor }
     procedure TestRun_GenericInstance_InheritedIntfGetsItab;
+    { A generic instance first written in a unit's implementation section is
+      shared with the units after it.  The compiler overflowed its stack
+      instantiating TBox<Int> again and again (exit 139). }
+    procedure TestRun_ImplSectionGenericInstance_SharedWithLaterUnits;
   end;
 
 implementation
@@ -1688,6 +1692,78 @@ program P;
       WriteLn(I.Show())
     end.
     ''', 'boxed' + LE, 0);
+end;
+
+procedure TE2EUsesChainTests.TestRun_ImplSectionGenericInstance_SharedWithLaterUnits;
+const
+  UBox = '''
+    unit uisbox;
+    interface
+    type
+      TBox<T> = class
+        Value: T;
+        function Clone(): TBox<T>;
+      end;
+    implementation
+    function TBox<T>.Clone(): TBox<T>;
+    begin
+      Result := TBox<T>.Create();
+      Result.Value := Value
+    end;
+    end.
+    ''';
+  UHolder = '''
+    unit uisholder;
+    interface
+    function Answer(): Int;
+    implementation
+    uses uisbox;
+    type
+      THolder = class
+        Box: TBox<Int>;
+      end;
+    function Answer(): Int;
+    var
+      H: THolder;
+    begin
+      H := THolder.Create();
+      H.Box := TBox<Int>.Create();
+      H.Box.Value := 41;
+      Result := H.Box.Clone().Value + 1
+    end;
+    end.
+    ''';
+  UUser = '''
+    unit uisuser;
+    interface
+    uses uisbox;
+    function Doubled(ABox: TBox<Int>): Int;
+    implementation
+    function Doubled(ABox: TBox<Int>): Int;
+    begin
+      Result := ABox.Clone().Value * 2
+    end;
+    end.
+    ''';
+  Prog = '''
+    program P;
+    uses uisbox, uisholder, uisuser;
+    var
+      B: TBox<Int>;
+    begin
+      B := TBox<Int>.Create();
+      B.Value := Answer();
+      WriteLn(Answer());
+      WriteLn(Doubled(B))
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  WriteScratchUnit(UBox);
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRunWithUnits(UHolder, UUser, Prog, Output, RCode));
+  AssertEquals('42' + LE + '84' + LE, Output);
 end;
 
 initialization

@@ -202,6 +202,10 @@ type
     function  CompileAndRunWithUnits(const AUnit1Src, AUnit2Src, ASrc: string;
                                      out AStdout: string;
                                      out AExitCode: Int): Boolean;
+    { Writes one more unit beside the program (named from its `unit <name>;`
+      header), for a test that needs more units than CompileAndRunWithUnits
+      takes. }
+    procedure WriteScratchUnit(const AUnitSrc: string);
   end;
 
 implementation
@@ -871,6 +875,11 @@ begin
         and (ASrc[Q] <> 10) and (ASrc[Q] <> 13) do
     Q := Q + 1;
   Result := Copy(ASrc, P, Q - P);
+end;
+
+procedure TE2ETestCase.WriteScratchUnit(const AUnitSrc: string);
+begin
+  WriteFile(FScratch + '/' + UnitNameOf(AUnitSrc) + '.pas', AUnitSrc);
 end;
 
 function TE2ETestCase.CompileAndRunWithUnits(const AUnit1Src, AUnit2Src,

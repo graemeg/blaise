@@ -86,6 +86,14 @@ type
     procedure TestUsesVisibility_TransitiveConstRejected;
     { ...and as a generic type argument. }
     procedure TestUsesVisibility_TransitiveTypeArgRejected;
+    { A generic instance first written in a unit's implementation section
+      (there TBox<Int>, a field of an impl-section class) is shared by every
+      unit that later writes the same spelling.  It was marked private to
+      that unit, so the next unit could not find it, instantiated it again
+      and could not register the copy under the taken name: the copy's own
+      method returning TBox<T> instantiated it again, without end, until the
+      compiler's stack overflowed. }
+    procedure TestUsesVisibility_ImplSectionGenericInstanceShared;
     procedure TestUsesVisibility_ImplUsesNotReExported;
     { A unit's implementation-section uses are visible to that unit's own
       implementation. }
@@ -1144,6 +1152,78 @@ begin
     Pos('TUnitRec', Msg) >= 0);
   AssertTrue('names the unit to add: ' + Msg,
     Pos('declared in unit ''VisTypes''', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_ImplSectionGenericInstanceShared;
+const
+  BoxSrc =
+    '''
+        unit ImplInstBox;
+        interface
+        type
+          TBox<T> = class
+            Value: T;
+            function Clone(): TBox<T>;
+          end;
+        implementation
+        function TBox<T>.Clone(): TBox<T>;
+        begin
+          Result := TBox<T>.Create();
+          Result.Value := Value
+        end;
+        end.
+        ''';
+  ImplSrc =
+    '''
+        unit ImplInstHolder;
+        interface
+        function Answer(): Int;
+        implementation
+        uses ImplInstBox;
+        type
+          THolder = class
+            Box: TBox<Int>;
+          end;
+        function Answer(): Int;
+        var
+          H: THolder;
+        begin
+          H := THolder.Create();
+          H.Box := TBox<Int>.Create();
+          H.Box.Value := 41;
+          Result := H.Box.Clone().Value + 1
+        end;
+        end.
+        ''';
+  UserSrc =
+    '''
+        unit ImplInstUser;
+        interface
+        uses ImplInstBox;
+        function Doubled(ABox: TBox<Int>): Int;
+        implementation
+        function Doubled(ABox: TBox<Int>): Int;
+        begin
+          Result := ABox.Clone().Value * 2
+        end;
+        end.
+        ''';
+  ProgSrc =
+    '''
+        program P;
+        uses ImplInstBox, ImplInstHolder, ImplInstUser;
+        var
+          B: TBox<Int>;
+          N: Int;
+        begin
+          B := TBox<Int>.Create();
+          B.Value := Answer();
+          N := Doubled(B)
+        end.
+        ''';
+begin
+  AssertEquals('an impl-section instance is found by later units', '',
+    AnalyseUnitsAndProg([BoxSrc, ImplSrc, UserSrc], ProgSrc));
 end;
 
 procedure TMultifileTests.TestUsesVisibility_GenericBodySeesDeclaringUnitUses;
