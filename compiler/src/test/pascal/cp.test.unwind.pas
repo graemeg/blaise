@@ -78,6 +78,11 @@ type
     { the main program's own call-argument and operand temporaries: main is
       a routine to the tables too }
     procedure TestDebug_MainTemporaries_ReleasedOnUnwind;
+    { a constructor that raises releases its new instance, which runs the
+      destructor on the partly built object (D2): a plain, a virtual (through
+      a metaclass) and a nested constructor call, and one that registered
+      Self elsewhere before it raised }
+    procedure TestDebug_RaisingConstructor_ReleasesInstance;
   end;
 
 implementation
@@ -972,6 +977,127 @@ begin
       try Order(); except on E: Exception do WriteLn('order ', E.Message); end;
     end.
     ''', 'concat b' + #10 + 'nested s' + #10 + 'compare s' + #10 + 'order s');
+end;
+
+procedure TUnwindE2ETests.TestDebug_RaisingConstructor_ReleasesInstance;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwCtor;
+    uses SysUtils, Generics.Collections;
+    type
+      TPart = class
+        Name: string;
+        constructor Create(const AName: string);
+        destructor Destroy; override;
+      end;
+      TBase = class
+        Tag: string;
+        Part: TPart;
+        constructor Create(AFail: Boolean); virtual;
+        destructor Destroy; override;
+      end;
+      TBaseClass = class of TBase;
+      TDerived = class(TBase)
+        constructor Create(AFail: Boolean); override;
+      end;
+      THolder = class
+        Inner: TPart;
+        constructor Create(AInner: TPart; AFail: Boolean);
+        destructor Destroy; override;
+      end;
+    var
+      Freed: Int;
+      Registry: TList<TBase>;
+    constructor TPart.Create(const AName: string);
+    begin
+      Name := AName;
+    end;
+    destructor TPart.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    constructor TBase.Create(AFail: Boolean);
+    begin
+      Tag := IntToStr(7) + 'tag';
+      Part := TPart.Create('p');
+      if AFail then raise Exception.Create('base');
+    end;
+    destructor TBase.Destroy;
+    begin
+      Freed := Freed + 10;
+      inherited Destroy();
+    end;
+    constructor TDerived.Create(AFail: Boolean);
+    begin
+      Registry.Add(Self);
+      inherited Create(AFail);
+    end;
+    constructor THolder.Create(AInner: TPart; AFail: Boolean);
+    begin
+      Inner := AInner;
+      if AFail then raise Exception.Create('holder');
+    end;
+    destructor THolder.Destroy;
+    begin
+      Freed := Freed + 100;
+      inherited Destroy();
+    end;
+    procedure Plain;
+    var B: TBase;
+    begin
+      B := TBase.Create(True);
+      WriteLn('unreached ', B.Tag);
+    end;
+    procedure Virt(C: TBaseClass);
+    var B: TBase;
+    begin
+      B := C.Create(True);
+      WriteLn('unreached ', B.Tag);
+    end;
+    procedure Nested;
+    var H: THolder;
+    begin
+      H := THolder.Create(TPart.Create(IntToStr(1)), True);
+      WriteLn('unreached ', H.Inner.Name);
+    end;
+    procedure ByValue(C: TBaseClass);
+    var B: TBase;
+    begin
+      B := ClassCreate(C, True);
+      WriteLn('unreached ', B.Tag);
+    end;
+    procedure Caught;
+    var B: TBase;
+    begin
+      try
+        B := TBase.Create(True);
+      except
+        on E: Exception do WriteLn('caught ', E.Message, ' ', B = nil);
+      end;
+    end;
+    begin
+      Registry := TList<TBase>.Create();
+      try Plain(); except on E: Exception do WriteLn('plain ', E.Message, ' ', Freed); end;
+      Freed := 0;
+      try Virt(TBase); except on E: Exception do WriteLn('virt ', E.Message, ' ', Freed); end;
+      Freed := 0;
+      try ByValue(TBase); except on E: Exception do WriteLn('byvalue ', E.Message, ' ', Freed); end;
+      Freed := 0;
+      try Nested(); except on E: Exception do WriteLn('nested ', E.Message, ' ', Freed); end;
+      Freed := 0;
+      Caught();
+      WriteLn('caught freed ', Freed);
+      Freed := 0;
+      try Virt(TDerived); except on E: Exception do WriteLn('registered ', E.Message, ' ', Freed, ' ', Registry.Count); end;
+      Registry.Clear();
+      WriteLn('cleared ', Freed);
+      Registry.Free();
+    end.
+    ''', 'plain base 11' + #10 + 'virt base 11' + #10 + 'byvalue base 11' + #10 + 'nested holder 101' + #10 +
+      'caught base True' + #10 + 'caught freed 11' + #10 +
+      'registered base 0 1' + #10 + 'cleared 11');
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;

@@ -338,6 +338,7 @@ type
     function OpndSlot(AIdx: Int): string;
     function UnwStrOpndOpen(AExpr: TASTExpr; const ASlot: string): Int;
     procedure UnwStrOpndClose(var AHandle: Int);
+    procedure EmitCtorBodyCall(AMethod: TMethodDecl; AArgs: TObjectList);
     function NextIntArgDest(var ANInt, AStackOff: Int): string;
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
@@ -1733,6 +1734,33 @@ begin
   FUnw.CloseRange(AHandle, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
   AHandle := -1;
+end;
+
+{ The constructor body called on the new instance in x0, left in x0.  The
+  instance is parked in an x29-relative operand slot, which the unwind
+  tables cover as a class across the call: a constructor that raises
+  releases its instance, running the destructor on the partly built object
+  (D2).  The +1 is the constructor call's own, so nothing else releases it
+  on that path. }
+procedure TArm64Backend.EmitCtorBodyCall(AMethod: TMethodDecl;
+  AArgs: TObjectList);
+var
+  Slot, Lbl: string;
+  Off, H: Int;
+begin
+  Slot := OpndSlot(FOpndTop);
+  FOpndTop := FOpndTop + 1;
+  EmitStoreSlot('x0', Slot);
+  H := -1;
+  if (FUnw <> nil) and FFrame.TryGetValue(Slot, Off) then
+  begin
+    H := FUnw.OpenRange(UNW_CLASS, -Off, 0, 0, False, Lbl);
+    if Lbl <> '' then Self.Emit(Lbl + ':');
+  end;
+  EmitMethodCallCommon(AMethod, 'Create', AArgs);
+  UnwStrOpndClose(H);
+  EmitLoadSlot('x0', Slot);
+  FOpndTop := FOpndTop - 1;
 end;
 
 function TArm64Backend.StrTransSlot(AIdx: Int): string;
@@ -18973,11 +19001,7 @@ begin
     EmitCallSym('_ClassCreate');
     MD := TMethodDecl(AStmt.ResolvedMethod);
     if MD <> nil then
-    begin
-      EmitPushX0();
-      EmitMethodCallCommon(MD, 'Create', AStmt.Args);
-      EmitPopTo('x0');
-    end;
+      EmitCtorBodyCall(MD, AStmt.Args);
     EmitCallSym('_ClassRelease');
     Exit;
   end;
@@ -19218,9 +19242,7 @@ begin
   try
     for I := 1 to AExpr.Args.Count - 1 do
       CtorArgs.Add(AExpr.Args.Items[I]);
-    EmitPushX0();               { keep the result across the ctor call }
-    EmitMethodCallCommon(TMethodDecl(AExpr.ResolvedDecl), 'Create', CtorArgs);
-    EmitPopTo('x0');
+    EmitCtorBodyCall(TMethodDecl(AExpr.ResolvedDecl), CtorArgs);
   finally
     CtorArgs.Free();
   end;
@@ -19261,11 +19283,7 @@ begin
         interfaces carry declaration stubs; the body lives in the
         owning unit's object }
       if MD <> nil then
-      begin
-        EmitPushX0();
-        EmitMethodCallCommon(MD, 'Create', AExpr.Args);
-        EmitPopTo('x0');
-      end;
+        EmitCtorBodyCall(MD, AExpr.Args);
       { MD = nil here means a parameterless ctor with no user body (the
         implicit default constructor).  An undeclared Create* variant WITH
         args never reaches codegen — the semantic pass desugars CreateFmt
@@ -19328,11 +19346,7 @@ begin
     { called even when Body = nil — imported unit interfaces carry
       declaration stubs; the body lives in the owning unit's object }
     if MD <> nil then
-    begin
-      EmitPushX0();               { keep the result across the ctor call }
-      EmitMethodCallCommon(MD, 'Create', AExpr.Args);
-      EmitPopTo('x0');
-    end;
+      EmitCtorBodyCall(MD, AExpr.Args);
     { MD = nil here means a parameterless ctor with no user body (the
       implicit default constructor).  An undeclared Create* variant WITH
       args never reaches codegen — the semantic pass desugars CreateFmt

@@ -1343,6 +1343,9 @@ type
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure UnwHoistOpen(AKind: Int);
     function UnwStrTempOpen(AExpr: TASTExpr): Int;
+    function UnwCtorOpen(): Int;
+    function EmitCtorHoldBegin(): Int;
+    procedure EmitCtorHoldEnd(var AHandle: Int);
     procedure UnwStrTempClose(var AHandle: Int);
     procedure UnwPendOpen(AIdx: Int);
     procedure UnwPendClose(AIdx: Int);
@@ -10058,8 +10061,7 @@ begin
         %rbx across the ctor call, mirroring the direct constructor path. }
       if (FC.ResolvedDecl <> nil) and (FC.Args.Count > 1) then
       begin
-        Self.Emit(#9'pushq %rbx');
-        Self.Emit(#9'movq %rax, %rbx');
+        UnwH := Self.EmitCtorHoldBegin();
         for SetI := 1 to FC.Args.Count - 1 do
         begin
           Self.EmitExprToEax(TASTExpr(FC.Args.Items[SetI]));
@@ -10079,13 +10081,11 @@ begin
           Self.Emit(Format(#9'callq %s',
             [MethodEmitNameNative(TMethodDecl(FC.ResolvedDecl),
               TMethodDecl(FC.ResolvedDecl).OwnerTypeName, 'Create')]));
-        Self.Emit(#9'movq %rbx, %rax');
-        Self.Emit(#9'popq %rbx');
+        Self.EmitCtorHoldEnd(UnwH);
       end
       else if FC.ResolvedDecl <> nil then
       begin
-        Self.Emit(#9'pushq %rbx');
-        Self.Emit(#9'movq %rax, %rbx');
+        UnwH := Self.EmitCtorHoldBegin();
         Self.Emit(#9'movq %rax, %rdi');
         if TMethodDecl(FC.ResolvedDecl).VTableSlot >= 0 then
         begin
@@ -10098,8 +10098,7 @@ begin
           Self.Emit(Format(#9'callq %s',
             [MethodEmitNameNative(TMethodDecl(FC.ResolvedDecl),
               TMethodDecl(FC.ResolvedDecl).OwnerTypeName, 'Create')]));
-        Self.Emit(#9'movq %rbx, %rax');
-        Self.Emit(#9'popq %rbx');
+        Self.EmitCtorHoldEnd(UnwH);
       end;
       Exit;
     end;
@@ -12554,9 +12553,13 @@ begin
     if FAE.ResolvedMethod <> nil then
     begin
       Self.Emit(#9'pushq %rax');
+      { the instance at (%rsp) is the frame's across the body: a raising
+        constructor releases it (D2) }
+      UnwH := Self.UnwCtorOpen();
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq ' + MethodEmitNameNative(
         TMethodDecl(FAE.ResolvedMethod), FAE.ResolvedType.Name, FAE.FieldName));
+      Self.UnwStrTempClose(UnwH);
       Self.Emit(#9'popq %rax');
     end;
     { %rax = new instance pointer. }
@@ -12811,6 +12814,7 @@ end;
   %rsi/%rdx/etc.  The method symbol is OwnerTypeName_MethodName. }
 procedure TX86_64Backend.EmitMethodCallExpr(ACall: TMethodCallExpr);
 var
+  UnwH:     Int;
   I:          Int;
   SetI:       Int;
   MD:         TMethodDecl;
@@ -12901,8 +12905,7 @@ begin
 
       if TotalSlots <= 6 then
       begin
-        Self.Emit(#9'pushq %rbx');
-        Self.Emit(#9'movq %rax, %rbx');
+        UnwH := Self.EmitCtorHoldBegin();
         Self.BeginCallArgs(MD.Params, ACall.Args);
         for I := 0 to ACall.Args.Count - 1 do
           Self.PushCallArg(TMethodParam(MD.Params.Items[I]),
@@ -12918,13 +12921,11 @@ begin
         else
           Self.Emit(#9'callq ' + Sym);
         Self.EndCallArgs();
-        Self.Emit(#9'movq %rbx, %rax');
-        Self.Emit(#9'popq %rbx');
+        Self.EmitCtorHoldEnd(UnwH);
       end
       else
       begin
-        Self.Emit(#9'pushq %rbx');
-        Self.Emit(#9'movq %rax, %rbx');
+        UnwH := Self.EmitCtorHoldBegin();
         HD := TList<Int>.Create();
         HK := TList<Int>.Create();
         HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
@@ -12945,8 +12946,7 @@ begin
         Self.EmitHoistEpilogue(ACall.Args, HD, HK, HTotal, CleanUp, True);
         HD.Free();
         HK.Free();
-        Self.Emit(#9'movq %rbx, %rax');
-        Self.Emit(#9'popq %rbx');
+        Self.EmitCtorHoldEnd(UnwH);
       end;
     end;
     Exit;
@@ -14828,6 +14828,7 @@ end;
 
 procedure TX86_64Backend.EmitMethodCallStmt(ACall: TMethodCallStmt);
 var
+  UnwH:     Int;
   I:        Int;
   MD:       TMethodDecl;
   Sym:      string;
@@ -14872,8 +14873,7 @@ begin
       Sym := MethodEmitNameNative(MD, RT.Name, ACall.Name);
       if TotalSlots <= 6 then
       begin
-        Self.Emit(#9'pushq %rbx');
-        Self.Emit(#9'movq %rax, %rbx');
+        UnwH := Self.EmitCtorHoldBegin();
         Self.BeginCallArgs(MD.Params, ACall.Args);
         for I := 0 to ACall.Args.Count - 1 do
           Self.PushCallArg(TMethodParam(MD.Params.Items[I]),
@@ -14889,13 +14889,11 @@ begin
         else
           Self.Emit(#9'callq ' + Sym);
         Self.EndCallArgs();
-        Self.Emit(#9'movq %rbx, %rax');
-        Self.Emit(#9'popq %rbx');
+        Self.EmitCtorHoldEnd(UnwH);
       end
       else
       begin
-        Self.Emit(#9'pushq %rbx');
-        Self.Emit(#9'movq %rax, %rbx');
+        UnwH := Self.EmitCtorHoldBegin();
         HD := TList<Int>.Create();
         HK := TList<Int>.Create();
         HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
@@ -14916,8 +14914,7 @@ begin
         Self.EmitHoistEpilogue(ACall.Args, HD, HK, HTotal, CleanUp, True);
         HD.Free();
         HK.Free();
-        Self.Emit(#9'movq %rbx, %rax');
-        Self.Emit(#9'popq %rbx');
+        Self.EmitCtorHoldEnd(UnwH);
       end;
     end;
     { Discarded result: free the rc=1 instance. }
@@ -26662,6 +26659,40 @@ begin
   if ArcExprOwnsRef(AExpr) then K := UNW_STR else K := UNW_STR0;
   Result := FUnw.OpenRange(K, FSPDepth, 0, 0, True, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ The new instance just stored at (%rsp), the frame's while its constructor
+  body runs: a raising constructor releases it, running the destructor on
+  the partly built object (D2).  The +1 is the constructor call's own. }
+function TX86_64Backend.UnwCtorOpen(): Int;
+var
+  Lbl: string;
+begin
+  Result := -1;
+  if FUnw = nil then Exit;
+  Result := FUnw.OpenRange(UNW_CLASS, FSPDepth, 0, 0, True, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ The new instance in %rax held across its constructor call: in callee-saved
+  %rbx for the call, and in a 16-byte stack slot (alignment kept) that the
+  unwind tables cover -- the walk cannot see a register.  Emitted with or
+  without tables, so the .text is the same either way. }
+function TX86_64Backend.EmitCtorHoldBegin(): Int;
+begin
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(#9'movq %rax, %rbx');
+  Self.Emit(#9'subq $16, %rsp');
+  Self.Emit(#9'movq %rax, (%rsp)');
+  Result := Self.UnwCtorOpen();
+end;
+
+procedure TX86_64Backend.EmitCtorHoldEnd(var AHandle: Int);
+begin
+  Self.UnwStrTempClose(AHandle);
+  Self.Emit(#9'addq $16, %rsp');
+  Self.Emit(#9'movq %rbx, %rax');
+  Self.Emit(#9'popq %rbx');
 end;
 
 procedure TX86_64Backend.UnwStrTempClose(var AHandle: Int);
