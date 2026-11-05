@@ -21,7 +21,7 @@ uses
   SysUtils, Classes, Generics.Collections, blaise.testing, uStrCompat,
   blaise.container.writer,
   blaise.machowriter, blaise.machoreader, blaise.sha256,
-  blaise.linker.macho.dylib;
+  blaise.linker.macho.dylib, blaise.linker.macho, blaise.assembler.arm64;
 
 type
   TMachOWriterTests = class(TTestCase)
@@ -61,6 +61,10 @@ type
     { a 32-bit field at or above 2^31 (a load-command type with
       LC_REQ_DYLD, a section attribute) reads back as its unsigned value }
     procedure TestReader_HighBitFieldsReadUnsigned;
+    { __DATA,__blaise_unw blocks from every object are folded into __data,
+      bracketed by section$start$/section$end$__DATA$__blaise_unw, with their
+      absolute words pointing into __text }
+    procedure TestLinker_UnwindSectionBounds;
     procedure TestEntry_LCMainNotUnixthread;
     procedure TestDylinkerAndLibSystem;
     procedure TestBuildVersion_PlatformMacOS;
@@ -481,6 +485,55 @@ begin
     W.Free();
   end;
   Result := ParseMachO(Buf, 'probe_exec');
+end;
+
+procedure TMachOExecWriterTests.TestLinker_UnwindSectionBounds;
+var
+  Lk: TMachOLinker;
+  Img: string;
+  F: TMachOFile;
+  SStart, SEnd, SMain: TMoSymbol;
+  Data: TMoSection;
+  Off: Int64;
+begin
+  Lk := TMachOLinker.Create();
+  try
+    Lk.AddObject(ParseMachO(AssembleArm64ToBytes(
+      '.text' + LineEnding + '.globl _main' + LineEnding + '_main:' + LineEnding +
+      'adrp x0, section$start$__DATA$__blaise_unw@PAGE' + LineEnding +
+      'add x0, x0, section$start$__DATA$__blaise_unw@PAGEOFF' + LineEnding +
+      'adrp x1, section$end$__DATA$__blaise_unw@PAGE' + LineEnding +
+      'add x1, x1, section$end$__DATA$__blaise_unw@PAGEOFF' + LineEnding +
+      'ret' + LineEnding +
+      '.section __DATA,__blaise_unw' + LineEnding + '.p2align 3' + LineEnding +
+      '.quad _main' + LineEnding + '.word 287454020' + LineEnding +
+      '.word 7' + LineEnding), 'a.o'));
+    Lk.AddObject(ParseMachO(AssembleArm64ToBytes(
+      '.data' + LineEnding + '.quad 1' + LineEnding +
+      '.section __DATA,__blaise_unw' + LineEnding + '.p2align 3' + LineEnding +
+      '.quad 42' + LineEnding), 'b.o'));
+    Img := Lk.Link('_main');
+  finally
+    Lk.Free();
+  end;
+  F := ParseMachO(Img, 'unw_exec');
+  try
+    SStart := F.FindSymbol('section$start$__DATA$__blaise_unw');
+    SEnd := F.FindSymbol('section$end$__DATA$__blaise_unw');
+    SMain := F.FindSymbol('_main');
+    AssertTrue('bounds exported', (SStart <> nil) and (SEnd <> nil) and
+      (SMain <> nil));
+    AssertEquals('both blocks, contiguous', 24, SEnd.Value - SStart.Value);
+    Data := F.FindSection('__DATA', '__data');
+    AssertTrue('inside __data', (SStart.Value >= Data.Addr) and
+      (SEnd.Value <= Data.Addr + Data.Size));
+    Off := Data.Offset + (SStart.Value - Data.Addr);
+    AssertEquals('anchor points at _main', SMain.Value, RdU64At(Img, Off));
+    AssertEquals('first block body', 287454020, Int64(RdU32At(Img, Off + 8)));
+    AssertEquals('second block', 42, RdU64At(Img, Off + 16));
+  finally
+    F.Free();
+  end;
 end;
 
 procedure TMachOExecWriterTests.TestReader_HighBitFieldsReadUnsigned;

@@ -63,6 +63,12 @@ type
     { merged output streams (indices into these are pre-layout offsets) }
     FText, FConst, FData, FTvars, FTdata: string;
     FOpdf: string;                     { merged __opdf debug payload }
+    { merged __blaise_unw unwind blocks: appended to __data after every
+      input's data, bracketed by the section$start$/section$end$ symbols
+      (FUnwindFlat = first such input section, -1 when there is none) }
+    FUnwind: string;
+    FUnwindBase: Int64;
+    FUnwindFlat: Int;
     FTbssSize, FBssSize: Int64;
     { per input section (flat, in FSecFirst[obj]+sectIdx order):
       which stream (-1 = dropped) and the base offset inside it }
@@ -90,6 +96,7 @@ type
     FLibSystemDirs: TStringList;       { owned; where to find it, read on first need }
     procedure MergeSections;
     procedure CollectSymbols;
+    procedure DefineUnwindBounds;
     procedure CollectImports;
     procedure SynthesiseStubs;
     procedure ApplyFixups;
@@ -141,6 +148,7 @@ const
   smTbss = 5;
   smBss = 6;
   smOpdf = 7;       { OPDF debug payload: own read-only segment, never rebased }
+  smUnwind = 8;     { unwind blocks: gathered, then folded into smData }
   smDropped = -1;
 
   STUB_SIZE = 12;   { adrp x16 / ldr x16 / br x16 }
@@ -166,6 +174,7 @@ begin
   FObjs := TList<TMachOFile>.Create();
   FSecStream := TList<Int>.Create();
   FSecBase := TList<Int64>.Create();
+  FUnwindFlat := -1;
   FSecFirst := TList<Int>.Create();
   FDefNames := TList<string>.Create();
   FDefSec := TList<Int>.Create();
@@ -261,6 +270,8 @@ begin
     Exit(smTbss);
   if (ASect.SegName = '__DATA') and (ASect.SectName = '__bss') then
     Exit(smBss);
+  if (ASect.SegName = '__DATA') and (ASect.SectName = '__blaise_unw') then
+    Exit(smUnwind);
   { OPDF debug payload (--debug-opdf): kept, in an __OPDF segment of its
     own, so the debugger finds it inside the executable the way it finds the
     ELF .opdf section }
@@ -342,12 +353,60 @@ begin
           FSecBase.Add(Length(FOpdf));
           FOpdf := FOpdf + Sec.Data;
         end;
+        smUnwind:
+        begin
+          if FUnwindFlat < 0 then FUnwindFlat := FSecStream.Count;
+          PadStream(FUnwind, Align);
+          FSecBase.Add(Length(FUnwind));
+          FUnwind := FUnwind + Sec.Data;
+        end;
       else
         FSecBase.Add(0);
       end;
       FSecStream.Add(Strm);
     end;
   end;
+  { The unwind blocks become one contiguous run at the end of __data, so
+    their relocations and rebases are ordinary __data ones and the image
+    needs no section of its own; the bounds are defined in CollectSymbols. }
+  if FUnwindFlat >= 0 then
+  begin
+    PadStream(FData, 8);
+    FUnwindBase := Length(FData);
+    FData := FData + FUnwind;
+    for I := 0 to FSecStream.Count - 1 do
+      if FSecStream.Get(I) = smUnwind then
+      begin
+        FSecStream.SetItem(I, smData);
+        FSecBase.SetItem(I, FSecBase.Get(I) + FUnwindBase);
+      end;
+  end;
+end;
+
+{ The linker-defined bounds of the merged unwind blocks, under ld64's names,
+  so generated code links the same with the internal linker and with ld64.
+  Defined only when some input carries the section. }
+procedure TMachOLinker.DefineUnwindBounds;
+
+  procedure Def(const AName: string; AOff: Int64);
+  begin
+    if FDefIndex.ContainsKey(AName) then
+      raise EMachOLinker.Create('macho linker: ' + AName +
+        ' is linker-defined and must not be defined by an input');
+    FDefIndex.Add(AName, FDefNames.Count);
+    FDefNames.Add(AName);
+    FDefSec.Add(FUnwindFlat);
+    FDefOff.Add(AOff);
+    FDefWeak.Add(False);
+  end;
+
+var
+  StartOff: Int64;
+begin
+  if FUnwindFlat < 0 then Exit;
+  StartOff := FUnwindBase - FSecBase.Get(FUnwindFlat);
+  Def('section$start$__DATA$__blaise_unw', StartOff);
+  Def('section$end$__DATA$__blaise_unw', StartOff + Length(FUnwind));
 end;
 
 procedure TMachOLinker.CollectSymbols;
@@ -850,6 +909,7 @@ var
 begin
   MergeSections();
   CollectSymbols();
+  DefineUnwindBounds();
   CollectImports();
   SynthesiseStubs();
 

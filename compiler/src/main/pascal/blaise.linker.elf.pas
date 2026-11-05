@@ -268,6 +268,7 @@ type
     function FindSymbol(const AName: string): TLinkSymbol;
     procedure AddSynthSymbol(const AName: string; AAddr: Int64);
     procedure DefineSynthSymbols;
+    function IsSynthName(const AName: string): Boolean;
     procedure ApplyRelocations;
     function ResolveSymbolAddr(AObj: TElfObjectFile; ASymIdx: Int;
       const AContext: string): Int64;
@@ -1153,6 +1154,23 @@ end;
   for the standalone path that does not touch it); __bss_start/_edata/
   _end mark the data/bss boundaries; __TMC_END__ resolves to _end.
   Only defined if not already provided by an input object. }
+{ [A-Za-z_][A-Za-z0-9_]*: the section names GNU ld brackets with
+  __start_/__stop_ symbols. }
+function IsCIdentifier(const S: string): Boolean;
+var
+  I, C: Int;
+begin
+  Result := Length(S) > 0;
+  for I := 0 to Length(S) - 1 do
+  begin
+    C := S[I];
+    if not (((C >= Ord('A')) and (C <= Ord('Z'))) or
+            ((C >= Ord('a')) and (C <= Ord('z'))) or (C = Ord('_')) or
+            ((I > 0) and (C >= Ord('0')) and (C <= Ord('9')))) then
+      Exit(False);
+  end;
+end;
+
 procedure TLinker.DefineSynthSymbols;
 var
   I: Int;
@@ -1192,6 +1210,36 @@ begin
   Self.AddSynthSymbol('_edata', DataEnd);
   Self.AddSynthSymbol('_end', BssEnd);
   Self.AddSynthSymbol('__TMC_END__', BssEnd);
+
+  { GNU ld's __start_<name> / __stop_<name> for an output section whose name
+    is a C identifier: the unwind tables (blaise_unwind) are found this way }
+  for I := 0 to FSecAddr.Count - 1 do
+  begin
+    M := FSecAddr.Get(I);
+    if IsCIdentifier(M.Name) then
+    begin
+      Self.AddSynthSymbol('__start_' + M.Name, FAddrOf.Get(I));
+      Self.AddSynthSymbol('__stop_' + M.Name, FAddrOf.Get(I) + M.Size);
+    end;
+  end;
+end;
+
+{ A name this linker defines itself (DefineSynthSymbols), so an undefined
+  reference to it is neither an import nor an error. }
+function TLinker.IsSynthName(const AName: string): Boolean;
+var
+  Rest: string;
+begin
+  if (AName = '_GLOBAL_OFFSET_TABLE_') or (AName = '__bss_start') or
+     (AName = '_edata') or (AName = '_end') or (AName = '__TMC_END__') then
+    Exit(True);
+  Rest := '';
+  if Pos('__start_', AName) = 0 then
+    Rest := Copy(AName, 8, Length(AName) - 8)
+  else if Pos('__stop_', AName) = 0 then
+    Rest := Copy(AName, 7, Length(AName) - 7);
+  Result := (Rest <> '') and IsCIdentifier(Rest) and
+    (FMerger.FindMerged(Rest) <> nil);
 end;
 
 { ---- Phase C: dynamic linking ----------------------------------------- }
@@ -1225,11 +1273,7 @@ begin
         Seen.Add(Sym.Name, True);
 
         { Skip linker-synthesised symbols. }
-        if (Sym.Name = '_GLOBAL_OFFSET_TABLE_') or
-           (Sym.Name = '__bss_start') or
-           (Sym.Name = '_edata') or
-           (Sym.Name = '_end') or
-           (Sym.Name = '__TMC_END__') then
+        if Self.IsSynthName(Sym.Name) then
           Continue;
 
         { Check if any object defines this symbol. }
@@ -1295,11 +1339,7 @@ begin
         Seen.Add(Sym.Name, True);
 
         { Skip linker-synthesised symbols (same set CollectExternals skips). }
-        if (Sym.Name = '_GLOBAL_OFFSET_TABLE_') or
-           (Sym.Name = '__bss_start') or
-           (Sym.Name = '_edata') or
-           (Sym.Name = '_end') or
-           (Sym.Name = '__TMC_END__') then
+        if Self.IsSynthName(Sym.Name) then
           Continue;
 
         Found := False;

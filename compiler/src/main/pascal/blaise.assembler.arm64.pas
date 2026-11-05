@@ -1013,7 +1013,9 @@ procedure TArm64Assembler.HandleDirective;
         The __thread_* arms below are unreachable from these tests:
         '__thread_bss' contains neither '.bss' nor '__bss' (the underscore run
         before 'bss' is single), and likewise '__thread_data'. }
-      if Pos('.rodata', FL.Args) >= 0 then FSection := cskRodata
+      if (Pos('__blaise_unw', FL.Args) >= 0) or
+         (Pos('blaise_unwind', FL.Args) >= 0) then FSection := cskUnwind
+      else if Pos('.rodata', FL.Args) >= 0 then FSection := cskRodata
       else if Pos('__const', FL.Args) >= 0 then FSection := cskRodata
       else if (Pos('.bss', FL.Args) >= 0) or
               (Pos('__bss', FL.Args) >= 0) then FSection := cskBss

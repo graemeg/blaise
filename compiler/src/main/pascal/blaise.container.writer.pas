@@ -69,10 +69,15 @@ type
                    its post-hoc uElfObject embedding, so this kind is never
                    populated there and never reaches the ELF writer's section
                    order, exactly like cskTvars. }
-    cskInitArray { load-time constructor pointers the dynamic loader runs.
+    cskInitArray, { load-time constructor pointers the dynamic loader runs.
                    ELF .init_array (DT_INIT_ARRAY); the Mach-O analogue is
                    __DATA,__mod_init_func (S_MOD_INIT_FUNC_POINTERS), not yet
                    emitted — a shared object's load constructor registers here }
+    cskUnwind    { exception unwind tables, one block per object: ELF
+                   blaise_unwind, Mach-O __DATA,__blaise_unw (alloc+write;
+                   the linker brackets the merged section with start/end
+                   symbols the runtime walks -- see
+                   docs/exception-unwind-cleanup-design.adoc) }
   );
 
   TContainerSymBind = (

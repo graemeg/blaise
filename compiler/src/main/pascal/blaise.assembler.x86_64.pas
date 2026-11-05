@@ -3020,6 +3020,9 @@ begin
       ASection := cskData
     else if StartsWithStr(Args, '.bss') then
       ASection := cskBss
+    else if StartsWithStr(Args, 'blaise_unwind') then
+      { exception unwind tables: alloc+write progbits, one block per object }
+      ASection := cskUnwind
     else if StartsWithStr(Args, '.opdf') then
       { OPDF debug section: alloc+write progbits data.  Holds .byte/.word/.int/
         .quad/.ascii records emitted by uDebugOPDF; .quad <label> lines become

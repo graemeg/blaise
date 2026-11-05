@@ -60,6 +60,10 @@ type
     procedure TestSym_StrongUndefined_Raises;
     procedure TestSym_WeakUndefinedResolvesToZero;
     procedure TestSym_SynthesisedSymbolsDefined;
+    { blaise_unwind blocks from every object merge into one run bracketed by
+      __start_blaise_unwind / __stop_blaise_unwind, in the writable load, with
+      their absolute words relocated }
+    procedure TestSym_UnwindSectionBounds;
     { Static relocations }
     procedure TestReloc_PC32CrossObjectCall;
     procedure TestReloc_Quad64_ResolvesToAbsoluteAddr;
@@ -975,6 +979,38 @@ begin
     Expected := Int64(0) - 4 - (StartAddr + 1);
     AssertEquals('weak-undef PC32 disp (S=0)',
       Int32(Expected and $FFFFFFFF), Disp);
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TLinkerTests.TestSym_UnwindSectionBounds;
+var
+  Lk: TLinker;
+  Bytes: string;
+  Start, Stop, Off: Int64;
+begin
+  Lk := LinkObjs(
+    ['.text' + LineEnding + '.globl _start' + LineEnding + '_start:' +
+     LineEnding + 'leaq __start_blaise_unwind(%rip), %rax' + LineEnding +
+     'leaq __stop_blaise_unwind(%rip), %rcx' + LineEnding + 'ret' + LineEnding +
+     '.section blaise_unwind,"aw",@progbits' + LineEnding + '.balign 8' +
+     LineEnding + '.quad _start' + LineEnding + '.long 287454020' + LineEnding +
+     '.long 7' + LineEnding,
+     '.data' + LineEnding + '.quad 1' + LineEnding +
+     '.section blaise_unwind,"aw",@progbits' + LineEnding + '.balign 8' +
+     LineEnding + '.quad 42' + LineEnding],
+    '_start', Bytes);
+  try
+    Start := Lk.AddrOfSymbol('__start_blaise_unwind');
+    Stop := Lk.AddrOfSymbol('__stop_blaise_unwind');
+    AssertTrue('__start_blaise_unwind defined', Start > 0);
+    AssertEquals('both blocks, contiguous', 24, Stop - Start);
+    Off := Start - $400000;
+    AssertEquals('anchor relocated to _start', Lk.AddrOfSymbol('_start'),
+      LeAt(Bytes, Off, 8));
+    AssertEquals('first block body', 287454020, LeAt(Bytes, Off + 8, 4));
+    AssertEquals('second block', 42, LeAt(Bytes, Off + 16, 8));
   finally
     Lk.Free();
   end;

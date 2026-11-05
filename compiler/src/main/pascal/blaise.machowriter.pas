@@ -340,9 +340,9 @@ const
     TBackendDriver.SupportsLibrary.  Add it here when Darwin libraries land. }
   { cskIface sits with the other non-loaded metadata, ahead of the zerofill
     sections which must stay last. }
-  SectionEmitOrder: array[0..8] of TContainerSectionKind = (
-    cskText, cskRodata, cskData, cskTdata, cskTvars, cskOpdf, cskIface,
-    cskBss, cskTbss);
+  SectionEmitOrder: array[0..9] of TContainerSectionKind = (
+    cskText, cskRodata, cskData, cskUnwind, cskTdata, cskTvars, cskOpdf,
+    cskIface, cskBss, cskTbss);
 
 procedure MachOSectionNames(AKind: TContainerSectionKind;
   out ASegName, ASectName: string);
@@ -379,6 +379,12 @@ begin
     cskOpdf:
     begin
       ASegName := '__OPDF'; ASectName := '__opdf';
+    end;
+    cskUnwind:
+    begin
+      { exception unwind tables; ld64 and the internal linker bracket the
+        merged section with section$start$/section$end$ symbols }
+      ASegName := '__DATA'; ASectName := '__blaise_unw';
     end;
     cskIface:
     begin

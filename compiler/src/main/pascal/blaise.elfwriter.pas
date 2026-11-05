@@ -394,6 +394,8 @@ begin
                  post-hoc uElfObject embedding owns this section on ELF, so
                  cskIface is absent from SecOrder below, like cskTvars }
     cskInitArray: Result := '.init_array';
+    cskUnwind: Result := 'blaise_unwind';  { a C identifier: the linker
+                 defines __start_blaise_unwind / __stop_blaise_unwind }
   else
     Result := '.text';
   end;
@@ -738,7 +740,7 @@ const
     ELF never emits.  Adding a kind that ELF *does* emit means extending the
     list AND this bound — otherwise the section is silently dropped from the
     object with no error. }
-  MaxSecOrder = 7;
+  MaxSecOrder = 8;
 
 var
   Buf: string;
@@ -797,6 +799,7 @@ begin
   SecOrder[5] := cskTbss;
   SecOrder[6] := cskOpdf;
   SecOrder[7] := cskInitArray;
+  SecOrder[8] := cskUnwind;
 
   NumDataSecs := 0;
   for I := 0 to MaxSecOrder do
@@ -1096,6 +1099,14 @@ begin
           { OPDF debug section: alloc+write progbits, matching GNU as output
             for `.section .opdf, "aw", @progbits`.  SHF_ALLOC makes it ride
             into the loadable image so the debugger finds it by name. }
+          ShFlags := SHF_ALLOC or SHF_WRITE;
+          ShType  := SHT_PROGBITS;
+        end;
+        cskUnwind:
+        begin
+          { exception unwind tables: alloc+write progbits, so the merged
+            section rides in the writable PT_LOAD (its anchor words are
+            relocated) }
           ShFlags := SHF_ALLOC or SHF_WRITE;
           ShType  := SHT_PROGBITS;
         end;
