@@ -75,6 +75,9 @@ type
     { an owned string operand -- an rc = 1 call result or an rc = 0 concat --
       held while the other operand of + or a comparison raises }
     procedure TestDebug_StringOperands_ReleasedOnUnwind;
+    { the main program's own call-argument and operand temporaries: main is
+      a routine to the tables too }
+    procedure TestDebug_MainTemporaries_ReleasedOnUnwind;
   end;
 
 implementation
@@ -969,6 +972,61 @@ begin
       try Order(); except on E: Exception do WriteLn('order ', E.Message); end;
     end.
     ''', 'concat b' + #10 + 'nested s' + #10 + 'compare s' + #10 + 'order s');
+end;
+
+procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwMain;
+    uses SysUtils;
+    type
+      IThing = interface
+        procedure Hi;
+      end;
+      TThing = class(IThing)
+        procedure Hi;
+        destructor Destroy; override;
+      end;
+      TArr = array of string;
+    var
+      Freed: Int;
+    procedure TThing.Hi;
+    begin
+    end;
+    destructor TThing.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    function MkIntf(): IThing;
+    begin
+      Result := TThing.Create();
+    end;
+    function MkArr(): TArr;
+    begin
+      SetLength(Result, 2);
+      Result[0] := 'e' + IntToStr(1);
+    end;
+    function MkStr(N: Int): string;
+    begin
+      Result := IntToStr(N) + 'x';
+    end;
+    procedure Take(I: IThing; const D: TArr; const S: string);
+    begin
+      raise Exception.Create(S);
+    end;
+    function BoomS(): string;
+    begin
+      raise Exception.Create('s');
+    end;
+    var
+      G: string;
+    begin
+      try Take(MkIntf(), MkArr(), MkStr(7)); except on E: Exception do WriteLn('args ', E.Message, ' ', Freed); end;
+      try G := MkStr(8) + BoomS(); except on E: Exception do WriteLn('opnd ', E.Message); end;
+    end.
+    ''', 'args 7x 1' + #10 + 'opnd s');
 end;
 
 initialization

@@ -19437,6 +19437,7 @@ end;
 
 procedure TArm64Backend.EmitProgram(AProg: TProgram);
 var
+  MainUnw: string;
   I, J: Int;
   VD:   TVarDecl;
   Decl: TMethodDecl;
@@ -19711,6 +19712,16 @@ begin
   Self.Emit('');
   EmitGloblDef(DarwinSym('main'));
   Self.Emit('_main:');
+  { _main is a routine to the unwind tables too: it owns no slots (program
+    variables are globals), but its temporaries -- call arguments, operands
+    -- are ranges like any frame's }
+  if FUnw <> nil then
+  begin
+    MainUnw := FUnw.NewLabel('s');
+    Self.Emit(MainUnw + ':');
+    FUnw.BeginRoutine(MainUnw);
+    FUnw.SetCoverage(MainUnw, MainUnw);
+  end;
   { Prologue: fp/lr pair + frame chain — ALWAYS (Darwin unwind).  argc/argv
     arrive in x0/x1 and pass straight through to _SetArgs, which must run
     before _BlaiseInit (that clobbers the argument registers).  The body is
@@ -19810,6 +19821,12 @@ begin
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
+  if FUnw <> nil then
+  begin
+    MainUnw := FUnw.NewLabel('e');
+    Self.Emit(MainUnw + ':');
+    FUnw.EndRoutine(MainUnw);
+  end;
   Self.DbgEndFunc();
   TvArmEnd(SavedArmNodes, SavedArmPos);
   FAsm := SavedAsm;

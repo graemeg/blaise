@@ -27402,6 +27402,7 @@ end;
   site. }
 procedure TX86_64Backend.EmitProgram(AProg: TProgram);
 var
+  MainUnw: string;
   I, J:  Int;
   VD:    TVarDecl;
   Decl:  TMethodDecl;
@@ -27499,6 +27500,17 @@ begin
   Self.Emit('.globl main');
   Self.DbgBeginFunc('main');
   Self.Emit('main:');
+  { main is a routine to the unwind tables too: no slots (program variables
+    are globals, its deferred releases and scratches .bss), but its stack
+    temporaries -- call arguments, operands -- are ranges; it has no frame
+    reserve }
+  if FUnw <> nil then
+  begin
+    MainUnw := FUnw.NewLabel('s');
+    Self.Emit(MainUnw + ':');
+    FUnw.BeginRoutine(MainUnw);
+    FUnw.SetCoverage(MainUnw, MainUnw);
+  end;
   { Prologue: establish a frame.  argc is in %edi, argv in %rsi per SysV. }
   Self.Emit(#9'pushq %rbp');
   Self.Emit(#9'movq %rsp, %rbp');
@@ -27555,6 +27567,12 @@ begin
   Self.Emit(#9'movl $0, %eax');
   Self.Emit(#9'leave');
   Self.Emit(#9'ret');
+  if FUnw <> nil then
+  begin
+    MainUnw := FUnw.NewLabel('e');
+    Self.Emit(MainUnw + ':');
+    FUnw.EndRoutine(MainUnw, 0);
+  end;
   Self.TvArmEnd(SavedArmNodes, SavedArmPos);
   Self.DbgEndFunc();
   Self.Emit('.type main, @function');
