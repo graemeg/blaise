@@ -300,8 +300,29 @@ type
 
 { The unwind table's code for a slot kind (uUnwindFacts.UNW_*). }
 function UnwKindCode(AKind: TUnwSlotKind): Int;
+{ How a routine's own managed Result is released when an exception unwinds
+  the routine before it returns (the epilogue hands it to the caller
+  instead): False when the type owns nothing -- an 'of object' method
+  pointer holds its receiver unretained. }
+function UnwResultKind(AType: TTypeDesc; out AKind: TUnwSlotKind): Boolean;
 
 implementation
+
+function UnwResultKind(AType: TTypeDesc; out AKind: TUnwSlotKind): Boolean;
+begin
+  Result := True;
+  AKind := uskStr;
+  if AType = nil then Exit(False);
+  if AType.IsString() then AKind := uskStr
+  else if AType.Kind = tyClass then AKind := uskClass
+  else if AType.Kind = tyDynArray then AKind := uskDyn
+  else if AType.Kind = tyInterface then AKind := uskIntf
+  else if ArcTypeIsRefClosure(AType) then AKind := uskRefEnv
+  else if (AType.Kind in [tyRecord, tyStaticArray]) and
+          ArcTypeHasManagedContent(AType) then AKind := uskAgg
+  else
+    Result := False;
+end;
 
 function UnwKindCode(AKind: TUnwSlotKind): Int;
 begin

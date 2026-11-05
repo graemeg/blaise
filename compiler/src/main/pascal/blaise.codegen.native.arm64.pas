@@ -564,7 +564,7 @@ type
     procedure EmitExit(AStmt: TExitStmt);
     function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
-    procedure RecordUnwindSlots(ASlots: TList<TUnwSlot>);
+    procedure RecordUnwindSlots(ADecl: TMethodDecl; ASlots: TList<TUnwSlot>);
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure EmitUnwindBlock;
     procedure EmitFunctionDef(ADecl: TMethodDecl;
@@ -14777,10 +14777,12 @@ end;
 { The frame slots an exception unwinding past this routine releases: the
   epilogue's own list, at their x29 offsets.  Aggregates follow with their
   release hooks. }
-procedure TArm64Backend.RecordUnwindSlots(ASlots: TList<TUnwSlot>);
+procedure TArm64Backend.RecordUnwindSlots(ADecl: TMethodDecl;
+  ASlots: TList<TUnwSlot>);
 var
   I, Off: Int;
   S: TUnwSlot;
+  K: TUnwSlotKind;
 begin
   if FUnw = nil then Exit;
   for I := 0 to ASlots.Count - 1 do
@@ -14791,6 +14793,17 @@ begin
       FUnw.AddSlot(-Off, UNW_AGG, 0, UnwAggHookPtr(S.AggType))
     else
       FUnw.AddSlot(-Off, UnwKindCode(S.Kind), 0, 0);
+  end;
+  { the routine's own Result: a frame slot on arm64 (the epilogue copies it
+    out, through x8 where the ABI wants a buffer), the callee's until the
+    routine returns }
+  if FIsFunction and UnwResultKind(ADecl.ResolvedReturnType, K) and
+     FFrame.TryGetValue('Result', Off) then
+  begin
+    if K = uskAgg then
+      FUnw.AddSlot(-Off, UNW_AGG, 0, UnwAggHookPtr(ADecl.ResolvedReturnType))
+    else
+      FUnw.AddSlot(-Off, UnwKindCode(K), 0, 0);
   end;
 end;
 
@@ -15549,7 +15562,7 @@ begin
 
   Self.Emit(FExitLabel + ':');
   FrameSlots := FrameSlotInventory(ADecl);
-  RecordUnwindSlots(FrameSlots);
+  RecordUnwindSlots(ADecl, FrameSlots);
   EmitFrameSlotReleases(FrameSlots);
   if FIsFunction and (RecShape >= 0) and
      (ADecl.ResolvedReturnType.Kind = tyRecord) then

@@ -1334,7 +1334,7 @@ type
       can run it twice. }
     function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
-    procedure RecordUnwindSlots(ASlots: TList<TUnwSlot>);
+    procedure RecordUnwindSlots(ADecl: TMethodDecl; ASlots: TList<TUnwSlot>);
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
     procedure EmitUnwindBlock;
@@ -26479,10 +26479,12 @@ end;
   epilogue's own list, at their %rbp offsets (an interface's obj half is its
   slot's base).  Register-promoted variables are unmanaged, so every managed
   slot is in the frame.  Aggregates follow with their release hooks. }
-procedure TX86_64Backend.RecordUnwindSlots(ASlots: TList<TUnwSlot>);
+procedure TX86_64Backend.RecordUnwindSlots(ADecl: TMethodDecl;
+  ASlots: TList<TUnwSlot>);
 var
   I, Off: Int;
   S: TUnwSlot;
+  K: TUnwSlotKind;
 begin
   if FUnw = nil then Exit;
   for I := 0 to ASlots.Count - 1 do
@@ -26498,6 +26500,18 @@ begin
     end
     else
       FUnw.AddSlot(Off, UnwKindCode(S.Kind), 0, 0);
+  end;
+  { the routine's own Result, the callee's until the routine returns --
+    unless it is returned through the caller's sret buffer, which the
+    caller owns }
+  if (ADecl.ResolvedReturnType <> nil) and not FSretFunc and
+     UnwResultKind(ADecl.ResolvedReturnType, K) and (FFrame <> nil) and
+     FFrame.TryGetValue('Result', Off) then
+  begin
+    if K = uskAgg then
+      FUnw.AddSlot(Off, UNW_AGG, 0, UnwAggHookPtr(ADecl.ResolvedReturnType))
+    else
+      FUnw.AddSlot(Off, UnwKindCode(K), 0, 0);
   end;
 end;
 
@@ -27141,7 +27155,7 @@ begin
     result, so no load is needed. }
   Self.Emit(FExitLabel + ':');
   FrameSlots := Self.FrameSlotInventory(ADecl);
-  Self.RecordUnwindSlots(FrameSlots);
+  Self.RecordUnwindSlots(ADecl, FrameSlots);
   Self.EmitFrameSlotReleases(FrameSlots);
   { Now that every ARC release call is done (none can clobber the result), load
     Result into %rax (int) or %xmm0 (float).  sret functions return via the

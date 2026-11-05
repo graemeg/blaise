@@ -55,6 +55,11 @@ type
     { records with managed fields (nested, with a [Weak] field) and static
       arrays of managed elements, as locals and as by-value parameters }
     procedure TestDebug_AggregateLocals_ReleasedOnUnwind;
+    { a function's own managed Result -- string, class, dynamic array,
+      'reference to' closure, managed record -- is released when
+      the function raises after assigning it; the caller's variable keeps its
+      old value; an 'of object' result owns nothing }
+    procedure TestDebug_ManagedResult_ReleasedOnUnwind;
   end;
 
 implementation
@@ -630,6 +635,122 @@ begin
       WriteLn('done');
     end.
     ''', 'locals 2' + #10 + 'params 0' + #10 + 'done');
+end;
+
+procedure TUnwindE2ETests.TestDebug_ManagedResult_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwResult;
+    uses SysUtils;
+    type
+      TTrack = class
+        destructor Destroy; override;
+        procedure Ping;
+      end;
+      IThing = interface
+        procedure Hello;
+      end;
+      TThing = class(IThing)
+        procedure Hello;
+        destructor Destroy; override;
+      end;
+      TFn = reference to function: Int;
+      TMeth = procedure of object;
+      TRec = record
+        S: string;
+        O: TTrack;
+      end;
+      TArr = array of string;
+    var
+      Freed: Int;
+      Keep: TTrack;
+    destructor TTrack.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    procedure TTrack.Ping;
+    begin
+    end;
+    procedure TThing.Hello;
+    begin
+    end;
+    destructor TThing.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    procedure Boom;
+    begin
+      raise Exception.Create('boom');
+    end;
+    function FStr(): string;
+    begin
+      Result := 'r' + IntToStr(1);
+      Boom();
+    end;
+    function FObj(): TTrack;
+    begin
+      Result := TTrack.Create();
+      Boom();
+    end;
+    function FArr(): TArr;
+    begin
+      SetLength(Result, 2);
+      Result[0] := 'a' + IntToStr(2);
+      Boom();
+    end;
+    function FFn(): TFn;
+    var K: TTrack;
+    begin
+      K := TTrack.Create();
+      Result := function: Int begin K.Ping(); Result := 1 end;
+      K := nil;
+      Boom();
+    end;
+    function FRec(): TRec;
+    begin
+      Result.S := 's' + IntToStr(3);
+      Result.O := TTrack.Create();
+      Boom();
+    end;
+    procedure RunRec;
+    var R: TRec;
+    begin
+      try R := FRec(); except on E: Exception do WriteLn('rec'); end;
+    end;
+    function FMeth(): TMeth;
+    begin
+      Result := @Keep.Ping;
+      Boom();
+    end;
+    var
+      S: string;
+      O: TTrack;
+      A: TArr;
+      F: TFn;
+      M: TMeth;
+    begin
+      Keep := TTrack.Create();
+      S := 'old';
+      try S := FStr(); except on E: Exception do WriteLn('str ', S); end;
+      try O := FObj(); except on E: Exception do WriteLn('obj ', Freed, ' ', O = nil); end;
+      Freed := 0;
+      try A := FArr(); except on E: Exception do WriteLn('arr ', Length(A)); end;
+      try F := FFn(); except on E: Exception do WriteLn('fn ', Freed); end;
+      Freed := 0;
+      { x86-64 builds a managed record result in the caller's variable, as
+        Delphi does, arm64 in its own frame: either way nothing leaks }
+      RunRec();
+      Freed := 0;
+      try M := FMeth(); except on E: Exception do WriteLn('meth ', Freed); end;
+      Keep := nil;
+      WriteLn('keep ', Freed);
+    end.
+    ''',
+    'str old' + #10 + 'obj 1 True' + #10 + 'arr 0' + #10 +
+    'fn 1' + #10 + 'rec' + #10 + 'meth 0' + #10 + 'keep 1');
 end;
 
 initialization
