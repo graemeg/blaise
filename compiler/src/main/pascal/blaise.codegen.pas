@@ -175,6 +175,13 @@ function RecretClassify(ARec: TRecordTypeDesc;
   twins ExprOwnsRef / NativeExprOwnsRef). }
 function ArcExprOwnsRef(AExpr: TASTExpr): Boolean;
 
+{ The dynamic-array intrinsics both backends lower to runtime.str calls:
+  Copy(A[, Index[, Count]]) on a dynamic array (_DynArrayCopy), and A + B of
+  two dynamic arrays (_DynArrayConcat; Concat(...) reaches the backends as
+  this chain). }
+function IsDynArrayCopyCall(AExpr: TASTExpr): Boolean;
+function IsDynArrayConcatExpr(AExpr: TASTExpr): Boolean;
+
 { True when AExpr is an INDEXED-property read L[I] / Obj.Items[I] that the
   semantic pass folded into its StrExpr: a TStringSubscriptExpr whose StrExpr
   is a property-read TFieldAccessExpr carrying the index in PropIndexExpr, and
@@ -645,6 +652,24 @@ begin
       [tyStaticArray, tyDynArray, tyOpenArray]);
 end;
 
+function IsDynArrayCopyCall(AExpr: TASTExpr): Boolean;
+begin
+  Result := (AExpr is TFuncCallExpr) and (AExpr.ResolvedType <> nil) and
+    (AExpr.ResolvedType.Kind = tyDynArray) and
+    (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+    not TFuncCallExpr(AExpr).IsIndirectCall and
+    not TFuncCallExpr(AExpr).IsProcFieldCall and
+    SameText(TFuncCallExpr(AExpr).Name, 'Copy');
+end;
+
+function IsDynArrayConcatExpr(AExpr: TASTExpr): Boolean;
+begin
+  Result := (AExpr is TBinaryExpr) and (AExpr.ResolvedType <> nil) and
+    (AExpr.ResolvedType.Kind = tyDynArray) and
+    (TBinaryExpr(AExpr).Op = boAdd) and
+    (TBinaryExpr(AExpr).LoweredCall = nil);
+end;
+
 function ArcExprOwnsRef(AExpr: TASTExpr): Boolean;
 var
   FA: TFieldAccessExpr;
@@ -665,6 +690,10 @@ begin
      and not AExpr.ResolvedType.IsString() then Exit;
   { a dynamic-array literal ([1, 2] given a dyn-array type) is a fresh array }
   if AExpr is TArrayLiteralExpr then
+    Exit(True);
+  { so are A + B and Copy(A, ...) on dynamic arrays: _DynArrayConcat and
+    _DynArrayCopy return a new rc=1 block }
+  if IsDynArrayConcatExpr(AExpr) or IsDynArrayCopyCall(AExpr) then
     Exit(True);
   if AExpr is TIdentExpr then
   begin

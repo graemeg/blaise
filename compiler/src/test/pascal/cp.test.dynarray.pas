@@ -77,6 +77,23 @@ type
       comparison; a static array still rejects nil }
     procedure TestSemantic_DynArray_NilAssignCompare_Accepted;
     procedure TestSemantic_StaticArray_NilAssign_Rejected;
+
+    { ------------------------------------------------------------------ }
+    { Copy / + / Concat / Delete / Insert on dynamic arrays (GH #260)     }
+    { ------------------------------------------------------------------ }
+    { Copy(A), Copy(A, I), Copy(A, I, N), A + B, A + [x], [x] + A and
+      Concat(A, B, ...) all type as A's array type }
+    procedure TestSemantic_DynArrayCopyConcat_TypeAsTheArray;
+    { A + B needs one dynamic-array type on both sides }
+    procedure TestSemantic_DynArrayPlus_MismatchedTypes_Rejected;
+    { Delete and Insert take an assignable array; an inserted value is checked
+      against the element type (or is an array of the same type) }
+    procedure TestSemantic_DynArrayDeleteInsert_ArgsChecked;
+    { Concat of strings is their concatenation; Concat needs one argument and
+      cannot mix strings and arrays }
+    procedure TestSemantic_Concat_StringsAndErrors;
+    { each operation lowers to its RTL routine on both ISAs }
+    procedure TestCodegen_DynArrayOps_CallTheirRtlRoutines;
   end;
 
 implementation
@@ -482,6 +499,170 @@ begin
     on E: ESemanticError do Raised := True;
   end;
   AssertTrue('nil into a static array rejected', Raised);
+end;
+
+procedure TDynArrayTests.TestSemantic_DynArrayCopyConcat_TypeAsTheArray;
+var Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+      program Prg;
+      type TIA = array of Int16;
+      var A, B, C: TIA; X: Int16;
+      begin
+        C := Copy(A);
+        C := Copy(A, 1);
+        C := Copy(A, 1, 2);
+        C := A + B;
+        C := A + [X];
+        C := [X, 7] + A;
+        C := Concat(A, B, [X]);
+        C := Concat(A);
+        X := Copy(A, 0, 1)[0];
+      end.
+      ''');
+  AssertNotNil('every array form accepted', Prog);
+  Prog.Free();
+end;
+
+procedure TDynArrayTests.TestSemantic_DynArrayPlus_MismatchedTypes_Rejected;
+begin
+  AssertTrue('different element types',
+    Pos('dynamic array', SemanticError('''
+      program Prg;
+      var A: array of Int16; S: array of string;
+      begin
+        A := A + S;
+      end.
+      ''')) >= 0);
+  AssertTrue('array plus a scalar',
+    SemanticError('''
+      program Prg;
+      var A: array of Int16;
+      begin
+        A := A + 1;
+      end.
+      ''') <> '');
+  AssertTrue('Copy result is the array type, not a string',
+    SemanticError('''
+      program Prg;
+      var A: array of Int16; S: string;
+      begin
+        S := Copy(A, 0, 1);
+      end.
+      ''') <> '');
+end;
+
+procedure TDynArrayTests.TestSemantic_DynArrayDeleteInsert_ArgsChecked;
+var Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+      program Prg;
+      type TIA = array of Int16;
+        TRec = record F: TIA; end;
+      var A, B: TIA; R: TRec; M: array of TIA; X: Int16;
+      procedure Edit(var V: TIA);
+      begin
+        Delete(V, 0, 1);
+        Insert(X, V, 0);
+      end;
+      begin
+        Delete(A, 1, 2);
+        Insert(B, A, 1);
+        Insert(X, A, 0);
+        Insert(5, A, 0);
+        Insert([1, 2], A, 0);
+        Delete(R.F, 0, 1);
+        Insert(X, R.F, 0);
+        SetLength(M, 1);
+        Insert(X, M[0], 0);
+        Delete(M[0], 0, 1);
+        Edit(A);
+      end.
+      ''');
+  AssertNotNil('every assignable target accepted', Prog);
+  Prog.Free();
+  AssertTrue('inserted value checked against the element type',
+    SemanticError('''
+      program Prg;
+      var A: array of Int16;
+      begin
+        Insert('x', A, 0);
+      end.
+      ''') <> '');
+  AssertTrue('Delete needs an assignable array',
+    Pos('assignable', SemanticError('''
+      program Prg;
+      type TIA = array of Int16;
+      function F: TIA; begin Result := nil end;
+      begin
+        Delete(F(), 0, 1);
+      end.
+      ''')) >= 0);
+  AssertTrue('Insert needs three arguments',
+    SemanticError('''
+      program Prg;
+      var A: array of Int16;
+      begin
+        Insert(1, A);
+      end.
+      ''') <> '');
+end;
+
+procedure TDynArrayTests.TestSemantic_Concat_StringsAndErrors;
+var Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+      program Prg;
+      var S, T: string;
+      begin
+        S := Concat('a', T, 'c');
+        S := Concat(T);
+      end.
+      ''');
+  AssertNotNil('string Concat accepted', Prog);
+  Prog.Free();
+  AssertTrue('Concat needs an argument',
+    SemanticError('''
+      program Prg;
+      var S: string;
+      begin
+        S := Concat();
+      end.
+      ''') <> '');
+  AssertTrue('Concat cannot mix strings and arrays',
+    SemanticError('''
+      program Prg;
+      var S: string; A: array of string;
+      begin
+        A := Concat(A, S);
+      end.
+      ''') <> '');
+end;
+
+procedure TDynArrayTests.TestCodegen_DynArrayOps_CallTheirRtlRoutines;
+const
+  Src = '''
+    program P;
+    var A, B, C: array of string;
+    begin
+      C := Copy(A, 1, 2);
+      C := A + B;
+      Delete(A, 0, 1);
+      Insert(B, A, 1);
+    end.
+    ''';
+begin
+  AssertEquals('Copy', '',
+    AsmMissing(Src, #9'callq _DynArrayCopy', #9'bl __DynArrayCopy'));
+  AssertEquals('+', '',
+    AsmMissing(Src, #9'callq _DynArrayConcat', #9'bl __DynArrayConcat'));
+  AssertEquals('Delete', '',
+    AsmMissing(Src, #9'callq _DynArrayDelete', #9'bl __DynArrayDelete'));
+  AssertEquals('Insert', '',
+    AsmMissing(Src, #9'callq _DynArrayInsert', #9'bl __DynArrayInsert'));
+  { a managed element passes its hook, so copies are retained }
+  AssertEquals('string element hook passed', '',
+    AsmMissing(Src, '_DynElemsString', '_DynElemsString'));
 end;
 
 initialization

@@ -497,6 +497,21 @@ type
     { %rdi = array, %esi = new length: %rax := the resized array.  Passes the
       element hook (%rcx) to _DynArraySetLengthM when the element is managed. }
     procedure EmitDynSetLengthCall(AElem: TTypeDesc);
+    { The leading arguments are in place: load the element size of AElem into
+      ASizeReg32 and its hook (or nil) into AHookReg64, then call ASym -- the
+      tail every runtime.str dynamic-array routine takes }
+    procedure EmitDynArrayRtlCall(const ASym: string; AElem: TTypeDesc;
+      const ASizeReg32, AHookReg64: string);
+    { %rax := the dynamic array AExpr evaluates to; an owned operand (a call
+      result, a literal, A + B) is released at the statement end }
+    procedure EmitDynArrayOperandToRax(AExpr: TASTExpr);
+    { %rax := Copy(A[, Index[, Count]]) / A + B on dynamic arrays: a fresh
+      rc=1 array (_DynArrayCopy / _DynArrayConcat) }
+    procedure EmitDynArrayCopyCall(ACall: TFuncCallExpr);
+    procedure EmitDynArrayConcat(ABin: TBinaryExpr);
+    { Delete(A, I, N) / Insert(Src, A, I) on a dynamic array: A :=
+      _DynArrayDelete / _DynArrayInsert(A, ...), through A's address }
+    procedure EmitDynArrayDeleteInsert(ACall: TProcCall);
     { Emit the generated element hooks registered since the last call. }
     procedure EmitDynElemHooks;
     { Emit an immortal class-name string blob in the data section and return
@@ -2187,6 +2202,99 @@ begin
   end;
   Self.Emit(Format(#9'leaq %s(%%rip), %%rcx', [Hook]));
   Self.Emit(#9'callq _DynArraySetLengthM');
+end;
+
+procedure TX86_64Backend.EmitDynArrayRtlCall(const ASym: string;
+  AElem: TTypeDesc; const ASizeReg32, AHookReg64: string);
+var
+  Hook: string;
+begin
+  Self.Emit(Format(#9'movl $%d, %s', [AElem.RawSize(), ASizeReg32]));
+  Hook := Self.DynElemHookSym(AElem);
+  if Hook = '' then
+    Self.Emit(Format(#9'movq $0, %s', [AHookReg64]))
+  else
+    Self.Emit(Format(#9'leaq %s(%%rip), %s', [Hook, AHookReg64]));
+  Self.Emit(#9'callq ' + ASym);
+end;
+
+procedure TX86_64Backend.EmitDynArrayOperandToRax(AExpr: TASTExpr);
+begin
+  Self.EmitExprToEax(AExpr);
+  if NativeExprOwnsRef(AExpr) then
+    Self.DeferNativeRelease('_DynArrayRelease');
+end;
+
+procedure TX86_64Backend.EmitDynArrayCopyCall(ACall: TFuncCallExpr);
+begin
+  Self.EmitDynArrayOperandToRax(TASTExpr(ACall.Args.Items[0]));
+  Self.Emit(#9'pushq %rax');                          { [A] }
+  if ACall.Args.Count > 1 then
+    Self.EmitInt64ArgToRax(TASTExpr(ACall.Args.Items[1]))
+  else
+    Self.Emit(#9'xorq %rax, %rax');
+  Self.Emit(#9'pushq %rax');                          { [A][I] }
+  if ACall.Args.Count > 2 then
+    Self.EmitInt64ArgToRax(TASTExpr(ACall.Args.Items[2]))
+  else
+    Self.EmitImmToReg(High(Int64), '%rax', '%eax');   { the rest of A }
+  Self.Emit(#9'movq %rax, %rdx');
+  Self.Emit(#9'popq %rsi');
+  Self.Emit(#9'popq %rdi');
+  Self.EmitDynArrayRtlCall('_DynArrayCopy',
+    TDynArrayTypeDesc(ACall.ResolvedType).ElementType, '%ecx', '%r8');
+end;
+
+procedure TX86_64Backend.EmitDynArrayConcat(ABin: TBinaryExpr);
+begin
+  Self.EmitDynArrayOperandToRax(ABin.Left);
+  Self.Emit(#9'pushq %rax');                          { [L] }
+  Self.EmitDynArrayOperandToRax(ABin.Right);
+  Self.Emit(#9'movq %rax, %rsi');
+  Self.Emit(#9'popq %rdi');
+  Self.EmitDynArrayRtlCall('_DynArrayConcat',
+    TDynArrayTypeDesc(ABin.ResolvedType).ElementType, '%edx', '%rcx');
+end;
+
+procedure TX86_64Backend.EmitDynArrayDeleteInsert(ACall: TProcCall);
+var
+  IsInsert: Boolean;
+  Target: TASTExpr;
+begin
+  IsInsert := SameText(ACall.Name, 'Insert');
+  if IsInsert then
+    Target := TASTExpr(ACall.Args.Items[1])
+  else
+    Target := TASTExpr(ACall.Args.Items[0]);
+  { the array is reached through its ADDRESS (the var-argument walk), so a
+    var param, a capture, a Self field, a record field and an element are
+    all updated where they live; the routine consumes the old reference and
+    returns the new one, which is stored back with no further ARC }
+  Self.EmitVarArgAddrToRax(Target);
+  Self.Emit(#9'pushq %rax');                          { [&A] }
+  if IsInsert then
+  begin
+    Self.EmitDynArrayOperandToRax(TASTExpr(ACall.Args.Items[0]));
+    Self.Emit(#9'pushq %rax');                        { [&A][Src] }
+  end
+  else
+  begin
+    Self.EmitInt64ArgToRax(TASTExpr(ACall.Args.Items[1]));
+    Self.Emit(#9'pushq %rax');                        { [&A][I] }
+  end;
+  Self.EmitInt64ArgToRax(TASTExpr(ACall.Args.Items[2]));
+  Self.Emit(#9'movq %rax, %rdx');      { Insert: Index / Delete: Count }
+  Self.Emit(#9'popq %rsi');            { Insert: Src / Delete: Index }
+  Self.Emit(#9'movq (%rsp), %rax');
+  Self.Emit(#9'movq (%rax), %rdi');                   { the old array }
+  if IsInsert then
+    Self.EmitDynArrayRtlCall('_DynArrayInsert',
+      TDynArrayTypeDesc(Target.ResolvedType).ElementType, '%ecx', '%r8')
+  else
+    Self.EmitDynArrayRtlCall('_DynArrayDelete',
+      TDynArrayTypeDesc(Target.ResolvedType).ElementType, '%ecx', '%r8');
+  Self.Emit(#9'popq %rdx');
+  Self.Emit(#9'movq %rax, (%rdx)');
 end;
 
 procedure TX86_64Backend.EmitDynElemHooks;
@@ -9031,6 +9139,17 @@ begin
   if AExpr is TNilLiteral then
   begin
     Self.Emit(#9'xorq %rax, %rax');
+    Exit;
+  end;
+
+  if IsDynArrayCopyCall(AExpr) then
+  begin
+    Self.EmitDynArrayCopyCall(TFuncCallExpr(AExpr));
+    Exit;
+  end;
+  if IsDynArrayConcatExpr(AExpr) then
+  begin
+    Self.EmitDynArrayConcat(TBinaryExpr(AExpr));
     Exit;
   end;
 
@@ -18713,6 +18832,16 @@ begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _BlaiseFreeMem');
+      Exit;
+    end;
+    { Delete(A, I, N) / Insert(Src, A, I) on a dynamic array }
+    if (PC.ResolvedDecl = nil) and (PC.Args.Count = 3) and
+       ((SameText(PC.Name, 'Delete') and
+         (TASTExpr(PC.Args.Items[0]).ResolvedType <> nil) and
+         (TASTExpr(PC.Args.Items[0]).ResolvedType.Kind = tyDynArray)) or
+        SameText(PC.Name, 'Insert')) then
+    begin
+      Self.EmitDynArrayDeleteInsert(PC);
       Exit;
     end;
     { Delete(S, Idx, Count): S := _StringDelete(S, Idx, Count) with ARC. }

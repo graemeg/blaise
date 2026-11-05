@@ -117,6 +117,23 @@ function _DynArraySetLength(Ptr: Pointer; NewLen: Int64;
   ElemSize: Int32): Pointer;
 function _DynArrayLength(Ptr: Pointer): Int64;
 
+{ Copy / + / Delete / Insert on dynamic arrays (FPC semantics).  Each takes
+  the element size and hook (nil for unmanaged elements) last, and builds a
+  fresh rc=1 block whose copied elements are retained through the hook.
+  _DynArrayCopy and _DynArrayConcat BORROW their operands and return a new
+  reference (nil when empty).  _DynArrayDelete and _DynArrayInsert follow
+  _DynArraySetLength: they CONSUME the holder's reference to Ptr and return
+  the value to store back (Ptr itself when nothing changes), so a shared
+  block is never modified for its other holders. }
+function _DynArrayCopy(Src: Pointer; Index, Count: Int64; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+function _DynArrayConcat(A, B: Pointer; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+function _DynArrayDelete(Ptr: Pointer; Index, Count: Int64; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+function _DynArrayInsert(Ptr, Src: Pointer; Index: Int64; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+
 { File-path manipulation — pure string operations, no OS calls }
 function _ChangeFileExt(Path, Ext: Pointer): Pointer;
 function _ExtractFileName(Path: Pointer): Pointer;
@@ -1545,6 +1562,122 @@ function _DynArraySetLength(Ptr: Pointer; NewLen: Int64;
   ElemSize: Int32): Pointer;
 begin
   Result := _DynArraySetLengthM(Ptr, NewLen, ElemSize, nil);
+end;
+
+{ A fresh rc=1 block of ALen elements carrying AHook, or nil for ALen <= 0.
+  The element bytes are left for the caller to fill. }
+function DynArrayNewBlock(ALen: Int64; AElemSize: Int32;
+  AHook: Pointer): Pointer;
+var
+  Data: PChar;
+  HookSlot: ^Pointer;
+  RC: ^Int32;
+  LenPtr: PDaLen;
+begin
+  if ALen <= 0 then
+    Exit(nil);
+  Data := PChar(_BlaiseGetMem(DA_HDR_SIZE + ALen * AElemSize)) + DA_HDR_SIZE;
+  HookSlot := Pointer(Data) + DA_HOOK_OFS;
+  HookSlot^ := AHook;
+  RC := Pointer(Data) + DA_RC_OFS;
+  RC^ := 1;
+  LenPtr := Pointer(Data) + DA_LEN_OFS;
+  LenPtr^ := ALen;
+  Result := Data;
+end;
+
+{ Append ACount elements of ASrc starting at element AFrom to the block being
+  filled at ADst + AAt elements, retaining them through AHook.  Returns the
+  next free element index. }
+function DynArrayAppendRun(ADst: Pointer; AAt: Int64; ASrc: Pointer;
+  AFrom, ACount: Int64; AElemSize: Int32; AHook: Pointer): Int64;
+var
+  H: TDynElemHook;
+begin
+  Result := AAt;
+  if ACount <= 0 then Exit;
+  MemCopy(PChar(ADst) + AAt * AElemSize, PChar(ASrc) + AFrom * AElemSize,
+    ACount * AElemSize);
+  if AHook <> nil then
+  begin
+    H := TDynElemHook(AHook);
+    H(PChar(ADst) + AAt * AElemSize, ACount, 1);
+  end;
+  Result := AAt + ACount;
+end;
+
+function _DynArrayCopy(Src: Pointer; Index, Count: Int64; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+var
+  Len: Int64;
+begin
+  Len := _DynArrayLength(Src);
+  { a negative start shortens the run by as much (Copy(A, -2, 3) = A[0]) }
+  if Index < 0 then
+  begin
+    Count := Count + Index;
+    Index := 0;
+  end;
+  if Index >= Len then Exit(nil);
+  if Count > Len - Index then
+    Count := Len - Index;
+  Result := DynArrayNewBlock(Count, ElemSize, Hook);
+  if Result <> nil then
+    DynArrayAppendRun(Result, 0, Src, Index, Count, ElemSize, Hook);
+end;
+
+function _DynArrayConcat(A, B: Pointer; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+var
+  LenA, LenB, At: Int64;
+begin
+  LenA := _DynArrayLength(A);
+  LenB := _DynArrayLength(B);
+  Result := DynArrayNewBlock(LenA + LenB, ElemSize, Hook);
+  if Result = nil then Exit;
+  At := DynArrayAppendRun(Result, 0, A, 0, LenA, ElemSize, Hook);
+  DynArrayAppendRun(Result, At, B, 0, LenB, ElemSize, Hook);
+end;
+
+function _DynArrayDelete(Ptr: Pointer; Index, Count: Int64; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+var
+  Len, At: Int64;
+begin
+  Len := _DynArrayLength(Ptr);
+  { out of range, or nothing to delete: the holder keeps its array }
+  if (Index < 0) or (Index >= Len) or (Count <= 0) then Exit(Ptr);
+  if Count > Len - Index then
+    Count := Len - Index;
+  Result := DynArrayNewBlock(Len - Count, ElemSize, Hook);
+  if Result <> nil then
+  begin
+    At := DynArrayAppendRun(Result, 0, Ptr, 0, Index, ElemSize, Hook);
+    DynArrayAppendRun(Result, At, Ptr, Index + Count, Len - Index - Count,
+      ElemSize, Hook);
+  end;
+  { the copies hold their own references: drop the holder's one to the old
+    block (the last reference releases its elements) }
+  _DynArrayRelease(Ptr);
+end;
+
+function _DynArrayInsert(Ptr, Src: Pointer; Index: Int64; ElemSize: Int32;
+  Hook: Pointer): Pointer;
+var
+  Len, SrcLen, At: Int64;
+begin
+  Len := _DynArrayLength(Ptr);
+  SrcLen := _DynArrayLength(Src);
+  if SrcLen = 0 then Exit(Ptr);
+  if Index < 0 then Index := 0;
+  if Index > Len then Index := Len;
+  { Src may be Ptr itself (Insert(A, A, I)): both are read before the old
+    block is released }
+  Result := DynArrayNewBlock(Len + SrcLen, ElemSize, Hook);
+  At := DynArrayAppendRun(Result, 0, Ptr, 0, Index, ElemSize, Hook);
+  At := DynArrayAppendRun(Result, At, Src, 0, SrcLen, ElemSize, Hook);
+  DynArrayAppendRun(Result, At, Ptr, Index, Len - Index, ElemSize, Hook);
+  _DynArrayRelease(Ptr);
 end;
 
 end.

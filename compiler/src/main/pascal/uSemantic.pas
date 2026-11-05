@@ -643,6 +643,10 @@ type
     function  AnalyseRawMemInteger(ACall: TProcCall; AIndex: Int;
       const ARoutine, ARole, AHint: string): TTypeDesc;
     procedure AnalyseMoveCall(ACall: TProcCall);
+    { Insert(X, var A: array of T; Index): X is an array of A's type, or an
+      element, which is wrapped into the one-element literal [X] typed as
+      A's array (so codegen only ever inserts an array). }
+    procedure AnalyseInsertCall(ACall: TProcCall);
     procedure AnalyseFillByteCall(ACall: TProcCall);
     { Phase A/B overload resolution.  Walks FProcIndex collecting all
       decls whose name matches AName (case-insensitive); filters by
@@ -815,6 +819,10 @@ type
     procedure AnalyseCaseStmt(AStmt: TCaseStmt);
     function  AnalyseMethodCallExpr(AExpr: TMethodCallExpr): TTypeDesc;
     function  AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
+    { Concat(A, B, ...) on strings or dynamic arrays of one type: lowered to
+      the chain A + B + ... held in AExpr.LoweredCall (the slot unwrap puts it
+      in the call's place), so it needs no codegen of its own. }
+    function  AnalyseConcatCall(AExpr: TFuncCallExpr): TTypeDesc;
     { Write/WriteLn field width: the parser's __WriteFmt(X, W[, D]) for
       `X:W` / `X:W:D`, rewritten in place into Format(Spec, [X]). }
     function  AnalyseWriteFmt(AExpr: TFuncCallExpr): TTypeDesc;
@@ -2606,6 +2614,27 @@ begin
     Self.ConstFitsIntType(AExpr, AExpected);
   if Result then
     AExpr.ResolvedType := AExpected;
+end;
+
+{ True when A and B are dynamic arrays of the same element type, compared
+  through any nesting (array of array of T): two separately declared
+  dynamic-array types of one element type are interchangeable, as in an
+  assignment. }
+function DynArrayTypesMatch(A, B: TTypeDesc): Boolean;
+begin
+  if (A = nil) or (B = nil) then Exit(False);
+  if A = B then Exit(True);
+  if (A.Kind <> tyDynArray) or (B.Kind <> tyDynArray) then Exit(False);
+  Result := DynArrayTypesMatch(TDynArrayTypeDesc(A).ElementType,
+    TDynArrayTypeDesc(B).ElementType);
+end;
+
+function TypeNameOrNil(AType: TTypeDesc): string;
+begin
+  if AType = nil then
+    Result := '<untyped>'
+  else
+    Result := AType.Name;
 end;
 
 procedure TSemanticAnalyser.CheckTypesMatch(AExpected, AActual: TTypeDesc;
@@ -18277,6 +18306,46 @@ end;
 { Move(Source, Dest, Count) copies Count bytes from the storage of Source to
   the storage of Dest, correctly when the two overlap (memmove).  Both
   backends lower it to _BlaiseMove(@Source, @Dest, Count). }
+procedure TSemanticAnalyser.AnalyseInsertCall(ACall: TProcCall);
+var
+  ArrType, SrcType: TTypeDesc;
+  Slot: TASTExpr;
+  Lit: TArrayLiteralExpr;
+begin
+  if ACall.Args.Count <> 3 then
+    SemanticError('Insert requires exactly 3 arguments', ACall.Line,
+      ACall.Col);
+  ArrType := Self.AnalyseListSlot(ACall.Args, 1);
+  if (ArrType = nil) or (ArrType.Kind <> tyDynArray) then
+    SemanticError('Second argument of ''Insert'' must be a dynamic array ' +
+      'variable', ACall.Line, ACall.Col);
+  if not IsVarArgLValue(TASTExpr(ACall.Args.Items[1])) then
+    SemanticError('Second argument of ''Insert'' must be an assignable ' +
+      'variable', ACall.Line, ACall.Col);
+  WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[1]));
+  Slot := TASTExpr(ACall.Args.Items[0]);
+  if Slot is TArrayLiteralExpr then
+    { a bracket literal is an array of A's type (Insert([1, 2], A, 0)) }
+    SrcType := Self.AnalyseExprHinted(Slot, ArrType)
+  else
+    SrcType := Self.AnalyseExprHinted(Slot,
+      TDynArrayTypeDesc(ArrType).ElementType);
+  if not DynArrayTypesMatch(SrcType, ArrType) then
+  begin
+    { an element: insert the literal [X], which checks X as an assignment
+      to the element type would }
+    Lit := TArrayLiteralExpr.Create();
+    Lit.Line := Slot.Line;
+    Lit.Col := Slot.Col;
+    Lit.Elements.Add(Slot);
+    Slot := Lit;
+    Self.AnalyseArrayLiteralAs(Lit, ArrType, True);
+  end;
+  ACall.Args.Items[0] := Slot;
+  Self.AnalyseIntegerArg(ACall.Args, 2, 'Insert', 'Index', ACall.Line,
+    ACall.Col);
+end;
+
 procedure TSemanticAnalyser.AnalyseMoveCall(ACall: TProcCall);
 begin
   if ACall.Args.Count <> 3 then
@@ -18440,6 +18509,16 @@ begin
       + 'FillByte(Dest, Count, Value), with Value in 0..255 (Ord(''A'') for a '
       + 'character)',
       ACall.Line, ACall.Col);
+  { Insert(X, A, Index) is a builtin only when nothing named Insert is in
+    scope: it is not entered in the symbol table, so a routine of that name
+    declared by a program or unit (FPC-compatibility helpers do) is not a
+    duplicate and keeps winning }
+  if (Sym = nil) and SameText(ACall.Name, 'Insert') then
+  begin
+    ACall.Name := 'Insert';
+    Self.AnalyseInsertCall(ACall);
+    Exit;
+  end;
   if Sym = nil then
     SemanticError(
       Format('Undeclared procedure ''%s''', [ACall.Name]),
@@ -18640,13 +18719,24 @@ begin
         SemanticError('Delete requires exactly 3 arguments',
           ACall.Line, ACall.Col);
       ArgType := Self.AnalyseListSlot(ACall.Args, 0);
-      if (ArgType = nil) or (ArgType.Kind <> tyString) then
-        SemanticError('First argument of ''Delete'' must be a string variable',
-          ACall.Line, ACall.Col);
-      if not ((TASTExpr(ACall.Args.Items[0]) is TIdentExpr) or
-              (TASTExpr(ACall.Args.Items[0]) is TFieldAccessExpr)) then
-        SemanticError('First argument of ''Delete'' must be an assignable string',
-          ACall.Line, ACall.Col);
+      if (ArgType <> nil) and (ArgType.Kind = tyDynArray) then
+      begin
+        { Delete(var A: array of T; Idx, Count): any assignable array, as
+          for SetLength }
+        if not IsVarArgLValue(TASTExpr(ACall.Args.Items[0])) then
+          SemanticError('First argument of ''Delete'' must be an assignable ' +
+            'variable', ACall.Line, ACall.Col);
+      end
+      else
+      begin
+        if (ArgType = nil) or (ArgType.Kind <> tyString) then
+          SemanticError('First argument of ''Delete'' must be a string or ' +
+            'dynamic array variable', ACall.Line, ACall.Col);
+        if not ((TASTExpr(ACall.Args.Items[0]) is TIdentExpr) or
+                (TASTExpr(ACall.Args.Items[0]) is TFieldAccessExpr)) then
+          SemanticError('First argument of ''Delete'' must be an assignable string',
+            ACall.Line, ACall.Col);
+      end;
       WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[0]));
       Self.AnalyseIntegerArg(ACall.Args, 1, 'Delete', 'Index', ACall.Line,
         ACall.Col);
@@ -18884,6 +18974,40 @@ begin
   AExpr.Args.Add(Spec);
   AExpr.Args.Add(Arr);
   Result := Self.AnalyseFuncCallExpr(AExpr);
+end;
+
+function TSemanticAnalyser.AnalyseConcatCall(AExpr: TFuncCallExpr): TTypeDesc;
+var
+  Chain: TASTExpr;
+  Bin: TBinaryExpr;
+  I: Int;
+begin
+  if AExpr.Args.Count = 0 then
+    SemanticError('Concat requires at least one argument', AExpr.Line,
+      AExpr.Col);
+  Chain := TASTExpr(AExpr.Args.Items[0]);
+  for I := 1 to AExpr.Args.Count - 1 do
+  begin
+    Bin := TBinaryExpr.Create();
+    Bin.Line := AExpr.Line;
+    Bin.Col := AExpr.Col;
+    Bin.Op := boAdd;
+    Bin.Left := Chain;
+    Bin.Right := TASTExpr(AExpr.Args.Items[I]);
+    Chain := Bin;
+  end;
+  { the chain owns the arguments now }
+  while AExpr.Args.Count > 0 do
+    AExpr.Args.Extract(AExpr.Args.Items[0]);
+  AExpr.LoweredCall := Chain;
+  Result := Self.AnalyseExprSlot(AExpr.LoweredCall);
+  if (Result = nil) or
+     not (Result.IsString() or (Result.Kind = tyDynArray)) then
+    SemanticError(
+      Format('Concat arguments must be strings or dynamic arrays, got ''%s''',
+        [TypeNameOrNil(Result)]),
+      AExpr.Line, AExpr.Col);
+  AExpr.ResolvedType := Result;
 end;
 
 function TSemanticAnalyser.AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
@@ -19248,6 +19372,13 @@ begin
     InstantiateGenericFunc(InstName);
     Sym := FTable.Lookup(InstName);
   end;
+  { Concat(...) is a builtin only when nothing named Concat is in scope (as
+    Insert in AnalyseProcCall): a user's own Concat keeps winning }
+  if (Sym = nil) and SameText(AExpr.Name, 'Concat') then
+  begin
+    AExpr.Name := 'Concat';
+    Exit(Self.AnalyseConcatCall(AExpr));
+  end;
   if Sym = nil then
     SemanticError(
       Format('Undeclared function ''%s''', [AExpr.Name]),
@@ -19380,9 +19511,27 @@ begin
 
   if SameText(AExpr.Name, 'Copy') then
   begin
+    if (AExpr.Args.Count < 1) or (AExpr.Args.Count > 3) then
+      SemanticError('Copy requires one to three arguments', AExpr.Line,
+        AExpr.Col);
+    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
+    if (ArgType <> nil) and (ArgType.Kind = tyDynArray) then
+    begin
+      { Copy(A), Copy(A, Index), Copy(A, Index, Count): a fresh array of A's
+        type (FPC semantics: the run is clamped to A's bounds) }
+      if AExpr.Args.Count > 1 then
+        Self.AnalyseIntegerArg(AExpr.Args, 1, 'Copy', 'Index', AExpr.Line,
+          AExpr.Col);
+      if AExpr.Args.Count > 2 then
+        Self.AnalyseIntegerArg(AExpr.Args, 2, 'Copy', 'Count', AExpr.Line,
+          AExpr.Col);
+      Result := ArgType;
+      AExpr.ResolvedType := Result;
+      Exit;
+    end;
     if AExpr.Args.Count <> 3 then
-      SemanticError('Copy requires exactly three arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+      SemanticError('Copy of a string requires exactly three arguments',
+        AExpr.Line, AExpr.Col);
     Self.AnalyseIntegerArg(AExpr.Args, 1, 'Copy', 'Index', AExpr.Line,
       AExpr.Col);
     Self.AnalyseIntegerArg(AExpr.Args, 2, 'Copy', 'Count', AExpr.Line,
@@ -22438,6 +22587,35 @@ begin
         ABin.Line, ABin.Col);
     ABin.ResolvedType := Result;
     Exit;
+  end;
+
+  { Dynamic-array concatenation (FPC's ArrayOperators): A + B, A + [X] and
+    [X] + A -- a bracket literal takes the other operand's array type.  The
+    result is a fresh array (the backends call _DynArrayConcat). }
+  if ABin.Op = boAdd then
+  begin
+    if (LType <> nil) and (LType.Kind = tyDynArray) and
+       (ABin.Right is TArrayLiteralExpr) and
+       ((RType = nil) or (RType.Kind = tyOpenArray)) then
+      RType := Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(ABin.Right),
+        LType, True);
+    if (RType <> nil) and (RType.Kind = tyDynArray) and
+       (ABin.Left is TArrayLiteralExpr) and
+       ((LType = nil) or (LType.Kind = tyOpenArray)) then
+      LType := Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(ABin.Left),
+        RType, True);
+    if ((LType <> nil) and (LType.Kind = tyDynArray)) or
+       ((RType <> nil) and (RType.Kind = tyDynArray)) then
+    begin
+      if not DynArrayTypesMatch(LType, RType) then
+        SemanticError(
+          Format('Operands of ''+'' must be the same dynamic array type, ' +
+            'got ''%s'' and ''%s''', [TypeNameOrNil(LType),
+            TypeNameOrNil(RType)]),
+          ABin.Line, ABin.Col);
+      ABin.ResolvedType := LType;
+      Exit(LType);
+    end;
   end;
 
   Self.AdoptConstOperandType(ABin, LType, RType);

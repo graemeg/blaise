@@ -713,6 +713,21 @@ type
     { x0 = array, x1 = new length: x0 := the resized array.  Passes the
       element hook (x3) to _DynArraySetLengthM when the element is managed. }
     procedure EmitDynSetLengthCall(AElem: TTypeDesc);
+    { x0.. = the leading arguments: load the element size of AElem into
+      ASizeReg and its hook (or nil) into AHookReg, then call ASym -- the
+      tail every runtime.str dynamic-array routine takes }
+    procedure EmitDynArrayRtlCall(const ASym: string; AElem: TTypeDesc;
+      const ASizeReg, AHookReg: string);
+    { x0 := the dynamic array AExpr evaluates to; an owned operand (a call
+      result, a literal, A + B) is released at the statement end }
+    procedure EmitDynArrayOperandToX0(AExpr: TASTExpr);
+    { x0 := Copy(A[, Index[, Count]]) / A + B on dynamic arrays: a fresh
+      rc=1 array (_DynArrayCopy / _DynArrayConcat) }
+    procedure EmitDynArrayCopyCall(ACall: TFuncCallExpr);
+    procedure EmitDynArrayConcat(ABin: TBinaryExpr);
+    { Delete(A, I, N) / Insert(Src, A, I) on a dynamic array: A :=
+      _DynArrayDelete / _DynArrayInsert(A, ...), through A's address }
+    procedure EmitDynArrayDeleteInsert(ACall: TProcCall);
     { Emit the generated element hooks registered since the last call. }
     procedure EmitDynElemHooks;
     function  RecReturnShape(ARec: TRecordTypeDesc): Int;
@@ -3652,6 +3667,107 @@ begin
   EmitCallSym('_DynArraySetLengthM');
 end;
 
+procedure TArm64Backend.EmitDynArrayRtlCall(const ASym: string;
+  AElem: TTypeDesc; const ASizeReg, AHookReg: string);
+var
+  Hook: string;
+begin
+  EmitIntLiteral(ASizeReg, AElem.RawSize());
+  Hook := DynElemHookSym(AElem);
+  if Hook = '' then
+    EmitIntLiteral(AHookReg, 0)
+  else
+  begin
+    Self.Emit(Format(#9'adrp %s, %s@PAGE', [AHookReg, Hook]));
+    Self.Emit(Format(#9'add %s, %s, %s@PAGEOFF', [AHookReg, AHookReg, Hook]));
+  end;
+  EmitCallSym(ASym);
+end;
+
+procedure TArm64Backend.EmitDynArrayOperandToX0(AExpr: TASTExpr);
+begin
+  Self.EmitExprToX0(AExpr);
+  if ArcExprOwnsRef(AExpr) then
+    DeferNativeRelease('_DynArrayRelease');
+end;
+
+procedure TArm64Backend.EmitDynArrayCopyCall(ACall: TFuncCallExpr);
+begin
+  EmitDynArrayOperandToX0(TASTExpr(ACall.Args.Items[0]));
+  EmitPushX0();                                       { [A] }
+  if ACall.Args.Count > 1 then
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[1]))
+  else
+    EmitIntLiteral('x0', 0);
+  EmitPushX0();                                       { [A][I] }
+  if ACall.Args.Count > 2 then
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[2]))
+  else
+    EmitIntLiteral('x0', High(Int64));                { the rest of A }
+  Self.Emit(#9'mov x2, x0');
+  Self.Emit(#9'ldr x1, [sp]');
+  Self.Emit(#9'ldr x0, [sp, #16]');
+  Self.Emit(#9'add sp, sp, #32');
+  EmitDynArrayRtlCall('_DynArrayCopy',
+    TDynArrayTypeDesc(ACall.ResolvedType).ElementType, 'x3', 'x4');
+end;
+
+procedure TArm64Backend.EmitDynArrayConcat(ABin: TBinaryExpr);
+begin
+  EmitDynArrayOperandToX0(ABin.Left);
+  EmitPushX0();                                       { [L] }
+  EmitDynArrayOperandToX0(ABin.Right);
+  Self.Emit(#9'mov x1, x0');
+  EmitPopTo('x0');
+  EmitDynArrayRtlCall('_DynArrayConcat',
+    TDynArrayTypeDesc(ABin.ResolvedType).ElementType, 'x2', 'x3');
+end;
+
+procedure TArm64Backend.EmitDynArrayDeleteInsert(ACall: TProcCall);
+var
+  IsInsert: Boolean;
+  Target: TASTExpr;
+begin
+  IsInsert := SameText(ACall.Name, 'Insert');
+  if IsInsert then
+    Target := TASTExpr(ACall.Args.Items[1])
+  else
+    Target := TASTExpr(ACall.Args.Items[0]);
+  { the array is reached through its ADDRESS (the var-argument walk), so a
+    var param, a capture, a Self field, a record field and an element are
+    all updated where they live; the routine consumes the old reference and
+    returns the new one, which is stored back with no further ARC }
+  EmitVarArgAddrToX0(Target);
+  EmitPushX0();                                       { [&A] }
+  if IsInsert then
+  begin
+    EmitDynArrayOperandToX0(TASTExpr(ACall.Args.Items[0]));
+    EmitPushX0();                                     { [&A][Src] }
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[2]));
+    Self.Emit(#9'mov x2, x0');                        { Index }
+    Self.Emit(#9'ldr x1, [sp]');                      { Src }
+  end
+  else
+  begin
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[1]));
+    EmitPushX0();                                     { [&A][I] }
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[2]));
+    Self.Emit(#9'mov x2, x0');                        { Count }
+    Self.Emit(#9'ldr x1, [sp]');                      { Index }
+  end;
+  Self.Emit(#9'ldr x9, [sp, #16]');
+  Self.Emit(#9'ldr x0, [x9]');                        { the old array }
+  if IsInsert then
+    EmitDynArrayRtlCall('_DynArrayInsert',
+      TDynArrayTypeDesc(Target.ResolvedType).ElementType, 'x3', 'x4')
+  else
+    EmitDynArrayRtlCall('_DynArrayDelete',
+      TDynArrayTypeDesc(Target.ResolvedType).ElementType, 'x3', 'x4');
+  Self.Emit(#9'ldr x9, [sp, #16]');
+  Self.Emit(#9'str x0, [x9]');
+  Self.Emit(#9'add sp, sp, #32');
+end;
+
 procedure TArm64Backend.EmitDynElemHooks;
 var
   T: TTypeDesc;
@@ -6333,6 +6449,16 @@ begin
       EmitCallSym('_BlaiseReallocMem');
       Exit;
     end;
+  end;
+  if IsDynArrayCopyCall(AExpr) then
+  begin
+    EmitDynArrayCopyCall(TFuncCallExpr(AExpr));
+    Exit;
+  end;
+  if IsDynArrayConcatExpr(AExpr) then
+  begin
+    EmitDynArrayConcat(TBinaryExpr(AExpr));
+    Exit;
   end;
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
@@ -10108,6 +10234,15 @@ begin
   begin
     EmitBuiltinStrCall2(TASTExpr(ACall.Args.Items[0]),
       TASTExpr(ACall.Args.Items[1]), '_AppendFile');
+    Exit;
+  end;
+  if (ACall.ResolvedDecl = nil) and (ACall.Args.Count = 3) and
+     ((SameText(ACall.Name, 'Delete') and
+       (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
+       (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind = tyDynArray)) or
+      SameText(ACall.Name, 'Insert')) then
+  begin
+    EmitDynArrayDeleteInsert(ACall);
     Exit;
   end;
   if SameText(ACall.Name, 'Delete') and (ACall.ResolvedDecl = nil) and

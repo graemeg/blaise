@@ -111,6 +111,24 @@ type
       empty, through every storage form; nil is also an argument, a result
       and a comparison operand }
     procedure TestRun_DynArray_NilAssign_EveryForm;
+    { GH #260: Copy, +, Concat, Delete and Insert on dynamic arrays, and
+      Concat on strings.  The program and its expected output come from FPC
+      3.2.2 (with ArrayOperators): every clamping rule for a negative or
+      out-of-range index and count, literals as operands, copy-on-write for
+      a shared array, and string elements.  Leak-checked. }
+    procedure TestRun_DynArrayOps_MatchFPC;
+    { the results hold exactly one reference and the sources keep theirs;
+      owned operands (call results, literals) are released; managed
+      elements are retained by every copy and released with the last one }
+    procedure TestRun_DynArrayOps_RefCountsAndManagedElements;
+    { Delete and Insert reach every assignable target: a var parameter, a
+      record field, an implicit-Self field, an element of an array of arrays,
+      a global and a captured local }
+    procedure TestRun_DynArrayOps_EveryTarget;
+    { Concat and Insert are builtins only when nothing of that name is in
+      scope: a program's own Concat / Insert, and an implicit-Self Insert
+      method, keep winning (FPC-compatibility units declare their own) }
+    procedure TestRun_UserConcatAndInsert_Win;
   end;
 
 implementation
@@ -1368,6 +1386,346 @@ begin
     '0 True False' + #10 + '0' + #10 + '0 0' + #10 + '0' + #10 + '0' + #10 +
     '0 2' + #10 + 'local 0' + #10 + 'True' + #10, 0);
   AssertLeakFreeOnAll(Src, 'local 0');
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArrayOps_MatchFPC;
+const
+  Src = '''
+    program oracle;
+    type TI = array of Int16; TS = array of string;
+    procedure P(const Tag: string; const A: TI);
+    var I: Int64;
+    begin
+      Write(Tag, ' [', Length(A), ']');
+      for I := 0 to High(A) do Write(' ', A[I]);
+      WriteLn();
+    end;
+    procedure PS(const Tag: string; const A: TS);
+    var I: Int64;
+    begin
+      Write(Tag, ' [', Length(A), ']');
+      for I := 0 to High(A) do Write(' ', A[I]);
+      WriteLn();
+    end;
+    var A, B, C, E: TI; SA, SB: TS; s: string;
+    begin
+      A := [10, 11, 12, 13, 14];
+      B := [20, 21];
+      E := nil;
+      P('copy-all', Copy(A));
+      P('copy-from2', Copy(A, 2));
+      P('copy-1-2', Copy(A, 1, 2));
+      P('copy-neg-3', Copy(A, -2, 3));
+      P('copy-3-99', Copy(A, 3, 99));
+      P('copy-5-1', Copy(A, 5, 1));
+      P('copy-9-1', Copy(A, 9, 1));
+      P('copy-1-0', Copy(A, 1, 0));
+      P('copy-1-neg', Copy(A, 1, -1));
+      P('copy-nil', Copy(E, 0, 2));
+      P('plus', A + B);
+      P('plus-nil-l', E + B);
+      P('plus-nil-r', A + E);
+      P('plus-lit', A + [7]);
+      P('lit-plus', [7, 8] + B);
+      P('concat3', Concat(A, B, [99]));
+      C := Copy(A); Delete(C, 1, 2); P('del-1-2', C);
+      C := Copy(A); Delete(C, 3, 99); P('del-3-99', C);
+      C := Copy(A); Delete(C, -1, 2); P('del-neg-2', C);
+      C := Copy(A); Delete(C, 5, 1); P('del-5-1', C);
+      C := Copy(A); Delete(C, 0, 0); P('del-0-0', C);
+      C := Copy(A); Delete(C, 0, 5); P('del-all', C);
+      C := Copy(A); Insert(B, C, 2); P('ins-arr-2', C);
+      C := Copy(A); Insert(B, C, 0); P('ins-arr-0', C);
+      C := Copy(A); Insert(B, C, 5); P('ins-arr-end', C);
+      C := Copy(A); Insert(B, C, 99); P('ins-arr-99', C);
+      C := Copy(A); Insert(B, C, -3); P('ins-arr-neg', C);
+      C := Copy(A); Insert(Int16(42), C, 1); P('ins-elem-1', C);
+      C := nil; Insert(Int16(42), C, 0); P('ins-elem-nil', C);
+      C := Copy(A); Insert([1, 2], C, 1); P('ins-lit', C);
+      C := A; Delete(C, 0, 1); P('cow-del-C', C); P('cow-del-A', A);
+      C := A; Insert(Int16(1), C, 0); P('cow-ins-C', C); P('cow-ins-A', A);
+      C := Copy(A); C[0] := 0; P('copy-indep-A', A);
+      s := 'x';
+      SA := ['a', 'b' + s, 'c'];
+      SB := Copy(SA, 1, 2); PS('s-copy', SB);
+      PS('s-plus', SA + SB);
+      SB := SA; Delete(SB, 0, 1); PS('s-del', SB); PS('s-del-orig', SA);
+      SB := SA; Insert('ins' + s, SB, 1); PS('s-ins', SB); PS('s-ins-orig', SA);
+      WriteLn(Concat('ab', 'cd', s));
+      WriteLn(Concat('solo'));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'copy-all [5] 10 11 12 13 14' + LE +
+    'copy-from2 [3] 12 13 14' + LE +
+    'copy-1-2 [2] 11 12' + LE +
+    'copy-neg-3 [1] 10' + LE +
+    'copy-3-99 [2] 13 14' + LE +
+    'copy-5-1 [0]' + LE +
+    'copy-9-1 [0]' + LE +
+    'copy-1-0 [0]' + LE +
+    'copy-1-neg [0]' + LE +
+    'copy-nil [0]' + LE +
+    'plus [7] 10 11 12 13 14 20 21' + LE +
+    'plus-nil-l [2] 20 21' + LE +
+    'plus-nil-r [5] 10 11 12 13 14' + LE +
+    'plus-lit [6] 10 11 12 13 14 7' + LE +
+    'lit-plus [4] 7 8 20 21' + LE +
+    'concat3 [8] 10 11 12 13 14 20 21 99' + LE +
+    'del-1-2 [3] 10 13 14' + LE +
+    'del-3-99 [3] 10 11 12' + LE +
+    'del-neg-2 [5] 10 11 12 13 14' + LE +
+    'del-5-1 [5] 10 11 12 13 14' + LE +
+    'del-0-0 [5] 10 11 12 13 14' + LE +
+    'del-all [0]' + LE +
+    'ins-arr-2 [7] 10 11 20 21 12 13 14' + LE +
+    'ins-arr-0 [7] 20 21 10 11 12 13 14' + LE +
+    'ins-arr-end [7] 10 11 12 13 14 20 21' + LE +
+    'ins-arr-99 [7] 10 11 12 13 14 20 21' + LE +
+    'ins-arr-neg [7] 20 21 10 11 12 13 14' + LE +
+    'ins-elem-1 [6] 10 42 11 12 13 14' + LE +
+    'ins-elem-nil [1] 42' + LE +
+    'ins-lit [7] 10 1 2 11 12 13 14' + LE +
+    'cow-del-C [4] 11 12 13 14' + LE +
+    'cow-del-A [5] 10 11 12 13 14' + LE +
+    'cow-ins-C [6] 1 10 11 12 13 14' + LE +
+    'cow-ins-A [5] 10 11 12 13 14' + LE +
+    'copy-indep-A [5] 10 11 12 13 14' + LE +
+    's-copy [2] bx c' + LE +
+    's-plus [5] a bx c bx c' + LE +
+    's-del [2] bx c' + LE +
+    's-del-orig [3] a bx c' + LE +
+    's-ins [4] a insx bx c' + LE +
+    's-ins-orig [3] a bx c' + LE +
+    'abcdx' + LE +
+    'solo' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'solo');
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArrayOps_RefCountsAndManagedElements;
+const
+  Src = '''
+    program Prg;
+    type
+      TIA = array of Int32;
+      PInt32 = ^Int32;
+      TBox = class
+        V: Int;
+        constructor Create(AV: Int);
+        destructor Destroy; override;
+      end;
+      TBoxes = array of TBox;
+    constructor TBox.Create(AV: Int); begin V := AV end;
+    destructor TBox.Destroy;
+    begin
+      WriteLn('box ', V, ' gone');
+      inherited Destroy()
+    end;
+    function RC(const A: TIA): Int32;
+    begin
+      Result := PInt32(Pointer(@A[0]) - 12)^;
+    end;
+    function Make(N: Int32): TIA;
+    begin
+      Result := [N, N + 1];
+    end;
+    procedure Ints;
+    var A, B, C: TIA;
+    begin
+      A := [1, 2, 3];
+      B := [4];
+      C := A + B;
+      WriteLn('plus ', RC(A), ' ', RC(B), ' ', RC(C));
+      C := Copy(A, 1, 2);
+      WriteLn('copy ', RC(A), ' ', RC(C));
+      C := Make(5) + Make(7);
+      WriteLn('owned plus ', Length(C), ' ', C[3], ' ', RC(C));
+      C := Copy(Make(9), 1, 1);
+      WriteLn('owned copy ', C[0], ' ', RC(C));
+      C := Concat(Make(1), [0], Make(3));
+      WriteLn('concat ', Length(C), ' ', RC(C));
+      WriteLn('length ', Length(A + Make(1)), ' ', Copy(A, 2, 1)[0]);
+      B := A;
+      Delete(B, 0, 1);
+      WriteLn('shared delete ', RC(A), ' ', RC(B), ' ', Length(A), ' ', Length(B));
+      B := A;
+      Insert(Make(8), B, 1);
+      WriteLn('shared insert ', RC(A), ' ', RC(B), ' ', Length(B), ' ', B[1]);
+      Insert(A, A, 1);
+      WriteLn('self insert ', Length(A), ' ', A[1], ' ', A[3], ' ', RC(A));
+    end;
+    procedure Boxes;
+    var A, B: TBoxes;
+    begin
+      A := [TBox.Create(1), TBox.Create(2), TBox.Create(3)];
+      B := Copy(A, 1, 1) + [TBox.Create(4)];
+      WriteLn('copied ', Length(B), ' ', B[0].V, ' ', B[1].V);
+      Delete(A, 1, 2);
+      WriteLn('deleted ', Length(A), ' ', A[0].V);
+      Insert(TBox.Create(5), A, 0);
+      WriteLn('inserted ', A[0].V, ' ', A[1].V);
+      A := nil;
+      WriteLn('a cleared');
+      B := nil;
+      WriteLn('b cleared');
+    end;
+    begin
+      Ints();
+      Boxes();
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'plus 1 1 1' + LE +
+    'copy 1 1' + LE +
+    'owned plus 4 8 1' + LE +
+    'owned copy 10 1' + LE +
+    'concat 5 1' + LE +
+    'length 5 3' + LE +
+    'shared delete 1 1 3 2' + LE +
+    'shared insert 1 1 5 8' + LE +
+    'self insert 6 1 3 1' + LE +
+    'copied 2 2 4' + LE +
+    'box 3 gone' + LE +
+    'deleted 1 1' + LE +
+    'inserted 5 1' + LE +
+    'box 5 gone' + LE +
+    'box 1 gone' + LE +
+    'a cleared' + LE +
+    'box 2 gone' + LE +
+    'box 4 gone' + LE +
+    'b cleared' + LE +
+    'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'done');
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArrayOps_EveryTarget;
+const
+  Src = '''
+    program Prg;
+    type
+      TSA = array of string;
+      TRec = record F: TSA; end;
+      THolder = class
+        Items: TSA;
+        procedure Edit();
+      end;
+    var G: TSA;
+    procedure Show(const Tag: string; const A: TSA);
+    var I: Int;
+    begin
+      Write(Tag, ':');
+      for I := 0 to High(A) do Write(' ', A[I]);
+      WriteLn();
+    end;
+    procedure THolder.Edit();
+    begin
+      Insert('h' + 'x', Items, 0);
+      Delete(Items, 1, 1);
+    end;
+    procedure ViaVar(var A: TSA);
+    begin
+      Insert(['v1', 'v2'], A, 1);
+      Delete(A, 0, 1);
+    end;
+    procedure Captured;
+    var L: TSA;
+      procedure Inner;
+      begin
+        Insert('c' + 'x', L, 1);
+        Delete(L, 0, 1);
+      end;
+    begin
+      L := ['a', 'b'];
+      Inner();
+      Show('captured', L);
+    end;
+    var R: TRec; H: THolder; M: array of TSA; A: TSA;
+    begin
+      A := ['a', 'b', 'c'];
+      ViaVar(A);
+      Show('var', A);
+      R.F := ['r1', 'r2'];
+      Insert('r0', R.F, 0);
+      Delete(R.F, 2, 1);
+      Show('field', R.F);
+      H := THolder.Create();
+      H.Items := ['i1', 'i2'];
+      H.Edit();
+      Show('self', H.Items);
+      H.Free();
+      SetLength(M, 2);
+      M[1] := ['m1'];
+      Insert('m0', M[1], 0);
+      Insert(M[1], M[0], 0);
+      Delete(M[1], 1, 1);
+      Show('elem0', M[0]);
+      Show('elem1', M[1]);
+      G := ['g1'];
+      Insert(G + ['g2'], G, 1);
+      Show('global', G);
+      Captured();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'var: v1 v2 b c' + LE +
+    'field: r0 r1' + LE +
+    'self: hx i2' + LE +
+    'elem0: m0 m1' + LE +
+    'elem1: m0' + LE +
+    'global: g1 g1 g2' + LE +
+    'captured: cx b' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'captured');
+end;
+
+procedure TE2EDynArrayTests.TestRun_UserConcatAndInsert_Win;
+const
+  Src = '''
+    program Prg;
+    type
+      TList2 = class
+        N: Int;
+        procedure Insert(AIdx, AVal, AExtra: Int);
+        procedure Fill();
+      end;
+    procedure TList2.Insert(AIdx, AVal, AExtra: Int);
+    begin
+      N := AIdx + AVal + AExtra;
+    end;
+    procedure TList2.Fill();
+    begin
+      Insert(1, 2, 3);
+    end;
+    procedure Insert(A, B, C: Int);
+    begin
+      WriteLn('user insert ', A + B + C);
+    end;
+    function Concat(const A, B: string): string;
+    begin
+      Result := 'user ' + A + B;
+    end;
+    var L: TList2;
+    begin
+      Insert(1, 2, 4);
+      WriteLn(Concat('x', 'y'));
+      L := TList2.Create();
+      L.Fill();
+      WriteLn('method insert ', L.N);
+      L.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'user insert 7' + LE +
+    'user xy' + LE +
+    'method insert 6' + LE, 0);
 end;
 
 initialization
