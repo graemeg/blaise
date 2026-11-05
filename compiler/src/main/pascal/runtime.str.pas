@@ -53,6 +53,7 @@ procedure _StringRelease(Ptr: Pointer);                external name '_StringRel
 { ... and the dynamic-array release, which runs the element hook on the last
   reference (SetLength drops a shared array's reference through it). }
 procedure _DynArrayRelease(Ptr: Pointer);              external name '_DynArrayRelease';
+procedure _LeakTrackDynArray(Ptr: Pointer; ANew: Int32); external name '_LeakTrackDynArray';
 
 { blaise_float binding — used by Format()'s %f/%e/%g handling. }
 function  _FormatFloatSpec(V: Float64; Spec: Int32; Prec: Int32): Pointer;
@@ -1528,6 +1529,7 @@ begin
   LenPtr    := Pointer(NewData) + DA_LEN_OFS;
   LenPtr^   := NewLen;
   _libc_memset(NewData, 0, NewLen * ElemSize);
+  _LeakTrackDynArray(NewData, 1);
   if Ptr <> nil then
   begin
     OldLen := _DynArrayLength(Ptr);
@@ -1552,6 +1554,7 @@ begin
         did not come along, then the old block goes without its hook }
       if (Hook <> nil) and (OldLen > NewLen) then
         H(Ptr + NewLen * ElemSize, OldLen - NewLen, 0);
+      _LeakTrackDynArray(Ptr, 0);
       _BlaiseFreeMem(Ptr - DA_HDR_SIZE);
     end;
   end;
@@ -1583,6 +1586,7 @@ begin
   RC^ := 1;
   LenPtr := Pointer(Data) + DA_LEN_OFS;
   LenPtr^ := ALen;
+  _LeakTrackDynArray(Data, 1);
   Result := Data;
 end;
 

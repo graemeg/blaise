@@ -109,6 +109,11 @@ type
       object's own graph (a signal wrapping its handlers in its own
       methods): the closures do not keep the object alive.  Self was
       captured strongly whatever the body used, a reference cycle. }
+    { BUG-20261105-leaktrack-setlength-dynarray: a dynamic array built by
+      SetLength (or Copy, +, Concat, Delete, Insert) is tracked, so a leaked
+      one is reported and every released one is not }
+    procedure TestDebug_DynArray_LeakReported;
+    procedure TestDebug_DynArray_EveryBuildPath_NoLeak;
     { a discarded dynamic-array result of a method called on a receiver or
       through an interface is released (the tracker made it visible) }
     procedure TestDebug_DiscardedResults_ReceiverAndInterface_NoLeak;
@@ -4168,6 +4173,66 @@ begin
       WriteLn('done');
     end.
     ''', 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_DynArray_LeakReported;
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { a node that holds itself in an array of nodes: a cycle that keeps the
+    node and its array alive }
+  AssertTrue('compile+run', CompileAndRunWithRTLDebugOn(beNative,
+    '''
+    program DynLeak;
+    type
+      TNode = class
+        Kids: array of TNode;
+      end;
+    var N: TNode;
+    begin
+      N := TNode.Create();
+      SetLength(N.Kids, 1);
+      N.Kids[0] := N;
+      N := nil;
+      WriteLn('end');
+    end.
+    ''', Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertTrue('the leaked array is reported, got: ' + Output,
+    Pos('- dynarray (rc=1)', Output) >= 0);
+  AssertTrue('and its node, got: ' + Output, Pos('- TNode (rc=1)', Output) >= 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_DynArray_EveryBuildPath_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program DynPaths;
+    type
+      TRec = record S: string; N: Int; end;
+    var
+      A, B, C: array of string;
+      R: array of TRec;
+      I: Int;
+    begin
+      SetLength(A, 3);
+      for I := 0 to 2 do A[I] := 'a' + Chr(48 + I);
+      SetLength(A, 5);             { grow, uniquely owned }
+      SetLength(A, 2);             { shrink }
+      B := A;
+      SetLength(B, 4);             { copy-on-write }
+      C := Copy(A, 0, 1) + B;
+      C := Concat(C, A);
+      Delete(C, 1, 2);
+      Insert(A, C, 1);
+      SetLength(R, 2);
+      R[1].S := 'r';
+      SetLength(R, 0);
+      WriteLn(Length(A), ' ', Length(B), ' ', Length(C));
+    end.
+    ''', '2 4 7');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_MethodLiteral_SelfUnused_NoCycle;

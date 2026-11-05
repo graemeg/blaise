@@ -83,6 +83,11 @@ function  _MethodAttributeCount(AClassTI, AName: Pointer): Int32;
 function  _GetMethodAttributeAt(AClassTI, AName: Pointer; AIndex: Int32): Pointer;
 procedure _AbstractMethodError;
 procedure _LeakTrackerEnable;
+{ A dynamic-array block made (ANew <> 0) or freed (0) by runtime.str other
+  than through _DynArrayAddRef / _DynArrayRelease: SetLength, Copy, +,
+  Concat, Delete and Insert build rc=1 blocks, and a uniquely owned block
+  that SetLength replaces is freed directly. }
+procedure _LeakTrackDynArray(Ptr: Pointer; ANew: Int32);
 procedure _LeakTrackerRegister(UserPtr: Pointer; ClassName: Pointer;
   UnitName: Pointer; Line: Int64);
 { Temporarily suspend / resume the leak tracker.  The tracker's table is a
@@ -404,6 +409,16 @@ begin
       WriteNL();
     end;
   end;
+end;
+
+procedure _LeakTrackDynArray(Ptr: Pointer; ANew: Int32);
+begin
+  if not GLTEnabled then Exit;
+  if Ptr = nil then Exit;
+  if ANew <> 0 then
+    LTInsert(Ptr, GLTTagDynArray, nil, 0)
+  else
+    LTDelete(Ptr);
 end;
 
 procedure _LeakTrackerRegister(UserPtr: Pointer; ClassName: Pointer;
