@@ -7,7 +7,8 @@
 [NOTE]
 ====
 Status:: ACCEPTED 2026-11-05; the owner's decisions on the open questions
-are recorded in <<owner-decisions>>.  Implementation follows <<commits>>.
+are recorded in <<owner-decisions>>.  Implementation follows <<commits>>;
+see <<progress>> for what has landed.
 Bug:: `BUG-20261028-money-mismatch-raise-leaks` (BUGS.md).
 Decision already taken:: option (c), table-driven unwinding (BUGS.md,
 2026-10-28).  This document does not revisit it; it plans it.
@@ -889,6 +890,77 @@ run the new e2e programs under `RunUnderValgrind` to catch use-after-free.
 Documentation updated alongside: `docs/design.adoc` ("ARC cleanup on exception
 paths"), the repository CLAUDE.md "Exception frames are an RTL contract"
 note, and this document.
+
+[[progress]]
+== Progress (2026-11-05)
+
+[cols="1,4",options="header"]
+|===
+| Step | Delivered
+
+| 1–3
+| x86-64 label differences; the unwind section through both assemblers,
+  object writers and linkers (the Mach-O linker folds the blocks into
+  `__data`); one frame-slot inventory per routine, consumed by the epilogue
+  (generated code byte-identical).
+
+| 4
+| Blocks, routine records, coverage, `_UnwindInit` from `_main`, the walk;
+  `--no-unwind-tables`; the `.text` identity test on both ISAs.
+
+| 4a
+| The leak tracker sees `SetLength`'s blocks (D8).  It surfaced two
+  defects, fixed separately: a discarded dynamic-array result of a receiver
+  or interface call was never released (and, on x86-64, no discarded result
+  of an interface call statement); a `[Weak]` or `[Unretained]` record
+  field took a strong reference.
+
+| 5–7
+| Scalar slots, aggregate slots (one release hook per type), the routine's
+  own managed `Result`.  On x86-64 a managed record or interface result is
+  built in the caller's buffer, which the caller owns.
+
+| 8
+| Call-argument temporaries (arm64 `__strtrans` park slots, x86-64 hoisted
+  stack values by depth).  The size filter of step 13 landed here, as D5
+  requires: ranges without a call that can raise are dropped, and routines
+  that own nothing get no record (the block is anchored at the first routine
+  emitted all the same).
+
+| 9
+| Deferred-release bases (`_pendrel`), `SPANS_TRY`, the raise-operand
+  exclusion (BUG-049).
+
+| 10–11 (string operators)
+| arm64 string `+` and comparison operands move into `__opnd` park slots
+  (D4); x86-64 records their stack depth.  A new kind, `STR0`, releases an
+  rc = 0 transient.
+
+| 12 (main)
+| `_main` is a routine to the tables: its argument and operand temporaries
+  are released when a raise is caught in the main program.
+|===
+
+Measured: the compiler carries 4.2 % of tables (231 KB of 5.46 MB), inside
+the D5 budget.
+
+=== Remaining
+
+Each of these is a leak when an exception passes, never a double release:
+
+* x86-64 interface results returned through a caller's stack buffer (ten
+  lowering sites) and arm64/x86-64 record call-argument (sret) areas,
+  `TakeRec(MkRec())`.
+* The new instance across a raising constructor call (D2).
+* Unit initialisation sections, and x86-64 `.bss` temporaries of `main`
+  (deferred releases, scratches).
+* Other arm64 operand temporaries still pushed below `sp` (outside the
+  string operators).
+* A destructor that raises while an aggregate hook releases a field: the
+  shared release walk zeroes a field after its release, so the next walk can
+  release that field again.  Changing the order would change ordinary
+  generated code; it is left for a separate change.
+* Step 14: the benchmark.
 
 [[risks]]
 == Risks
