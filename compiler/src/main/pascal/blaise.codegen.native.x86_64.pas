@@ -20700,7 +20700,15 @@ begin
     begin
       Self.Emit(#9'pushq %rax');
       Self.EmitVarBaseToReg(FA.RecordName, False, '%rcx');
-      if FA.FieldInfo.TypeDesc.IsString() then
+      if (FA.FieldInfo.TypeDesc.Kind = tyClass) and
+         (FA.FieldInfo.IsWeak or FA.FieldInfo.IsUnretained) then
+      begin
+        { a non-owning record field takes no reference and drops none (the
+          strong arm below kept a [Weak] field's target alive) }
+        Self.Emit(#9'popq %rax');
+        Self.EmitNonOwningFieldStore(FA, '%rcx');
+      end
+      else if FA.FieldInfo.TypeDesc.IsString() then
       begin
         if not NativeExprOwnsRef(FA.Expr) then
         begin
@@ -20761,7 +20769,15 @@ begin
     begin
       Self.Emit(#9'pushq %rax');
       Self.EmitVarBaseToReg(FA.RecordName, True, '%rcx');
-      if FA.FieldInfo.TypeDesc.IsString() then
+      if (FA.FieldInfo.TypeDesc.Kind = tyClass) and
+         (FA.FieldInfo.IsWeak or FA.FieldInfo.IsUnretained) then
+      begin
+        { a non-owning record field takes no reference and drops none (the
+          strong arm below kept a [Weak] field's target alive) }
+        Self.Emit(#9'popq %rax');
+        Self.EmitNonOwningFieldStore(FA, '%rcx');
+      end
+      else if FA.FieldInfo.TypeDesc.IsString() then
       begin
         if not NativeExprOwnsRef(FA.Expr) then
         begin

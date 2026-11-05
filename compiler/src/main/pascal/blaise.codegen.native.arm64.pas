@@ -4777,6 +4777,23 @@ begin
     Self.Emit(Format(#9'str s0, [x9, #%d]', [AStmt.FieldInfo.Offset]));
     Exit;
   end;
+  if (AStmt.FieldInfo.TypeDesc.Kind = tyClass) and
+     (AStmt.FieldInfo.IsWeak or AStmt.FieldInfo.IsUnretained) then
+  begin
+    { a NON-OWNING record field takes no reference and drops none, as a
+      non-owning instance field does (EmitInstanceFieldStore); an owned +1
+      value has no other owner and is released once stored.  The strong
+      store below used to run here, so a [Weak] field kept its target
+      alive. }
+    Self.EmitExprToX0(AStmt.Expr);
+    EmitPushX0();
+    EmitRecordBaseAddr('x9', AStmt.RecordName, AStmt.IsVarParam);
+    EmitNonOwningFieldStore(AStmt.FieldInfo, 'x9');
+    EmitPopTo('x0');
+    if ArcExprOwnsRef(AStmt.Expr) then
+      EmitCallSym('_ClassRelease');
+    Exit;
+  end;
   if AStmt.FieldInfo.TypeDesc.IsString() or
      (AStmt.FieldInfo.TypeDesc.Kind = tyClass) then
   begin

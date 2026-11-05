@@ -117,6 +117,10 @@ type
     { a discarded dynamic-array result of a method called on a receiver or
       through an interface is released (the tracker made it visible) }
     procedure TestDebug_DiscardedResults_ReceiverAndInterface_NoLeak;
+    { a [Weak] or [Unretained] class field of a record -- a local, through a
+      var parameter -- takes no reference: its target is freed when its last
+      owner goes, and the [Weak] field then reads nil }
+    procedure TestDebug_NonOwningRecordField_TakesNoReference;
     procedure TestDebug_MethodLiteral_SelfUnused_NoCycle;
     { every way a literal reaches its method's Self -- field read and
       write, method call as statement and expression, property, explicit
@@ -4134,6 +4138,41 @@ begin
     'exit 3 alive=0' + #10 +
     'break 3 alive=0' + #10 +
     'retries 3 alive=0');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_NonOwningRecordField_TakesNoReference;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program WeakRecField;
+    type
+      TTrack = class
+      end;
+      TRec = record
+        [Weak] Peer: TTrack;
+        [Unretained] Raw: TTrack;
+      end;
+    procedure SetVia(var R: TRec; T: TTrack);
+    begin
+      R.Peer := T;
+      R.Raw := T;
+    end;
+    procedure Local;
+    var
+      R, R2: TRec;
+      K: TTrack;
+    begin
+      K := TTrack.Create();
+      R.Peer := K;
+      R.Raw := K;
+      SetVia(R2, K);
+      K := nil;
+      WriteLn(R.Peer = nil, ' ', R2.Peer = nil);
+    end;
+    begin
+      Local();
+    end.
+    ''', 'True True');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_DiscardedResults_ReceiverAndInterface_NoLeak;
