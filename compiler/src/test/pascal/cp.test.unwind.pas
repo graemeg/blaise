@@ -60,6 +60,11 @@ type
       the function raises after assigning it; the caller's variable keeps its
       old value; an 'of object' result owns nothing }
     procedure TestDebug_ManagedResult_ReleasedOnUnwind;
+    { owned string and class temporaries passed to a call that raises are
+      released, whether the raise leaves the caller or is caught in it, with
+      nested calls among the arguments; a result moved into a variable is
+      released once }
+    procedure TestDebug_CallArgTemporaries_ReleasedOnUnwind;
   end;
 
 implementation
@@ -342,7 +347,9 @@ begin
       Local();
     end.
     ''',
-    'deep 3' + #10 + 'bottom 1001' + #10 + 'here 1' + #10, 0);
+    { every Blaise frame from the raise to the handler's, that one
+      included: P3, P2, P1 and main; 1001 Recurse frames and main; Local }
+    'deep 4' + #10 + 'bottom 1002' + #10 + 'here 1' + #10, 0);
 end;
 
 procedure TUnwindE2ETests.TestDebug_ScalarLocals_ReleasedOnUnwind;
@@ -751,6 +758,71 @@ begin
     ''',
     'str old' + #10 + 'obj 1 True' + #10 + 'arr 0' + #10 +
     'fn 1' + #10 + 'rec' + #10 + 'meth 0' + #10 + 'keep 1');
+end;
+
+procedure TUnwindE2ETests.TestDebug_CallArgTemporaries_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwArgs;
+    uses SysUtils;
+    type
+      TTrack = class
+        destructor Destroy; override;
+      end;
+    var
+      Freed: Int;
+    destructor TTrack.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    function MkStr(N: Int): string;
+    begin
+      Result := IntToStr(N) + 'x';
+    end;
+    function MkObj(): TTrack;
+    begin
+      Result := TTrack.Create();
+    end;
+    function Wrap(const A: string): string;
+    begin
+      Result := '[' + A + ']';
+    end;
+    procedure Take(const A: string; O: TTrack; const B: string);
+    begin
+      raise Exception.Create(A + B);
+    end;
+    procedure Passes;
+    var S: string;
+    begin
+      S := 'p';
+      Take(MkStr(1) + S, MkObj(), Wrap(MkStr(2)));
+    end;
+    procedure Catches;
+    begin
+      try
+        Take(MkStr(3), MkObj(), MkStr(4));
+      except
+        on E: Exception do Write('caught ', E.Message, ' ', Freed, ' ');
+      end;
+    end;
+    procedure Moved;
+    var O: TTrack;
+    begin
+      O := MkObj();
+      Take(MkStr(5), O, MkStr(6));
+    end;
+    begin
+      try Passes(); except on E: Exception do WriteLn('passes ', E.Message, ' ', Freed); end;
+      Freed := 0;
+      Catches();
+      WriteLn(Freed);
+      Freed := 0;
+      try Moved(); except on E: Exception do WriteLn('moved ', Freed); end;
+    end.
+    ''',
+    'passes 1xp[2x] 1' + #10 + 'caught 3x4x 1 1' + #10 + 'moved 1');
 end;
 
 initialization

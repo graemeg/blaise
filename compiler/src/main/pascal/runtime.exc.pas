@@ -61,7 +61,7 @@ procedure _CheckNil(Obj: Pointer);
 { Exception unwind cleanup (docs/exception-unwind-cleanup-design.adoc).
   Generated _main passes the bounds of the linked unwind section. }
 procedure _UnwindInit(AStart, AStop: Pointer);
-{ Test hook: how many frames the last raise's walk found a routine for. }
+{ Test hook: how many Blaise frames the last raise's walk passed. }
 function  _UnwindLastWalk: Int;
 
 implementation
@@ -203,6 +203,7 @@ const
   UNW_HDR_SIZE = 32;
   UNW_ROUTINE_SIZE = 32;
   UNW_SLOT_SIZE = 8;
+  UNW_RANGE_SIZE = 16;
   UNW_STR = 1;
   UNW_CLASS = 2;
   UNW_INTF = 3;
@@ -211,6 +212,7 @@ const
   UNW_WEAK = 6;
   UNW_AGG = 7;
   UNW_F_INDIRECT = 1;
+  UNW_F_SPANS_TRY = 2;
 {$IFDEF CPUARM64}
   JB_FP_OFS = 80;             { x29 in the jmp_buf }
 {$ELSE}
@@ -235,7 +237,7 @@ var
   g_unw_stop: Pointer;
 
 threadvar
-  g_unw_frames: Int;          { frames the last walk found a routine for }
+  g_unw_frames: Int;          { Blaise frames the last walk passed }
 
 procedure _UnwindInit(AStart, AStop: Pointer);
 begin
@@ -304,77 +306,99 @@ begin
   end;
 end;
 
-{ Release what AFrame owns at APC.  AIsTarget: the frame of the try that
-  catches -- it carries on running, so its own slots are left alone. }
+{ Release one managed value of the given kind whose storage is at A, nil
+  first: a destructor this runs that raises in turn finds it already empty. }
+procedure UnwReleaseAt(ABlk: Pointer; A: PPointer; W: UInt32);
+var
+  V: Pointer;
+  Hook: TUnwAggHook;
+begin
+  case W and $FF of
+    UNW_STR:
+    begin
+      V := A^; A^ := nil; _StringRelease(V);
+    end;
+    UNW_CLASS:
+    begin
+      V := A^; A^ := nil; _ClassRelease(V);
+    end;
+    UNW_DYN:
+    begin
+      V := A^; A^ := nil; _DynArrayRelease(V);
+    end;
+    UNW_INTF:
+    begin
+      { the obj half; the itab half is static }
+      V := A^; A^ := nil;
+      PPointer(Pointer(A) + 8)^ := nil;
+      _ClassRelease(V);
+    end;
+    UNW_REFENV:
+    begin
+      { the Env half of a 'reference to' closure }
+      V := PPointer(Pointer(A) + 8)^;
+      PPointer(Pointer(A) + 8)^ := nil;
+      _ClassRelease(V);
+    end;
+    UNW_WEAK:
+      _WeakClear(A);
+    UNW_AGG:
+    begin
+      { a by-value aggregate parameter's slot holds the address of the
+        frame's copy }
+      if ((W shr 8) and UNW_F_INDIRECT) <> 0 then
+        A := PPointer(A^);
+      Hook := TUnwAggHook(PPointer(ABlk + UNW_HDR_SIZE + (W shr 16) * 8)^);
+      if A <> nil then
+        Hook(Pointer(A));
+    end;
+  end;
+end;
+
+{ Release what AFrame owns at APC: the owned temporaries live there, in
+  every frame; and, unless the frame is the target -- the frame of the try
+  that catches, which carries on running -- its own slots. }
 procedure UnwCleanFrame(ABlk, ARtn: Pointer; AFrame: Pointer; APC: UInt;
   AIsTarget: Boolean);
 var
-  Off: UInt;
-  NRtn, NPtrs, First, N, I: Int;
+  Off, Lo, Hi: UInt;
+  NRtn, NPtrs, NSlotsAll, First, N, I: Int;
   S: UInt;
-  A: PPointer;
-  V: Pointer;
   W: UInt32;
-  Hook: TUnwAggHook;
 begin
-  g_unw_frames := g_unw_frames + 1;
+  Off := APC - UInt(PPointer(ABlk + 8)^) - PUInt32(ARtn)^;
+  NRtn := PUInt32(ABlk + 20)^;
+  NPtrs := PUInt32(ABlk + 24)^;
+  NSlotsAll := PUInt32(ABlk + 28)^;
+  { temporaries: a range whose statement spans a try is left to that
+    statement when its handler is in this very frame }
+  First := PUInt32(ARtn + 20)^;
+  N := PUInt32(ARtn + 28)^;
+  S := UInt(ABlk) + UNW_HDR_SIZE + UInt(NPtrs) * 8 +
+    UInt(NRtn) * UNW_ROUTINE_SIZE + UInt(NSlotsAll) * UNW_SLOT_SIZE +
+    UInt(First) * UNW_RANGE_SIZE;
+  for I := 0 to N - 1 do
+  begin
+    Lo := PUInt32(Pointer(S))^;
+    Hi := PUInt32(Pointer(S + 4))^;
+    W := PUInt32(Pointer(S + 12))^;
+    if (Off >= Lo) and (Off < Hi) and
+       not (AIsTarget and (((W shr 8) and UNW_F_SPANS_TRY) <> 0)) then
+      UnwReleaseAt(ABlk, PPointer(AFrame + PInt32(Pointer(S + 8))^), W);
+    S := S + UNW_RANGE_SIZE;
+  end;
   if AIsTarget then Exit;
   { the frame's own slots, if its code at APC is past the prologue's
     zeroing and before the epilogue's own release }
-  Off := APC - UInt(PPointer(ABlk + 8)^) - PUInt32(ARtn)^;
   if (Off < PUInt32(ARtn + 8)^) or (Off >= PUInt32(ARtn + 12)^) then Exit;
-  NRtn := PUInt32(ABlk + 20)^;
-  NPtrs := PUInt32(ABlk + 24)^;
   First := PUInt32(ARtn + 16)^;
   N := PUInt32(ARtn + 24)^;
   S := UInt(ABlk) + UNW_HDR_SIZE + UInt(NPtrs) * 8 +
     UInt(NRtn) * UNW_ROUTINE_SIZE + UInt(First) * UNW_SLOT_SIZE;
   for I := 0 to N - 1 do
   begin
-    A := PPointer(AFrame + PInt32(Pointer(S))^);
-    W := PUInt32(Pointer(S + 4))^;
-    { nil before release: a destructor this runs that raises in turn finds
-      the slot already empty }
-    case W and $FF of
-      UNW_STR:
-      begin
-        V := A^; A^ := nil; _StringRelease(V);
-      end;
-      UNW_CLASS:
-      begin
-        V := A^; A^ := nil; _ClassRelease(V);
-      end;
-      UNW_DYN:
-      begin
-        V := A^; A^ := nil; _DynArrayRelease(V);
-      end;
-      UNW_INTF:
-      begin
-        { the obj half; the itab half is static }
-        V := A^; A^ := nil;
-        PPointer(Pointer(A) + 8)^ := nil;
-        _ClassRelease(V);
-      end;
-      UNW_REFENV:
-      begin
-        { the Env half of a 'reference to' closure }
-        V := PPointer(Pointer(A) + 8)^;
-        PPointer(Pointer(A) + 8)^ := nil;
-        _ClassRelease(V);
-      end;
-      UNW_WEAK:
-        _WeakClear(A);
-      UNW_AGG:
-      begin
-        { a by-value aggregate parameter's slot holds the address of the
-          frame's copy }
-        if ((W shr 8) and UNW_F_INDIRECT) <> 0 then
-          A := PPointer(A^);
-        Hook := TUnwAggHook(PPointer(ABlk + UNW_HDR_SIZE + (W shr 16) * 8)^);
-        if A <> nil then
-          Hook(Pointer(A));
-      end;
-    end;
+    UnwReleaseAt(ABlk, PPointer(AFrame + PInt32(Pointer(S))^),
+      PUInt32(Pointer(S + 4))^);
     S := S + UNW_SLOT_SIZE;
   end;
 end;
@@ -402,6 +426,7 @@ begin
     PC := RA - 1;
     Blk := UnwFindBlock(PC);
     if Blk = nil then Exit;
+    g_unw_frames := g_unw_frames + 1;
     Rtn := UnwFindRoutine(Blk, PC);
     if Rtn <> nil then
       UnwCleanFrame(Blk, Rtn, Pointer(FP), PC, FP = TargetFP);

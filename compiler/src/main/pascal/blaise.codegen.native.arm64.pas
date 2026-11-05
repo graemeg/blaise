@@ -94,6 +94,8 @@ type
     { aggregate types the unwind tables release, each through one hook }
     FUnwAggTypes: TList<TTypeDesc>;
     FUnwAggLbls: TStringList;
+    { the open unwind range of each '__strtrans_<n>' park slot (-1: none) }
+    FUnwTrans: TList<Int>;
     [Unretained] FDbgCur: TDbgFunc;   { facts entry for the routine being emitted }
     FDbgSeq: Int;                 { .Ldbg_N label counter }
     { enclosing routine while its nested routines are emitted, so
@@ -566,6 +568,8 @@ type
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
     procedure RecordUnwindSlots(ADecl: TMethodDecl; ASlots: TList<TUnwSlot>);
     function UnwAggHookPtr(AType: TTypeDesc): Int;
+    procedure UnwParkOpen(AIdx: Int);
+    procedure UnwParkClose(AIdx: Int; const AShape: string);
     procedure EmitUnwindBlock;
     procedure EmitFunctionDef(ADecl: TMethodDecl;
       AWeakBind: Boolean = False);
@@ -1061,8 +1065,10 @@ begin
   inherited Create(ATarget);
   if not GNoUnwindTables then
     FUnw := TUnwindFacts.Create('L');
+  FUnwObserve := FUnw;
   FUnwAggTypes := TList<TTypeDesc>.Create();
   FUnwAggLbls := TStringList.Create();
+  FUnwTrans := TList<Int>.Create();
   FFrame       := TDictionary<string, Int>.Create();
   FGlobalNames := TStringList.Create();
   FStrLits     := TStringList.Create();
@@ -1126,6 +1132,7 @@ begin
   FUnw.Free();
   FUnwAggTypes.Free();
   FUnwAggLbls.Free();
+  FUnwTrans.Free();
   FEnvCaps.Free();
   FEnvPacked.Free();
   FHandlerVars.Free();
@@ -14807,6 +14814,40 @@ begin
   end;
 end;
 
+{ An owned call-argument temporary parked in '__strtrans_<AIdx>' (just
+  stored): the frame owns it from here until its release after the call.
+  Its kind is known at the release (UnwParkClose). }
+procedure TArm64Backend.UnwParkOpen(AIdx: Int);
+var
+  Off, H: Int;
+  Lbl: string;
+begin
+  if FUnw = nil then Exit;
+  if not FFrame.TryGetValue(StrTransSlot(AIdx), Off) then Exit;
+  H := FUnw.OpenRange(UNW_STR, -Off, 0, 0, False, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  while FUnwTrans.Count <= AIdx do FUnwTrans.Add(-1);
+  FUnwTrans.SetItem(AIdx, H);
+end;
+
+{ The park slot's value is about to be released (AShape: 'C' class, 'D'
+  dynamic array, else string): the range ends before the release call, so
+  a destructor that raises during it cannot make the walk release it again. }
+procedure TArm64Backend.UnwParkClose(AIdx: Int; const AShape: string);
+var
+  H: Int;
+  Lbl: string;
+begin
+  if (FUnw = nil) or (AIdx >= FUnwTrans.Count) then Exit;
+  H := FUnwTrans.Get(AIdx);
+  if H < 0 then Exit;
+  if AShape = 'C' then FUnw.SetRangeKind(H, UNW_CLASS)
+  else if AShape = 'D' then FUnw.SetRangeKind(H, UNW_DYN);
+  FUnw.CloseRange(H, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  FUnwTrans.SetItem(AIdx, -1);
+end;
+
 { The pointer-table index of AType's unwind release hook, one per distinct
   aggregate type in the object (emitted by EmitUnwindBlock). }
 function TArm64Backend.UnwAggHookPtr(AType: TTypeDesc): Int;
@@ -16160,6 +16201,7 @@ begin
                 InternalError('owned transient of this type in an ' +
                   'open-array literal block', Arg);
               EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+              UnwParkOpen(TransTop + TransN);
               Inc(TransN);
               FStrTransTop := TransTop + TransN;
             end;
@@ -16208,6 +16250,7 @@ begin
           if ArcExprOwnsRef(Arg) then
           begin
             EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+            UnwParkOpen(TransTop + TransN);
             TransShapes := TransShapes + 'D';
             Inc(TransN);
             FStrTransTop := TransTop + TransN;
@@ -16550,6 +16593,7 @@ begin
         begin
           Self.Emit(#9'str x1, [sp, #-16]!');
           EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+          UnwParkOpen(TransTop + TransN);
           Self.Emit(#9'ldr x1, [sp], #16');
           TransShapes := TransShapes + 'C';
           Inc(TransN);
@@ -16599,6 +16643,7 @@ begin
         if ArcExprOwnsRef(Arg) then
         begin
           EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+          UnwParkOpen(TransTop + TransN);
           TransShapes := TransShapes + '1';
           Inc(TransN);
           FStrTransTop := TransTop + TransN;
@@ -16608,6 +16653,7 @@ begin
                 TMethodParam(ADecl.Params.Items[I]).IsConstParam then
         begin
           EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+          UnwParkOpen(TransTop + TransN);
           { PIN NOW, before the call (BUG-20260725-arm64-const-str-param-alias).
             A callee that stores its const parameter into a local retains it and
             releases that local at scope exit; at rc=0 the cycle reaches zero
@@ -16627,6 +16673,7 @@ begin
                   Self.ParamsHaveVarString(ADecl.Params)) then
         begin
           EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+          UnwParkOpen(TransTop + TransN);
           { pin NOW (value still in x0), before the call consumes it }
           EmitCallSym('_StringAddRef');
           TransShapes := TransShapes + 'P';
@@ -16789,6 +16836,7 @@ begin
           { owned class transient: the callee borrows it — park the +1
             for one post-call release (shape 'C') }
           EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+          UnwParkOpen(TransTop + TransN);
           TransShapes := TransShapes + 'C';
           Inc(TransN);
           FStrTransTop := TransTop + TransN;
@@ -16797,6 +16845,7 @@ begin
                 (Arg.ResolvedType.Kind = tyDynArray) and ArcExprOwnsRef(Arg) then
         begin
           EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+          UnwParkOpen(TransTop + TransN);
           TransShapes := TransShapes + 'D';
           Inc(TransN);
           FStrTransTop := TransTop + TransN;
@@ -16942,6 +16991,7 @@ begin
         the pop-walk, and the two result-preserving pushes above (the old
         sp-relative offset drifted with all three and freed the wrong string). }
       EmitLoadSlot('x0', StrTransSlot(TransTop + I));
+      UnwParkClose(TransTop + I, Copy(TransShapes, I, 1));
       if Copy(TransShapes, I, 1) = 'C' then
       begin
         { owned class transient: one release drops the borrowed +1 }
@@ -20365,7 +20415,7 @@ begin
   Hi := FUnw.NewLabel('hi');
   { the label closes the object's text: switch back to it, since the last
     thing emitted may have been data (an RTL unit's tail is) }
-  if FUnw.RoutineCount() > 0 then
+  if FUnw.HasText() then
   begin
     Self.Emit('.text');
     { each aggregate's release hook (x0 = its address): releases and zeroes

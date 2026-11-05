@@ -102,6 +102,9 @@ type
     { aggregate types the unwind tables release, each through one hook }
     FUnwAggTypes: TList<TTypeDesc>;
     FUnwAggLbls: TStringList;
+    { open unwind ranges of hoisted owned call arguments, innermost call
+      last (EmitArgHoist pushes, EmitHoistEpilogue closes and pops) }
+    FUnwHoist: TList<Int>;
     { --- Stage-1 register promotion (two-pass) -----------------------
       Hot, safe scalar locals/params live in callee-saved %r14/%r15 for
       the whole function instead of frame slots.  Pass 1 emits the
@@ -1336,6 +1339,7 @@ type
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
     procedure RecordUnwindSlots(ADecl: TMethodDecl; ASlots: TList<TUnwSlot>);
     function UnwAggHookPtr(AType: TTypeDesc): Int;
+    procedure UnwHoistOpen(AKind: Int);
     procedure EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
     procedure EmitUnwindBlock;
     { Prologue init for a promoted param that arrived on the STACK (7th+
@@ -1780,8 +1784,10 @@ begin
   inherited Create(ATarget);
   if not GNoUnwindTables then
     FUnw := TUnwindFacts.Create('.L');
+  FUnwObserve := FUnw;
   FUnwAggTypes := TList<TTypeDesc>.Create();
   FUnwAggLbls := TStringList.Create();
+  FUnwHoist := TList<Int>.Create();
   FLabelCount          := 0;
   FDataGlobals         := TOrderedDictionary<string, TTypeDesc>.Create();
   FGlobalOwners        := TDictionary<string, string>.Create();
@@ -1853,6 +1859,7 @@ begin
   FUnw.Free();
   FUnwAggTypes.Free();
   FUnwAggLbls.Free();
+  FUnwHoist.Free();
   FProgScratch.Free();
   FProgScratchSz.Free();
   FIntfSplitHalf.Free();
@@ -23241,6 +23248,7 @@ begin
       Result := Result + 16;
       ADepths.Add(Result);
       AKinds.Add(akIntfConsume);
+      Self.UnwHoistOpen(UNW_CLASS);   { the owned obj half, on top }
       Continue;
     end;
 
@@ -23276,6 +23284,7 @@ begin
       Result := Result + 16;
       ADepths.Add(Result);
       AKinds.Add(akIntfConsume);
+      Self.UnwHoistOpen(UNW_CLASS);   { the owned obj half, on top }
       Continue;
     end;
     if (not IsVarPos) and (Arg.ResolvedType <> nil) and
@@ -23286,6 +23295,7 @@ begin
       Result := Result + 8;
       ADepths.Add(Result);
       AKinds.Add(akClassConsume);
+      Self.UnwHoistOpen(UNW_CLASS);
       Continue;
     end;
     { ... and an owned dyn-array transient (Use(MakeArr())): the by-value
@@ -23301,6 +23311,7 @@ begin
       Result := Result + 8;
       ADepths.Add(Result);
       AKinds.Add(akDynConsume);
+      Self.UnwHoistOpen(UNW_DYN);
       Continue;
     end;
 
@@ -23357,6 +23368,7 @@ begin
           AKinds.Add(akStrPin)
         else
           AKinds.Add(akStrConsume);
+        Self.UnwHoistOpen(UNW_STR);
         Continue;
       end;
     end;
@@ -23372,7 +23384,30 @@ procedure TX86_64Backend.EmitHoistEpilogue(AArgs: TObjectList;
 var
   I, K, Off: Int;
   HasWork: Boolean;
+  NRanged, RBase, RNext: Int;
+  Lbl: string;
+
+  { the next of this call's hoisted owned arguments is about to be released:
+    its unwind range ends before the release call }
+  procedure CloseNext;
+  begin
+    if (FUnw = nil) or (RNext >= FUnwHoist.Count) then Exit;
+    FUnw.CloseRange(FUnwHoist.Get(RNext), Lbl);
+    if Lbl <> '' then Self.Emit(Lbl + ':');
+    RNext := RNext + 1;
+  end;
+
 begin
+  NRanged := 0;
+  if FUnw <> nil then
+    for I := 0 to AKinds.Count - 1 do
+      if AKinds.Get(I) in [akStrPin, akStrConsume, akIntfConsume,
+                           akClassConsume, akDynConsume] then
+        NRanged := NRanged + 1;
+  RBase := FUnwHoist.Count - NRanged;
+  if RBase < 0 then
+    raise ENativeCodeGenError.Create('unwind: hoist epilogue without its ranges');
+  RNext := RBase;
   HasWork := False;
   for I := 0 to AKinds.Count - 1 do
     if AKinds.Get(I) >= akRecCall then
@@ -23396,6 +23431,7 @@ begin
       if (K = akStrPin) or (K = akStrConsume) then
       begin
         Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
+        CloseNext();
         Self.Emit(#9'callq _StringRelease');
       end
       else if (K = akIntfConsume) or (K = akClassConsume) then
@@ -23403,11 +23439,13 @@ begin
         { Release the owned (+1) obj of a hoisted interface-call argument, or
           an owned class transient argument. }
         Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
+        CloseNext();
         Self.Emit(#9'callq _ClassRelease');
       end
       else if K = akDynConsume then
       begin
         Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
+        CloseNext();
         Self.Emit(#9'callq _DynArrayRelease');
       end
       else if TASTExpr(AArgs.Items[I]).ResolvedType.Kind = tyRecord then
@@ -23427,6 +23465,9 @@ begin
     Self.Emit(#9'movsd 32(%rsp), %xmm1');
     Self.Emit(#9'addq $40, %rsp');
   end;
+  { this call's ranges are closed: drop them from the stack }
+  while FUnwHoist.Count > RBase do
+    FUnwHoist.Delete(FUnwHoist.Count - 1);
   if AReclaim and (ATotal + ABase > 0) then
     Self.Emit(Format(#9'addq $%d, %%rsp', [ATotal + ABase]));
 end;
@@ -26231,6 +26272,7 @@ var
   P:           TMethodParam;
   Mark:        Int;
   UnwMark:     Int;
+  UnwFirst:    string;
   NestedDecl:  TMethodDecl;
   SavedOuterDecl: TMethodDecl;
   AddrTaken:   TStringList;
@@ -26315,7 +26357,14 @@ begin
   end;
 
   Mark := Self.AsmMark();
-  if FUnw <> nil then UnwMark := FUnw.RoutineCount() else UnwMark := 0;
+  UnwFirst := '';
+  if FUnw <> nil then
+  begin
+    UnwMark := FUnw.RoutineCount();
+    UnwFirst := FUnw.FirstStart;
+  end
+  else
+    UnwMark := 0;
   FPromoActive := False;
   for I := 0 to 3 do
   begin
@@ -26345,7 +26394,11 @@ begin
         FPromoVars[0], '/', FPromoVars[1], '/', FPromoVars[2], '/',
         FPromoVars[3], ']');
     Self.AsmRollback(Mark);
-    if FUnw <> nil then FUnw.TruncateTo(UnwMark);
+    if FUnw <> nil then
+    begin
+      FUnw.TruncateTo(UnwMark);
+      FUnw.FirstStart := UnwFirst;
+    end;
     FPromoActive := True;
     FPromoFunc := FuncSymbolFromDecl(ADecl);
     Self.EmitFunctionCore(ADecl, AExported);
@@ -26513,6 +26566,24 @@ begin
     else
       FUnw.AddSlot(Off, UnwKindCode(K), 0, 0);
   end;
+end;
+
+{ An owned call argument EmitArgHoist has just pushed (or, for a pinned
+  string, retained): the frame owns it at the current stack depth until
+  EmitHoistEpilogue releases it after the call.  The label is written past
+  the pending-push peephole (it marks a position, not an instruction), so
+  it may precede the push it follows -- no call lies between them. }
+procedure TX86_64Backend.UnwHoistOpen(AKind: Int);
+var
+  H: Int;
+  Lbl: string;
+begin
+  if FUnw = nil then Exit;
+  H := FUnw.OpenRange(AKind, FSPDepth, 0, 0, True, Lbl);
+  if Lbl <> '' then inherited Emit(Lbl + ':');
+  { pushed even outside a routine (H = -1), so the epilogue's count of this
+    call's ranges always matches }
+  FUnwHoist.Add(H);
 end;
 
 { The pointer-table index of AType's unwind release hook, one per distinct
@@ -27195,7 +27266,7 @@ begin
     begin
       UnwLbl := FUnw.NewLabel('e');
       Self.Emit(UnwLbl + ':');
-      FUnw.EndRoutine(UnwLbl);
+      FUnw.EndRoutine(UnwLbl, FFrameSize);
     end;
   finally
     Self.TvArmEnd(SavedArmNodes, SavedArmPos);
@@ -27726,7 +27797,7 @@ begin
   Hi := FUnw.NewLabel('hi');
   { the label closes the object's text: switch back to it, since the last
     thing emitted may have been data (an RTL unit's tail is) }
-  if FUnw.RoutineCount() > 0 then
+  if FUnw.HasText() then
   begin
     Self.Emit('.text');
     { each aggregate's release hook (%rdi = its address): releases and

@@ -90,6 +90,10 @@ type
       O(N^2) final concat) is the right structure — the same approach the QBE
       backend's TIRBuffer uses. }
     FAsm:      TStringBuilder;
+    { the backend's exception unwind facts, shown every emitted line while
+      a temporary's range is open, to learn whether a call that can raise
+      lies inside it (nil: no tables) }
+    [Unretained] FUnwObserve: TUnwindFacts;
     { Generic function instances already emitted into FAsm, by instance
       name.  Every module monomorphises its own copy (weak-bound across
       objects), so a whole-program build that appends several modules to one
@@ -434,6 +438,8 @@ end;
 procedure TNativeBackend.Emit(const ALine: string);
 begin
   FAsm.AppendLine(ALine);
+  if (FUnwObserve <> nil) and FUnwObserve.HasOpenRanges() then
+    FUnwObserve.NoteLine(ALine);
 end;
 
 procedure TNativeBackend.EmitBlank;
