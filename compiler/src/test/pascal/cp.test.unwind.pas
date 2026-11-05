@@ -101,6 +101,12 @@ type
       x86-64 keeps in .bss (absolute ranges): released when a raise is
       caught in main }
     procedure TestDebug_MainDeferredBases_ReleasedOnUnwind;
+    { a destructor that raises while the walk releases: the new exception
+      replaces the in-flight one, which is released (D1); the walk carries
+      on through the field-cleanup function and the aggregate hook (each
+      field released once, zeroed before its release); a destructor that
+      catches its own exception leaves the original in flight }
+    procedure TestDebug_RaisingDestructor_DuringUnwind;
   end;
 
 implementation
@@ -1332,6 +1338,72 @@ begin
       WriteLn(X);
     end.
     ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + '3');
+end;
+
+procedure TUnwindE2ETests.TestDebug_RaisingDestructor_DuringUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwDtorRaise;
+    uses SysUtils;
+    type
+      TBad = class
+        Tag: string;
+        destructor Destroy; override;
+      end;
+      TCatcher = class
+        destructor Destroy; override;
+      end;
+      TRec = record
+        A: TBad;
+        S: string;
+        B: TBad;
+      end;
+    var Destroyed: Int;
+    destructor TBad.Destroy;
+    begin
+      Destroyed := Destroyed + 1;
+      if Tag = 'raise' then raise Exception.Create('from destructor');
+      inherited Destroy();
+    end;
+    destructor TCatcher.Destroy;
+    begin
+      Destroyed := Destroyed + 1;
+      try raise Exception.Create('inner'); except on E: Exception do WriteLn('dtor ', E.Message); end;
+      inherited Destroy();
+    end;
+    function Boom(): Int; begin raise Exception.Create('first'); end;
+    procedure InRecord;
+    var R: TRec;
+    begin
+      R.A := TBad.Create(); R.A.Tag := 'raise';
+      R.S := IntToStr(5) + 's';
+      R.B := TBad.Create(); R.B.Tag := 'ok';
+      Boom();
+    end;
+    procedure InLocals;
+    var A, B: TBad; S: string;
+    begin
+      A := TBad.Create(); A.Tag := 'raise';
+      S := IntToStr(6) + 's';
+      B := TBad.Create(); B.Tag := 'ok';
+      Boom();
+    end;
+    procedure Caught;
+    var C: TCatcher;
+    begin
+      C := TCatcher.Create();
+      Boom();
+    end;
+    begin
+      try InRecord(); except on E: Exception do WriteLn('rec ', E.Message, ' ', Destroyed); end;
+      Destroyed := 0;
+      try InLocals(); except on E: Exception do WriteLn('loc ', E.Message, ' ', Destroyed); end;
+      Destroyed := 0;
+      try Caught(); except on E: Exception do WriteLn('own ', E.Message, ' ', Destroyed); end;
+    end.
+    ''', 'rec from destructor 2' + #10 + 'loc from destructor 2' + #10 +
+      'dtor inner' + #10 + 'own first 1');
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;

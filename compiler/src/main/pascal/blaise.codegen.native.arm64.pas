@@ -94,6 +94,11 @@ type
     { aggregate types the unwind tables release, each through one hook }
     FUnwAggTypes: TList<TTypeDesc>;
     FUnwAggLbls: TStringList;
+    { EmitReleaseSlotAt zeroes a slot BEFORE its release (the unwind
+      release hooks): a destructor that raises mid-hook starts a walk that
+      may run the hook on the same aggregate again, which must then find
+      the field already nil }
+    FReleaseNilFirst: Boolean;
     { the open unwind range of each '__strtrans_<n>' park slot (-1: none) }
     FUnwTrans: TList<Int>;
     { the open unwind range of each '_pendrel_<n>' slot (-1: none) }
@@ -20666,7 +20671,9 @@ begin
       Self.Emit(#9'mov x29, sp');
       Self.Emit(#9'str x19, [sp, #-16]!');
       Self.Emit(#9'mov x19, x0');
+      FReleaseNilFirst := True;
       Self.EmitManagedReleaseAt(FUnwAggTypes.Get(I), 'x19', True);
+      FReleaseNilFirst := False;
       Self.Emit(#9'ldr x19, [sp], #16');
       Self.Emit(#9'ldp x29, x30, [sp], #16');
       Self.Emit(#9'ret');
@@ -20738,6 +20745,8 @@ procedure TArm64Backend.EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Int;
   const ABaseReg: string; AZero: Boolean);
 begin
   Self.Emit(Format(#9'ldr x0, [%s, #%d]', [ABaseReg, AOffset]));
+  if AZero and FReleaseNilFirst then
+    Self.Emit(Format(#9'str xzr, [%s, #%d]', [ABaseReg, AOffset]));
   if AType.IsString() then
     EmitCallSym('_StringRelease')
   else if AType.Kind = tyDynArray then
@@ -20745,7 +20754,7 @@ begin
   else
     { tyClass and tyInterface release the obj slot via _ClassRelease }
     EmitCallSym('_ClassRelease');
-  if AZero then
+  if AZero and not FReleaseNilFirst then
     Self.Emit(Format(#9'str xzr, [%s, #%d]', [ABaseReg, AOffset]));
 end;
 

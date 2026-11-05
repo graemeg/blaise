@@ -102,6 +102,13 @@ type
     { aggregate types the unwind tables release, each through one hook }
     FUnwAggTypes: TList<TTypeDesc>;
     FUnwAggLbls: TStringList;
+    { EmitReleaseSlotAt zeroes a slot BEFORE its release (the unwind
+      release hooks; see the arm64 backend) }
+    FReleaseNilFirst: Boolean;
+    { EmitDataSection leaves the unwind block to the caller: the program
+      emits code (field-cleanup and env-cleanup functions) after its data
+      section, which the block's text range must cover }
+    FUnwBlockLater: Boolean;
     { open unwind ranges of hoisted owned call arguments, innermost call
       last (EmitArgHoist pushes, EmitHoistEpilogue closes and pops) }
     FUnwHoist: TList<Int>;
@@ -2400,7 +2407,8 @@ var
   InitCD:   TConstDecl;
 begin
   Self.EmitDynElemHooks();
-  Self.EmitUnwindBlock();
+  if not FUnwBlockLater then
+    Self.EmitUnwindBlock();
   if (FDataGlobals.Count = 0) and (FProgExcFrameCount = 0) and
      (not FProgHasJumboSet) and (not FProgHasPendRel) and
      (FProgScratch.Count = 0) then
@@ -4126,6 +4134,13 @@ begin
     Self.Emit(Format(#9'movq %d(%s), %%rdi', [AOffset, ABaseReg]))
   else
     Self.Emit(Format(#9'movq (%s), %%rdi', [ABaseReg]));
+  if AZero and FReleaseNilFirst then
+  begin
+    if AOffset > 0 then
+      Self.Emit(Format(#9'movq $0, %d(%s)', [AOffset, ABaseReg]))
+    else
+      Self.Emit(Format(#9'movq $0, (%s)', [ABaseReg]));
+  end;
   if AType.IsString() then
     Self.Emit(#9'callq _StringRelease')
   else if AType.Kind = tyDynArray then
@@ -4134,7 +4149,7 @@ begin
     { tyClass and tyInterface both release the obj slot via _ClassRelease; an
       interface's itab slot at +8 is static rodata and needs no release. }
     Self.Emit(#9'callq _ClassRelease');
-  if AZero then
+  if AZero and not FReleaseNilFirst then
   begin
     if AOffset > 0 then
       Self.Emit(Format(#9'movq $0, %d(%s)', [AOffset, ABaseReg]))
@@ -27694,6 +27709,7 @@ begin
   Self.Emit('.section .note.GNU-stack,"",@progbits');
 
   { Data section: all registered global integer/float/record slots. }
+  FUnwBlockLater := True;
   Self.EmitDataSection();
   { Class data section: typeinfo, vtables, field-cleanup functions. }
   Self.EmitClassSection(AProg.Block.TypeDecls, OwnGI,
@@ -27702,6 +27718,10 @@ begin
   Self.EmitEnvCleanupDefs(AProg.Block);
   Self.EmitEnvCleanupDefsForInstances(OwnGI,
                                       OwnGRI);
+  { the unwind block closes the code: a walk passes through the cleanup
+    functions above (a destructor raising while the unwinder releases) }
+  FUnwBlockLater := False;
+  Self.EmitUnwindBlock();
   { Interface data: typeinfo tokens, itabs, impllists.  Emitted after the class
     section so the class-name strings and method symbols it references exist. }
   Self.Emit('.data');
@@ -28043,7 +28063,9 @@ begin
       Self.Emit(#9'pushq %rbx');
       Self.Emit(#9'subq $8, %rsp');
       Self.Emit(#9'movq %rdi, %rbx');
+      FReleaseNilFirst := True;
       Self.EmitManagedReleaseAt(FUnwAggTypes.Get(I), '%rbx', True);
+      FReleaseNilFirst := False;
       Self.Emit(#9'addq $8, %rsp');
       Self.Emit(#9'popq %rbx');
       Self.Emit(#9'popq %rbp');

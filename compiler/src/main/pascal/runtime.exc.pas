@@ -241,6 +241,8 @@ var
 
 threadvar
   g_unw_frames: Int;          { Blaise frames the last walk passed }
+  g_unw_obj: Pointer;         { the exception whose walk is running }
+  g_unw_target: Pointer;      { ...and the handler frame it unwinds to }
 
 procedure _UnwindInit(AStart, AStop: Pointer);
 begin
@@ -458,13 +460,29 @@ end;
 procedure _Raise(Obj: Pointer);
 var
   ExcSlot: PPointer;
+  SavedObj, SavedTarget: Pointer;
 begin
   if g_exc_top = nil then
     _libc_abort();
+  { a raise while another exception's walk runs (a destructor the walk
+    released): one that escapes to that walk's handler replaces the
+    in-flight exception (D1), which nothing else will release; one caught
+    nearer (inside the destructor) leaves it in flight }
+  SavedObj := g_unw_obj;
+  SavedTarget := g_unw_target;
+  if (SavedObj <> nil) and (SavedObj <> Obj) and (g_exc_top = SavedTarget) then
+  begin
+    _ClassRelease(SavedObj);
+    SavedObj := nil;
+  end;
+  g_unw_obj := Obj;
+  g_unw_target := g_exc_top;
   { release what the frames between here and the handler own; a
     destructor that runs may raise and catch on its own, so the exception
     state is set afterwards }
   _UnwindCleanup(g_exc_top);
+  g_unw_obj := SavedObj;
+  g_unw_target := SavedTarget;
   g_current_exception := Obj;
   ExcSlot := g_exc_top + OFS_EXCEPTION;
   ExcSlot^ := Obj;
