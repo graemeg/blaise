@@ -9172,6 +9172,7 @@ end;
 procedure TX86_64Backend.EmitExprToEax(AExpr: TASTExpr);
 var
   UnwH: Int;
+  UnwLbl: string;
   BE:  TBinaryExpr;
   FC:  TFuncCallExpr;
   JDest: string;
@@ -10139,10 +10140,19 @@ begin
         Self.Emit(#9'movq %rax, %rdi');
         Self.Emit(#9'callq _StringAddRef');
       end;
+      { the (pinned) string at 8(%rsp) is the frame's while the index is
+        evaluated }
+      UnwH := -1;
+      if FUnw <> nil then
+      begin
+        UnwH := FUnw.OpenRange(UNW_STR, FSPDepth - 8, 0, 0, True, UnwLbl);
+        if UnwLbl <> '' then Self.Emit(UnwLbl + ':');
+      end;
       Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[1]));
       Self.Emit(#9'movq %rax, %rsi');
       Self.Emit(#9'movq (%rsp), %rdi');
       Self.Emit(#9'callq _OrdAt');
+      Self.UnwStrTempClose(UnwH);
       Self.Emit(#9'movq %rax, (%rsp)');    { the byte }
       Self.Emit(#9'movq 8(%rsp), %rdi');
       Self.Emit(#9'callq _StringRelease');
@@ -26239,6 +26249,11 @@ var
   TotalSize: Int;
   ArrLit:    TArrayLiteralExpr;
   UseArray:  Boolean;
+  Fmt:       TASTExpr;
+  FmtH, K:   Int;
+  ElemH:     array of Int;
+  AnyOwned:  Boolean;
+  UnwLbl:    string;
 begin
   { Forwarded 'array of const' param (BUG-047): Format(fmt, ArgsParam) where
     ArgsParam is a plain open-array-of-TVarRec reference, not a bracket
@@ -26283,10 +26298,18 @@ begin
     ArrLit := nil;
     FmtCount := AArgs.Count - 1;
   end;
-  Self.EmitExprToEax(TASTExpr(AArgs.Items[0]));
+  Fmt := TASTExpr(AArgs.Items[0]);
+  Self.EmitExprToEax(Fmt);
   Self.Emit(#9'pushq %rax');
+  { an owned format string is the frame's while the arguments are evaluated
+    and the call runs, then released (it leaked, raise or not) }
+  FmtH := Self.UnwStrTempOpen(Fmt);
   if FmtCount > 0 then
   begin
+    SetLength(ElemH, FmtCount);
+    for I := 0 to FmtCount - 1 do
+      ElemH[I] := -1;
+    AnyOwned := ArcBuiltinStrArgOwnsRef(Fmt);
     TotalSize := ((FmtCount * 16) + 15) and (-16);
     Self.Emit(#9'pushq %rbx');
     Self.Emit(Format(#9'subq $%d, %%rsp', [TotalSize]));
@@ -26319,21 +26342,65 @@ begin
         Self.Emit(Format(#9'movq $1, %d(%%rbx)', [I * 16]));
       Self.EmitExprToEax(Arg);
       Self.Emit(Format(#9'movq %%rax, %d(%%rbx)', [I * 16 + 8]));
+      { an owned string element: the frame's (in the block) until released
+        after the call }
+      if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyString) and
+         ArcBuiltinStrArgOwnsRef(Arg) then
+      begin
+        AnyOwned := True;
+        if FUnw <> nil then
+        begin
+          if ArcExprOwnsRef(Arg) then K := UNW_STR else K := UNW_STR0;
+          ElemH[I] := FUnw.OpenRange(K, FSPDepth - (I * 16 + 8), 0, 0, True,
+            UnwLbl);
+          if UnwLbl <> '' then Self.Emit(UnwLbl + ':');
+        end;
+      end;
     end;
     Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [TotalSize + 8]));
     Self.Emit(#9'movq %rbx, %rsi');
     Self.Emit(Format(#9'movl $%d, %%edx', [FmtCount]));
     Self.Emit(#9'callq _StringFormatN');
+    for I := 0 to FmtCount - 1 do
+      Self.UnwStrTempClose(ElemH[I]);
+    Self.UnwStrTempClose(FmtH);
+    if AnyOwned then
+    begin
+      { dispose the owned transients by shape, the result kept in %rax }
+      Self.Emit(#9'pushq %rax');
+      for I := 0 to FmtCount - 1 do
+      begin
+        if UseArray then
+          Arg := TASTExpr(ArrLit.Elements.Items[I])
+        else
+          Arg := TASTExpr(AArgs.Items[I + 1]);
+        if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyString) and
+           ArcBuiltinStrArgOwnsRef(Arg) then
+          Self.EmitStrDisposeFromSlot(Arg, Format('%d(%%rbx)', [I * 16 + 8]));
+      end;
+      if ArcBuiltinStrArgOwnsRef(Fmt) then
+        Self.EmitStrDisposeFromSlot(Fmt,
+          Format('%d(%%rsp)', [8 + TotalSize + 8]));
+      Self.Emit(#9'popq %rax');
+    end;
     Self.Emit(Format(#9'addq $%d, %%rsp', [TotalSize]));
     Self.Emit(#9'popq %rbx');
     Self.Emit(#9'addq $8, %rsp');
   end
   else
   begin
-    Self.Emit(#9'popq %rdi');
+    Self.Emit(#9'movq (%rsp), %rdi');
     Self.Emit(#9'xorl %esi, %esi');
     Self.Emit(#9'xorl %edx, %edx');
     Self.Emit(#9'callq _StringFormatN');
+    Self.UnwStrTempClose(FmtH);
+    if ArcBuiltinStrArgOwnsRef(Fmt) then
+    begin
+      Self.Emit(#9'pushq %rax');
+      Self.EmitStrDisposeFromSlot(Fmt, '8(%rsp)');
+      Self.Emit(#9'popq %rax');
+    end;
+    Self.Emit(#9'addq $8, %rsp');
   end;
 end;
 

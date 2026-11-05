@@ -107,6 +107,11 @@ type
       field released once, zeroed before its release); a destructor that
       catches its own exception leaves the original in flight }
     procedure TestDebug_RaisingDestructor_DuringUnwind;
+    { owned values a built-in keeps below sp while it evaluates more: the
+      receiver of a field store, OrdAt's string, Format's format and string
+      elements, a two-string built-in's first operand; and Format's owned
+      transients are released without a raise too (x86-64 leaked them) }
+    procedure TestDebug_ParkedOperands_ReleasedOnUnwind;
   end;
 
 implementation
@@ -1410,6 +1415,38 @@ begin
     end.
     ''', 'rec from destructor 2' + #10 + 'loc from destructor 2' + #10 +
       'dtor inner' + #10 + 'own first 1');
+end;
+
+procedure TUnwindE2ETests.TestDebug_ParkedOperands_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwParked;
+    uses SysUtils;
+    type TObj = class N: Int; end;
+    function MkO(): TObj; begin Result := TObj.Create(); end;
+    function MkS(): string; begin Result := IntToStr(7) + 'abc'; end;
+    function MkF(): string; begin Result := '%d-%s' + IntToStr(1); end;
+    function Boom(): Int; begin raise Exception.Create('b'); end;
+    function BoomS(): string; begin raise Exception.Create('s'); end;
+    var X: Int; S: string;
+    procedure A; begin MkO().N := Boom(); end;
+    procedure B; begin X := OrdAt(MkS(), Boom()); end;
+    procedure C; begin S := Format(MkF(), [Boom(), 'x']); end;
+    procedure D; begin S := Format('%s %d', [MkS(), Boom()]); end;
+    procedure E; begin S := ChangeFileExt(MkS(), BoomS()); end;
+    begin
+      try A(); except on X: Exception do WriteLn('a ', X.Message); end;
+      try B(); except on X: Exception do WriteLn('b ', X.Message); end;
+      try C(); except on X: Exception do WriteLn('c ', X.Message); end;
+      try D(); except on X: Exception do WriteLn('d ', X.Message); end;
+      try E(); except on X: Exception do WriteLn('e ', X.Message); end;
+      S := Format(MkF(), [3, MkS()]);
+      X := OrdAt(MkS(), 1);
+      WriteLn(S, ' ', X);
+    end.
+    ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + 'e s' + #10 +
+      '3-7abc1 97');
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;

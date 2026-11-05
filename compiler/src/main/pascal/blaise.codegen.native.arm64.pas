@@ -346,6 +346,8 @@ type
     procedure EmitCtorBodyCall(AMethod: TMethodDecl; AArgs: TObjectList);
     function UnwRecArgOpen(AArg: TASTExpr): Int;
     function UnwClassSlotOpen(const ASlot: string): Int;
+    function UnwShadowOpen(AKind: Int): Int;
+    function UnwStrKindOf(AExpr: TASTExpr): Int;
     function NextIntArgDest(var ANInt, AStackOff: Int): string;
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
@@ -1803,6 +1805,31 @@ begin
   if (FUnw = nil) or not FFrame.TryGetValue(ASlot, Off) then Exit;
   Result := FUnw.OpenRange(UNW_CLASS, -Off, 0, 0, False, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ x0 = an owned value the code keeps below sp (pushed) until its release:
+  a copy goes into an x29-relative operand slot, covered as AKind, so a raise
+  before that release releases it.  The caller drops the slot (FOpndTop)
+  once the range is closed. }
+function TArm64Backend.UnwShadowOpen(AKind: Int): Int;
+var
+  Slot, Lbl: string;
+  Off: Int;
+begin
+  Result := -1;
+  Slot := OpndSlot(FOpndTop);
+  FOpndTop := FOpndTop + 1;
+  EmitStoreSlot('x0', Slot);
+  if (FUnw = nil) or not FFrame.TryGetValue(Slot, Off) then Exit;
+  Result := FUnw.OpenRange(AKind, -Off, 0, 0, False, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ The release kind of an owned string transient: an rc = 1 result, or an
+  rc = 0 one (concat, built-in) that takes addref + release. }
+function TArm64Backend.UnwStrKindOf(AExpr: TASTExpr): Int;
+begin
+  if ArcExprOwnsRef(AExpr) then Result := UNW_STR else Result := UNW_STR0;
 end;
 
 function TArm64Backend.StrTransSlot(AIdx: Int): string;
@@ -4630,6 +4657,7 @@ var
   RelStr: Boolean;
   CVStore: TAssignment;
   CVElem: TStaticSubscriptAssign;
+  ShadowTop, ShadowH: Int;
 begin
   RelStr := False;
   if AStmt.IsClassVarWrite and AStmt.IsElemWrite then
@@ -4781,8 +4809,13 @@ begin
     if ArcExprOwnsRef(AStmt.ObjExpr) then
     begin
       EmitPushX0();                 { [obj] — the +1 copy, released below }
+      { the value's evaluation may raise }
+      ShadowTop := FOpndTop;
+      ShadowH := UnwShadowOpen(UNW_CLASS);
       EmitPushX0();                 { [obj][obj] — consumed by the store }
       EmitInstanceFieldStoreStacked(AStmt.FieldInfo, AStmt.Expr);
+      UnwStrOpndClose(ShadowH);
+      FOpndTop := ShadowTop;
       EmitPopTo('x0');              { the retained copy }
       EmitCallSym('_ClassRelease');
       Exit;
@@ -5582,6 +5615,7 @@ var
   Idx: Int;
   EmptyArgs: TObjectList;
   Owned: Boolean;
+  ShadowTop, ShadowH: Int;
 begin
   { ClassCreate carries the resolved CONSTRUCTOR in ResolvedDecl, so it must
     be claimed before any arm that lowers a resolved call as a plain call }
@@ -6565,16 +6599,22 @@ begin
         pinned when rc=0, and disposed once the byte is read (P3-2) }
       Owned := ArcBuiltinStrArgOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      ShadowH := -1;
+      ShadowTop := FOpndTop;
       if Owned then
       begin
         Self.EmitOwnedStrTransientPin(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
         EmitPushX0();                   { parked for the release }
+        { pinned: a plain release balances it }
+        ShadowH := UnwShadowOpen(UNW_STR);
       end;
       EmitPushX0();
       EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
       Self.Emit(#9'mov x1, x0');
       EmitPopTo('x0');
       EmitCallSym('_OrdAt');
+      UnwStrOpndClose(ShadowH);
+      FOpndTop := ShadowTop;
       if Owned then
       begin
         Self.Emit(#9'ldr x1, [sp]');
@@ -12796,6 +12836,8 @@ var
   Arg: TASTExpr;
   Elems: TObjectList;
   IsIntArg: Boolean;
+  ShadowTop: Int;
+  ShadowHs: array of Int;
 begin
   { Format(Fmt, [a, b, ...]) → _StringFormatN(fmt, block, count).
     Block layout mirrors x86-64: 16-byte entries, tag at +0 (0 = int,
@@ -12845,12 +12887,22 @@ begin
   FmtCount := Elems.Count;
   Self.EmitExprToX0(TASTExpr(AArgs.Items[0]));
   EmitPushX0();                              { [fmt] — parked to the end }
+  { the owned transients below sp are shadowed in operand slots, the
+    frame's until their disposal (an argument may raise) }
+  ShadowTop := FOpndTop;
+  SetLength(ShadowHs, FmtCount + 1);
+  for I := 0 to FmtCount do
+    ShadowHs[I] := -1;
+  if ArcBuiltinStrArgOwnsRef(TASTExpr(AArgs.Items[0])) then
+    ShadowHs[FmtCount] := UnwShadowOpen(UnwStrKindOf(TASTExpr(AArgs.Items[0])));
   if FmtCount = 0 then
   begin
     Self.Emit(#9'ldr x0, [sp]');
     Self.Emit(#9'movz x1, #0');
     Self.Emit(#9'movz x2, #0');
     EmitCallSym('_StringFormatN');
+    UnwStrOpndClose(ShadowHs[0]);
+    FOpndTop := ShadowTop;
     if ArcBuiltinStrArgOwnsRef(TASTExpr(AArgs.Items[0])) then
     begin
       EmitPushX0();                          { [fmt][result] }
@@ -12883,6 +12935,9 @@ begin
                                  tyEnum]);
     Self.EmitExprToX0(Arg);
     Self.Emit(Format(#9'str x0, [sp, #%d]', [I * 16 + 8]));
+    if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyString) and
+       ArcBuiltinStrArgOwnsRef(Arg) then
+      ShadowHs[I] := UnwShadowOpen(UnwStrKindOf(Arg));
     if IsIntArg then
       Self.Emit(#9'movz x9, #0')
     else
@@ -12893,6 +12948,9 @@ begin
   Self.Emit(#9'mov x1, sp');
   EmitIntLiteral('x2', FmtCount);
   EmitCallSym('_StringFormatN');
+  for I := 0 to FmtCount do
+    UnwStrOpndClose(ShadowHs[I]);
+  FOpndTop := ShadowTop;
   { transient disposal by shape: the block still holds every element
     pointer and the fmt sits above it — park the result, sweep, restore }
   EmitPushX0();                              { [fmt][block][result] }
@@ -12921,17 +12979,26 @@ end;
 
 procedure TArm64Backend.EmitBuiltinStrCall2(AArg0, AArg1: TASTExpr;
   const ASym: string);
+var
+  ShadowTop, ShadowH: Int;
 begin
   { two-arg twin: BOTH operands stay parked across the call so either
     transient can be disposed by shape afterwards (the concat emitter's
     slot scheme) }
   Self.EmitExprToX0(AArg0);
   EmitPushX0();                           { [a0] }
+  { an owned first operand is the frame's while the second is evaluated }
+  ShadowTop := FOpndTop;
+  ShadowH := -1;
+  if ArcBuiltinStrArgOwnsRef(AArg0) then
+    ShadowH := UnwShadowOpen(UnwStrKindOf(AArg0));
   Self.EmitExprToX0(AArg1);
   EmitPushX0();                           { [a0][a1] }
   Self.Emit(#9'ldr x1, [sp]');
   Self.Emit(#9'ldr x0, [sp, #16]');
   EmitCallSym(ASym);
+  UnwStrOpndClose(ShadowH);
+  FOpndTop := ShadowTop;
   if ArcBuiltinStrArgOwnsRef(AArg0) or ArcBuiltinStrArgOwnsRef(AArg1) then
   begin
     EmitPushX0();                         { [a0][a1][result] }
