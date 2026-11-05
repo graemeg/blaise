@@ -1326,6 +1326,8 @@ type
     { The per-function emission tail (symbol, frame, prologue, body,
       epilogue) — extracted from EmitFunctionDef so the two-pass driver
       can run it twice. }
+    function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
+    procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
     procedure EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
     { Prologue init for a promoted param that arrived on the STACK (7th+
       integer arg): load the caller-pushed slot into the register.  No-op
@@ -26304,6 +26306,187 @@ begin
   FHandlerVars.Delete(FHandlerVars.Count - 1);
 end;
 
+const
+  { TUnwSlot.AggForm on x86-64: which release walk an aggregate takes }
+  AGG_REC_FIELDS = 0;     { EmitRecordFieldReleases }
+  AGG_STATIC_ELEMS = 1;   { EmitStaticArrayReleaseElems }
+  AGG_MANAGED_AT = 2;     { EmitManagedReleaseAt }
+
+{ The managed values this routine's frame owns, in epilogue release order:
+  the closure environment (a thunk borrows its own), the block environments,
+  the managed locals in declaration order (not Result, which the caller
+  owns; not [Unretained]), then the by-value managed parameters, balancing
+  the prologue's retain (not var, out, const or open-array).  Locals and
+  globals dispatch on the shared ArcScopeExitReleaseKind classifier, as
+  EmitGlobalReleases does.  The epilogue releases exactly this list. }
+function TX86_64Backend.FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
+var
+  I, J: Int;
+  VD: TVarDecl;
+  P: TMethodParam;
+  S: TUnwSlot;
+  K: TUnwSlotKind;
+begin
+  Result := TList<TUnwSlot>.Create();
+  if (ADecl.EnvCaptured <> nil) and (not ADecl.IsAnonThunk) then
+    Result.Add(TUnwSlot.Create('__envp', uskClass));
+  if ADecl.BlockEnvTypes <> nil then
+    for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
+      Result.Add(TUnwSlot.Create('__envp_b' + IntToStr(I), uskClass));
+  if ADecl.Body <> nil then
+    for I := 0 to ADecl.Body.Decls.Count - 1 do
+    begin
+      VD := TVarDecl(ADecl.Body.Decls.Items[I]);
+      if VD.ResolvedType = nil then Continue;
+      if VD.IsUnretained then Continue;
+      for J := 0 to VD.Names.Count - 1 do
+        case ArcScopeExitReleaseKind(VD.ResolvedType) of
+          arkString:
+            Result.Add(TUnwSlot.Create(VD.Names.Strings[J], uskStr));
+          arkClass:
+            if VD.IsWeak then
+              Result.Add(TUnwSlot.Create(VD.Names.Strings[J], uskWeak))
+            else
+              Result.Add(TUnwSlot.Create(VD.Names.Strings[J], uskClass));
+          arkIntf:
+          begin
+            { the obj half of the fat pointer; the itab is static rodata }
+            if VD.IsWeak then K := uskWeak else K := uskIntf;
+            S := TUnwSlot.Create(VD.Names.Strings[J], K);
+            S.IntfHalf := True;
+            Result.Add(S);
+          end;
+          arkDynArray:
+            Result.Add(TUnwSlot.Create(VD.Names.Strings[J], uskDyn));
+          arkRefEnv:
+            Result.Add(TUnwSlot.Create(VD.Names.Strings[J], uskRefEnv));
+          arkAggregate:
+          begin
+            S := TUnwSlot.Create(VD.Names.Strings[J], uskAgg);
+            S.AggType := VD.ResolvedType;
+            if VD.ResolvedType.Kind = tyRecord then
+              S.AggForm := AGG_REC_FIELDS
+            else
+              S.AggForm := AGG_STATIC_ELEMS;
+            Result.Add(S);
+          end;
+          arkNone:
+            begin
+              { nothing to release }
+            end;
+        end;
+    end;
+  for I := 0 to ADecl.Params.Count - 1 do
+  begin
+    P := TMethodParam(ADecl.Params.Items[I]);
+    if P.IsVarParam or P.IsOpenArray or P.IsConstParam then Continue;
+    if P.ResolvedType = nil then Continue;
+    case P.ResolvedType.Kind of
+      tyString: Result.Add(TUnwSlot.Create(P.ParamName, uskStr));
+      tyClass: Result.Add(TUnwSlot.Create(P.ParamName, uskClass));
+      tyInterface:
+      begin
+        S := TUnwSlot.Create(P.ParamName, uskIntf);
+        S.IntfHalf := True;
+        Result.Add(S);
+      end;
+      { balances the entry retain (BUG-20260721-byval-dynarray-param-no-arc) }
+      tyDynArray: Result.Add(TUnwSlot.Create(P.ParamName, uskDyn));
+      tyRecord:
+      begin
+        { the parameter slot holds the address of the frame's copy }
+        S := TUnwSlot.Create(P.ParamName, uskAgg);
+        S.Indirect := True;
+        S.AggType := P.ResolvedType;
+        S.AggForm := AGG_REC_FIELDS;
+        Result.Add(S);
+      end;
+      tyStaticArray:
+        if ArcTypeHasManagedContent(P.ResolvedType) then
+        begin
+          S := TUnwSlot.Create(P.ParamName, uskAgg);
+          S.Indirect := True;
+          S.AggType := P.ResolvedType;
+          S.AggForm := AGG_MANAGED_AT;
+          Result.Add(S);
+        end;
+    else
+      { other kinds own nothing }
+    end;
+  end;
+end;
+
+{ Scope-exit release of the frame's managed values (Exit statements land
+  here too).  Addressing is VarOperand (frame offsets); the sibling
+  EmitGlobalReleases walk does the same job for program-level globals. }
+procedure TX86_64Backend.EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
+var
+  I: Int;
+  S: TUnwSlot;
+  Opnd: string;
+begin
+  for I := 0 to ASlots.Count - 1 do
+  begin
+    S := ASlots.Get(I);
+    if S.IntfHalf then
+      Opnd := Self.IntfObjOperand(S.Name, False)
+    else
+      Opnd := Self.VarOperand(S.Name);
+    case S.Kind of
+      uskStr:
+      begin
+        Self.Emit(Format(#9'movq %s, %%rdi', [Opnd]));
+        Self.Emit(#9'callq _StringRelease');
+      end;
+      uskClass, uskIntf:
+      begin
+        Self.Emit(Format(#9'movq %s, %%rdi', [Opnd]));
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+      uskWeak:
+      begin
+        Self.Emit(Format(#9'leaq %s, %%rdi', [Opnd]));
+        Self.Emit(#9'callq _WeakClear');
+      end;
+      uskDyn:
+      begin
+        Self.Emit(Format(#9'movq %s, %%rdi', [Opnd]));
+        Self.Emit(#9'callq _DynArrayRelease');
+      end;
+      uskRefEnv:
+      begin
+        { the Data half strong-references the env record (nil for a
+          capture-free closure; the release is nil-safe) }
+        Self.Emit(Format(#9'leaq %s, %%rcx', [Opnd]));
+        Self.Emit(#9'movq 8(%rcx), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+      uskAgg:
+      begin
+        { the walk keeps its base in callee-saved %rbx across the release
+          calls; a static array of managed elements releases each element
+          (BUG-016 stage 2), and a manually freed element is nil, so the
+          walk is a no-op on it }
+        Self.Emit(#9'pushq %rbx');
+        if S.Indirect then
+          Self.Emit(Format(#9'movq %s, %%rbx', [Opnd]))
+        else
+          Self.Emit(Format(#9'leaq %s, %%rbx', [Opnd]));
+        case S.AggForm of
+          AGG_REC_FIELDS:
+            Self.EmitRecordFieldReleases(TRecordTypeDesc(S.AggType), '%rbx');
+          AGG_STATIC_ELEMS:
+            Self.EmitStaticArrayReleaseElems(
+              TStaticArrayTypeDesc(S.AggType), '%rbx', False);
+        else
+          Self.EmitManagedReleaseAt(S.AggType, '%rbx', False);
+        end;
+        Self.Emit(#9'popq %rbx');
+      end;
+    end;
+  end;
+end;
+
 procedure TX86_64Backend.EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
 var
   I, J:    Int;
@@ -26843,182 +27026,7 @@ begin
     params/locals.  For sret functions the caller's buffer already holds the
     result, so no load is needed. }
   Self.Emit(FExitLabel + ':');
-  { Anonymous-method env: the enclosing frame drops its strong reference on
-    exit; the env lives on iff an escaped closure still references it.  A
-    thunk BORROWS its env from the closure fat value — no release. }
-  if (ADecl.EnvCaptured <> nil) and (not ADecl.IsAnonThunk) then
-  begin
-    Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand('__envp')]));
-    Self.Emit(#9'callq _ClassRelease');
-  end;
-  if ADecl.BlockEnvTypes <> nil then
-    for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
-    begin
-      Self.Emit(Format(#9'movq %s, %%rdi',
-        [Self.VarOperand('__envp_b' + IntToStr(I))]));
-      Self.Emit(#9'callq _ClassRelease');
-    end;
-  { Release ARC-managed locals (not params, not Result).
-    Result is returned to the caller who owns it.
-
-    Addressing is VarOperand (frame offsets); the sibling EmitGlobalReleases
-    walk does the same job for program-level globals via <Name>(%rip).  Both
-    dispatch on the shared ArcScopeExitReleaseKind classifier so they cannot
-    drift apart on which type kinds they cover. }
-  if ADecl.Body <> nil then
-  begin
-    for I := 0 to ADecl.Body.Decls.Count - 1 do
-    begin
-      VD := TVarDecl(ADecl.Body.Decls.Items[I]);
-      if VD.ResolvedType = nil then Continue;
-      { an [Unretained] local holds no reference }
-      if VD.IsUnretained then Continue;
-      AKind := ArcScopeExitReleaseKind(VD.ResolvedType);
-      case AKind of
-        { String locals: release the string. }
-        arkString:
-          for J := 0 to VD.Names.Count - 1 do
-          begin
-            Self.Emit(Format(#9'movq %s, %%rdi',
-              [Self.VarOperand(VD.Names.Strings[J])]));
-            Self.Emit(#9'callq _StringRelease');
-          end;
-        { Class locals: release the object reference. }
-        arkClass:
-          for J := 0 to VD.Names.Count - 1 do
-          begin
-            if VD.IsWeak then
-            begin
-              Self.Emit(Format(#9'leaq %s, %%rdi',
-                [Self.VarOperand(VD.Names.Strings[J])]));
-              Self.Emit(#9'callq _WeakClear');
-            end
-            else
-            begin
-              Self.Emit(Format(#9'movq %s, %%rdi',
-                [Self.VarOperand(VD.Names.Strings[J])]));
-              Self.Emit(#9'callq _ClassRelease');
-            end;
-          end;
-        { Interface locals: release the obj half of the fat pointer; the itab
-          is static rodata and is not refcounted. }
-        arkIntf:
-          for J := 0 to VD.Names.Count - 1 do
-          begin
-            if VD.IsWeak then
-            begin
-              Self.Emit(Format(#9'leaq %s, %%rdi',
-                [Self.IntfObjOperand(VD.Names.Strings[J], False)]));
-              Self.Emit(#9'callq _WeakClear');
-            end
-            else
-            begin
-              Self.Emit(Format(#9'movq %s, %%rdi',
-                [Self.IntfObjOperand(VD.Names.Strings[J], False)]));
-              Self.Emit(#9'callq _ClassRelease');
-            end;
-          end;
-        { Dyn-array locals: release the data buffer; balances the
-          first-assignment retain (a dyn-array var assignment retains the new
-          buffer). }
-        arkDynArray:
-          for J := 0 to VD.Names.Count - 1 do
-          begin
-            Self.Emit(Format(#9'movq %s, %%rdi',
-              [Self.VarOperand(VD.Names.Strings[J])]));
-            Self.Emit(#9'callq _DynArrayRelease');
-          end;
-        { 'reference to' locals: the Data half strong-references an ARC env
-          record (nil for capture-free closures — release is a nil-safe
-          no-op). }
-        arkRefEnv:
-          for J := 0 to VD.Names.Count - 1 do
-          begin
-            Self.Emit(Format(#9'leaq %s, %%rcx',
-              [Self.VarOperand(VD.Names.Strings[J])]));
-            Self.Emit(#9'movq 8(%rcx), %rdi');
-            Self.Emit(#9'callq _ClassRelease');
-          end;
-        { Record locals with managed fields: release each ARC-managed field at
-          scope exit.  The record block lives in the frame; its address goes
-          into %rbx (callee-saved) so it survives the per-field release calls.
-
-          Static-array-of-managed locals (class, string, interface, dyn-array,
-          or record with managed content): release each element at scope exit
-          (BUG-016 stage 2 — previously interface elements only).  The inline
-          storage base goes into %rbx (callee-saved).
-
-          Safe against manual element lifetimes (e.g. the ELF writer's
-          `RelaBuf: array[0..MaxSecOrder] of TByteBuf`, MaxSecOrder = 6):
-          A[I].Free() nils the element slot, making this walk a no-op on
-          manually-freed elements, and the element store's retain is
-          conditional on RHS ownership (stage 1), so each live slot holds
-          exactly one reference for this walk to balance. }
-        arkAggregate:
-          for J := 0 to VD.Names.Count - 1 do
-          begin
-            Self.Emit(#9'pushq %rbx');
-            Self.Emit(Format(#9'leaq %s, %%rbx',
-              [Self.VarOperand(VD.Names.Strings[J])]));
-            if VD.ResolvedType.Kind = tyRecord then
-              Self.EmitRecordFieldReleases(
-                TRecordTypeDesc(VD.ResolvedType), '%rbx')
-            else
-              Self.EmitStaticArrayReleaseElems(
-                TStaticArrayTypeDesc(VD.ResolvedType), '%rbx', False);
-            Self.Emit(#9'popq %rbx');
-          end;
-      end;
-    end;
-  end;
-  { ARC: release string/class/interface value params on exit — matches the
-    entry retain pass.  Skip var, out, open-array and const params (const
-    params are caller-protected; see the entry pass comment). }
-  for I := 0 to ADecl.Params.Count - 1 do
-  begin
-    P := TMethodParam(ADecl.Params.Items[I]);
-    if P.IsVarParam or P.IsOpenArray or P.IsConstParam then Continue;
-    if P.ResolvedType = nil then Continue;
-    if P.ResolvedType.Kind = tyString then
-    begin
-      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(P.ParamName)]));
-      Self.Emit(#9'callq _StringRelease');
-    end
-    else if P.ResolvedType.Kind = tyClass then
-    begin
-      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(P.ParamName)]));
-      Self.Emit(#9'callq _ClassRelease');
-    end
-    else if P.ResolvedType.Kind = tyInterface then
-    begin
-      Self.Emit(Format(#9'movq %s, %%rdi',
-        [Self.IntfObjOperand(P.ParamName, False)]));
-      Self.Emit(#9'callq _ClassRelease');
-    end
-    else if P.ResolvedType.Kind = tyDynArray then
-    begin
-      { Balances the entry retain
-        (BUG-20260721-byval-dynarray-param-no-arc). }
-      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(P.ParamName)]));
-      Self.Emit(#9'callq _DynArrayRelease');
-    end
-    else if P.ResolvedType.Kind = tyRecord then
-    begin
-      Self.Emit(#9'pushq %rbx');
-      Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(P.ParamName)]));
-      Self.EmitRecordFieldReleases(TRecordTypeDesc(P.ResolvedType), '%rbx');
-      Self.Emit(#9'popq %rbx');
-    end
-    else if (P.ResolvedType.Kind = tyStaticArray) and
-            ArcTypeHasManagedContent(P.ResolvedType) then
-    begin
-      { balances the entry retain of each managed element }
-      Self.Emit(#9'pushq %rbx');
-      Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(P.ParamName)]));
-      Self.EmitManagedReleaseAt(P.ResolvedType, '%rbx', False);
-      Self.Emit(#9'popq %rbx');
-    end;
-  end;
+  Self.EmitFrameSlotReleases(Self.FrameSlotInventory(ADecl));
   { Now that every ARC release call is done (none can clobber the result), load
     Result into %rax (int) or %xmm0 (float).  sret functions return via the
     caller's buffer and need no load.  Reg-return records load into

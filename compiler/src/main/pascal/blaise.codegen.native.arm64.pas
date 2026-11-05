@@ -556,6 +556,8 @@ type
     procedure EmitBuiltinStrCall2(AArg0, AArg1: TASTExpr;
       const ASym: string);
     procedure EmitExit(AStmt: TExitStmt);
+    function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
+    procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
     procedure EmitFunctionDef(ADecl: TMethodDecl;
       AWeakBind: Boolean = False);
     { Each generic function instance's body, reporting its allocations
@@ -14694,6 +14696,102 @@ begin
   FLeakSiteUnit := '';
 end;
 
+{ The managed values this routine's frame owns, in epilogue release order:
+  block environments, the closure environment (a thunk borrows its own),
+  then the string, class, [Weak], interface, dynamic-array, closure and
+  record locals RegisterFrameSlots collected (by-value managed parameters
+  among them).  The epilogue releases exactly this list. }
+function TArm64Backend.FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
+var
+  I: Int;
+  S: TUnwSlot;
+begin
+  Result := TList<TUnwSlot>.Create();
+  { each block env's frame reference (the last execution's env lives on only
+    if an escaped closure holds it) }
+  if ADecl.BlockEnvTypes <> nil then
+    for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
+      Result.Add(TUnwSlot.Create('__envp_b' + IntToStr(I), uskClass));
+  { the enclosing frame's strong reference to the closure env; the env lives
+    on iff an escaped closure still holds it.  A thunk BORROWS its env from
+    the fat value it was called through. }
+  if (ADecl.EnvCaptured <> nil) and not ADecl.IsAnonThunk then
+    Result.Add(TUnwSlot.Create('__envp', uskClass));
+  for I := 0 to FStrLocals.Count - 1 do
+    Result.Add(TUnwSlot.Create(FStrLocals.Strings[I], uskStr));
+  { borrowed Self is NOT in FObjLocals }
+  for I := 0 to FObjLocals.Count - 1 do
+    Result.Add(TUnwSlot.Create(FObjLocals.Strings[I], uskClass));
+  for I := 0 to FWeakLocals.Count - 1 do
+    Result.Add(TUnwSlot.Create(FWeakLocals.Strings[I], uskWeak));
+  { the obj half of an interface local is its first word }
+  for I := 0 to FIntfLocals.Count - 1 do
+    Result.Add(TUnwSlot.Create(FIntfLocals.Strings[I], uskIntf));
+  for I := 0 to FDynLocals.Count - 1 do
+    Result.Add(TUnwSlot.Create(FDynLocals.Strings[I], uskDyn));
+  for I := 0 to FRefLocals.Count - 1 do
+    Result.Add(TUnwSlot.Create(FRefLocals.Strings[I], uskRefEnv));
+  for I := 0 to FRecLocals.Count - 1 do
+    if AggHasManaged(TTypeDesc(FRecLocals.Objects[I])) then
+    begin
+      S := TUnwSlot.Create(FRecLocals.Strings[I], uskAgg);
+      S.AggType := TTypeDesc(FRecLocals.Objects[I]);
+      Result.Add(S);
+    end;
+end;
+
+{ Scope-exit release of the frame's managed values (Exit statements land
+  here too). }
+procedure TArm64Backend.EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
+var
+  I: Int;
+  S: TUnwSlot;
+begin
+  for I := 0 to ASlots.Count - 1 do
+  begin
+    S := ASlots.Get(I);
+    case S.Kind of
+      uskStr:
+      begin
+        EmitLoadSlot('x0', S.Name);
+        EmitCallSym('_StringRelease');
+      end;
+      uskClass, uskIntf:
+      begin
+        EmitLoadSlot('x0', S.Name);
+        EmitCallSym('_ClassRelease');
+      end;
+      uskWeak:
+      begin
+        { deregister the slot from the weak table }
+        EmitSlotAddr('x0', S.Name);
+        EmitCallSym('_WeakClear');
+      end;
+      uskDyn:
+      begin
+        EmitLoadSlot('x0', S.Name);
+        EmitCallSym('_DynArrayRelease');
+      end;
+      uskRefEnv:
+      begin
+        { the Env pointer at +8; nil-safe, so a capture-free closure is a no-op }
+        EmitSlotAddr('x0', S.Name);
+        Self.Emit(#9'ldr x0, [x0, #8]');
+        EmitCallSym('_ClassRelease');
+      end;
+      uskAgg:
+      begin
+        { the field walk needs a callee-saved base register across its
+          release calls }
+        Self.Emit(#9'str x19, [sp, #-16]!');
+        EmitSlotAddr('x19', S.Name);
+        Self.EmitManagedReleaseAt(S.AggType, 'x19', False);
+        Self.Emit(#9'ldr x19, [sp], #16');
+      end;
+    end;
+  end;
+end;
+
 procedure TArm64Backend.EmitFunctionDef(ADecl: TMethodDecl;
   AWeakBind: Boolean);
 var
@@ -15367,71 +15465,7 @@ begin
   EmitStmtList(ADecl.Body.Stmts);
 
   Self.Emit(FExitLabel + ':');
-  { drop each block env's frame reference (the last execution's env lives
-    on only if an escaped closure holds it) }
-  if ADecl.BlockEnvTypes <> nil then
-    for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
-    begin
-      EmitLoadSlot('x0', '__envp_b' + IntToStr(I));
-      EmitCallSym('_ClassRelease');
-    end;
-  { The enclosing frame drops its strong reference to the closure env; the
-    env lives on iff an escaped closure still holds it.  A thunk BORROWS its
-    env from the fat value it was called through -- no release. }
-  if (ADecl.EnvCaptured <> nil) and not ADecl.IsAnonThunk then
-  begin
-    EmitLoadSlot('x0', '__envp');
-    EmitCallSym('_ClassRelease');
-  end;
-  { release string locals at scope exit (Exit statements land here too) }
-  for I := 0 to FStrLocals.Count - 1 do
-  begin
-    EmitLoadSlot('x0', FStrLocals.Strings[I]);
-    EmitCallSym('_StringRelease');
-  end;
-  { release class-typed locals (borrowed Self is NOT in FObjLocals) }
-  for I := 0 to FObjLocals.Count - 1 do
-  begin
-    EmitLoadSlot('x0', FObjLocals.Strings[I]);
-    EmitCallSym('_ClassRelease');
-  end;
-  { deregister [Weak] locals (their obj slot) from the weak table }
-  for I := 0 to FWeakLocals.Count - 1 do
-  begin
-    EmitSlotAddr('x0', FWeakLocals.Strings[I]);
-    EmitCallSym('_WeakClear');
-  end;
-  { release the obj half of interface locals }
-  for I := 0 to FIntfLocals.Count - 1 do
-  begin
-    EmitLoadSlot('x0', FIntfLocals.Strings[I]);
-    EmitCallSym('_ClassRelease');
-  end;
-  for I := 0 to FDynLocals.Count - 1 do
-  begin
-    EmitLoadSlot('x0', FDynLocals.Strings[I]);
-    EmitCallSym('_DynArrayRelease');
-  end;
-  { release the Env half of 'reference to' closure locals (arkRefEnv): load the
-    slot address, read the Env pointer at +8, _ClassRelease it (nil-safe, so a
-    capture-free closure is a no-op). }
-  for I := 0 to FRefLocals.Count - 1 do
-  begin
-    EmitSlotAddr('x0', FRefLocals.Strings[I]);
-    Self.Emit(#9'ldr x0, [x0, #8]');
-    EmitCallSym('_ClassRelease');
-  end;
-  { release the managed fields of record locals — the base-class walk needs
-    a callee-saved base register across its release calls }
-  for I := 0 to FRecLocals.Count - 1 do
-    if AggHasManaged(TTypeDesc(FRecLocals.Objects[I])) then
-    begin
-      Self.Emit(#9'str x19, [sp, #-16]!');
-      EmitSlotAddr('x19', FRecLocals.Strings[I]);
-      Self.EmitManagedReleaseAt(TTypeDesc(FRecLocals.Objects[I]),
-        'x19', False);
-      Self.Emit(#9'ldr x19, [sp], #16');
-    end;
+  EmitFrameSlotReleases(FrameSlotInventory(ADecl));
   if FIsFunction and (RecShape >= 0) and
      (ADecl.ResolvedReturnType.Kind = tyRecord) then
   begin

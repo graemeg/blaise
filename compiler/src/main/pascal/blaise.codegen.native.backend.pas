@@ -50,6 +50,31 @@ const
 type
   ENativeCodeGenError = class(Exception);
 
+  { One managed value a routine's frame owns and releases at scope exit: the
+    single inventory both the epilogue and the exception unwind table are
+    built from, so the two cannot disagree about what a frame owns
+    (docs/exception-unwind-cleanup-design.adoc, "Slot inventory").  Each
+    backend fills the list in its own epilogue order. }
+  TUnwSlotKind = (
+    uskStr,      { string: _StringRelease }
+    uskClass,    { class reference, closure or block environment: _ClassRelease }
+    uskIntf,     { interface: _ClassRelease of the obj half }
+    uskDyn,      { dynamic array: _DynArrayRelease }
+    uskRefEnv,   { 'reference to' closure: _ClassRelease of the Env at +8 }
+    uskWeak,     { [Weak] reference: _WeakClear of the slot }
+    uskAgg);     { record with managed fields / static array of managed }
+
+  TUnwSlot = class
+  public
+    Name: string;           { frame slot (local, parameter or synthesised) }
+    Kind: TUnwSlotKind;
+    Indirect: Boolean;      { the slot holds the value's address }
+    IntfHalf: Boolean;      { x86-64: addressed as an interface's obj half }
+    AggType: TTypeDesc;     { uskAgg: the aggregate's type }
+    AggForm: Int;           { uskAgg: which release walk (backend-defined) }
+    constructor Create(const AName: string; AKind: TUnwSlotKind);
+  end;
+
   TNativeBackend = class
   protected
     FTarget:    TTargetDesc;
@@ -274,6 +299,13 @@ type
   TNativeBackendClass = class of TNativeBackend;
 
 implementation
+
+constructor TUnwSlot.Create(const AName: string; AKind: TUnwSlotKind);
+begin
+  inherited Create();
+  Name := AName;
+  Kind := AKind;
+end;
 
 procedure TNativeBackend.SetDebugFacts(AFacts: TDbgFacts);
 begin
