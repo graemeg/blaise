@@ -951,7 +951,8 @@ note, and this document.
   is lowered into a hidden routine (`__unitinit_<unit>`), which gives it a
   frame (a try/except there did not compile on arm64) and unwind tables.
   x86-64 main's `.bss` deferred-release slots are described by address
-  (`UNW_F_ABS`: the location indexes the block's pointer table).
+  (`UNW_F_ABS`: the location indexes the block's pointer table).  Later the same day: a closure callee copy's Env (`MkFn()(Boom())`),
+  `Copy`/`PosEx` string operands, a dynamic array literal's new array.
 
 | Destructors raising
 | A destructor that raises while the walk releases: on x86-64 the program's
@@ -976,11 +977,19 @@ the D5 budget.
 
 Each of these is a leak when an exception passes, never a double release:
 
+No case is known to leak.  Probes of the expression shapes that hold an
+owned value across a call that can raise (call results as receivers,
+indices and operands; built-in arguments; closure callees; array
+literals; `case`, `for..in` and conditions over call results; the main
+program and unit sections) found the leaks fixed on 2026-11-05 and no
+others.  Two families are covered only where a probe reached them:
+
 * x86-64 `main`'s other `.bss` scratches (those not behind a deferred
   release).  Unit sections without a try/except need nothing: a raise there
   is never caught.
-* Other arm64 operand temporaries still pushed below `sp`, outside the
-  string operators, call arguments, constructors and receivers.
+* arm64 operands pushed below `sp` by a lowering not yet probed.  A new
+  owned operand kept below `sp` across a call needs an `__opnd` shadow
+  (`UnwShadowOpen`).
 
 [[risks]]
 == Risks
