@@ -60,6 +60,9 @@ const
   UNW_F_SPANS_TRY = 2;         { open across a try: not released in the frame
                                  whose handler catches (that statement is
                                  still running and releases it) }
+  UNW_F_ABS = 4;               { a range at an absolute address: its location
+                                 is the index of that address in the block's
+                                 pointer table (x86-64 main's .bss slots) }
 
 var
   { --no-unwind-tables: a diagnostic that suppresses every unwind label,
@@ -351,7 +354,7 @@ begin
   if (AHandle < 0) or (FCur = nil) then Exit;
   R := FCur.Ranges.Get(AHandle);
   R.Kind := AKind;
-  R.Flags := (R.Flags and UNW_F_SPANS_TRY) or AFlags;
+  R.Flags := (R.Flags and (UNW_F_SPANS_TRY or UNW_F_ABS)) or AFlags;
   R.Aux := AAux;
 end;
 

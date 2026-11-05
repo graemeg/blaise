@@ -26641,11 +26641,17 @@ var
   Off, H: Int;
   Lbl: string;
 begin
-  { a deferred release armed in a frame '_pendrel_<AIdx>' (main and unit
-    initialisation keep theirs in .bss and are not described) }
-  if (FUnw = nil) or (FFrame = nil) then Exit;
-  if not FFrame.TryGetValue(Format('_pendrel_%d', [AIdx]), Off) then Exit;
-  H := FUnw.OpenRange(0, Off, 0, 0, False, Lbl);
+  { a deferred release armed in '_pendrel_<AIdx>': a frame slot, or in main
+    (frameless) a .bss slot, described by its address (UNW_F_ABS) }
+  if FUnw = nil then Exit;
+  if FFrame = nil then
+    H := FUnw.OpenRange(0, FUnw.AddPtr(Format('_pendrel_%d', [AIdx])),
+      UNW_F_ABS, 0, False, Lbl)
+  else
+  begin
+    if not FFrame.TryGetValue(Format('_pendrel_%d', [AIdx]), Off) then Exit;
+    H := FUnw.OpenRange(0, Off, 0, 0, False, Lbl);
+  end;
   if Lbl <> '' then Self.Emit(Lbl + ':');
   while FUnwPend.Count <= AIdx do FUnwPend.Add(-1);
   FUnwPend.SetItem(AIdx, H);

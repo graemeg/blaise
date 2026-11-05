@@ -97,6 +97,10 @@ type
       it -- an internal error), and the temporaries a caught raise passes
       are released }
     procedure TestDebug_UnitSectionTryExcept;
+    { the main program's deferred-release bases and record scratches, which
+      x86-64 keeps in .bss (absolute ranges): released when a raise is
+      caught in main }
+    procedure TestDebug_MainDeferredBases_ReleasedOnUnwind;
   end;
 
 implementation
@@ -1301,6 +1305,33 @@ begin
   AssertTrue('sections ran, got: ' + Output,
     Pos('byz' + #10 + 'fin f', Output) >= 0);
   AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TUnwindE2ETests.TestDebug_MainDeferredBases_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwMainPend;
+    uses SysUtils;
+    type
+      TObj = class
+        S: string;
+        N: Int;
+      end;
+      TRec = record S: string; N: Int; T: string; end;
+    function MkObj(): TObj; begin Result := TObj.Create(); Result.N := 3; Result.S := 'q'; end;
+    function MkRec(): TRec; begin Result.S := IntToStr(4) + 'r'; Result.T := 'tt' + IntToStr(5); end;
+    function Boom(): Int; begin raise Exception.Create('b'); end;
+    var X: Int; S: string;
+    begin
+      try X := MkObj().N + Boom(); except on E: Exception do WriteLn('a ', E.Message); end;
+      try S := MkObj().S + IntToStr(Boom()); except on E: Exception do WriteLn('b ', E.Message); end;
+      try X := MkRec().N + Boom(); except on E: Exception do WriteLn('c ', E.Message); end;
+      try S := MkRec().S + IntToStr(Boom()); except on E: Exception do WriteLn('d ', E.Message); end;
+      X := MkObj().N + MkRec().N;
+      WriteLn(X);
+    end.
+    ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + '3');
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;

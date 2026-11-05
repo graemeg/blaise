@@ -214,6 +214,7 @@ const
   UNW_STR0 = 8;
   UNW_F_INDIRECT = 1;
   UNW_F_SPANS_TRY = 2;
+  UNW_F_ABS = 4;              { location = pointer-table index of an address }
 {$IFDEF CPUARM64}
   JB_FP_OFS = 80;             { x29 in the jmp_buf }
 {$ELSE}
@@ -396,7 +397,14 @@ begin
     W := PUInt32(Pointer(S + 12))^;
     if (Off >= Lo) and (Off < Hi) and
        not (AIsTarget and (((W shr 8) and UNW_F_SPANS_TRY) <> 0)) then
-      UnwReleaseAt(ABlk, PPointer(AFrame + PInt32(Pointer(S + 8))^), W);
+    begin
+      if ((W shr 8) and UNW_F_ABS) <> 0 then
+        { a static slot: its address is in the block's pointer table }
+        UnwReleaseAt(ABlk, PPointer(PPointer(ABlk + UNW_HDR_SIZE +
+          UInt(PInt32(Pointer(S + 8))^) * 8)^), W)
+      else
+        UnwReleaseAt(ABlk, PPointer(AFrame + PInt32(Pointer(S + 8))^), W);
+    end;
     S := S + UNW_RANGE_SIZE;
   end;
   if AIsTarget then Exit;
