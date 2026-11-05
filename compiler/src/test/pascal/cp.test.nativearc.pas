@@ -504,8 +504,7 @@ const
 begin
   AssertEquals('the owned receiver is parked for release', '',
     AsmMissing(Src, #9'movq %rax, _pendrel_0(%rip)',
-      #9'bl _MakeL' + #10 + #9'str x0, [sp, #-16]!' + #10 +
-        #9'str x0, [sp, #-16]!'));
+      #9'bl _MakeL' + #10 + #9'stur x0, [x29, #-'));
 end;
 
 procedure TNativeArcTests.TestAddrOfOwnedTransientField_ReleasedAtStatementEnd;
