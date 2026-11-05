@@ -173,7 +173,7 @@ begin
     Result := (B0 shl 8) or B1;
 end;
 
-function ReadU32(ABuf: string; AOff: Int; ALE: Boolean): Int32;
+function ReadU32(ABuf: string; AOff: Int; ALE: Boolean): UInt32;
 var
   B0, B1, B2, B3, K: Int;
 begin
@@ -194,13 +194,13 @@ var
 begin
   if ALE then
   begin
-    Lo := Int64(ReadU32(ABuf, AOff,     True))     and $FFFFFFFF;
-    Hi := Int64(ReadU32(ABuf, AOff + 4, True))     and $FFFFFFFF;
+    Lo := ReadU32(ABuf, AOff,     True);
+    Hi := ReadU32(ABuf, AOff + 4, True);
   end
   else
   begin
-    Hi := Int64(ReadU32(ABuf, AOff,     False))    and $FFFFFFFF;
-    Lo := Int64(ReadU32(ABuf, AOff + 4, False))    and $FFFFFFFF;
+    Hi := ReadU32(ABuf, AOff,     False);
+    Lo := ReadU32(ABuf, AOff + 4, False);
   end;
   Result := Lo or (Hi shl 32);
 end;
@@ -375,8 +375,8 @@ begin
   end
   else
   begin
-    AOffset := Int64(ReadU32(ABuf, AOff + 16, ALE)) and $FFFFFFFF;
-    ASize   := Int64(ReadU32(ABuf, AOff + 20, ALE)) and $FFFFFFFF;
+    AOffset := ReadU32(ABuf, AOff + 16, ALE);
+    ASize   := ReadU32(ABuf, AOff + 20, ALE);
   end;
 end;
 
@@ -445,8 +445,8 @@ begin
       end
       else
       begin
-        Offset := Int64(ReadU32(ShtBuf, I * EntrySize + 16, AInfo.LittleEndian)) and $FFFFFFFF;
-        Size   := Int64(ReadU32(ShtBuf, I * EntrySize + 20, AInfo.LittleEndian)) and $FFFFFFFF;
+        Offset := ReadU32(ShtBuf, I * EntrySize + 16, AInfo.LittleEndian);
+        Size   := ReadU32(ShtBuf, I * EntrySize + 20, AInfo.LittleEndian);
       end;
       Sec := TElfSection.Create();
       Sec.NameOff := NameOff;

@@ -123,7 +123,7 @@ begin
   Result := StrAt(ABuf, AOff) or (StrAt(ABuf, AOff + 1) shl 8);
 end;
 
-function RdU32(const ABuf: string; AOff: Int): Int32;
+function RdU32(const ABuf: string; AOff: Int): UInt32;
 begin
   Result := StrAt(ABuf, AOff)
          or (StrAt(ABuf, AOff + 1) shl 8)
@@ -135,8 +135,8 @@ function RdU64(const ABuf: string; AOff: Int): Int64;
 var
   Lo, Hi: Int64;
 begin
-  Lo := Int64(RdU32(ABuf, AOff)) and $FFFFFFFF;
-  Hi := Int64(RdU32(ABuf, AOff + 4)) and $FFFFFFFF;
+  Lo := RdU32(ABuf, AOff);
+  Hi := RdU32(ABuf, AOff + 4);
   Result := Lo or (Hi shl 32);
 end;
 
@@ -373,7 +373,7 @@ begin
         Sec.Flags    := RdU32(ABytes, SecOff + 64);
         if (Sec.Offset > 0) and (Sec.Size > 0) and
            (Sec.Offset + Sec.Size <= Length(ABytes)) then
-          Sec.Data := Copy(ABytes, Sec.Offset, Int32(Sec.Size))
+          Sec.Data := Copy(ABytes, Sec.Offset, Sec.Size)
         else
           Sec.Data := '';
         while NReloc > 0 do

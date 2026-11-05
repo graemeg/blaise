@@ -70,7 +70,7 @@
       "work list for type standardisation Phase 5 (docs/type-standardisation-",
       "design.adoc): 4529 findings in compiler/ and 1751 in stdlib/ at v0.15.0.",
       "Since Phase 5 the only findings are ClassicPascalTypes' own tests, which",
-      "exercise the classic names on purpose.  Still at info, so those 28 do",
+      "exercise the classic names on purpose.  Still at info, so those 39 do",
       "not read as defects."
     ],
     "BL-2006": { "enabled": true, "severity": "info" },

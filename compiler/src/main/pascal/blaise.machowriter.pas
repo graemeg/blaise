@@ -244,8 +244,8 @@ const
   LC_LOAD_DYLIB      = $0C;
   LC_LOAD_DYLINKER   = $0E;
   { $22/$28 or LC_REQ_DYLD ($80000000) — precomputed literals }
-  LC_DYLD_INFO_ONLY  = Int32($80000022);
-  LC_MAIN            = Int32($80000028);
+  LC_DYLD_INFO_ONLY  = $80000022;
+  LC_MAIN            = $80000028;
   LC_UNIXTHREAD      = $05;
 
   { legacy dyld-info opcodes }
@@ -271,8 +271,8 @@ procedure MachOSectionNames(AKind: TContainerSectionKind;
   out ASegName, ASectName: string);
 
 const
-  MH_MAGIC_64        = Int32($FEEDFACF);
-  CPU_TYPE_ARM64     = Int32($0100000C);
+  MH_MAGIC_64        = $FEEDFACF;
+  CPU_TYPE_ARM64     = $0100000C;
   CPU_SUBTYPE_ARM64_ALL = 0;
   MH_OBJECT          = 1;
   MH_EXECUTE         = 2;
@@ -291,7 +291,7 @@ const
   S_THREAD_LOCAL_REGULAR   = $11;
   S_THREAD_LOCAL_ZEROFILL  = $12;
   S_THREAD_LOCAL_VARIABLES = $13;
-  S_ATTR_PURE_INSTRUCTIONS = Int32($80000000);
+  S_ATTR_PURE_INSTRUCTIONS = $80000000;
   S_ATTR_SOME_INSTRUCTIONS = $00000400;
 
   { nlist_64 n_type / n_desc }
@@ -1147,8 +1147,8 @@ const
     kernel demands at least an ad-hoc CodeDirectory with SHA-256 page
     hashes covering the whole file up to the signature itself. }
   LC_CODE_SIGNATURE = $1D;
-  CSMAGIC_EMBEDDED_SIGNATURE = Int32($FADE0CC0);
-  CSMAGIC_CODEDIRECTORY      = Int32($FADE0C02);
+  CSMAGIC_EMBEDDED_SIGNATURE = $FADE0CC0;
+  CSMAGIC_CODEDIRECTORY      = $FADE0C02;
   CS_ADHOC = $2;
   CS_EXECSEG_MAIN_BINARY = $1;
   CS_HASHTYPE_SHA256 = 2;
@@ -1156,9 +1156,9 @@ const
   CD_HEADER_SIZE = 88;    { version $20400 layout }
   { entitlements (SetEntitlements): three more blobs in the SuperBlob, and
     the CodeDirectory hashes them in special slots -1..-7 }
-  CSMAGIC_REQUIREMENTS         = Int32($FADE0C01);
-  CSMAGIC_EMBEDDED_ENTITLEMENTS = Int32($FADE7171);
-  CSMAGIC_EMBEDDED_DER_ENTITLEMENTS = Int32($FADE7172);
+  CSMAGIC_REQUIREMENTS         = $FADE0C01;
+  CSMAGIC_EMBEDDED_ENTITLEMENTS = $FADE7171;
+  CSMAGIC_EMBEDDED_DER_ENTITLEMENTS = $FADE7172;
   CSSLOT_REQUIREMENTS = 2;
   CSSLOT_ENTITLEMENTS = 5;
   CSSLOT_DER_ENTITLEMENTS = 7;

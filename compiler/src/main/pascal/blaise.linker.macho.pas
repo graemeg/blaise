@@ -236,7 +236,7 @@ var
 begin
   FIn := TFileInputStream.Create(APath);
   try
-    SetLength(Bytes, Int32(FIn.Size()));
+    SetLength(Bytes, FIn.Size());
     if Length(Bytes) > 0 then
       FIn.Read(PChar(Bytes), Length(Bytes));
   finally
@@ -587,7 +587,7 @@ procedure TMachOLinker.PatchStream(AStream: Int; AOff: Int64;
     L: Int;
   begin
     for L := 0 to ASize - 1 do
-      S[AOff + L] := Chr(Int32((AValue shr (L * 8)) and $FF));
+      S[AOff + L] := Chr((AValue shr (L * 8)) and $FF);
   end;
 
 begin
@@ -613,7 +613,7 @@ function TMachOLinker.ReadStream(AStream: Int; AOff: Int64;
   begin
     V := 0;
     for M := 0 to ASize - 1 do
-      V := V or (Int64(OrdAt(S, Int32(AOff) + M) and $FF) shl (M * 8));
+      V := V or (Int64(OrdAt(S, AOff + M) and $FF) shl (M * 8));
     Result := V;
   end;
 
@@ -657,16 +657,16 @@ begin
     StubVm := FLayout.TextVm + FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE;
     GotVm := FLayout.DataVm + FGotBase + Int64(FImpGot.Get(I)) * 8;
     PageDelta := (GotVm shr 12) - (StubVm shr 12);
-    W := Int32($90000010)
-      or (Int32(PageDelta and 3) shl 29)
-      or (Int32((PageDelta shr 2) and $7FFFF) shl 5);
+    W := $90000010
+      or ((PageDelta and 3) shl 29)
+      or (((PageDelta shr 2) and $7FFFF) shl 5);
     PatchStream(smText, FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE,
       4, W);
-    W := Int32($F9400210) or (Int32((GotVm and $FFF) shr 3) shl 10);
+    W := $F9400210 or (((GotVm and $FFF) shr 3) shl 10);
     PatchStream(smText, FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE + 4,
       4, W);
     PatchStream(smText, FStubBase + Int64(FImpGot.Get(I)) * STUB_SIZE + 8,
-      4, Int32($D61F0200));
+      4, $D61F0200);
   end;
 
   for I := 0 to FObjs.Count - 1 do
@@ -777,8 +777,8 @@ begin
             if (Delta > $7FFFFFF) or (Delta < -$8000000) then
               raise EMachOLinker.Create('macho linker: branch to ' +
                 Sym.Name + ' out of range');
-            W := Int32(ReadStream(Strm, SiteOff, 4));
-            W := W or (Int32((Delta shr 2)) and $3FFFFFF);
+            W := ReadStream(Strm, SiteOff, 4);
+            W := W or ((Delta shr 2) and $3FFFFFF);
             PatchStream(Strm, SiteOff, 4, W);
           end;
           ARM64_RELOC_PAGE21,
@@ -788,9 +788,9 @@ begin
               raise EMachOLinker.Create('macho linker: page reference to '
                 + 'undefined symbol ' + Sym.Name);
             PageDelta := ((Target + Addend) shr 12) - (SiteVm shr 12);
-            W := Int32(ReadStream(Strm, SiteOff, 4));
-            W := W or (Int32(PageDelta and 3) shl 29)
-              or (Int32((PageDelta shr 2) and $7FFFF) shl 5);
+            W := ReadStream(Strm, SiteOff, 4);
+            W := W or ((PageDelta and 3) shl 29)
+              or (((PageDelta shr 2) and $7FFFF) shl 5);
             PatchStream(Strm, SiteOff, 4, W);
           end;
           ARM64_RELOC_PAGEOFF12,
@@ -799,9 +799,9 @@ begin
             if IsImport then
               raise EMachOLinker.Create('macho linker: pageoff reference '
                 + 'to undefined symbol ' + Sym.Name);
-            W := Int32(ReadStream(Strm, SiteOff, 4));
+            W := ReadStream(Strm, SiteOff, 4);
             if (R.RType = ARM64_RELOC_TLVP_LOAD_PAGEOFF12)
-               and ((W and Int32($3B000000)) = Int32($39000000)) then
+               and ((W and $3B000000) = $39000000) then
             begin
               { TLV RELAXATION, exactly as Apple's ld performs it.  The
                 canonical access sequence LOADS the descriptor's address out of
@@ -817,18 +817,18 @@ begin
                 ADD-immediate (0xF9400000 -> 0x91000000) and write the RAW
                 12-bit offset: an add-immediate is unscaled, whereas the LDR it
                 replaces had its immediate scaled by the access size. }
-              W := Int32($91000000) or (W and $3FF);
-              W := W or (Int32((Target + Addend) and $FFF) shl 10);
+              W := $91000000 or (W and $3FF);
+              W := W or (((Target + Addend) and $FFF) shl 10);
             end
             else
             begin
               { scaled load/store class shifts the immediate by its size;
                 add-immediate takes the raw low 12 bits }
-              if (W and Int32($3B000000)) = Int32($39000000) then
+              if (W and $3B000000) = $39000000 then
                 Scale := (W shr 30) and 3
               else
                 Scale := 0;
-              W := W or (Int32(((Target + Addend) and $FFF) shr Scale)
+              W := W or ((((Target + Addend) and $FFF) shr Scale)
                 shl 10);
             end;
             PatchStream(Strm, SiteOff, 4, W);
@@ -880,8 +880,7 @@ begin
   if not FDefIndex.TryGetValue(AEntrySym, DefIdx) then
     raise EMachOLinker.Create('macho linker: entry symbol ' + AEntrySym +
       ' is not defined by any input');
-  FWriter.SetEntryTextOffset(
-    Int32(DefinedVm(DefIdx) - FLayout.TextVm));
+  FWriter.SetEntryTextOffset(DefinedVm(DefIdx) - FLayout.TextVm);
 
   Result := FWriter.Finish();
 end;

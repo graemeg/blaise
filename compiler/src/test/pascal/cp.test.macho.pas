@@ -50,7 +50,7 @@ type
   TMachOExecWriterTests = class(TTestCase)
   private
     function BuildExec: TMachOFile;
-    function RdU32At(const ABuf: string; AOff: Int): Int;
+    function RdU32At(const ABuf: string; AOff: Int): UInt32;
     function RdU64At(const ABuf: string; AOff: Int): Int64;
   published
     procedure TestExecHeader_TypeAndPieFlags;
@@ -58,6 +58,9 @@ type
     procedure TestTextSegment_BaseAndPageAlignment;
     procedure TestDataSegment_BssZerofillTail;
     procedure TestLinkEdit_CoversDyldInfoAndSymtab;
+    { a 32-bit field at or above 2^31 (a load-command type with
+      LC_REQ_DYLD, a section attribute) reads back as its unsigned value }
+    procedure TestReader_HighBitFieldsReadUnsigned;
     procedure TestEntry_LCMainNotUnixthread;
     procedure TestDylinkerAndLibSystem;
     procedure TestBuildVersion_PlatformMacOS;
@@ -431,7 +434,7 @@ end;
 
 { ---- TMachOExecWriterTests ---- }
 
-function TMachOExecWriterTests.RdU32At(const ABuf: string; AOff: Int): Int;
+function TMachOExecWriterTests.RdU32At(const ABuf: string; AOff: Int): UInt32;
 begin
   Result := StrAt(ABuf, AOff)
          or (StrAt(ABuf, AOff + 1) shl 8)
@@ -478,6 +481,28 @@ begin
     W.Free();
   end;
   Result := ParseMachO(Buf, 'probe_exec');
+end;
+
+procedure TMachOExecWriterTests.TestReader_HighBitFieldsReadUnsigned;
+var
+  F: TMachOFile;
+  LC: TMoLoadCmd;
+  Sec: TMoSection;
+begin
+  F := BuildExec();
+  try
+    LC := F.FindLoadCmd($80000022);
+    AssertTrue('LC_DYLD_INFO_ONLY found by its unsigned value', LC <> nil);
+    AssertEquals(2147483682, LC.Cmd);
+    LC := F.FindLoadCmd($80000028);
+    AssertTrue('LC_MAIN found by its unsigned value', LC <> nil);
+    Sec := F.FindSection('__TEXT', '__text');
+    AssertTrue('__text present', Sec <> nil);
+    AssertTrue('S_ATTR_PURE_INSTRUCTIONS read unsigned',
+      Sec.Flags >= $80000000);
+  finally
+    F.Free();
+  end;
 end;
 
 procedure TMachOExecWriterTests.TestExecHeader_TypeAndPieFlags;
@@ -1088,12 +1113,12 @@ begin
     Le32($10000) + Le32($10000) + Name;
   Trie := TrieOf();
   TrieOff := 32 + Length(IdCmd) + 16;
-  TrieCmd := Le32(Int32($80000033)) + Le32(16) + Le32(TrieOff) + Le32(Length(Trie));
-  Thin := Le32(Int32($FEEDFACF)) + Le32($0100000C) + Le32(0) + Le32(6) +
+  TrieCmd := Le32($80000033) + Le32(16) + Le32(TrieOff) + Le32(Length(Trie));
+  Thin := Le32($FEEDFACF) + Le32($0100000C) + Le32(0) + Le32(6) +
     Le32(2) + Le32(Length(IdCmd) + Length(TrieCmd)) + Le32(0) + Le32(0) +
     IdCmd + TrieCmd + Trie;
   { a fat wrapper: an x86_64 entry first (must be skipped), then arm64 }
-  Fat := Be32Of(Int32($CAFEBABE)) + Be32Of(2) +
+  Fat := Be32Of($CAFEBABE) + Be32Of(2) +
     Be32Of($01000007) + Be32Of(3) + Be32Of(64) + Be32Of(4) + Be32Of(0) +
     Be32Of($0100000C) + Be32Of(0) + Be32Of(64) + Be32Of(Length(Thin)) + Be32Of(0);
   while Length(Fat) < 64 do Fat := Fat + Chr(0);
@@ -1187,13 +1212,13 @@ var
   SigOff, CdOff, HashOff, CodeLimit: Int;
   NSlots, I, PageLen: Int;
 
-  function BeU32(AOff: Int): Int;
+  function BeU32(AOff: Int): UInt32;
   begin
     Result := (StrAt(Img, AOff) shl 24) or (StrAt(Img, AOff + 1) shl 16)
       or (StrAt(Img, AOff + 2) shl 8) or StrAt(Img, AOff + 3);
   end;
 
-  function LeU32(AOff: Int): Int;
+  function LeU32(AOff: Int): UInt32;
   begin
     Result := StrAt(Img, AOff) or (StrAt(Img, AOff + 1) shl 8)
       or (StrAt(Img, AOff + 2) shl 16) or (StrAt(Img, AOff + 3) shl 24);
@@ -1227,9 +1252,9 @@ begin
   end;
   AssertTrue('LC_CODE_SIGNATURE present', SigOff > 0);
   { SuperBlob: magic, length, count=1, type=0, cd offset }
-  AssertEquals(Int32($FADE0CC0), BeU32(SigOff));
+  AssertEquals($FADE0CC0, BeU32(SigOff));
   CdOff := SigOff + BeU32(SigOff + 16);
-  AssertEquals(Int32($FADE0C02), BeU32(CdOff));
+  AssertEquals($FADE0C02, BeU32(CdOff));
   HashOff := CdOff + BeU32(CdOff + 16);
   NSlots := BeU32(CdOff + 28);
   CodeLimit := BeU32(CdOff + 32);

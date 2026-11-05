@@ -668,7 +668,7 @@ BL-2006, which reports every classic type name with its replacement as a
 quick-fix.  `Integer` is not always `Int32`: a count or an index is better
 served by `Int`, so each use deserves a decision rather than a rename.
 
-*Planned with the retirement.*  Three changes are decided for the v0.16
+*Delivered with the retirement.*  Three changes came with it in the v0.16
 cycle, because each one changes the meaning of existing code:
 
 * *Context-typed integer literals* (delivered in v0.16, Phase 4.3).  A
@@ -692,10 +692,11 @@ cycle, because each one changes the meaning of existing code:
 * *Counts stay signed.*  `Length` and `Count` return the signed `Int`, so
   `for I := Count - 1 downto 0` cannot underflow — the reason Go made
   `len()` signed.  `UInt` and the unsigned fixed-width names are for bit
-  manipulation, hashes and formats defined as unsigned, and a warning for a
-  `downto 0` loop over an unsigned variable comes with the change.
+  manipulation, hashes and formats defined as unsigned, and a `downto 0`
+  loop over an unsigned variable is warned about (Phase 4.1).
 
-The design document holds the full plan.
+`docs/type-standardisation-design.adoc` records how each phase was carried
+out, and what was found and fixed on the way.
 
 ==== Int64 ↔ UInt64 conversion is explicit
 
@@ -778,7 +779,7 @@ reads an `array of const` commonly handles `vtInteger` alone, and a ported
 FPC and Delphi instead type a constant by the smallest type that holds
 it.  A single default, the platform's natural integer, is easier to
 predict, and the hint and operand rules leave the meaning of existing
-`Integer` code unchanged: on the compiler's own source the change altered
+32-bit code unchanged: on the compiler's own source the change altered
 no computed value, only the width of a few constant comparisons and
 conversions (`docs/type-standardisation-design.adoc`, step 4.3).
 
@@ -837,7 +838,7 @@ implicit narrowing rule.  Declare the variable `Int`, or use
 | `IntToStr` | `(Int32): string` | 32-bit integer to decimal string; when the argument resolves to `Int64` the codegen automatically routes the call to `_Int64ToStr`, and when it resolves to `UInt64` to `_UInt64ToStr`, matching FPC's overloaded resolution
 | `Int64ToStr` | `(Int64): string` | 64-bit signed integer to decimal string
 | `UInt64ToStr` | `(UInt64): string` | 64-bit unsigned integer to decimal string
-| `StrToInt` | `(string): Integer` | Decimal string to 32-bit integer; truncates silently on overflow
+| `StrToInt` | `(string): Int32` | Decimal string to 32-bit integer; truncates silently on overflow
 | `StrToInt64` | `(string): Int64` | Decimal string to 64-bit signed integer
 |===
 
@@ -1394,7 +1395,7 @@ Each element is checked as an assignment to the element type would be, so
 `[1.5, 2]` is a valid `array of Float` and `[1, 255]` a valid
 `array of Byte`.  Range checking follows the scalar rule too: a subrange or
 enum element type rejects an out-of-range constant, while a plain `Byte` or
-`Word` element, like a `Byte` variable, is not checked.  A `lo..hi` range is
+`UInt16` element, like a `Byte` variable, is not checked.  A `lo..hi` range is
 a set-literal form and is rejected here.
 
 The literal owns its array, like a call returning one: the target takes the
@@ -1459,10 +1460,10 @@ Blaise supports fixed-size, stack-allocated arrays declared as
 * The block is zero-initialised with `memset` at function entry (Pascal
   default initialisation semantics; also required by QBE's SSA checker).
 * Element access uses `base + (I − L) × sizeof(T)`.  Non-zero-based ranges
-  are supported: `array[5..9] of Integer` stores 5 elements; `A[5]` maps to
+  are supported: `array[5..9] of Int32` stores 5 elements; `A[5]` maps to
   offset 0.
 * `sizeof(T)` for array element sizing uses the _raw_ byte footprint of the
-  element type: 1 for `Byte`/`Boolean`, 4 for `Integer`/`UInt32`, 8 for
+  element type: 1 for `Byte`/`Boolean`, 4 for `Int32`/`UInt32`, 8 for
   `Int64`/`UInt64`/`String`/pointer types.  This differs from the
   standalone-variable allocation size on the stack, which always allocates
   at least 4 bytes (QBE's smallest `alloc4`), because array elements are
@@ -1519,7 +1520,7 @@ A named type alias for a static array may be declared in a `type` section:
 ----
 type
   TByteBuffer = array[0..63] of Byte;
-  TIntRange   = array[1..10] of Integer;
+  TIntRange   = array[1..10] of Int;
 var
   Buf: TByteBuffer;
   R:   TIntRange;
@@ -1759,7 +1760,7 @@ needs to be ordinal-compatible with the set's base type, not strictly
 numeric.  `True in s` and `Include(s, False)` therefore work directly,
 without an intervening `Ord()`.
 
-Larger ordinal types (`Integer`, `Word`, `Int64`) are rejected because they
+Larger ordinal types (`Int32`, `UInt16`, `Int64`) are rejected because they
 would require impractically large bitmaps.
 
 ==== Integer-subrange base (`set of 0..255`)
@@ -1923,7 +1924,7 @@ the member identifiers are not in scope during the first pass.
   small enumerations (≤ 32 members).  A single word is the correct choice.
 - *`not` for set complement* — deferred.  Not required for current self-hosting
   targets.  Can be added as a unary `not` on set operands when needed.
-- *`set of Integer`* — rejected.  Integer has 2^32 possible values; a bitmap
+- *`set of Int32`* — rejected.  Integer has 2^32 possible values; a bitmap
   would require 512 MB.  Only Byte (256 values) and Boolean (2 values) are
   accepted as ordinal base types alongside enumerations.
 - *Integer-literal set constants* — deferred.  The `const X = [1, 2, 3]`
@@ -1981,11 +1982,11 @@ Blaise supports two procedural type forms:
 [source,pascal]
 ----
 type
-  TIntFn      = function: Integer;
-  TStrFn      = function(const S: string): Integer;
-  TLogProc    = procedure(Level: Integer; const Msg: string);
+  TIntFn      = function: Int;
+  TStrFn      = function(const S: string): Int;
+  TLogProc    = procedure(Level: Int; const Msg: string);
   TRunMethod  = procedure of object;
-  TIsTrue     = function (X: Integer): Boolean of object;
+  TIsTrue     = function (X: Int): Boolean of object;
 
 var
   F: TIntFn;
@@ -2323,13 +2324,13 @@ Blaise generics are reified/monomorphised, and closures compose with them:
   `TGetter<T> = reference to function(): T;` registers a `TGenericProcDef`
   and instantiates on demand exactly like class/record/interface templates.
   A monomorphised procedural type is pure type metadata — it defines a
-  concrete `TProceduralTypeDesc` (e.g. `reference to function(): Integer`)
+  concrete `TProceduralTypeDesc` (e.g. `reference to function(): Int32`)
   and emits no code.
 - A closure literal inside a generic class/record body is monomorphised
   with the body: each instantiation gets its own thunk and environment
   record, and a `T`-typed capture becomes a concrete env field whose ARC
   treatment is decided after substitution (managed at `T = string`, plain
-  value at `T = Integer`).  Because the lifted thunk is analysed later in
+  value at `T = Int32`).  Because the lifted thunk is analysed later in
   module scope — where the instantiation's `T` binding is gone — the
   literal's declared type names are substituted to their concrete forms at
   analysis time, while the binding is still active.
@@ -2375,7 +2376,7 @@ chained across routine levels:
 
 ----
 procedure Outer;
-var G: Integer;
+var G: Int;
   procedure Mid;
   var P: TProc;
   begin
@@ -2483,7 +2484,7 @@ comparison.  The generic-method-on-generic-class machinery this needs
 (`TList<T>.Map<R>` — the design's gate probe) required: preserving
 method-level type parameters through class instantiation and the `.bif`
 template (TRoutineSig gains TypeParams), nested-aware type-argument
-substitution in method instantiation (`TSel<Integer, R>` at `R = string`),
+substitution in method instantiation (`TSel<Int32, R>` at `R = string`),
 scoped binding of the method's own type params during instance body
 analysis (so `TList<R>.Create()` canonicalises), and skipping generic
 templates at emission on both backends.
@@ -2621,13 +2622,13 @@ class collections with class enumerators were accepted.
 * Static arrays (Step 7b): `for X in Arr do` where `Arr: array[L..H] of T`
   uses index-based iteration; non-zero-based ranges are supported.
 * String byte iteration (Step 7c): `for B in S do` iterates the raw UTF-8
-  bytes of `S`.  The loop variable must be an ordinal type (`Byte`, `Integer`,
+  bytes of `S`.  The loop variable must be an ordinal type (`Byte`, `Int32`,
   etc.); each iteration yields one byte via `loadub`.  There is no `Char` type
   in Blaise — `S[N]` and `for B in S do` both expose bytes, not codepoints.
   This is consistent with the language-rationale decision documented under
   _No Char Type_.
 * Generic collection iteration (Step 9b): `for X in List do` where `List` is
-  a generic class instantiation (e.g. `TList<Integer>`) — requires
+  a generic class instantiation (e.g. `TList<Int32>`) — requires
   `GetEnumerator` / `MoveNext` / `Current` property on the instantiated type.
   Property cloning in `InstantiateGeneric` is implemented; works for any
   generic class that exposes the enumerator protocol.
@@ -2666,7 +2667,7 @@ Iteration is always in ascending ordinal order (bit 0 first), regardless of
 the order in which members were added to the set literal.
 
 The loop variable must be an ordinal type; using a non-ordinal variable (e.g.
-`string`) is a semantic error.  Assigning to an `Integer` variable is
+`string`) is a semantic error.  Assigning to an `Int32` variable is
 permitted (enum/integer ordinal compatibility applies, as elsewhere in Blaise).
 
 ==== Alternatives rejected
@@ -2932,9 +2933,9 @@ and an unresolvable tie is a compile-time "ambiguous overload" error.
 
 Two overloads whose parameters are the *same types* are a duplicate
 declaration, rejected at the second one — including when the types are
-spelled differently through a type alias: `F(UInt32)` and `F(Cardinal)`,
-or `F(Int)` and `F(Int64)` on a 64-bit target.  The message names the alias
-pair (`'Cardinal' and 'UInt32' are the same type`).  Signatures are compared
+spelled differently through a type alias: `F(Int)` and `F(Int64)` on a
+64-bit target, or `F(UInt8)` and `F(Byte)`.  The message names the alias
+pair (`'Int' and 'Int64' are the same type`).  Signatures are compared
 in the form that names the emitted symbol, so the check catches exactly the
 pairs that would otherwise collide.
 
@@ -2946,8 +2947,8 @@ sets explicit at the source level: a reader can see at a glance that a
 declaration is intended to participate in dispatch, and accidental
 shadowing of an unrelated symbol cannot silently introduce an
 overload.  Delphi's preference for exact match avoids the "promotion
-ambiguity" pitfalls that surface when an `Integer` argument matches
-both an `Integer` and a `Double` overload — exact match always wins,
+ambiguity" pitfalls that surface when an `Int32` argument matches
+both an `Int32` and a `Float64` overload — exact match always wins,
 ambiguity is escalated to the user.
 
 === Overload sets merge across inheritance
@@ -2960,14 +2961,14 @@ type.
 [source,pascal]
 ----
 TBase = class
-  function F(x: Integer): string; overload;
+  function F(x: Int): string; overload;
 end;
 TDerived = class(TBase)
   function F(s: string): string; overload;   // adds to, does not replace
 end;
 var d: TDerived;
 begin
-  d.F(5);     // resolves to TBase.F(Integer)
+  d.F(5);     // resolves to TBase.F(Int)
   d.F('a');   // resolves to TDerived.F(string)
 end;
 ----
@@ -2990,10 +2991,10 @@ appended after `$`:
 |===
 | Code | Meaning
 
-| `i` | Integer (32-bit signed)
-| `l` | Int64
-| `d` | Double
-| `s` | Single
+| `i` | `Int32`
+| `l` | `Int64` (and so `Int`)
+| `d` | `Float64`
+| `s` | `Float32`
 | `b` | Boolean
 | `y` | Byte
 | `S` | string
@@ -3003,7 +3004,7 @@ appended after `$`:
 | `@X` | var/out parameter of X
 |===
 
-Example: `procedure Log(const S: string; N: Integer); overload;` is
+Example: `procedure Log(const S: string; N: Int32); overload;` is
 named `Log$Si` after type-code mangling, then escaped through `QBEMangle`
 to the QBE symbol `$Log_D_Si` (the leading `$` sigil is preserved; any
 embedded sigil characters are escaped as listed below).  Phase A of the
@@ -3099,7 +3100,7 @@ the FPC RTL, the Blaise RTL, and every port we have surveyed; the
 restriction can be relaxed later without invalidating earlier code.
 
 Restricting to single-name groups keeps the syntax unambiguous —
-`A, B, C : Integer = 0` could plausibly mean "all three default to
+`A, B, C : Int32 = 0` could plausibly mean "all three default to
 zero" or "only `C` has a default", and the compiler refuses to guess.
 
 === Forward declarations and overrides
@@ -3125,7 +3126,7 @@ overriding *function* build on its parent's result:
 
 [source,pascal]
 ----
-function TDerived.Value: Integer; override;
+function TDerived.Value: Int; override;
 begin
   Result := inherited Value() + 100;   // call parent, then extend
 end;
@@ -3160,7 +3161,7 @@ QBE).
 Methods, constructors and virtual methods of a generic class or record may
 be overloaded under the same rules as a non-generic type.  Each overload of
 an instance is keyed by its parameter list *after* substitution, so
-`TBox<Integer>.Put(A: T)` and `TBox<string>.Put(A: T)` are told apart
+`TBox<Int32>.Put(A: T)` and `TBox<string>.Put(A: T)` are told apart
 from each other and from their siblings exactly as hand-written overloads
 would be.
 
@@ -3194,8 +3195,8 @@ So given:
 
 [source,delphi]
 ----
-function F(A: Integer; B: Integer = 0): Integer; overload;
-function F(A: Integer): Integer; overload;
+function F(A: Int; B: Int = 0): Int; overload;
+function F(A: Int): Int; overload;
 ----
 
 the call `F(42)` resolves to the second overload (no defaulting
@@ -3204,13 +3205,13 @@ needed), not the first — even though both type-score equally.
 When candidates still tie, the one with more exact-type arguments wins.
 After that, the *closest* implicit conversions win.  Each widened argument
 has a distance: integer to a wider integer costs twice the growth in bytes,
-plus one for a change of signedness; `Single` to `Double` costs one; an
+plus one for a change of signedness; `Float32` to `Float64` costs one; an
 integer to a float costs more than any integer widening.  The candidate
 with the smallest total wins, so a `Byte` or `Int8` argument reaches an
-`Integer` overload before an `Int64` one, a `Byte` reaches `Word` before
-`SmallInt`, and an `Integer` reaches `Int64` before `Double`.  Only an equal
-total is ambiguous — for example an `Integer` argument against `Single` and
-`Double` overloads.
+`Int32` overload before an `Int64` one, a `Byte` reaches `UInt16` before
+`Int16`, and an `Int32` reaches `Int64` before `Float64`.  Only an equal
+total is ambiguous — for example an `Int32` argument against `Float32` and
+`Float64` overloads.
 
 FPC and Delphi both prefer the closest widening.  Before this rule Blaise
 rated every widening alike and reported such calls as ambiguous — a
@@ -3745,7 +3746,7 @@ Supported:
 ----
 unit MyUnit;
 interface
-var x: Integer;
+var x: Int;
 implementation
 initialization
   x := 1;
@@ -3760,7 +3761,7 @@ Rejected (issue #172):
 ----
 unit MyUnit;
 interface
-var x: Integer;
+var x: Int;
 implementation
 begin          // ERROR: bare 'begin' block not permitted in a unit body
   x := 1;
@@ -3978,8 +3979,8 @@ units — must use these types rather than writing inline collection logic:
 
 * *Structural interface identity* — As with plain interfaces, generic
   interface identity is based on the `typeinfo_*` symbol emitted at
-  instantiation time, not on GUIDs.  `IMap<Integer,Integer>` and
-  `IMap<String,Integer>` are distinct types with distinct typeinfo pointers.
+  instantiation time, not on GUIDs.  `IMap<Int32,Int32>` and
+  `IMap<String,Int32>` are distinct types with distinct typeinfo pointers.
 
 === Implementation notes
 
@@ -3988,7 +3989,7 @@ interface in its parent clause (e.g. `TDictionary<K,V> = class(IMap<K,V>)`),
 `InstantiateGeneric` detects that the substituted `ParentName` resolves to
 `tyInterface`, moves it to `ImplementsNames`, and calls `AddImplements` on
 the concrete `TRecordTypeDesc`.  This wires the type-compatibility check that
-allows `M: IMap<Integer,Integer> := TDictionary<Integer,Integer>.Create`.
+allows `M: IMap<Int32,Int32> := TDictionary<Int32,Int32>.Create`.
 
 The codegen emits itab and impllist data for generic class instances in
 `EmitInterfaceDefs`, parallel to the existing path for non-generic classes.
@@ -3996,7 +3997,7 @@ Both class and interface names in itab symbols are passed through `QBEMangle`
 to produce valid QBE identifiers (e.g. `$itab_TDictionary_Integer_Integer_IMap_Integer_Integer`).
 
 A non-generic class may also *inherit* from a generic-class instance — e.g.
-`TIntBox = class(TBox<Integer>)`.  The first heritage entry is instantiated and
+`TIntBox = class(TBox<Int32>)`.  The first heritage entry is instantiated and
 then classified: a `tyInterface` result becomes an implements entry (above),
 any other (a class instance) is the parent class.  Because the generic instance
 is emitted under its `QBEMangle`'d symbol (`typeinfo_TBox_Integer`), the
@@ -4016,16 +4017,16 @@ type
     function Get: T;
   end;
   IDeriv<T> = interface(IBase<T>)     // forwards T to the parent
-    function Extra: Integer;
+    function Extra: Int;
   end;
-  IConc<T> = interface(IBase<Integer>) // a concrete parent is also legal
+  IConc<T> = interface(IBase<Int>) // a concrete parent is also legal
     function C: T;
   end;
 ----
 
 This is the Delphi spelling, chosen because Blaise already uses it everywhere
-else generics and interfaces meet — `TBox = class(IBox<Integer>)` for an
-implemented interface, and `TIntBox = class(TBox<Integer>)` for a generic
+else generics and interfaces meet — `TBox = class(IBox<Int32>)` for an
+implemented interface, and `TIntBox = class(TBox<Int32>)` for a generic
 parent class.  FPC's `{$mode objfpc}` requires explicit
 `generic`/`specialize` keywords (`generic IDeriv<T> = interface(specialize
 IBase<T>)`), which Blaise has no equivalent of; its `{$mode delphi}` accepts
@@ -4034,7 +4035,7 @@ language rather than a keyword that appears in this position only.
 
 The parent is parsed as a full `TypeName`, exactly as a class parent already
 was.  At instantiation the template's parameters are substituted into the
-parent name (`IBase<T>` with `T := Integer` becomes `IBase<Integer>`), that
+parent name (`IBase<T>` with `T := Int32` becomes `IBase<Int32>`), that
 instance is materialised like any other, and its methods are inherited *ahead
 of* the template's own — matching the ordering the non-generic path uses, so a
 method's slot position does not depend on whether its interface is generic.
@@ -4117,7 +4118,7 @@ All scalar element types are fully supported:
 |1 byte
 |`storeb` / `loadub`
 
-|`Integer`, `UInt32`, `enum`
+|`Int32`, `UInt32`, `enum`
 |4 bytes
 |`storew` / `loadw`
 
@@ -4378,14 +4379,17 @@ These items are under active consideration but not yet decided.
 
 === Integer Width
 
-*Resolved:* `Integer` is 32-bit on all platforms, matching FPC.  `Int64`
-is the explicit 64-bit type.  See the _Integer Types_ section in the Type
-System chapter for the full decision, rationale, and alternatives rejected.
+*Resolved:* `Int` is the pointer-sized integer (64-bit on every current
+target) and the default for counts, indices and general arithmetic; every
+other integer type states its width (`Int32`, `UInt16`, ...).  The classic
+`Integer` is not a builtin; `ClassicPascalTypes` supplies it as `Int32`,
+the width FPC gives it.  See the _Integer Types_ section in the Type System
+chapter for the full decision, rationale, and alternatives rejected.
 
 === Enumeration Underlying Type
 
 *Resolved:* Enumeration values are stored as QBE `w` (32-bit word) on all
-platforms, matching the current Blaise `Integer` type.  FPC's
+platforms, the width of `Int32`.  FPC's
 smallest-type-that-fits approach is not followed: the compiler always uses `w`
 for simplicity and ABI predictability.  Set types also use `w` for sets with
 ≤ 32 members and `l` for 33–64 members.
@@ -4403,7 +4407,7 @@ early returns with a value concise:
 
 [source,pascal]
 ----
-function Classify(N: Integer): Integer;
+function Classify(N: Int): Int;
 begin
   if N < 0 then Exit(-1);
   if N = 0 then Exit(0);
@@ -4465,8 +4469,8 @@ Blaise supports typed constant declarations with the form:
 [source,pascal]
 ----
 const
-  Pi: Double = 3.14159265358979323846;
-  MaxItems: Integer = 100;
+  Pi: Float64 = 3.14159265358979323846;
+  MaxItems: Int = 100;
   Greeting: string = 'hello';
 ----
 
@@ -4475,7 +4479,8 @@ to work unchanged with inferred types.
 
 === Supported types
 
-Scalar typed constants: Integer, Int64, Double, Single, Boolean, string.
+Scalar typed constants: `Int32`, `Int64` (and so `Int`), `Float64`,
+`Float32`, `Boolean`, `string`.
 
 Array typed constants: `array[EnumType] of ScalarType` — see
 _Array-of-enum typed constants_ below.
@@ -4487,9 +4492,9 @@ parser complexity for rare use cases.
 === Rationale
 
 Typed constants give the programmer explicit control over the type of a
-constant value.  Without them, `const Pi = 3.14159` infers `Double`, which is
-correct, but `const Scale = 2` infers `Integer` — there is no way to declare a
-`Single` or `Int64` constant without a typed form.
+constant value.  Without them, `const Pi = 3.14159` infers `Float64`, which is
+correct, but `const Scale = 2` infers `Int` — there is no way to declare a
+`Float32` or `Int32` constant without a typed form.
 
 The primary motivator was `Pi: Double` in `math.pas`, where the untyped form
 would have ambiguous type inference across platforms and makes the intent
@@ -4497,7 +4502,7 @@ opaque.
 
 === Alternatives Rejected
 
-*Using type-cast syntax* (`const Pi = Double(3.14159)`) — requires the parser
+*Using type-cast syntax* (`const Pi = Float64(3.14159)`) — requires the parser
 to distinguish a type-cast expression from a function call inside a const
 initialiser, which is more complex than a simple colon annotation and is not
 the FPC/Delphi convention.
@@ -4588,7 +4593,7 @@ type
 
 const
   WeatherNames: array[TWeather] of string = ('Sunny', 'Cloudy', 'Rainy');
-  WeatherCost:  array[TWeather] of Integer = (0, 1, 2);
+  WeatherCost:  array[TWeather] of Int = (0, 1, 2);
 ----
 
 The element count in the value list must exactly match the number of enum
@@ -4609,7 +4614,7 @@ and the named form `type TA = array[Boolean] of string;` followed by
 asymmetry with no justification, since the two declare the same thing.
 
 Supported element types: the same scalar types supported by scalar typed
-constants (Integer, Int64, Double, Single, Boolean, string).
+constants (`Int32`, `Int64`, `Float64`, `Float32`, `Boolean`, `string`).
 
 === Implementation
 
@@ -4660,8 +4665,8 @@ form or the equivalent nested form:
 
 [source]
 ----
-const M: array[0..1, 0..2] of Integer = ((1, 2, 3), (4, 5, 6));
-const N: array[0..1] of array[0..1] of Integer = ((10, 20), (30, 40));
+const M: array[0..1, 0..2] of Int = ((1, 2, 3), (4, 5, 6));
+const N: array[0..1] of array[0..1] of Int = ((10, 20), (30, 40));
 ----
 
 A multi-dimensional const desugars to a nested static-array type (the comma and
@@ -4682,12 +4687,12 @@ Blaise records may declare methods alongside fields:
 ----
 type
   TPoint = record
-    X, Y: Integer;
-    function Distance(Other: TPoint): Integer;
+    X, Y: Int;
+    function Distance(Other: TPoint): Int;
     function ToString: string;
   end;
 
-function TPoint.Distance(Other: TPoint): Integer;
+function TPoint.Distance(Other: TPoint): Int;
 begin
   Result := Abs(Self.X - Other.X) + Abs(Self.Y - Other.Y)
 end;
@@ -4816,15 +4821,15 @@ The Delphi/FPC convention encodes `TDateTime` as a `Double`: integer part
 is days since 1899-12-30, fractional part is the time of day.  This has
 three well-known problems:
 
-* *Precision loss.*  A `Double` has 53 bits of mantissa.  Operations on
+* *Precision loss.*  A `Float64` has 53 bits of mantissa.  Operations on
   dates more than a few centuries from the epoch lose milliseconds and
   eventually whole seconds.  Arithmetic round-trips do not preserve the
   original value.
 * *Type confusion.*  The same type is used for a calendar date, a local
   wall-clock instant, and a UTC point-in-time.  There is no way for the
   type system to flag a function that adds a local-time value to a
-  UTC instant — both compile to `Double + Double`.
-* *No timezone metadata.*  The bare `Double` carries no information about
+  UTC instant — both compile to `Float64 + Float64`.
+* *No timezone metadata.*  The bare `Float64` carries no information about
   whether the encoded value is local time, UTC, or naive.  Reasoning about
   DST transitions or cross-timezone arithmetic requires out-of-band
   knowledge.
@@ -4862,9 +4867,9 @@ formatting and a substantial fraction of real-world timezone needs.
 
 `TInstant` and `TDuration` use signed `Int64` nanoseconds — large enough to
 cover ±292 years from epoch with nanosecond precision.  `TDate` / `TTime` /
-`TDateTime` use `Integer` per sub-field.  `Byte`-sized fields now pack at
+`TDateTime` use `Int32` per sub-field.  `Byte`-sized fields now pack at
 their natural 1-byte stride, but the existing public API is locked in on
-`Integer` for the per-field accessors, so changing the storage type would
+`Int32` for the per-field accessors, so changing the storage type would
 break call sites for no observable benefit.
 
 === Alternatives Rejected
@@ -4941,21 +4946,21 @@ follows three rules:
 
 * *Arithmetic is promoted.*  `+`, `-`, `*`, `div`, `mod`, unary minus and
   the bitwise `and`, `or` and `xor`, applied to operands that are both
-  narrower than 64 bits (`Int8`, `Byte`, `SmallInt`, `Word`, `Integer`,
+  narrower than 64 bits (`Int8`, `Byte`, `Int16`, `UInt16`, `Int32`,
   `UInt32`), are evaluated in, and typed, `Int64`.
-  `High(Integer) + 1` is `2147483648`, and `Byte(255) + Byte(1)` is `256`.
+  `High(Int32) + 1` is `2147483648`, and `Byte(255) + Byte(1)` is `256`.
   An operation with a 64-bit operand keeps the existing rule (`Int64`, or
   `UInt64` when an operand is `UInt64`).
 * *Shifts keep their width.*  `shl`, `shr` and `sar` promote an 8- or
-  16-bit left operand to 32 bits (`UInt32` for an unsigned operand, `Integer`
+  16-bit left operand to 32 bits (`UInt32` for an unsigned operand, `Int32`
   for a signed one), so `B shl 8` keeps its bits.  A 32- or 64-bit left
   operand keeps its type, and the shift wraps at that width:
-  `Integer(1) shl 31` is `Low(Integer)`, and `shr` of a negative `Integer`
+  `Int32(1) shl 31` is `Low(Int32)`, and `shr` of a negative `Int32`
   shifts zeros in at bit 31 (`-1 shr 1` is `2147483647`).
 * *`not` keeps its operand's type.*  `not Byte(200)` is the `Byte` `55`.
 
-A constant expression is typed like a literal, by magnitude: `N - 1` with
-`const N = 64` is `Integer`, and `2147483647 + 1` is `Int64`.  A
+A constant expression is typed like a literal (see _Integer literal
+typing_): `N - 1` with `const N = 64` is `Int`, as is `2147483647 + 1`.  A
 promoted value stored into a narrower variable or passed to a narrower
 parameter is truncated, as any implicit narrowing is.
 
@@ -4963,8 +4968,8 @@ Implicit narrowing is the language rule and is silent by default.  The
 opt-in `--warn-narrowing` flag reports every non-constant value of a wider
 integer type stored into a narrower one -- an assignment, a value argument
 or a `for`-loop bound -- as a migration aid for code that stores a `Length`,
-a `Count` or a promoted expression into an `Integer`.  An explicit
-conversion (`Integer(L)`) states the intent and is not reported, nor is a
+a `Count` or a promoted expression into an `Int32`.  An explicit
+conversion (`Int32(L)`) states the intent and is not reported, nor is a
 constant that fits its destination.
 
 Every integer value in a register holds the sign- or zero-extension of its
@@ -4992,7 +4997,7 @@ them.
 
 | Delphi
 | stays 32-bit, wraps
-| promoted to `Integer`
+| promoted to `Int32`
 | promoted to 32 bits, wraps at 32
 
 | Java, C#, C
@@ -5018,7 +5023,7 @@ them.
 
 Arithmetic concerns numeric value, so promotion gives the answer the
 programmer meant: an intermediate such as `(A * B) div C` cannot overflow
-32 bits, `High(Integer) + 1 > High(Integer)` holds, and a comparison or
+32 bits, `High(Int32) + 1 > High(Int32)` holds, and a comparison or
 `WriteLn` of an expression sees its true value.  It costs nothing on a
 64-bit target, matches FPC, which most ported code was written for, and
 agrees with the `Int`-by-default direction of the type standardisation
@@ -5032,7 +5037,7 @@ keeps the Pascal byte-packing idiom `(B shl 8) or C` working.
 
 === Consequences
 
-* Overload resolution follows the promoted type: with `F(Integer)` and
+* Overload resolution follows the promoted type: with `F(Int32)` and
   `F(Int64)` overloads, `F(I + 1)` calls `F(Int64)`.
 * Code that relied on 32-bit wraparound through `+`, `-` or `*` keeps the
   same low 32 bits when the result is stored into a 32-bit variable; only a
@@ -5055,7 +5060,7 @@ Pascal dialect, where narrow arithmetic has always been promoted.
 
 *Promote the shifts as well* — one rule for every operator, but no
 mainstream language widens a 32-bit shift, and `shr` of a negative
-`Integer` would then yield `9223372036854775807` instead of
+`Int32` would then yield `9223372036854775807` instead of
 `2147483647`.
 
 == `/` vs `div` — Real Division and Integer Division
@@ -5067,11 +5072,11 @@ separate operators:
 
 * `/` — real division.  Always yields a floating-point result, even
   when both operands are integers.  Integer operands are promoted to
-  `Double` before the division.  The result type is `Single` only when
-  both operands are `Single`; in every other case the result is
-  `Double`.
+  `Float64` before the division.  The result type is `Float32` only when
+  both operands are `Float32`; in every other case the result is
+  `Float64`.
 * `div` — integer division.  Both operands must be integer types;
-  passing a `Single` or `Double` operand is a semantic error.
+  passing a `Float32` or `Float64` operand is a semantic error.
 
 This matches standard Pascal, Delphi, and Free Pascal.
 
@@ -5079,7 +5084,7 @@ This matches standard Pascal, Delphi, and Free Pascal.
 
 Conflating `/` and `div` produces silently-wrong code in numerical
 expressions.  A user writing `Round(Y / X)` where `X` and `Y` are
-`Integer` reasonably expects the same result as `Round(Y / X)` written
+`Int32` reasonably expects the same result as `Round(Y / X)` written
 with floating-point operands — i.e. the rational quotient rounded to
 the nearest integer.  Treating `/` as integer division when both
 operands are integers makes `Round(10 / 3)` evaluate as `Round(3) = 3`
@@ -5135,7 +5140,7 @@ the rational answer rounds up or down.
 |===
 
 This is the behaviour of `Round` in Delphi and FPC.  A `Single` argument
-rounds the same way (it widens to `Double` exactly).
+rounds the same way (it widens to `Float64` exactly).
 
 === Rationale
 
@@ -5192,7 +5197,7 @@ All four float-to-integer built-ins return `Int64`:
 | `Floor(X)` | `Int64`
 |===
 
-An `Int64` result narrows implicitly into an `Integer` variable, so
+An `Int64` result narrows implicitly into an `Int32` variable, so
 `I := Ceil(X)` compiles as before.
 
 === Rationale
@@ -5234,12 +5239,12 @@ Blaise therefore provides no separate `Ceil64` / `Floor64`.
 
 === Decision
 
-`High(T)` and `Low(T)` accept any ordinal type — `Integer`, `Int64`,
-`UInt32`, `UInt64`, `SmallInt`, `Word`, `Byte`, `Boolean`, and any
+`High(T)` and `Low(T)` accept any ordinal type — `Int32`, `Int64`,
+`UInt32`, `UInt64`, `Int16`, `UInt16`, `Byte`, `Boolean`, and any
 user-declared `enum` — in addition to the array and string forms
 documented above.  The argument may be either a type name (e.g.
-`High(Integer)`) or a value of that type (e.g. `High(SomeVar)`).
-The result type is the argument's own type, not `Integer`, so
+`High(Int32)`) or a value of that type (e.g. `High(SomeVar)`).
+The result type is the argument's own type, not `Int32`, so
 `High(Int64)` has type `Int64` and round-trips through 64-bit code
 paths without truncation.
 
@@ -5257,18 +5262,18 @@ guards, which is both noisier and easier to get wrong on the
 `Int64`/`UInt64` end of the range.
 
 The result type matches the argument deliberately.  Returning
-`Integer` for every form would make `High(Int64)` lossy and would
+`Int32` for every form would make `High(Int64)` lossy and would
 also break overload resolution against `Int64`-typed call sites.
 Returning the argument type composes naturally with assignment and
 comparison.
 
-The bounds are folded at compile time — `High(Integer)` emits a single
+The bounds are folded at compile time — `High(Int32)` emits a single
 QBE `=w copy 2147483647` instruction.  No runtime call, no extra
 memory.
 
 === Floating-point types
 
-`High(Double)` is a category error in Pascal: ordinal bounds and
+`High(Float64)` is a category error in Pascal: ordinal bounds and
 floating-point extremes are different concepts.  IEEE 754 has
 `+inf`/`-inf`, finite `MaxDouble`/`-MaxDouble`, a smallest positive
 normal `MinDouble`, and `NaN` — none of which `High`/`Low` could
@@ -5279,11 +5284,11 @@ exactly that.
 
 === Alternatives Rejected
 
-*Return `Integer` for every ordinal form* — rejected.  `High(Int64)`
+*Return `Int32` for every ordinal form* — rejected.  `High(Int64)`
 would lose its top bit at the call site, silently producing wrong
 results in 64-bit arithmetic.
 
-*Generalise to floats as `High(Double) = MaxDouble`* — rejected.
+*Generalise to floats as `High(Float64) = MaxDouble`* — rejected.
 Conflates two distinct concepts (ordinal upper bound vs. largest
 finite float) and doesn't generalise to `+inf` or `NaN` semantics.
 Named constants on the `math` unit are unambiguous and discoverable.
@@ -5308,7 +5313,7 @@ call on the right-hand side may omit the type arguments:
 var S: TStack<string>;
 S := TStack<>.Create;          // equivalent to TStack<string>.Create
 
-var D: TDictionary<string, Integer>;
+var D: TDictionary<string, Int>;
 D := TDictionary<>.Create;     // infers both K and V from the LHS
 ----
 
@@ -5371,7 +5376,7 @@ type
   end;
 
 var
-  V: TMyVal<Integer>;
+  V: TMyVal<Int>;
 begin
   V.Value := 42;
   WriteLn(V.GetValue());
@@ -5379,7 +5384,7 @@ end.
 ----
 
 Generic records are monomorphized exactly like generic classes: each distinct
-instantiation (`TMyVal<Integer>`, `TMyVal<string>`, etc.) creates a new
+instantiation (`TMyVal<Int32>`, `TMyVal<string>`, etc.) creates a new
 concrete `TRecordTypeDesc` with its own field layout and method bodies.  Type
 parameter constraints apply identically.
 
@@ -5427,7 +5432,7 @@ type
       begin if cond then Result := a else Result := b end;
   end;
 ...
-  u.Pick<Integer>(True, 7, 9);     // -> 7
+  u.Pick<Int>(True, 7, 9);     // -> 7
   u.Pick<string>(False, 'a', 'b'); // -> 'b'
 ----
 
@@ -5436,7 +5441,7 @@ arguments at a call site produces one concrete method body, named
 `<Owner>_<Method>_<Args>` (e.g. `TUtil_Pick_Integer`).  The implicit `Self` is
 preserved, so a generic method may read the receiver's fields and call its
 other methods.  Type arguments are explicit at the call site
-(`u.Pick<Integer>(...)`); they are not inferred from the value arguments.
+(`u.Pick<Int32>(...)`); they are not inferred from the value arguments.
 
 This is distinct from a method of a generic *class* (`TBox<T>` and its
 `function Get: T`), where the type parameter `T` is bound by the class
@@ -5503,10 +5508,10 @@ The `not` operator accepts both Boolean and integer operands:
 
 * On a Boolean operand, `not` performs logical negation.  The result type
   is `Boolean`.
-* On an integer operand (`Byte`, `SmallInt`, `Word`, `Integer`, `Int64`,
+* On an integer operand (`Byte`, `Int16`, `UInt16`, `Int32`, `Int64`,
   `UInt64`), `not` performs bitwise complement — every bit is inverted.
   The result has the operand's type: `not Byte(200)` is the `Byte` `55`.
-* On a floating-point operand (`Single`, `Double`), `not` is a semantic
+* On a floating-point operand (`Float32`, `Float64`), `not` is a semantic
   error.
 
 This matches Delphi and Free Pascal, where `not` is overloaded on the
@@ -5524,11 +5529,11 @@ The result keeps the operand's type, as in FPC (verified: `not M` with
 result of a not operation is of the same type as the operand"), Rust
 (`!`), Swift (`~`) and Go (`^`).  C and Java alone promote the operand to
 `int` first.  An earlier revision of this section widened narrow operands
-to `Integer`, so that `Flags and (not M)` acted as a full-width mask, and
+to `Int32`, so that `Flags and (not M)` acted as a full-width mask, and
 stated that this matched Delphi and FPC; it did not, and it also turned
-`not` of a `UInt32` into a negative `Integer`.  It changed with the
+`not` of a `UInt32` into a negative `Int32`.  It changed with the
 integer expression width rules (see "Integer Expression Width").  To
-complement at full width, widen first: `Flags and not Integer(M)`.
+complement at full width, widen first: `Flags and not Int32(M)`.
 
 === Alternatives Rejected
 
@@ -5539,7 +5544,7 @@ expect this behaviour.
 
 *Return the same type as the operand for narrow types* — a `Byte` result
 of `not B` where `B = 3` would be `252`, which is surprising when the
-value is used as a bitmask in a wider expression.  Promoting to `Integer`
+value is used as a bitmask in a wider expression.  Promoting to `Int32`
 is consistent with how other arithmetic operators handle narrow operands.
 
 == Boolean formatting — `WriteLn` prints `True` / `False`
@@ -5622,7 +5627,7 @@ TLS rather than the global data section.  Each thread receives its own copy,
 zero-initialised unless the declaration carries an initialiser.
 
 *Initialised threadvars:* a threadvar may carry an initialiser, exactly as a
-`var` declaration may (`threadvar Depth: Integer = 1;`).  Every thread, not
+`var` declaration may (`threadvar Depth: Int32 = 1;`).  Every thread, not
 only the main thread, starts from the declared value.
 
 The initial value costs nothing at run time.  Both object formats already
@@ -5922,20 +5927,20 @@ is rounded to `Float32` before an enclosing expression uses it, so
 
 === Decision
 
-Integer-family values (`Integer`, `Int64`, `UInt32`, `UInt64`, `SmallInt`,
-`Word`, `Byte`) widen implicitly to `Double` wherever a float is expected:
+Integer-family values (`Int32`, `Int64`, `UInt32`, `UInt64`, `Int16`,
+`UInt16`, `Byte`) widen implicitly to `Float64` wherever a float is expected:
 
-* Assignment to a `Single` or `Double` variable (`d := i`).
+* Assignment to a `Float32` or `Float64` variable (`d := i`).
 * Arguments to the float compiler builtins: `Sqrt`, `Ceil`, `Floor`,
   `Round`, `Trunc`, `Ln`, `Log2`, `Log10`, `Power`, `Sin`, `Cos`, `Tan`,
   `ArcTan`, `ArcTan2`, `ArcSin`, `ArcCos`, `Sinh`, `Cosh`, `Tanh`,
   `IsNaN`, `IsInfinite`.  `Sin(12)` and `Tanh(I)` are valid; the result
-  type of the value-returning trig builtins is `Double` for integer
+  type of the value-returning trig builtins is `Float64` for integer
   arguments (for float arguments it continues to match the argument
-  type — `Single`→`Single`, `Double`→`Double`).
-* Explicit float typecasts: `Double(I)` and `Single(I)` perform a real
+  type — `Float32`→`Float32`, `Float64`→`Float64`).
+* Explicit float typecasts: `Float64(I)` and `Float32(I)` perform a real
   numeric conversion (never a bit reinterpretation).  Float-to-float
-  casts likewise convert: `Single(D)` narrows, `Double(S)` widens.
+  casts likewise convert: `Float32(D)` narrows, `Float64(S)` widens.
 
 === Rationale
 
@@ -5944,18 +5949,18 @@ implicit widening; rejecting them made Blaise's builtins stricter than the
 rest of the language for no benefit — plain assignment already widened
 implicitly, so `d := i; d := Tanh(d)` compiled while `d := Tanh(i)` did
 not.  Mixed integer/float arithmetic (`s * 1000`) was likewise already
-accepted by the semantic pass.  The widening is always to `Double`
-(not `Single`): it is the lossless choice for every 32-bit integer and
+accepted by the semantic pass.  The widening is always to `Float64`
+(not `Float32`): it is the lossless choice for every 32-bit integer and
 matches the C math library signatures the builtins lower to.
 
 === Alternatives Rejected
 
 * *Require explicit float literals/casts* (status quo) — rejected: it
   contradicts both Pascal tradition and Blaise's own assignment rule, and
-  the recommended workaround (`Tanh(Single(I))`) did not work because
+  the recommended workaround (`Tanh(Float32(I))`) did not work because
   float typecasts were lowered as bit copies.
-* *Widen to `Single` for small integer types* — rejected: `Double`
-  represents every `Integer` exactly; `Single` does not (24-bit
+* *Widen to `Float32` for small integer types* — rejected: `Float64`
+  represents every `Int32` exactly; `Float32` does not (24-bit
   mantissa).  Precision should not silently depend on the argument's
   declared integer width.
 
@@ -5967,7 +5972,7 @@ A float is a compile-time error wherever an integer is required.  It becomes
 an integer only through `Trunc` or `Round`, which say how the fraction is
 dropped.  The rule covers:
 
-* ordinal typecasts of a float -- `Integer(D)`, `Byte(2.5)`, `TColor(S)`,
+* ordinal typecasts of a float -- `Int32(D)`, `Byte(2.5)`, `TColor(S)`,
   `Boolean(D)` -- and `Ord` of a float;
 * the operands of `and`, `or`, `xor`, `shl`, `shr` and `mod` (`div` already
   required integers);
@@ -5981,13 +5986,13 @@ dropped.  The rule covers:
 The message names the type and points at the conversions:
 
 ----
-Illegal type conversion from 'Double' to 'Integer' (use Trunc or Round to
+Illegal type conversion from 'Float64' to 'Int32' (use Trunc or Round to
 convert a float to an integer)
-Length argument of 'SetLength' must be an integer, not 'Double' (use Trunc
+Length argument of 'SetLength' must be an integer, not 'Float64' (use Trunc
 or Round to convert a float to an integer)
 ----
 
-The opposite direction is unchanged: `Double(I)` and `Single(I)` convert
+The opposite direction is unchanged: `Float64(I)` and `Float32(I)` convert
 numerically (see _Implicit Integer→Float Widening_ above), and an indexed
 property whose index parameter is a float still takes one.
 
@@ -5995,10 +6000,10 @@ property whose index parameter is a float still takes one.
 
 Before the rule these forms compiled to something nobody asked for.  A float
 variable in an integer context was read as its bit pattern --
-`Integer(3.7)` printed `-1717986918` (the low half of the IEEE-754
+`Int32(3.7)` printed `-1717986918` (the low half of the IEEE-754
 encoding) on both backends, `Ord(D)`, `IntToStr(D)` and `I xor D` used the
 whole 64-bit pattern, and `SetLength(S, D)` asked for a length of about
-4.6 * 10^18 -- while a float *expression* such as `Integer(I / 2)` or
+4.6 * 10^18 -- while a float *expression* such as `Int32(I / 2)` or
 `I or 2.5` reached the code generators, which have no integer lowering for
 it, and failed with an internal message.  None of these is a numeric
 conversion, and none can be what the programmer meant.
@@ -6011,7 +6016,7 @@ reject the same forms, so the rule costs no portability.
 
 * *Convert numerically, truncating (as C's `(int)d` does).* -- rejected: it
   silently picks one rounding rule where Pascal makes the programmer choose
-  between `Trunc` and `Round`, and it would make `Integer(D)` mean something
+  between `Trunc` and `Round`, and it would make `Int32(D)` mean something
   different in Blaise than in FPC and Delphi.
 * *Keep the bit reinterpretation as a documented escape hatch.* -- rejected:
   the cast reads like a conversion, and code that genuinely wants a float's
@@ -6030,9 +6035,9 @@ fields, so field-backed accessors cannot exist:
 ----
 type
   IValued = interface
-    function GetValue(): Integer;
-    procedure SetValue(AValue: Integer);
-    property Value: Integer read GetValue write SetValue;
+    function GetValue(): Int;
+    procedure SetValue(AValue: Int);
+    property Value: Int read GetValue write SetValue;
   end;
 ----
 
@@ -6069,8 +6074,8 @@ declared parameter exactly as for a direct call: a type mismatch is a
 compile-time error, too many arguments is an error, and a bracket literal
 takes its type from the formal (a set, an `array of const`, a narrower
 integer open array).  An argument also *travels* as the declared parameter
-dictates — an `Integer` passed to a `Double` parameter is converted and
-passed in a float register, a `Double` passed to a `Single` parameter is
+dictates — an `Int32` passed to a `Float64` parameter is converted and
+passed in a float register, a `Float64` passed to a `Float32` parameter is
 narrowed, and an `Int64` parameter beyond the register file occupies a full
 8-byte stack slot.
 
@@ -6078,11 +6083,11 @@ narrowed, and an `Int64` parameter beyond the register file occupies a full
 ----
 type
   IGauge = interface
-    function Scale(D: Double; N: Integer): Double;
+    function Scale(D: Float64; N: Int): Float64;
   end;
 ...
-  G.Scale(2, 4);       // 2 is passed as the Double 2.0
-  G.Scale('x', 4);     // error: argument 1 of 'Scale': expected 'Double'
+  G.Scale(2, 4);       // 2 is passed as the Float64 2.0
+  G.Scale('x', 4);     // error: argument 1 of 'Scale': expected 'Float64'
 ----
 
 === Rationale
@@ -6188,7 +6193,7 @@ The collection types follow three explicit ownership conventions:
   local in an exited routine therefore survives in the collection.
 * `TStringList.Objects[]` — NON-OWNING raw pointer slots, by design.
   The API type is `Pointer`, and storing integer payloads cast to
-  pointers (`TObject(PtrUInt(N))`) is an accepted idiom (the compiler
+  pointers (`TObject(UInt(N))`) is an accepted idiom (the compiler
   itself uses it); blind retention would corrupt such entries.  Callers
   storing real objects must hold a strong reference elsewhere for the
   entry's lifetime.
@@ -6220,7 +6225,7 @@ referencing it in an expression reports an undeclared identifier.
 
 This matches Delphi and FPC, both of which reject the redeclaration with
 `Duplicate identifier` (Delphi error E2004 documents exactly this case:
-`program Tests; var Tests: Integer;`).
+`program Tests; var Tests: Int32;`).
 
 A program may not share its name with any unit in the build, whether it uses
 that unit directly or only through another unit:
@@ -6296,8 +6301,8 @@ detail.  The guarantee covers all storage categories and all type kinds:
 |===
 | Type kind | Zero value
 
-| Integer, Int64, Byte, Word, SmallInt, UInt32, UInt64 | `0`
-| Single, Double | `0.0` (positive zero — all bits 0)
+| Every integer type (`Int`, `Int32`, `Byte`, `UInt64`, ...) | `0`
+| `Float32`, `Float64` | `0.0` (positive zero — all bits 0)
 | Boolean | `False`
 | Byte (used as Char) | `#0`
 | Enum | ordinal `0` (first declared member)
@@ -6388,7 +6393,7 @@ end;
 `Default(T)` exists in Delphi and FPC *because* those languages leave locals
 and `Result` holding garbage.  Without it there is no way to spell "the zero
 value of T" inside a generic body, where `0` is wrong for `string` and `''` is
-wrong for `Integer`.  Blaise removes the premise: declaring a variable of type
+wrong for `Int32`.  Blaise removes the premise: declaring a variable of type
 `T` yields that zero value, for scalars, strings, classes, interfaces,
 pointers, dynamic arrays, static arrays and records with managed fields alike,
 per the table above.
@@ -6438,8 +6443,8 @@ exactly equivalent:
 [source,pascal]
 ----
 var
-  A: array[0..1, 0..2] of Integer;        // comma form
-  B: array[0..1] of array[0..2] of Integer; // nested form
+  A: array[0..1, 0..2] of Int;        // comma form
+  B: array[0..1] of array[0..2] of Int; // nested form
 begin
   A[i, j] := v;   // comma indexing
   A[i][j] := v;   // chained indexing — identical to the line above
@@ -6497,13 +6502,13 @@ No new debug record is required.  A nested array emits one `recArray`
 (`Dimensions = 1`) per dimension, with each dimension's element type
 pointing at the next inner `recArray`.  The reference debugger (pdr)
 follows the element chain and renders the value as a true multi-dimensional
-structure, e.g. `array[0..1] of array[0..2] of Integer = [[0,0,0],[0,0,0]]`.
+structure, e.g. `array[0..1] of array[0..2] of Int32 = [[0,0,0],[0,0,0]]`.
 
 === Constant initialisers
 
 Multi-dimensional *const* arrays use the same nested desugaring and
-row-major layout.  Both the comma form (`array[0..1, 0..2] of Integer`)
-and the nested form (`array[0..1] of array[0..1] of Integer`) are accepted
+row-major layout.  Both the comma form (`array[0..1, 0..2] of Int32`)
+and the nested form (`array[0..1] of array[0..1] of Int32`) are accepted
 in a const type annotation, and the initialiser nests one parenthesised
 group per dimension (`((1, 2, 3), (4, 5, 6))`).  The values are flattened
 to row-major order at parse time, so codegen emits a single contiguous data
@@ -6518,7 +6523,7 @@ same chained subscript forms for both reading and writing:
 
 [source,pascal]
 ----
-var m: array of array of Integer;
+var m: array of array of Int;
 begin
   SetLength(m, 2);
   SetLength(m[0], 3);     // each row sized independently — rows may be jagged
@@ -6549,9 +6554,9 @@ A global variable declaration may carry an initialiser:
 [source,pascal]
 ----
 var
-  G: Integer = 42;
+  G: Int = 42;
   S: string = 'hello';
-  A: array[0..2] of Integer = (10, 20, 30);
+  A: array[0..2] of Int = (10, 20, 30);
   F: TFlags = [fRead, fWrite];
 ----
 
@@ -6567,7 +6572,7 @@ as follows:
   unit-level variables.  A local variable initialiser is rejected: locals are
   zero-initialised and then assigned in the body, keeping the data-section
   path the single source of truth for static initial values.
-* *Single name.*  `var A, B: Integer = 1` is a parse error — an initialiser
+* *Single name.*  `var A, B: Int32 = 1` is a parse error — an initialiser
   applies to exactly one variable, avoiding the ambiguity of whether the value
   is shared or per-name.
 * *Arrays and sets for aggregates.*  Array initialisers reuse the existing
@@ -6582,7 +6587,7 @@ as follows:
   procedural types and dynamic arrays.  It documents intent and eases porting
   from FPC and Delphi, which accept it.  Because every variable is already
   zero-initialised, the initialiser is type-checked and then dropped; it never
-  reaches the data section.  `N: Integer = nil` is rejected.
+  reaches the data section.  `N: Int32 = nil` is rejected.
 * *The same in a unit.*  A unit's initialisers are folded and checked on every
   path, including the normal build where the unit is compiled with the program
   that uses it.  Until 2026-10-22 that path skipped them: an expression or
@@ -6794,29 +6799,29 @@ does not expose Delphi's overlapping union fields (`VInteger`, `VAnsiString`,
 [source,pascal]
 ----
 procedure Log(args: array of const);
-var i: Integer;
+var i: Int;
 begin
   for i := 0 to High(args) do
     case args[i].VType of
-      vtInteger:    WriteLn(Integer(args[i].VValue));
+      vtInteger:    WriteLn(Int(args[i].VValue));
       vtBoolean:    WriteLn(Boolean(args[i].VValue));
       vtAnsiString: WriteLn(string(PChar(args[i].VValue)));
-      vtExtended:   WriteLn(PDouble(args[i].VValue)^);
+      vtExtended:   WriteLn(PFloat64(args[i].VValue)^);
       vtObject:     ...TObject(args[i].VValue)...;
     end;
 end;
 ----
 
 The supported element kinds and their tags are `vtInteger` (also boolean as
-`vtBoolean`, enum ordinals as `vtEnum`), `vtInt64`, `vtExtended` (`Double`),
+`vtBoolean`, enum ordinals as `vtEnum`), `vtInt64`, `vtExtended` (`Float64`),
 `vtAnsiString` (the UTF-8 string), `vtObject`, and `vtPointer`.
 
 Two representation choices follow from the pointer-sized value slot:
 
-* *Doubles are heap-boxed.*  A `Double` does not fit a reinterpret-cast through
-  the pointer slot (it is a different register class, and `Double(ptr)` is not a
+* *Doubles are heap-boxed.*  A `Float64` does not fit a reinterpret-cast through
+  the pointer slot (it is a different register class, and `Float64(ptr)` is not a
   bit-reinterpretation).  So a `vtExtended` element stores a pointer to a
-  heap-allocated `Double`; the callee dereferences it (`PDouble(VValue)^`).
+  heap-allocated `Float64`; the callee dereferences it (`PFloat64(VValue)^`).
   This mirrors FPC's `vtExtended: PExtended`.
 * *Strings and objects are borrowed, not retained.*  The boxed value is the
   string's data pointer / the object pointer, stored without an `AddRef`
@@ -6849,7 +6854,7 @@ homogeneous literal (`[1, 2, 3]`) and the empty literal (`[]`) bind too.
 
 A variable declaration may not share its identifier with any type name that is
 visible at the point of declaration — whether the type is built-in
-(`Integer`, `string`), declared in the same block, declared in an enclosing
+(`Int32`, `string`), declared in the same block, declared in an enclosing
 scope, or imported from another unit.  Pascal is case-insensitive, so the
 shadowing is detected regardless of letter case:
 
@@ -6913,7 +6918,7 @@ identifier.
 
 * *Match FPC exactly (same-scope clash only; built-in/outer shadowing
   allowed).*  Rejected.  It fixes the reported case but keeps the underlying
-  footgun: `var Integer: Int64` would still compile and silently rebind the
+  footgun: `var Int32: Int64` would still compile and silently rebind the
   type name for the rest of the scope.  Blaise favours a clean rule over FPC
   bug-for-bug compatibility (cf. the deliberate omission of `Char`, the
   uniform 0-based indexing, and the required `overload` keyword).
@@ -7017,7 +7022,7 @@ constants.
 The semantic pass detects a float expression (at least one float literal, a
 named float constant, or use of `/`) and dispatches to a float-specific
 constant folder.  The folder performs arithmetic using the host's IEEE 754
-`Double` type and stores the result as a string in the constant declaration,
+`Float64` type and stores the result as a string in the constant declaration,
 exactly as bare float literals are stored.
 
 === Alternatives considered
@@ -7043,8 +7048,8 @@ made a standard idiom unwritable, and both FPC and Delphi accept it.  The
 float constant evaluator now delegates `and`, `or`, `xor`, `shl`, `shr` and
 `not` to the INTEGER evaluator and converts the folded result.
 +
-Folding in Int64 rather than Double is the load-bearing detail: 2^53 is
-precisely where a Double stops representing consecutive integers, so folding
+Folding in `Int64` rather than `Float64` is the load-bearing detail: 2^53 is
+precisely where a `Float64` stops representing consecutive integers, so folding
 that shift in floating point would silently produce a wrong constant — and
 2^53 is exactly the shift this idiom uses.
 +
@@ -7065,9 +7070,9 @@ const Lo = 1;
 const Hi = 100;
 type
   TBuf  = array[0..N-1] of Byte;     { expression as bound }
-  TArr  = array[Lo..Hi] of Integer;  { named constants as both bounds }
+  TArr  = array[Lo..Hi] of Int;  { named constants as both bounds }
 var
-  A: array[0..N] of Integer;         { named constant as upper bound }
+  A: array[0..N] of Int;         { named constant as upper bound }
 const
   Days: array[0..N-1] of string = (...);  { const-array declarations too }
 ----
@@ -7108,7 +7113,7 @@ type
   TColor = (Red, Green, Blue);
   TColorNames = array[TColor] of string;   { type declaration }
 var
-  Costs: array[TColor] of Integer;         { var declaration }
+  Costs: array[TColor] of Int;         { var declaration }
 ----
 
 The array is sized `Ord(Low(TColor))..Ord(High(TColor))` — the enum's minimum
@@ -7135,7 +7140,7 @@ standard `TStaticArrayTypeDesc` with bounds `0..N-1`.
 * *Support non-enum ordinal index types (`array[Byte]`, `array[Boolean]`).*
   Deferred at first, since the enum form covered the primary use case; both
   have since been implemented — `array[Boolean]` for GH #181, and the 8- and
-  16-bit integer types (`array[Byte]`, `array[Int8]`, `array[Word]`,
+  16-bit integer types (`array[Byte]`, `array[Int8]`, `array[UInt16]`,
   `array[Int16]`) on 2026-10-21 (see the static-array feature table).
 * *Store the enum type in `TStaticArrayTypeDesc`.*  Rejected.  The type
   descriptor erases the index origin after semantic analysis, storing only
@@ -7227,7 +7232,7 @@ Exact decimal arithmetic is provided by a single StdLib type, `TDecimal`
 There is deliberately no fixed-point `Currency`/`Comp` type and no separate
 `BigDecimal`; the one `TDecimal` serves money, billing, tax and every other
 exact-decimal need.  Scientific and engineering computation is explicitly out of
-scope for `TDecimal` and remains the domain of `Double` and the `Math` unit.
+scope for `TDecimal` and remains the domain of `Float64` and the `Math` unit.
 
 `TDecimal` is a value-type record holding an unsigned magnitude, a signed scale,
 and a sign, with a compact `Int64` fast path that inflates to an arbitrary-
@@ -7240,7 +7245,7 @@ The string-consolidation precedent applies directly.  Just as Blaise replaced
 the `string`/`AnsiString`/`WideString`/`ShortString` family with one `string`,
 it replaces the `Currency`/`Comp`/`Extended`/`Real` numeric proliferation — which
 came from hardware limitations and legacy concerns that no longer apply — with
-one exact-decimal type plus the two float primitives (`Double`, `Single`).
+one exact-decimal type plus the two float primitives (`Float64`, `Float32`).
 
 The single-type choice matches the dominant industry pattern.  .NET (`decimal`),
 Swift (`Decimal`), Rust (`rust_decimal`) and Python (`decimal.Decimal`) each ship
@@ -7280,7 +7285,7 @@ rounding) need no change to the library.
 
 * *Making `TDecimal` cover scientific use too.*  Rejected.  Scientific work wants
   hardware floating point and transcendental functions over irrational results,
-  where exact decimal representation is impossible and pointless.  `Double` +
+  where exact decimal representation is impossible and pointless.  `Float64` +
   `Math` already serve this; `TDecimal` ships no such functions.
 
 * *Baking currency (ISO-4217) into the numeric core.*  Deferred to the
@@ -7469,7 +7474,7 @@ reaches the named unit's routine whatever shadows it.  Routines marked
 ----
 program Report;
 uses StrUtils;
-function PadRight(const S: string; W: Integer): string;   { the program's own }
+function PadRight(const S: string; W: Int): string;   { the program's own }
 begin ... end;
 begin
   WriteLn(PadRight('x', 3), StrUtils.PadRight('y', 3))
@@ -7606,7 +7611,7 @@ declaration.  A mismatch is a compile-time error naming both lists:
 
 ----
 Implementation of 'Tcl.methodOne' does not match its declaration at line 5:
-  declared (Integer; Byte), implemented (Byte; Integer)
+  declared (Int; Byte), implemented (Byte; Int)
 ----
 
 Generic methods are compared as written, since their parameter types name
@@ -7616,7 +7621,7 @@ type parameters that resolve only per instantiation.
 
 Callers are checked against the declaration, and the body was attached to the
 declaration, so an implementation spelling other types silently reread every
-argument: a unit routine declared `Foo(X: Integer)` and implemented
+argument: a unit routine declared `Foo(X: Int32)` and implemented
 `Foo(X: Byte)` printed 300 for a `Byte` (GH #215).  Only the parameter count
 was compared before, and for a non-overloaded method not even that.  The
 check found three such implementations in the compiler itself, each leaving
@@ -7629,7 +7634,7 @@ any method of this class").
 === Alternatives Rejected
 
 * *Delphi's short form*, an implementation with no parameter list at all
-  (`procedure TFoo.Bar;` for a declared `Bar(X: Integer)`).  Rejected
+  (`procedure TFoo.Bar;` for a declared `Bar(X: Int32)`).  Rejected
   (decision 2026-10-22): it is a second spelling of the same implementation,
   and it hides the parameters a body uses from anyone reading it.  It now gets
   the mismatch error, which shows the list to write.
@@ -7795,10 +7800,10 @@ type
   private
     FItems: TList<TEntry>;         { ordinary instance field }
     static function GetInstance: TRegistry;   { no Self; type-associated }
-    function GetItem(I: Integer): TEntry;     { ordinary instance method }
+    function GetItem(I: Int): TEntry;     { ordinary instance method }
   public
     static property Instance: TRegistry read GetInstance;
-    property Items[I: Integer]: TEntry read GetItem;
+    property Items[I: Int]: TEntry read GetItem;
   end;
 
 static function TRegistry.GetInstance: TRegistry;   { out-of-line impl }
@@ -8079,7 +8084,7 @@ units may freely declare same-named classes.
 
 Generic-instance symbols are deliberately mangled *bare* — no unit prefix —
 and emitted with weak binding (the C++ COMDAT model, adopted for BUG-004).
-The same instance (`TList<Integer>`) can be materialised by any compilation
+The same instance (`TList<Int32>`) can be materialised by any compilation
 process, so its symbols must be process- and unit-independent for the linker
 to fold the copies to one; runtime type identity (`is`/`as` across units)
 also depends on the whole program agreeing on a single typeinfo symbol per
@@ -8106,7 +8111,7 @@ C++ treats ODR violations — except diagnosed instead of undefined.
 * *Prefix by the DECLARING unit of the template and (recursively) of every
   type argument.* Correct in principle — the declaring unit is an intrinsic
   fact about the type, so dedup still works and the mangling becomes
-  injective (`foo.TBox<Integer>` vs `bar.TBox<Integer>` get distinct
+  injective (`foo.TBox<Int32>` vs `bar.TBox<Int32>` get distinct
   symbols). Deferred, not rejected: it is an ABI/wire-format change that
   must land in the shared front-end mangling for all backends, the `.bif`
   cache format, and the bootstrap chain in lockstep. Tracked as a future
@@ -8127,7 +8132,7 @@ An external routine may be declared with the `varargs` directive:
 
 [source,pascal]
 ----
-function printf(AFormat: PChar): Integer; cdecl; varargs; external 'c' name 'printf';
+function printf(AFormat: PChar): Int32; cdecl; varargs; external 'c' name 'printf';
 ----
 
 Call sites may then pass any number of extra arguments after the declared
@@ -8142,12 +8147,12 @@ Rules:
 * `varargs` cannot combine with `overload`: the variadic arity range would
   make overload resolution ambiguous by construction.
 * Fewer arguments than the fixed parameter list remains an arity error.
-* Extra arguments must be C-passable: integers, enums, Boolean, Double,
+* Extra arguments must be C-passable: integers, enums, Boolean, `Float64`,
   pointers, PChar, nil.  Two cases get targeted errors instead of silent
   ABI breakage:
 ** a Blaise `string` is rejected with a hint to pass `PChar(S)` — the
    managed string header must not cross a C varargs boundary;
-** a `Single` is rejected with a hint to pass `Double(F)` — C's default
+** a `Float32` is rejected with a hint to pass `Float64(F)` — C's default
    argument promotions mean the callee always reads a `double`, so passing
    a 4-byte float silently produces garbage.
 
@@ -8186,7 +8191,7 @@ A record or class may declare overloaded operators using the Delphi
 ----
 type
   TRect = record
-    L, T, R, B: Integer;
+    L, T, R, B: Int;
     class operator Add(const A, C: TRect): TRect;
     class operator Equal(const A, C: TRect): Boolean;
   end;
@@ -8206,8 +8211,8 @@ identifiers, recognised only after `class operator`; a field or method named
 operators are deliberately *not* accepted.
 
 Operators that share a name are told apart by their full signature, with no
-`overload` directive: `Multiply(const A: TVec; B: Integer)` and
-`Multiply(A: Integer; const B: TVec)` may both be declared, and each
+`overload` directive: `Multiply(const A: TVec; B: Int32)` and
+`Multiply(A: Int32; const B: TVec)` may both be declared, and each
 out-of-line body is matched to its declaration by signature.  An operator may
 also share its name with an ordinary method of the same type (`TDecimal`'s
 `class operator Add` beside its `Add` method).  They are different kinds of
@@ -8235,7 +8240,7 @@ implicit `Self` and takes its operands as explicit parameters.
 * *Built-in operators always win.* Operator resolution is a *fallback*: it is
   consulted only after every built-in rule (set algebra, `in`, logical ops,
   comparisons, string `+`, pointer arithmetic, shifts, numeric arithmetic)
-  has declined.  `string + string`, `Integer + Integer` and set algebra are
+  has declined.  `string + string`, `Int32 + Int32` and set algebra are
   therefore untouched by definition, not by careful ordering.
 * *Class `=` keeps reference identity.* Because the built-in class-identity
   comparison is tried first, declaring `class operator Equal` on a *class*
@@ -8305,7 +8310,7 @@ implicit `Self` and takes its operands as explicit parameters.
   written `0 - A`.  Unary minus is instead its own node (see "Unary Minus"),
   so `-R` on a record resolves `class operator Negative` directly, and a
   record without one is rejected with a message naming `Negative` rather than
-  silently running a `Subtract(Integer, TRec)` operator.
+  silently running a `Subtract(Int32, TRec)` operator.
 
 == Unary Minus — Its Own Node, IEEE Negation
 
@@ -8313,7 +8318,7 @@ implicit `Self` and takes its operands as explicit parameters.
 
 [source,pascal]
 ----
-var Z, N: Double;
+var Z, N: Float64;
 begin
   Z := 0.0;
   N := -Z;              { -0.0 }
@@ -8325,10 +8330,10 @@ The rules:
 
 * *Floats* negate by flipping the sign bit, as IEEE 754 defines negation:
   `-(+0.0)` is `-0.0`, `-(-0.0)` is `+0.0`, and the sign of a NaN flips.  The
-  result keeps the operand's width: `-S` of a `Single` is a `Single`.
+  result keeps the operand's width: `-S` of a `Float32` is a `Float32`.
 * *Integers* keep the result type and value `0 - X` gives: `Byte`,
-  `Word`, `Int8`, `SmallInt`, `UInt32` and `Integer` operands are promoted
-  to `Int64` (so `-Low(Integer)` is `2147483648`; a negated literal is a
+  `UInt16`, `Int8`, `Int16`, `UInt32` and `Int32` operands are promoted
+  to `Int64` (so `-Low(Int32)` is `2147483648`; a negated literal is a
   constant and is typed by magnitude), and `Int64` and `UInt64` keep their
   type and wrap at the boundary (`-Low(Int64)` is `Low(Int64)`,
   `-UInt64(1)` is `High(UInt64)`).  See "Integer Expression Width".
@@ -8336,7 +8341,7 @@ The rules:
   `class operator Negative`; without one, `-R` is an error naming the operator
   to declare.
 * *Default values* may be a negated literal or named constant:
-  `procedure F(A: Integer = -1; B: Double = -0.5)`.
+  `procedure F(A: Int32 = -1; B: Float64 = -0.5)`.
 
 === Rationale
 
@@ -8352,7 +8357,7 @@ The rules:
   match the old typing exactly; no integer program changes meaning.
 * *`-S` stays `Single`.* The old desugaring typed `-S` as `Double`, because
   the synthesised `0` was an `Integer` and `Integer - Single` promotes.  That
-  silently selected a `Double` overload for `F(-S)`.  A negation has one
+  silently selected a `Float64` overload for `F(-S)`.  A negation has one
   operand, so it keeps that operand's width.
 * *One node, one meaning.* A synthesised zero had to be recognised wherever
   negation mattered (the `Negative` operator, constant folding, default
@@ -8366,7 +8371,7 @@ The rules:
 === Alternatives considered
 
 * *Keep `0 - X` and special-case floats in the backends* -- rejected: it
-  fixes the sign of zero but leaves `-S` typed as `Double`, leaves `Negative`
+  fixes the sign of zero but leaves `-S` typed as `Float64`, leaves `Negative`
   needing the synthesised-zero recognition, and keeps negated defaults
   rejected.
 * *Desugar to `-1 * X`* -- rejected: it produces the right sign for floats
@@ -8435,7 +8440,7 @@ An `{$EMBED}` constant's length is the file's size, so restating it as an
 explicit `array[0..N-1]` would be redundant and would silently rot when the
 asset changed.  The unbounded form `array of Byte` derives its bounds from the
 value list.  It is a general const form, not an embed-only special case: a
-hand-written `const A: array of Integer = (1, 2, 3)` is equally valid.
+hand-written `const A: array of Int32 = (1, 2, 3)` is equally valid.
 
 === Cache invalidation is part of the feature
 
@@ -8492,7 +8497,7 @@ the enclosing type acts as a namespace:
 type
   TCfg = class
     type
-      TEntry = record Key: Integer; end;
+      TEntry = record Key: Int; end;
       TLevel = 1..9;
   public
     Data: TEntry;                        // bare, from inside the type
@@ -8571,7 +8576,7 @@ the compiler reports a semantic error:
 
 [source,pascal]
 ----
-var a: array[0..4] of Integer;
+var a: array[0..4] of Int;
 begin
   a[99] := 7;   // Array index 99 is out of bounds of 'a' (valid range is 0..4)
   a[-3] := 5;   // Array index -3 is out of bounds of 'a' (valid range is 0..4)
@@ -8631,7 +8636,7 @@ The fold deliberately trusts the annotation the expression pass has already
 made (`TIdentExpr.IsConstant` / `ConstValue`) rather than re-resolving the
 name itself. Re-resolution is not merely redundant, it is wrong: a variable,
 parameter or field whose name collides with an enum member
-(`var Red: Integer` alongside `TColor = (Red, ...)`) is not a constant, but a
+(`var Red: Int32` alongside `TColor = (Red, ...)`) is not a constant, but a
 fresh lookup can find the enum member and fold the index to its ordinal,
 rejecting a legal program. The expression pass reaches its bare-enum arm only
 after a symbol lookup has failed, so it already resolves the collision
@@ -8724,7 +8729,7 @@ Three constant positions are *not* checked, each for a reason:
 
 Also unchecked, as conservative misses rather than choices: a value that does
 not fold (`v := High(TStd) + 1`, since `High`/`Low` are not folded), and a
-plain `Byte`/`Word`/`Integer` destination, whose full storage range is its
+plain `Byte`/`UInt16`/`Int32` destination, whose full storage range is its
 type's range — `b := 300` on a `Byte` remains a separate, much broader
 question.
 
@@ -8759,7 +8764,7 @@ and a member subscript addresses the slot at its own ordinal:
 [source,pascal]
 ----
 type TColor = (Red = 5, Green = 10);
-var A: array[TColor] of Integer;
+var A: array[TColor] of Int;
 ----
 
 `A` holds six elements, `Low(A)` is 5, `High(A)` is 10, `SizeOf(A)` is 24, and
@@ -8821,7 +8826,7 @@ needs one value per slot, holes included:
 
 [source,pascal]
 ----
-const A: array[TColor] of Integer = (1, 0, 0, 0, 0, 2);   { six values }
+const A: array[TColor] of Int = (1, 0, 0, 0, 0, 2);   { six values }
 ----
 
 This is a breaking change: `(1, 2)` was accepted before and is now rejected
@@ -8929,14 +8934,14 @@ accepted inline: `procedure (...)`, `function (...): T`, either of them with
 [source,pascal]
 ----
 var
-  Error:    procedure (nr, line, col: Integer; pos: Int64);
-  Compare:  function (const A, B: string): Integer;
+  Error:    procedure (nr, line, col: Int; pos: Int64);
+  Compare:  function (const A, B: string): Int;
   OnChange: procedure (Sender: TObject) of object;
-  Next:     reference to function (X: Integer): Integer;
+  Next:     reference to function (X: Int): Int;
 
 type
   TRec = record
-    F: function (A, B: Integer): Integer;
+    F: function (A, B: Int): Int;
   end;
 ----
 
@@ -8966,7 +8971,7 @@ a parse error that gives no hint of the workaround.
 The implementation follows the inline set types: the parser encodes the type
 as a type-name string, and the semantic type resolver builds the descriptor
 from that string on demand.  The encoding keeps the procedural kind in front of
-the parameter list (`procedure of object(K:Integer)`), so a function whose
+the parameter list (`procedure of object(K:Int32)`), so a function whose
 result is itself a method pointer cannot be read two ways.  Because the type
 travels as a name, it works in every type position and is carried through a
 unit's cached interface (`.bif`) without a format change, as `array of T` and
@@ -8976,8 +8981,8 @@ specialises with the class.
 
 Named and inline procedural types resolve their parameter and result types
 through one routine.  Making that routine build inline types on demand also
-lets a named procedural type use them, as in `procedure (P: ^Integer)` and
-`function (): array of Integer`, which a name-only lookup had rejected
+lets a named procedural type use them, as in `procedure (P: ^Int32)` and
+`function (): array of Int32`, which a name-only lookup had rejected
 (BUG-20261013-proctype-inline-param-types).
 
 === Alternatives considered
@@ -9135,8 +9140,8 @@ Accepting and ignoring a keyword (`specialize`, `generic`), or defining an
 empty `TInterfacedObject`, would make porting a little easier, but at a cost
 to the language:
 
-* *Two spellings of one construct.*  `specialize TList<Integer>` and
-  `TList<Integer>` would mean the same, and code written for Blaise would
+* *Two spellings of one construct.*  `specialize TList<Int32>` and
+  `TList<Int32>` would mean the same, and code written for Blaise would
   carry a keyword that does nothing.  The generics section already chose the
   Delphi spelling so that one rule covers the whole language.
 * *A reader is misled.*  Every token in a Blaise program should mean
@@ -9150,7 +9155,7 @@ to the language:
 
 Rejecting a construct with no explanation is the other failure: before these
 messages, `goto 999` reported "Bare reference to 'goto' requires () for a
-call" and `specialize TList<Integer>` reported "Expected ';' but got
+call" and `specialize TList<Int32>` reported "Expected ';' but got
 'identifier'".  A porter meets the error before any documentation, so the
 error has to carry the explanation.  Code that must build with both FPC and
 Blaise already has the right tool: conditional compilation
@@ -9190,7 +9195,7 @@ FPC and Delphi use.  It is a compiler intrinsic, not a declared procedure:
   data — a string, class, interface, dynamic array or `reference to` closure,
   or a record or static array containing one at any depth — the call is a
   compile-time error that names the type and points to assignment.  The
-  check runs per generic instantiation, so `TBox<Integer>` may use `Move` in
+  check runs per generic instantiation, so `TBox<Int32>` may use `Move` in
   its body while `TBox<string>` is refused.
 
 `FillByte(Dest, Count, Value)` sets `Count` bytes of the variable `Dest` to

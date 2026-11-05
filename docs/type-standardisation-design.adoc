@@ -3,9 +3,11 @@
 :toclevels: 3
 :sectnums:
 
-Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
-implemented 2026-10-19/20 and released in v0.15.0; Phases 4 (steps
-4.0–4.8) and 5 done in the v0.16 cycle (see <<progress>>). +
+Status: COMPLETE — all design decisions signed off 2026-10-19.  Phases 0–3
+implemented 2026-10-19/20 and released in v0.15.0; Phases 4–7 done in the
+v0.16 cycle, the last on 2026-11-05 (see <<progress>>).  The decisions are
+recorded permanently in `docs/language-rationale.adoc`; this document is
+the record of how they were carried out. +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -607,7 +609,14 @@ The announcement in discussion #106 is revised on the following points:
   fixed-width spellings; an unknown classic name gets the D11 error.
   Found on the way: a generic receiver or a generic routine whose type
   argument is an alias instantiated a second, differently named copy.
-  Next: Phase 7.
+
+| 7
+| The object-file readers return `UInt32` for 32-bit fields, so a field at
+  or above 2^31^ reads as its unsigned value, and the Mach-O format
+  constants are plain hexadecimal; the readers' offsets and sizes are no
+  longer narrowed to 32 bits.  BlaiseGuard and a text scan find no classic
+  name outside `ClassicPascalTypes`; the language rationale carries the
+  width-stating names throughout.
 |===
 
 [#timeline]
@@ -767,6 +776,43 @@ Done 2026-10-30.
 * BlaiseGuard and migration-analyser self-check over the tree; FreeBSD
   full-tier dispatch; refresh `-pre`; fold this document's decisions into the
   language rationale as the permanent record.
+
+Done 2026-11-05.
+
+* Readers.  `RdU32` (ELF and Mach-O readers), `ReadU32` (`uElfObject`),
+  `U32At` and `U32BeAt` (the dylib reader) return `UInt32`; `RdU64` and
+  `ReadU64` no longer mask the halves they combine.  The Mach-O writer's and
+  the dylib reader's format constants (`MH_MAGIC_64`, `LC_DYLD_INFO_ONLY`,
+  `LC_MAIN`, `S_ATTR_PURE_INSTRUCTIONS`, the code-signature magics, ...)
+  and the Mach-O linker's patched instruction words are plain hexadecimal,
+  typed `Int`.  The ELF reader no longer narrows section and symbol offsets,
+  sizes and archive member positions to 32 bits.  Tests read a
+  load-command type, a section attribute, an `sh_info` and an `sh_type` at
+  or above 2^31^ back unsigned.
+* Behaviour.  The compiler built by the previous commit's binary and by
+  this one links to byte-identical executables, Mach-O on macOS arm64 and
+  ELF for Linux x86-64.  The arm64 assembler's `EmitW(Int32($...))`
+  encodings are unchanged: an instruction word is an `Int32` by the D10
+  rule.
+* Self-checks.  BL-2006 reports only `ClassicPascalTypes`' own tests (39
+  findings, which exercise the classic names on purpose) across compiler,
+  stdlib, tools, bindings, runtime and tests.  A text scan, which also
+  covers inactive `{$IFDEF}` branches, finds the classic names only in
+  comments, in test programs that use `ClassicPascalTypes` on purpose, and
+  as a method name.  The migration analyser is still the empty placeholder
+  described under Phase 2, so it has nothing to check.
+* FreeBSD.  The full tier (in-VM fixpoint, full suite and stdlib suite)
+  runs on every CI run, including the `ci/**` pre-flight of this change.
+* Rationale.  `docs/language-rationale.adoc` uses the width-stating names
+  in every example and statement of current behaviour; the classic names
+  remain only where it describes FPC, Delphi, `ClassicPascalTypes` or the
+  language before v0.16.  Statements left from before the change were
+  corrected: the _Integer Width_ open question, which still read
+  "`Integer` is 32-bit", constant expressions typed by magnitude, and the
+  Phase 4 changes described as planned.
+* Found on the way.  A shift keeps the width of its left operand, so a
+  32-bit `StrAt(...) shl 24` wraps negative; the tests' own 32-bit field
+  helpers now return `UInt32` as the readers do.
 
 [#phase4-plan]
 == Phase 4 implementation plan

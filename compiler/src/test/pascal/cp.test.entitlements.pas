@@ -139,13 +139,13 @@ var
   Slots: array[0..3] of Int32;
   Blobs: array[0..3] of string;
 
-  function BeU32(AOff: Int): Int;
+  function BeU32(AOff: Int): UInt32;
   begin
     Result := (StrAt(Img, AOff) shl 24) or (StrAt(Img, AOff + 1) shl 16)
       or (StrAt(Img, AOff + 2) shl 8) or StrAt(Img, AOff + 3);
   end;
 
-  function LeU32(AOff: Int): Int;
+  function LeU32(AOff: Int): UInt32;
   begin
     Result := StrAt(Img, AOff) or (StrAt(Img, AOff + 1) shl 8)
       or (StrAt(Img, AOff + 2) shl 16) or (StrAt(Img, AOff + 3) shl 24);
@@ -176,7 +176,7 @@ begin
     Off := Off + LeU32(Off + 4);
   end;
   AssertTrue('LC_CODE_SIGNATURE present', SigOff > 0);
-  AssertEquals('SuperBlob magic', Int32($FADE0CC0), BeU32(SigOff));
+  AssertEquals('SuperBlob magic', $FADE0CC0, BeU32(SigOff));
   AssertEquals('SuperBlob length', Length(Img) - SigOff, BeU32(SigOff + 4));
   AssertEquals('four blobs', 4, BeU32(SigOff + 8));
   for I := 0 to 3 do

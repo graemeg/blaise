@@ -98,13 +98,13 @@ uses
   uStrCompat, streams, blaise.machowriter;
 
 const
-  MH_MAGIC_64 = Int32($FEEDFACF);
-  FAT_MAGIC_BE = Int32($CAFEBABE);   { read big-endian }
+  MH_MAGIC_64 = $FEEDFACF;
+  FAT_MAGIC_BE = $CAFEBABE;   { read big-endian }
   CPU_TYPE_ARM64 = $0100000C;
   LC_ID_DYLIB = $0D;
-  LC_REEXPORT_DYLIB = Int32($8000001F);
-  LC_DYLD_INFO_ONLY = Int32($80000022);
-  LC_DYLD_EXPORTS_TRIE = Int32($80000033);
+  LC_REEXPORT_DYLIB = $8000001F;
+  LC_DYLD_INFO_ONLY = $80000022;
+  LC_DYLD_EXPORTS_TRIE = $80000033;
 
 constructor TMachODylib.Create;
 begin
@@ -128,13 +128,13 @@ begin
     (N = 'dl') or (N = 'dyld') or (N = 'info');
 end;
 
-function U32At(const ABuf: string; AOff: Int): Int32;
+function U32At(const ABuf: string; AOff: Int): UInt32;
 begin
   Result := StrAt(ABuf, AOff) or (StrAt(ABuf, AOff + 1) shl 8) or
     (StrAt(ABuf, AOff + 2) shl 16) or (StrAt(ABuf, AOff + 3) shl 24);
 end;
 
-function U32BeAt(const ABuf: string; AOff: Int): Int32;
+function U32BeAt(const ABuf: string; AOff: Int): UInt32;
 begin
   Result := (StrAt(ABuf, AOff) shl 24) or (StrAt(ABuf, AOff + 1) shl 16) or
     (StrAt(ABuf, AOff + 2) shl 8) or StrAt(ABuf, AOff + 3);
@@ -197,7 +197,7 @@ begin
       if Node >= ASize then
         raise EMachODylib.Create('export trie: node outside the trie');
       P := AOff + Node;
-      TermSize := Int32(ReadUleb(ABytes, P));
+      TermSize := ReadUleb(ABytes, P);
       if TermSize > 0 then
         AOut.Include(Prefix);
       P := P + TermSize;
@@ -207,7 +207,7 @@ begin
       begin
         Edge := StrZAt(ABytes, P);
         P := P + Length(Edge) + 1;
-        Child := Int32(ReadUleb(ABytes, P));
+        Child := ReadUleb(ABytes, P);
         Nodes.Add(Child);
         Prefixes.Add(Prefix + Edge);
       end;
@@ -470,7 +470,7 @@ var
 begin
   FIn := TFileInputStream.Create(APath);
   try
-    SetLength(Result, Int32(FIn.Size()));
+    SetLength(Result, FIn.Size());
     if Length(Result) > 0 then
       FIn.Read(PChar(Result), Length(Result));
   finally

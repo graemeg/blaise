@@ -20,7 +20,7 @@ interface
 uses
   classes, SysUtils, process, blaise.testing, Generics.Collections,
   blaise.elfreader, blaise.linker.elf, blaise.assembler.x86_64,
-  blaise.codegen.target;
+  blaise.codegen.target, uElfObject, uStrCompat;
 
 type
   TElfReaderTests = class(TTestCase)
@@ -33,6 +33,9 @@ type
     procedure TestParse_QuadRelocation;
     procedure TestParse_BssNoData;
     procedure TestParse_BadMagic_Raises;
+    { sh_type and sh_info at or above 2^31 read back unsigned, in both
+      ELF readers }
+    procedure TestParse_HighBitFieldsReadUnsigned;
     procedure TestArchive_SyntheticLongNames;
     procedure TestArchive_BadMagic_Raises;
     procedure TestArchive_ParsesRTL;
@@ -357,6 +360,68 @@ begin
       Raised := True;
   end;
   AssertTrue('bad magic must raise EElfReader', Raised);
+end;
+
+function PatchU32LE(const ABuf: string; AOff: Int; AVal: Int64): string;
+begin
+  Result := Copy(ABuf, 0, AOff)
+    + Chr(AVal and $FF) + Chr((AVal shr 8) and $FF)
+    + Chr((AVal shr 16) and $FF) + Chr((AVal shr 24) and $FF)
+    + Copy(ABuf, AOff + 4, Length(ABuf) - AOff - 4);
+end;
+
+procedure TElfReaderTests.TestParse_HighBitFieldsReadUnsigned;
+var
+  Bytes, Path: string;
+  Obj: TElfObjectFile;
+  Idx, HdrOff: Int;
+  ShOff: Int64;
+  Info: uElfObject.TElfInfo;
+  Sects: uElfObject.TElfSectionArray;
+  Found: Boolean;
+  I: Int;
+begin
+  Bytes := AssembleToBytes(
+    '.text' + LineEnding + 'nop' + LineEnding +
+    '.section .bss' + LineEnding + 'buf:' + LineEnding + '.skip 8' + LineEnding);
+  Obj := ParseElfObject(Bytes, 'test.o');
+  try
+    Idx := Obj.SectionIndexOf('.bss');
+  finally
+    Obj.Free();
+  end;
+  AssertTrue('.bss present', Idx > 0);
+  ShOff := (Int64(StrAt(Bytes, 40)) or (Int64(StrAt(Bytes, 41)) shl 8)
+    or (Int64(StrAt(Bytes, 42)) shl 16) or (Int64(StrAt(Bytes, 43)) shl 24));
+  HdrOff := ShOff + Idx * 64;
+  { sh_info of .bss: meaningless to the reader, so any value parses }
+  Bytes := PatchU32LE(Bytes, HdrOff + 44, $80000001);
+  Obj := ParseElfObject(Bytes, 'test.o');
+  try
+    AssertEquals(2147483649, Obj.Sections.Get(Idx).Info);
+  finally
+    Obj.Free();
+  end;
+
+  { sh_type in the user range (SHT_LOUSER = $80000000) }
+  Bytes := PatchU32LE(Bytes, HdrOff + 4, $80000000);
+  Path := IncludeTrailingPathDelimiter(GetTempDir()) + 'blz_highbit_'
+    + IntToStr(GetProcessID()) + '.o';
+  WriteFile(Path, Bytes);
+  try
+    AssertTrue('probe', uElfObject.ProbeElf(Path, Info));
+    Sects := uElfObject.LoadSections(Path, Info);
+    Found := False;
+    for I := 0 to Length(Sects) - 1 do
+      if Sects[I].Name = '.bss' then
+      begin
+        AssertEquals(2147483648, Sects[I].SType);
+        Found := True;
+      end;
+    AssertTrue('.bss listed', Found);
+  finally
+    DeleteFile(Path);
+  end;
 end;
 
 procedure TElfReaderTests.TestArchive_SyntheticLongNames;

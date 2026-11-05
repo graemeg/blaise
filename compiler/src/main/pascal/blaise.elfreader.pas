@@ -183,7 +183,7 @@ begin
          or ((Ord(ABuf[AOff + 1]) and $FF) shl 8);
 end;
 
-function RdU32(const ABuf: string; AOff: Int): Int32;
+function RdU32(const ABuf: string; AOff: Int): UInt32;
 begin
   Result := (Ord(ABuf[AOff]) and $FF)
          or ((Ord(ABuf[AOff + 1]) and $FF) shl 8)
@@ -195,8 +195,8 @@ function RdU64(const ABuf: string; AOff: Int): Int64;
 var
   Lo, Hi: Int64;
 begin
-  Lo := Int64(RdU32(ABuf, AOff)) and $FFFFFFFF;
-  Hi := Int64(RdU32(ABuf, AOff + 4)) and $FFFFFFFF;
+  Lo := RdU32(ABuf, AOff);
+  Hi := RdU32(ABuf, AOff + 4);
   Result := Lo or (Hi shl 32);
 end;
 
@@ -321,14 +321,14 @@ begin
       HdrOff := ShOff + Int64(I) * ELF64_SHDR_SIZE;
       Sec := TRdSection.Create();
       Sec.Name := '';
-      Sec.ShType := RdU32(ABytes, Int32(HdrOff) + 4);
-      Sec.Flags := RdU64(ABytes, Int32(HdrOff) + 8);
-      Sec.FileOffset := RdU64(ABytes, Int32(HdrOff) + 24);
-      Sec.Size := RdU64(ABytes, Int32(HdrOff) + 32);
-      Sec.Link := RdU32(ABytes, Int32(HdrOff) + 40);
-      Sec.Info := RdU32(ABytes, Int32(HdrOff) + 44);
-      Sec.AddrAlign := RdU64(ABytes, Int32(HdrOff) + 48);
-      Sec.EntSize := RdU64(ABytes, Int32(HdrOff) + 56);
+      Sec.ShType := RdU32(ABytes, HdrOff + 4);
+      Sec.Flags := RdU64(ABytes, HdrOff + 8);
+      Sec.FileOffset := RdU64(ABytes, HdrOff + 24);
+      Sec.Size := RdU64(ABytes, HdrOff + 32);
+      Sec.Link := RdU32(ABytes, HdrOff + 40);
+      Sec.Info := RdU32(ABytes, HdrOff + 44);
+      Sec.AddrAlign := RdU64(ABytes, HdrOff + 48);
+      Sec.EntSize := RdU64(ABytes, HdrOff + 56);
       Sec.Data := '';
       if (Sec.ShType <> SHT_NOBITS) and (Sec.ShType <> SHT_NULL) and
          (Sec.Size > 0) then
@@ -336,7 +336,7 @@ begin
         if Sec.FileOffset + Sec.Size > Length(ABytes) then
           raise EElfReader.Create(ASourceName + ': section '
             + IntToStr(I) + ' data truncated');
-        Sec.Data := Copy(ABytes, Int32(Sec.FileOffset), Int32(Sec.Size));
+        Sec.Data := Copy(ABytes, Sec.FileOffset, Sec.Size);
       end;
       Obj.Sections.Add(Sec);
     end;
@@ -349,7 +349,7 @@ begin
     begin
       HdrOff := ShOff + Int64(I) * ELF64_SHDR_SIZE;
       Sec := Obj.Sections.Get(I);
-      Sec.Name := RdStrZ(ShStr.Data, RdU32(ABytes, Int32(HdrOff)));
+      Sec.Name := RdStrZ(ShStr.Data, RdU32(ABytes, HdrOff));
     end;
 
     { Symbol table (at most one SHT_SYMTAB in a relocatable object). }
@@ -360,18 +360,18 @@ begin
       if (Sec.Link <= 0) or (Sec.Link >= ShNum) then
         raise EElfReader.Create(ASourceName + ': symtab has bad strtab link');
       StrSec := Obj.Sections.Get(Sec.Link);
-      SymCount := Int32(Sec.Size) div ELF64_SYM_SIZE;
+      SymCount := Sec.Size div ELF64_SYM_SIZE;
       for J := 0 to SymCount - 1 do
       begin
         EntOff := Int64(J) * ELF64_SYM_SIZE;
         Sym := TRdSymbol.Create();
-        Sym.Name := RdStrZ(StrSec.Data, RdU32(Sec.Data, Int32(EntOff)));
-        InfoByte := Ord(Sec.Data[Int32(EntOff) + 4]) and $FF;
+        Sym.Name := RdStrZ(StrSec.Data, RdU32(Sec.Data, EntOff));
+        InfoByte := Ord(Sec.Data[EntOff + 4]) and $FF;
         Sym.Bind := InfoByte shr 4;
         Sym.SymType := InfoByte and $F;
-        Sym.Shndx := RdU16(Sec.Data, Int32(EntOff) + 6);
-        Sym.Value := RdU64(Sec.Data, Int32(EntOff) + 8);
-        Sym.Size := RdU64(Sec.Data, Int32(EntOff) + 16);
+        Sym.Shndx := RdU16(Sec.Data, EntOff + 6);
+        Sym.Value := RdU64(Sec.Data, EntOff + 8);
+        Sym.Size := RdU64(Sec.Data, EntOff + 16);
         Obj.Symbols.Add(Sym);
       end;
     end;
@@ -381,17 +381,17 @@ begin
     begin
       Sec := Obj.Sections.Get(I);
       if Sec.ShType <> SHT_RELA then Continue;
-      RelCount := Int32(Sec.Size) div ELF64_RELA_SIZE;
+      RelCount := Sec.Size div ELF64_RELA_SIZE;
       for J := 0 to RelCount - 1 do
       begin
         EntOff := Int64(J) * ELF64_RELA_SIZE;
         Rel := TRdReloc.Create();
         Rel.TargetSection := Sec.Info;
-        Rel.Offset := RdU64(Sec.Data, Int32(EntOff));
-        RInfo := RdU64(Sec.Data, Int32(EntOff) + 8);
-        Rel.SymIndex := Int32(RInfo shr 32);
-        Rel.RelocType := Int32(RInfo and $FFFFFFFF);
-        Rel.Addend := RdU64(Sec.Data, Int32(EntOff) + 16);
+        Rel.Offset := RdU64(Sec.Data, EntOff);
+        RInfo := RdU64(Sec.Data, EntOff + 8);
+        Rel.SymIndex := RInfo shr 32;
+        Rel.RelocType := RInfo and $FFFFFFFF;
+        Rel.Addend := RdU64(Sec.Data, EntOff + 16);
         Obj.Relocs.Add(Rel);
       end;
     end;
@@ -483,12 +483,12 @@ begin
     begin
       { 60-byte member header: name[16] mtime[12] uid[6] gid[6]
         mode[8] size[10] magic[2] }
-      if (Ord(ABytes[Int32(P) + 58]) <> Ord('`')) or
-         (Ord(ABytes[Int32(P) + 59]) <> 10) then
+      if (Ord(ABytes[P + 58]) <> Ord('`')) or
+         (Ord(ABytes[P + 59]) <> 10) then
         raise EElfReader.Create(ASourceName
           + ': corrupt member header at offset ' + IntToStr(P));
-      NameField := ArTrimField(Copy(ABytes, Int32(P), 16));
-      SizeField := Copy(ABytes, Int32(P) + 48, 10);
+      NameField := ArTrimField(Copy(ABytes, P, 16));
+      SizeField := Copy(ABytes, P + 48, 10);
       MemberSize := ArParseDec(ArTrimField(SizeField));
       P := P + 60;
       if P + MemberSize > Length(ABytes) then
@@ -496,7 +496,7 @@ begin
 
       if NameField = '//' then
         { GNU long-name table }
-        LongNames := Copy(ABytes, Int32(P), Int32(MemberSize))
+        LongNames := Copy(ABytes, P, MemberSize)
       else if (NameField = '/') or (NameField = '/SYM64/') then
         { symbol index — skip }
       else
@@ -526,7 +526,7 @@ begin
         end;
         M := TArchiveMember.Create();
         M.Name := Name;
-        M.Data := Copy(ABytes, Int32(P), Int32(MemberSize));
+        M.Data := Copy(ABytes, P, MemberSize);
         AMembers.Add(M);
       end;
 
