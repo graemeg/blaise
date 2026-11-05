@@ -939,6 +939,17 @@ note, and this document.
 | 12 (main)
 | `_main` is a routine to the tables: its argument and operand temporaries
   are released when a raise is caught in the main program.
+
+| Residuals (2026-11-05)
+| A raising constructor releases its new instance, running the destructor
+  (D2): arm64 parks it in an `__opnd` slot, x86-64 also spills it to a
+  16-byte stack slot.  Record-call arguments (`TakeRec(MkRec())`) are
+  indirect aggregate ranges.  An owned call-result receiver (an interface,
+  class or record that `MkX().M(args)` holds across the call) is covered on
+  both ISAs, which closes the x86-64 interface results held in a stack
+  buffer across a call that can raise.  A unit section holding a try/except
+  is lowered into a hidden routine (`__unitinit_<unit>`), which gives it a
+  frame (a try/except there did not compile on arm64) and unwind tables.
 |===
 
 Measured: the compiler carries 4.2 % of tables (231 KB of 5.46 MB), inside
@@ -948,14 +959,11 @@ the D5 budget.
 
 Each of these is a leak when an exception passes, never a double release:
 
-* x86-64 interface results returned through a caller's stack buffer (ten
-  lowering sites) and arm64/x86-64 record call-argument (sret) areas,
-  `TakeRec(MkRec())`.
-* The new instance across a raising constructor call (D2).
-* Unit initialisation sections, and x86-64 `.bss` temporaries of `main`
-  (deferred releases, scratches).
+* x86-64 `.bss` temporaries of `main` (deferred releases, scratches), and
+  unit sections without a try/except (a raise there is never caught, so
+  nothing is left to leak into).
 * Other arm64 operand temporaries still pushed below `sp` (outside the
-  string operators).
+  string operators, call arguments and receivers).
 * A destructor that raises while an aggregate hook releases a field: the
   shared release walk zeroes a field after its release, so the next walk can
   release that field again.  Changing the order would change ordinary
