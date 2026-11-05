@@ -340,6 +340,7 @@ type
     procedure UnwStrOpndClose(var AHandle: Int);
     procedure EmitCtorBodyCall(AMethod: TMethodDecl; AArgs: TObjectList);
     function UnwRecArgOpen(AArg: TASTExpr): Int;
+    function UnwClassSlotOpen(const ASlot: string): Int;
     function NextIntArgDest(var ANInt, AStackOff: Int): string;
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
@@ -1783,6 +1784,19 @@ begin
   if (FUnw = nil) or not FFrame.TryGetValue(Slot, Off) then Exit;
   Result := FUnw.OpenRange(UNW_AGG, -Off, UNW_F_INDIRECT,
     UnwAggHookPtr(AArg.ResolvedType), False, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ An owned object reference just stored in frame slot ASlot, released by
+  the caller once a call is done: a CLASS range until then (-1: no tables). }
+function TArm64Backend.UnwClassSlotOpen(const ASlot: string): Int;
+var
+  Off: Int;
+  Lbl: string;
+begin
+  Result := -1;
+  if (FUnw = nil) or not FFrame.TryGetValue(ASlot, Off) then Exit;
+  Result := FUnw.OpenRange(UNW_CLASS, -Off, 0, 0, False, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
 end;
 
@@ -18160,11 +18174,13 @@ var
   Decl: TMethodDecl;
   Par: TMethodParam;
   Slot, RecvSlot: string;
+  RecvH: Int;
   Owned: Boolean;
   NInt, NFloat: Int;
   Params: TObjectList;
   AllDeclared: Boolean;
 begin
+  RecvH := -1;
   { itab dispatch through the ordinary call path, like a closure call
     (EmitFatPtrCall): the synthesised declaration takes each parameter's
     declared type from the interface type, falling back to the ARGUMENT's
@@ -18238,6 +18254,9 @@ begin
     if not FFrame.ContainsKey(RecvSlot) then
       AddLocal(RecvSlot, 8);
     EmitStoreSlot('x0', RecvSlot);
+    { the frame's until the release below: the arguments or the call may
+      raise }
+    RecvH := UnwClassSlotOpen(RecvSlot);
   end;
   EmitPushX0();                                 { the receiver obj = Self }
   Decl := TMethodDecl.Create();
@@ -18268,6 +18287,7 @@ begin
   end;
   if RecvSlot <> '' then
   begin
+    UnwStrOpndClose(RecvH);
     { keep every result register across the release }
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');
     Self.Emit(#9'stp d0, d1, [sp, #-16]!');
@@ -18794,6 +18814,8 @@ procedure TArm64Backend.EmitMethodCallOnExpr(AMethod: TMethodDecl;
 var
   Owned: Boolean;
   Sz: Int;
+  SaveTop, RecvH: Int;
+  RecvSlot: string;
 begin
   if AMethod.IsRecordMethod and (AObjExpr.ResolvedType <> nil) and
      (AObjExpr.ResolvedType.Kind = tyRecord) and
@@ -18814,8 +18836,13 @@ begin
     EmitIntLiteral('x2', AObjExpr.ResolvedType.RawSize());
     EmitCallSym('memcpy');
     Self.Emit(#9'mov x0, sp');
+    { a managed temp's address, parked: the arguments or the call may raise }
+    SaveTop := FOpndTop;
+    RecvH := UnwRecArgOpen(AObjExpr);
     EmitPushX0();                          { the receiver EmitCall pops }
     EmitCall(AMethod, AName, AArgs, '', True, AMethod.VTableSlot);
+    UnwStrOpndClose(RecvH);
+    FOpndTop := SaveTop;
     if not RecretManagedClean(TRecordTypeDesc(AObjExpr.ResolvedType)) then
       EmitRecTempFieldReleases(TRecordTypeDesc(AObjExpr.ResolvedType), '', 0);
     EmitAddSubImm('add', 'sp', 'sp', Sz);  { drop the temp }
@@ -18833,18 +18860,29 @@ begin
     EmitRecAddrToX0(AObjExpr)
   else
     Self.EmitExprToX0(AObjExpr);
+  SaveTop := FOpndTop;
+  RecvSlot := '';
+  RecvH := -1;
   if Owned then
-    EmitPushX0();               { copy for the post-call release }
+  begin
+    { the copy for the post-call release lives in an x29-relative operand
+      slot, the frame's while the arguments and the call run }
+    RecvSlot := OpndSlot(FOpndTop);
+    FOpndTop := FOpndTop + 1;
+    EmitStoreSlot('x0', RecvSlot);
+    RecvH := UnwClassSlotOpen(RecvSlot);
+  end;
   EmitPushX0();                 { the receiver EmitCall pops into x0 }
   EmitCall(AMethod, AName, AArgs, '', True, AMethod.VTableSlot);
   if Owned then
   begin
+    UnwStrOpndClose(RecvH);
     EmitPushX0();               { park the result }
-    Self.Emit(#9'ldr x0, [sp, #16]');
+    EmitLoadSlot('x0', RecvSlot);
     EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
-    Self.Emit(#9'add sp, sp, #16');   { drop the receiver copy }
   end;
+  FOpndTop := SaveTop;
 end;
 
 procedure TArm64Backend.EmitMethodCallStmt(AStmt: TMethodCallStmt);

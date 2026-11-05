@@ -1345,6 +1345,8 @@ type
     function UnwRecArgRanged(AArg: TASTExpr): Boolean;
     function UnwStrTempOpen(AExpr: TASTExpr): Int;
     function UnwCtorOpen(): Int;
+    function UnwIntfRecvOpen(): Int;
+    function UnwRecvBufOpen(AObjExpr: TASTExpr): Int;
     function EmitCtorHoldBegin(): Int;
     procedure EmitCtorHoldEnd(var AHandle: Int);
     procedure UnwStrTempClose(var AHandle: Int);
@@ -4706,6 +4708,7 @@ var
   HTotal, Pushed: Int;
   VFlags: string;
   RecvOnStack: Boolean;
+  RecvH: Int;
   DiscSz: Int;
   CleanBytes: Int;
   SlotClasses: TList<Int>;
@@ -4724,6 +4727,9 @@ begin
     _itab(%rip)` -- symbols that are never defined; the linker bound them to
     arbitrary addresses and the program segfaulted at run time. }
   RecvOnStack := (AObjExpr <> nil) and Self.EmitIntfValueOnStack(AObjExpr);
+  RecvH := -1;
+  if RecvOnStack then
+    RecvH := Self.UnwIntfRecvOpen();
   DiscSz := 0;
   if ADiscardIntfRet then
   begin
@@ -4806,6 +4812,7 @@ begin
   begin
     { Release the owned receiver pair; preserve the dispatch result regs
       (this path also serves expression position). }
+    Self.UnwStrTempClose(RecvH);
     Self.Emit(#9'subq $24, %rsp');
     Self.Emit(#9'movq %rax, 0(%rsp)');
     Self.Emit(#9'movq %rdx, 8(%rsp)');
@@ -12816,6 +12823,7 @@ end;
 procedure TX86_64Backend.EmitMethodCallExpr(ACall: TMethodCallExpr);
 var
   UnwH:     Int;
+  RecvH:    Int;
   I:          Int;
   SetI:       Int;
   MD:         TMethodDecl;
@@ -13037,6 +13045,7 @@ begin
       args are pushed) and carry its address in callee-saved %rbx, which survives
       the arg push/pop sequence.  %rbx is saved/restored around the whole call. }
     RecvBufBytes := 0;
+    RecvH := -1;
     if (ACall.ObjExpr <> nil) and MD.IsRecordMethod and
        Self.IsNativeRecordCall(ACall.ObjExpr) then
     begin
@@ -13045,6 +13054,7 @@ begin
       Self.Emit(Format(#9'subq $%d, %%rsp', [RecvBufBytes]));
       Self.EmitRecordCallSretAt(ACall.ObjExpr, '(%rsp)');
       Self.Emit(#9'movq %rsp, %rbx');     { receiver address -> callee-saved }
+      RecvH := Self.UnwRecvBufOpen(ACall.ObjExpr);
     end;
 
     Self.BeginCallArgs(MD.Params, ACall.Args);
@@ -13110,6 +13120,7 @@ begin
     begin
       { Release the buffer's managed fields, free it and restore %rbx (none of
         which disturbs the return registers %rax/%rdx/%xmm0/%xmm1). }
+      Self.UnwStrTempClose(RecvH);
       Self.EmitRecvBufFieldReleases(ACall.ObjExpr);
       Self.Emit(Format(#9'addq $%d, %%rsp', [RecvBufBytes]));
       Self.Emit(#9'popq %rbx');
@@ -13121,6 +13132,7 @@ begin
       into a stack buffer and carry its address in callee-saved %rbx (immune to
       the hoist/alloc %rsp movement below).  See the <=6 path for the rationale. }
     RecvBufBytes := 0;
+    RecvH := -1;
     if (ACall.ObjExpr <> nil) and MD.IsRecordMethod and
        Self.IsNativeRecordCall(ACall.ObjExpr) then
     begin
@@ -13129,6 +13141,7 @@ begin
       Self.Emit(Format(#9'subq $%d, %%rsp', [RecvBufBytes]));
       Self.EmitRecordCallSretAt(ACall.ObjExpr, '(%rsp)');
       Self.Emit(#9'movq %rsp, %rbx');
+      RecvH := Self.UnwRecvBufOpen(ACall.ObjExpr);
     end;
     OverflowSlots := TotalSlots - 6;
     AllocSz := ((TotalSlots * 8 + 15) and (-16));
@@ -13184,6 +13197,7 @@ begin
     HK.Free();
     if RecvBufBytes > 0 then
     begin
+      Self.UnwStrTempClose(RecvH);
       Self.EmitRecvBufFieldReleases(ACall.ObjExpr);
       Self.Emit(Format(#9'addq $%d, %%rsp', [RecvBufBytes]));
       Self.Emit(#9'popq %rbx');
@@ -25745,6 +25759,7 @@ var
   OverflowBytes: Int;
   SlotClasses: TList<Int>;
   RecvOnStack: Boolean;
+  RecvH: Int;
 begin
   IntfD := TInterfaceTypeDesc(ACall.ResolvedClassType);
   ArgN := 0;
@@ -25754,6 +25769,9 @@ begin
     owned pair sits above the hoist region until after the dispatch. }
   RecvOnStack := (ACall.ObjExpr <> nil) and
     Self.EmitIntfValueOnStack(ACall.ObjExpr);
+  RecvH := -1;
+  if RecvOnStack then
+    RecvH := Self.UnwIntfRecvOpen();
   { Same unknown-signature hoist as EmitInterfaceCall; the region sits BELOW
     the sret buffer (see EmitIntfSretCall for the layout rationale). }
   HD := TList<Int>.Create();
@@ -25804,6 +25822,7 @@ begin
   if RecvOnStack then
   begin
     { drop the owned receiver, then move the result pair up over it }
+    Self.UnwStrTempClose(RecvH);
     Self.Emit(#9'movq 16(%rsp), %rdi');
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'movq (%rsp), %rax');
@@ -25870,6 +25889,7 @@ var
   RetSize: Int;
   SlotClasses: TList<Int>;
   RecvOnStack: Boolean;
+  RecvH: Int;
 begin
   IntfD := TInterfaceTypeDesc(ACall.ResolvedClassType);
   { a closure / method pointer is returned as the 16-byte record it is laid
@@ -25910,6 +25930,9 @@ begin
     EmitInterfaceCall. }
   RecvOnStack := (ACall.ObjExpr <> nil) and
     Self.EmitIntfValueOnStack(ACall.ObjExpr);
+  RecvH := -1;
+  if RecvOnStack then
+    RecvH := Self.UnwIntfRecvOpen();
 
   { Same unknown-signature hoist as EmitIntfSretMethodCall; the region sits
     BELOW any sret buffer space we reserve. }
@@ -25980,6 +26003,7 @@ begin
   if RecvOnStack then
   begin
     { release the owned receiver; the result is already in the dest buffer }
+    Self.UnwStrTempClose(RecvH);
     Self.Emit(#9'movq (%rsp), %rdi');
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'addq $16, %rsp');
@@ -26687,6 +26711,34 @@ begin
   Result := -1;
   if FUnw = nil then Exit;
   Result := FUnw.OpenRange(UNW_CLASS, FSPDepth, 0, 0, True, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ An owned interface receiver's fat pair just left at (%rsp) (obj at 0, itab
+  at 8), released after its call: the frame's while the arguments and the
+  call run. }
+function TX86_64Backend.UnwIntfRecvOpen(): Int;
+var
+  Lbl: string;
+begin
+  Result := -1;
+  if FUnw = nil then Exit;
+  Result := FUnw.OpenRange(UNW_INTF, FSPDepth, 0, 0, True, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ A managed record receiver returned by a call (MkRec().M(args)), built in
+  the buffer at (%rsp) and released after its call: an aggregate range
+  until then (-1: no managed fields, or no tables). }
+function TX86_64Backend.UnwRecvBufOpen(AObjExpr: TASTExpr): Int;
+var
+  Lbl: string;
+begin
+  Result := -1;
+  if (FUnw = nil) or (AObjExpr.ResolvedType = nil) or
+     not ArcTypeHasManagedContent(AObjExpr.ResolvedType) then Exit;
+  Result := FUnw.OpenRange(UNW_AGG, FSPDepth, 0,
+    Self.UnwAggHookPtr(AObjExpr.ResolvedType), True, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
 end;
 

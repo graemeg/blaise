@@ -88,6 +88,10 @@ type
       by-value parameters, a large and a small (register-returned) record,
       a method callee }
     procedure TestDebug_RecordCallArgs_ReleasedOnUnwind;
+    { an owned receiver -- an interface, class or managed record returned by
+      a call -- is released when its call's argument or the call raises:
+      scalar, interface and record results, statement and expression }
+    procedure TestDebug_OwnedReceivers_ReleasedOnUnwind;
   end;
 
 implementation
@@ -1177,6 +1181,72 @@ begin
       F();
     end.
     ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd in' + #10 + 'e b' + #10 + '7s7');
+end;
+
+procedure TUnwindE2ETests.TestDebug_OwnedReceivers_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwRecv;
+    uses SysUtils;
+    type
+      TPair = record
+        S: string;
+        T: string;
+      end;
+      IThing = interface
+        function Echo(N: Int): Int;
+        procedure Put(const T: IThing; N: Int);
+        function Again(N: Int): IThing;
+        function Pair(N: Int): TPair;
+      end;
+      TThing = class(IThing)
+        FN: string;
+        constructor Create(const N: string);
+        function Echo(N: Int): Int;
+        procedure Put(const T: IThing; N: Int);
+        function Again(N: Int): IThing;
+        function Pair(N: Int): TPair;
+      end;
+      TObj = class
+        function Echo(N: Int): Int;
+        procedure Put(N: Int);
+      end;
+      TVal = record
+        S: string;
+        function Echo(N: Int): Int;
+      end;
+    constructor TThing.Create(const N: string); begin FN := N; end;
+    function TThing.Echo(N: Int): Int; begin Result := N; end;
+    procedure TThing.Put(const T: IThing; N: Int); begin WriteLn(N); end;
+    function TThing.Again(N: Int): IThing; begin Result := Self; end;
+    function TThing.Pair(N: Int): TPair; begin Result.S := FN; Result.T := FN; end;
+    function TObj.Echo(N: Int): Int; begin Result := N; end;
+    procedure TObj.Put(N: Int); begin WriteLn(N); end;
+    function TVal.Echo(N: Int): Int; begin Result := N; end;
+    function Mk(const N: string): IThing; begin Result := TThing.Create(N); end;
+    function MkO(): TObj; begin Result := TObj.Create(); end;
+    function MkV(N: Int): TVal; begin Result.S := IntToStr(N) + 'v'; end;
+    function Boom(): Int; begin raise Exception.Create('b'); end;
+    procedure A; begin WriteLn(Mk('a').Echo(Boom())); end;
+    procedure B; begin Mk('b').Put(Mk('b2'), Boom()); end;
+    procedure C; var T: IThing; begin T := Mk('c').Again(Boom()); end;
+    procedure D; var P: TPair; begin P := Mk('d').Pair(Boom()); end;
+    procedure E; begin WriteLn(MkO().Echo(Boom())); end;
+    procedure F; begin MkO().Put(Boom()); end;
+    procedure G; begin WriteLn(MkV(7).Echo(Boom())); end;
+    begin
+      try A(); except on X: Exception do WriteLn('a ', X.Message); end;
+      try B(); except on X: Exception do WriteLn('b ', X.Message); end;
+      try C(); except on X: Exception do WriteLn('c ', X.Message); end;
+      try D(); except on X: Exception do WriteLn('d ', X.Message); end;
+      try E(); except on X: Exception do WriteLn('e ', X.Message); end;
+      try F(); except on X: Exception do WriteLn('f ', X.Message); end;
+      try G(); except on X: Exception do WriteLn('g ', X.Message); end;
+      WriteLn(Mk('h').Echo(8), MkO().Echo(9), MkV(1).Echo(10));
+    end.
+    ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + 'e b' + #10 +
+      'f b' + #10 + 'g b' + #10 + '8910');
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;
