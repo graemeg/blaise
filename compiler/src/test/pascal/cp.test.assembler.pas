@@ -42,6 +42,13 @@ type
     procedure TestBranchUndefined_EmitsReloc;
     procedure TestNoteGnuStack_Present;
     procedure TestUnknownDirective_Raises;
+    { `.long A - B` / `.quad A - B` with both labels in one section is an
+      assemble-time constant (unwind tables address code from data);
+      forward and backward, no relocation }
+    procedure TestLabelDifference_SameSection_Constant;
+    { across sections, or with an undefined label, it is not a constant:
+      reported, never silently assembled }
+    procedure TestLabelDifference_NotConstant_Raises;
     { A data directive's value must fit its width, read as signed or
       unsigned; a wider one is an error, not truncated. }
     procedure TestDataDirective_ValueTooWide_Raises;
@@ -600,6 +607,52 @@ begin
   AssertTrue('01 02 | 07 00 00 00 | 09 00*7 laid out contiguously',
     ContainsBytes(B, Chr(1) + Chr(2) + Chr(7) + Chr(0) + Chr(0) + Chr(0) +
       Chr(9) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0)));
+end;
+
+procedure TAsmEncodingTests.TestLabelDifference_SameSection_Constant;
+var
+  B: string;
+begin
+  B := AssembleToBytes(
+    '.data' + LineEnding +
+    '.long .Lend - .Lstart' + LineEnding +          { forward }
+    '.text' + LineEnding +
+    '.Lstart:' + LineEnding +
+    'nop' + LineEnding + 'nop' + LineEnding + 'nop' + LineEnding +
+    'nop' + LineEnding +
+    '.Lend:' + LineEnding +
+    'ret' + LineEnding +
+    '.data' + LineEnding +
+    '.4byte .Lstart - .Lend' + LineEnding +         { backward, negative }
+    '.quad .Lend - .Lstart' + LineEnding);
+  AssertTrue('04 00 00 00 | fc ff ff ff | 04 00*7 in .data',
+    ContainsBytes(B, Chr(4) + Chr(0) + Chr(0) + Chr(0) +
+      Chr($FC) + Chr($FF) + Chr($FF) + Chr($FF) +
+      Chr(4) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0)));
+  AssertTrue('a constant needs no relocation', not ContainsBytes(B, '.rela.data'));
+end;
+
+procedure TAsmEncodingTests.TestLabelDifference_NotConstant_Raises;
+
+  function Raises(const AAsm: string): Boolean;
+  begin
+    Result := False;
+    try
+      AssembleToBytes(AAsm);
+    except
+      on E: EAssembler do
+        Result := True;
+    end;
+  end;
+
+begin
+  AssertTrue('cross-section', Raises(
+    '.text' + LineEnding + '.La:' + LineEnding + 'ret' + LineEnding +
+    '.data' + LineEnding + '.Lb:' + LineEnding +
+    '.long .Lb - .La' + LineEnding));
+  AssertTrue('undefined label', Raises(
+    '.text' + LineEnding + '.La:' + LineEnding + 'ret' + LineEnding +
+    '.data' + LineEnding + '.quad .Lnowhere - .La' + LineEnding));
 end;
 
 procedure TAsmEncodingTests.TestUnknownDirective_Raises;

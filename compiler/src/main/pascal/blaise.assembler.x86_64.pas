@@ -2922,6 +2922,48 @@ end;
 
 { ---- Directive handler ------------------------------------------------ }
 
+{ `A - B` in a data directive, both labels in the SAME section: an
+  assemble-time constant, off(A) - off(B).  This assembler never relaxes a
+  branch, so pass 1 and pass 2 lay every label out at the same offset and a
+  forward label is as good as a backward one; pass 1 only sizes the
+  directive.  A cross-section difference or an undefined label would need a
+  relocation pair -- reported, never assembled as a symbol with a bogus
+  displacement (which is what the plain operand parser makes of it). }
+function IsLabelDifference(const AArgs: string): Boolean;
+var
+  P: Int;
+  LA, LB: string;
+begin
+  Result := False;
+  P := Pos(' - ', AArgs);
+  if P <= 0 then Exit;
+  LA := TrimStr(Copy(AArgs, 0, P));
+  LB := TrimStr(Copy(AArgs, P + 3, Length(AArgs) - P - 3));
+  if (LA = '') or (LB = '') then Exit;
+  Result := not IsDigit(LA[0]) and not IsDigit(LB[0]);
+end;
+
+function LabelDifference(const AArgs: string; const ACtx: TEncodeContext): Int64;
+var
+  P: Int;
+  LA, LB: string;
+  IA, IB: TLabelInfo;
+begin
+  Result := 0;
+  if ACtx.Pass <> 2 then Exit;
+  P := Pos(' - ', AArgs);
+  LA := TrimStr(Copy(AArgs, 0, P));
+  LB := TrimStr(Copy(AArgs, P + 3, Length(AArgs) - P - 3));
+  if not (ACtx.Labels.TryGetValue(LA, IA) and IA.Defined and
+          ACtx.Labels.TryGetValue(LB, IB) and IB.Defined) then
+    raise EAssembler.Create('label difference needs two labels defined in this file: '
+      + AArgs);
+  if IA.Section <> IB.Section then
+    raise EAssembler.Create('label difference across sections is not a constant: '
+      + AArgs);
+  Result := Int64(IA.Offset) - Int64(IB.Offset);
+end;
+
 procedure HandleDirective(const AParsed: TParsedLine;
   var ASection: TContainerSectionKind; AWriter: IContainerWriter;
   var AGlobals: TDictionary<string, Boolean>;
@@ -3111,6 +3153,14 @@ begin
     x86-64.  The OPDF debug emitter uses .int, so accept it here. }
   if (Dir = '.long') or (Dir = '.int') then
   begin
+    if IsLabelDifference(Args) then
+    begin
+      Val := LabelDifference(Args, ACtx);
+      if not FieldFits(Val, 32) then
+        raise EAssembler.Create('.long label difference out of range: ' + Args);
+      AWriter.AppendDWord(ASection, Val);
+      Exit;
+    end;
     DataOp := ParseOperand(Args, 0, OpEnd);
     if DataOp.Kind = opLabel then
     begin
@@ -3135,6 +3185,11 @@ begin
 
   if Dir = '.quad' then
   begin
+    if IsLabelDifference(Args) then
+    begin
+      AWriter.AppendQWord(ASection, LabelDifference(Args, ACtx));
+      Exit;
+    end;
     DataOp := ParseOperand(Args, 0, OpEnd);
     if DataOp.Kind = opLabel then
     begin
