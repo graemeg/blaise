@@ -402,6 +402,12 @@ type
     { Class-enumerator path (IsArrayIter = False) }
     IsArrayIter:          Boolean;    { True when collection is a static array }
     EnumVarName:          string;     { synthetic enumerator slot, e.g. __forin_0 }
+    { synthetic managed slot (e.g. __ficoll_1) holding a collection the
+      loop owns (for X in MakeList() do) until the loop ends; being a
+      local of the collection's class type, the routine's scope-exit
+      release covers Exit and Exit(X) from inside the loop.  '' when no
+      local block was open (a backend then keeps its own scratch) }
+    CollVarName:          string;
     ResolvedEnumTypeName: string;     { enumerator class type name }
     [Unretained] GetEnumDecl:          TObject;    { TMethodDecl — not owned }
     [Unretained] MoveNextDecl:         TObject;    { TMethodDecl — not owned }

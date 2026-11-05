@@ -836,7 +836,10 @@ type
     { Emit the element-to-loop-variable assignment for index-based for-in
       paths.  Handles ARC (string/class AddRef/Release) and width-correct
       stores.  AElemInRax is True when the element value is already in %rax. }
-    procedure EmitForInAssignElem(AStmt: TForInStmt);
+    { AOwned: the value in %rax is already a +1 the loop variable takes
+      over (an enumerator's Current is a call result); otherwise it is a
+      borrowed element and is retained }
+    procedure EmitForInAssignElem(AStmt: TForInStmt; AOwned: Boolean = False);
     { Copy an aggregate array element (record / inline array / jumbo set) into
       the for-in loop variable by value.  %rax holds the element address on
       entry.  Records go through retain/release + memcpy so managed fields are
@@ -15997,7 +16000,8 @@ end;
 
 { Assign the element value (already in %rax) to the for-in loop variable,
   with ARC handling for strings and classes. }
-procedure TX86_64Backend.EmitForInAssignElem(AStmt: TForInStmt);
+procedure TX86_64Backend.EmitForInAssignElem(AStmt: TForInStmt;
+  AOwned: Boolean);
 var
   VarOp: string;
   Cap:   Boolean;
@@ -16015,8 +16019,11 @@ begin
   if AStmt.ResolvedVarType.IsString() then
   begin
     Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _StringAddRef');
+    if not AOwned then
+    begin
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _StringAddRef');
+    end;
     if Cap then
       Self.Emit(Format(#9'movq %s, %%r11', [Self.VarOperand('_cap_' + AStmt.VarName)]));
     Self.Emit(Format(#9'movq %s, %%rdi', [VarOp]));
@@ -16029,8 +16036,11 @@ begin
   else if AStmt.ResolvedVarType.Kind = tyClass then
   begin
     Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
+    if not AOwned then
+    begin
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+    end;
     if Cap then
       Self.Emit(Format(#9'movq %s, %%r11', [Self.VarOperand('_cap_' + AStmt.VarName)]));
     Self.Emit(Format(#9'movq %s, %%rdi', [VarOp]));
@@ -16560,15 +16570,29 @@ begin
   EnumOp   := Self.VarOperand(AStmt.EnumVarName);
 
   { Call GetEnumerator on the collection.  An owned collection (for X in
-    MakeList() do) is kept in a scratch until the loop ends -- it leaked,
-    and an enumerator need not hold a reference of its own }
+    MakeList() do) is kept in a slot until the loop ends -- it leaked,
+    and an enumerator need not hold a reference of its own.  The slot is
+    the front end's managed local (CollVarName), so Exit and Exit(X) from
+    inside the loop release it with the routine's other locals; it may
+    still hold the collection of an earlier pass that an exception left (a
+    loop inside try..except inside another loop), so that one is released
+    first. }
   Self.EmitExprToEax(AStmt.CollExpr);
   CollTmp := '';
   if (AStmt.CollExpr.ResolvedType <> nil) and
      (AStmt.CollExpr.ResolvedType.Kind = tyClass) and
      NativeExprOwnsRef(AStmt.CollExpr) then
   begin
-    CollTmp := Self.NewScratchOperand(8);
+    if AStmt.CollVarName <> '' then
+    begin
+      CollTmp := Self.VarOperand(AStmt.CollVarName);
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(Format(#9'movq %s, %%rdi', [CollTmp]));
+      Self.Emit(#9'callq _ClassRelease');
+      Self.Emit(#9'popq %rax');
+    end
+    else
+      CollTmp := Self.NewScratchOperand(8);
     Self.Emit(Format(#9'movq %%rax, %s', [CollTmp]));
   end;
   Self.Emit(#9'movq %rax, %rdi');
@@ -16698,7 +16722,9 @@ begin
           AStmt.ResolvedVarType);
     end
     else
-      Self.EmitForInAssignElem(AStmt);
+      { Current is a call result: an owned +1 the loop variable takes over
+        (retaining it again leaked one reference per iteration) }
+      Self.EmitForInAssignElem(AStmt, True);
   end;
 
   Self.EmitStmt(AStmt.Body);
@@ -24478,7 +24504,11 @@ begin
     8-byte pad keeps %rsp 16-aligned across the %rbx save. }
   Self.Emit(#9'pushq %rbx');
   Self.Emit(#9'subq $8, %rsp');
-  if AObjExpr <> nil then
+  if (AObjExpr <> nil) and (AObjExpr is TDerefExpr) and AReceiverIsRecord then
+    { a record reached through a pointer (P^.F(X)): the record's address,
+      the receiver base, is the pointer's value }
+    Self.EmitExprToEax(TDerefExpr(AObjExpr).Expr)
+  else if AObjExpr <> nil then
   begin
     if not ((AObjExpr is TIdentExpr) or (AObjExpr is TFieldAccessExpr)) and
        ((AObjExpr.ResolvedType = nil) or

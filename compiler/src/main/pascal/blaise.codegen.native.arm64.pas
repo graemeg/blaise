@@ -12086,11 +12086,26 @@ begin
       { an owned collection (for X in MakeList() do) lives in a slot until
         the loop ends: an enumerator need not hold a reference of its own
         (TList's does not), so releasing it earlier freed the list under
-        the loop }
-      CollTmp := '__ficoll_' + IntToStr(FJArgN);
-      FJArgN := FJArgN + 1;
-      if not FFrame.ContainsKey(CollTmp) then
-        AddLocal(CollTmp, 8);
+        the loop.  The slot is the front end's managed local (CollVarName),
+        so Exit and Exit(X) from inside the loop release it with the
+        routine's other locals; it may still hold the collection of an
+        earlier pass that an exception left (a loop inside try..except
+        inside another loop), so that one is released first. }
+      if AStmt.CollVarName <> '' then
+      begin
+        CollTmp := AStmt.CollVarName;
+        EmitPushX0();
+        EmitLoadSlot('x0', CollTmp);
+        EmitCallSym('_ClassRelease');
+        EmitPopTo('x0');
+      end
+      else
+      begin
+        CollTmp := '__ficolltmp_' + IntToStr(FJArgN);
+        FJArgN := FJArgN + 1;
+        if not FFrame.ContainsKey(CollTmp) then
+          AddLocal(CollTmp, 8);
+      end;
       EmitStoreSlot('x0', CollTmp);
     end;
     EmitMethodCallCommon(GetE, 'GetEnumerator', EmptyArgs);

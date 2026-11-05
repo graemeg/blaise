@@ -97,6 +97,14 @@ type
       empty string, read a float Current as 0.0, and leaked or re-evaluated
       call collections) }
     procedure TestDebug_ForInForms_NoLeak;
+    { for X in Call() do over a class collection, left by Exit, Exit(X),
+      Break, or an exception caught inside the routine with the loop run
+      again: the collection the call returned is released on every path (it
+      was released only at the loop's end, so leaving the routine from
+      inside the loop leaked it and everything it held).  An exception
+      propagating out of the routine is BUG-20261028-money-mismatch-raise-
+      leaks. }
+    procedure TestDebug_ForInOwnedCollection_ExitPaths_NoLeak;
     { an interface-returning call as a scalar operand (GetI() <> nil,
       Assigned(O.GetI()), O.GetI() = L) and an interface read through an
       owned transient receiver (MkObj().GetI(), MkObj().FIntf, MkObj().P[I]):
@@ -3999,6 +4007,113 @@ begin
     'False' + #10 +
     '3.00' + #10 +
     'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ForInOwnedCollection_ExitPaths_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program ForInExits;
+    uses SysUtils, Generics.Collections;
+    type
+      TItem = class
+        Tag: Int;
+        constructor Create(ATag: Int);
+        destructor Destroy; override;
+      end;
+      TOwner = class
+        FItems: TList<TItem>;
+        constructor Create();
+        function Items(): TList<TItem>;
+        function FindValue(ATag: Int): TItem;
+        function FindPlain(ATag: Int): TItem;
+        function FindBreak(ATag: Int): TItem;
+        function Retries(): Int;
+      end;
+    var Alive: Int;
+    constructor TItem.Create(ATag: Int); begin Tag := ATag; Alive := Alive + 1 end;
+    destructor TItem.Destroy; begin Alive := Alive - 1; inherited Destroy() end;
+    constructor TOwner.Create();
+    var I: Int;
+    begin
+      FItems := TList<TItem>.Create();
+      for I := 1 to 5 do FItems.Add(TItem.Create(I));
+    end;
+    function TOwner.Items(): TList<TItem>; begin Result := FItems end;
+    function TOwner.FindValue(ATag: Int): TItem;
+    var C: TItem;
+    begin
+      for C in Items() do
+        if C.Tag = ATag then
+          Exit(C);
+      Result := nil;
+    end;
+    function TOwner.FindPlain(ATag: Int): TItem;
+    var C: TItem;
+    begin
+      Result := nil;
+      for C in Items() do
+        if C.Tag = ATag then
+        begin
+          Result := C;
+          Exit;
+        end;
+    end;
+    function TOwner.FindBreak(ATag: Int): TItem;
+    var C: TItem;
+    begin
+      Result := nil;
+      for C in Items() do
+        if C.Tag = ATag then
+        begin
+          Result := C;
+          Break;
+        end;
+    end;
+    function TOwner.Retries(): Int;
+    var C: TItem; Pass: Int;
+    begin
+      Result := 0;
+      for Pass := 1 to 3 do
+        try
+          for C in Items() do
+            if C.Tag = 2 then
+              raise Exception.Create('again');
+        except
+          on E: Exception do Result := Result + 1;
+        end;
+    end;
+    procedure Check(const AName: string; AMode: Int);
+    var O: TOwner; F: TItem; N: Int;
+    begin
+      Alive := 0;
+      N := 0;
+      O := TOwner.Create();
+      case AMode of
+        0: F := O.FindValue(3);
+        1: F := O.FindValue(99);
+        2: F := O.FindPlain(3);
+        3: F := O.FindBreak(3);
+        4: N := O.Retries();
+      end;
+      if F <> nil then N := F.Tag;
+      F := nil;
+      O := nil;
+      WriteLn(AName, ' ', N, ' alive=', Alive);
+    end;
+    begin
+      Check('exit-value', 0);
+      Check('not-found', 1);
+      Check('exit', 2);
+      Check('break', 3);
+      Check('retries', 4);
+    end.
+    ''',
+    'exit-value 3 alive=0' + #10 +
+    'not-found 0 alive=0' + #10 +
+    'exit 3 alive=0' + #10 +
+    'break 3 alive=0' + #10 +
+    'retries 3 alive=0');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_ForInForms_NoLeak;

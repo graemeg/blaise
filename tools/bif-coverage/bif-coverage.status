@@ -159,6 +159,7 @@ TForInStmt.CollExpr  serialise
 TForInStmt.Body  serialise
 TForInStmt.IsArrayIter  safe
 TForInStmt.EnumVarName  safe
+TForInStmt.CollVarName  safe
 TForInStmt.ResolvedEnumTypeName  safe
 TForInStmt.IdxVarName  safe
 TForInStmt.ArrayLow  safe

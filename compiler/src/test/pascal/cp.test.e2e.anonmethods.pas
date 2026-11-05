@@ -152,6 +152,10 @@ type
     procedure TestRun_ClosureInRecordField_VarParamReceiver;
     procedure TestRun_ClosureInRecordField_LocalRecord;
     procedure TestRun_ClosureInRecordField_NestedRecord;
+    { a procedural field of a record reached through a pointer (P^.F(X)):
+      the receiver base is the pointer's value.  x86-64 rejected the
+      dereference as an "unsupported receiver expression" }
+    procedure TestRun_ProcFieldInRecord_ThroughPointer;
     { BUG-20260922-record-closure-field-not-managed: a record whose only
       managed member is a 'reference to' field was reported "managed clean",
       so a whole-record copy shared the env with NO retain and the scope-exit
@@ -1885,6 +1889,35 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, 'nested' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ProcFieldInRecord_ThroughPointer;
+const
+  Src = '''
+    program P;
+    type
+      TShow = procedure(N: Int);
+      TFn = reference to function(N: Int): Int;
+      TRec = record Tag: Int; Show: TShow; Fn: TFn; end;
+      PRec = ^TRec;
+    procedure ShowIt(N: Int); begin WriteLn('show ', N) end;
+    var
+      R: TRec;
+      Ptr: PRec;
+      K: Int;
+    begin
+      K := 10;
+      R.Tag := 3;
+      R.Show := @ShowIt;
+      R.Fn := function(N: Int): Int begin Result := N + K end;
+      Ptr := @R;
+      Ptr^.Show(Ptr^.Tag);
+      WriteLn('fn ', Ptr^.Fn(5))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'show 3' + LineEnding + 'fn 15' + LineEnding, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_RecordCopy_ClosureField_EnvSurvivesCopy;

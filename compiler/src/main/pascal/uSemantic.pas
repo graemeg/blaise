@@ -14305,7 +14305,22 @@ begin
         SynthDecl.ResolvedType := EnumType;
         SynthDecl.IsGlobal    := False;
         FCurrentLocalBlock.Decls.Add(SynthDecl);
-      end;
+
+        { a managed slot for a collection the loop owns (a call result):
+          a local of the collection's type, so Exit and Exit(X) release it
+          with the routine's other locals.  A raw scratch released at the
+          loop's end leaked it (and all it held) on both paths. }
+        ForInS.CollVarName := '__ficoll_' + IntToStr(FForInCounter);
+        Inc(FForInCounter);
+        SynthDecl := TVarDecl.Create();
+        SynthDecl.Names.Add(ForInS.CollVarName);
+        SynthDecl.TypeName    := CollRT.Name;
+        SynthDecl.ResolvedType := CollType;
+        SynthDecl.IsGlobal    := False;
+        FCurrentLocalBlock.Decls.Add(SynthDecl);
+      end
+      else
+        ForInS.CollVarName := '';
     end
     else if CollType.Kind = tyString then
     begin
