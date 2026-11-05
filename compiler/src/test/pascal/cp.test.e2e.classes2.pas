@@ -139,6 +139,7 @@ type
       subclasses) is a follow-up commit. }
     procedure TestRun_LocalVar_ShadowsOwnMethod;
     procedure TestRun_ParentMethod_ShadowsProgramProc;
+    procedure TestRun_Field_ShadowsBuiltinAndProgramProc;
     { Explicit qualifiers are unambiguous paths — the priority order
       does not apply.  Self.X must hit a class member; inherited X
       must hit a parent method.  Neither falls through to unit-level. }
@@ -955,6 +956,64 @@ const
     program-level proc.  Pre-fix, the global lookup ran first and
     bound to the program-level Tag (output '1'); post-fix the
     implicit-Self check finds parent.Tag and wins (output '2'). }
+  { A class field shadows a built-in routine (Pos, Copy, Format, Trim,
+    Length) and a program-level function (Count) of the same name inside
+    the class's methods: written, read, as a method receiver (statement
+    and expression), as a record base and as an array base.  A local
+    variable still beats the field
+    (BUG-20261103-field-named-like-builtin: "'Pos' is not a variable"). }
+  SrcResolve_Field_OverBuiltin =
+    '''
+        program ResFieldOverBuiltin;
+        function Count(): Int;
+        begin Result := 99 end;
+        type
+          TRec = record N: Int; end;
+          TBox = class
+            V: Int;
+            procedure Bump();
+            function Get(): Int;
+          end;
+          TScan = class
+            Pos: Int;
+            Count: Int;
+            Copy: string;
+            Format: TBox;
+            Trim: TRec;
+            Length: array of Int;
+            procedure Step();
+            function Get(): Int;
+          end;
+        procedure TBox.Bump();
+        begin V := V + 7 end;
+        function TBox.Get(): Int;
+        begin Result := V end;
+        procedure TScan.Step();
+        begin
+          Pos := Pos + 1;
+          Count := Pos * 10;
+          Copy := 'c' + IntToStr(Count);
+          Format := TBox.Create();
+          Format.Bump();
+          Trim.N := Format.Get() + Trim.N;
+          SetLength(Length, 2);
+          Length[1] := Trim.N * 2
+        end;
+        function TScan.Get(): Int;
+        var Copy: Int;
+        begin
+          Copy := 5;
+          Result := Pos + Count + Copy + Length[1]
+        end;
+        var S: TScan;
+        begin
+          S := TScan.Create();
+          S.Step();
+          WriteLn(S.Get(), ' ', S.Copy, ' ', Count(), ' ', S.Trim.N);
+          S.Free()
+        end.
+        ''';
+
   SrcResolve_ParentMethod_OverProgramProc =
     '''
         program ResParentOverProgram;
@@ -1876,6 +1935,16 @@ begin
   AssertTrue('compile+run', CompileAndRun(SrcResolve_ParentMethod_OverProgramProc, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('inherited method wins over program-level proc', '2' + LE, Output);
+end;
+
+procedure TE2EClasses2Tests.TestRun_Field_ShadowsBuiltinAndProgramProc;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRun(SrcResolve_Field_OverBuiltin, Output, RCode));
+  AssertEquals('exit code 0', 0, RCode);
+  AssertEquals('fields win over Pos, Copy and Count; a local wins over a field',
+    '30 c10 99 7' + LE, Output);
 end;
 
 procedure TE2EClasses2Tests.TestRun_ExplicitSelf_AlwaysClassMember;

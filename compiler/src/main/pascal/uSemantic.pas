@@ -382,6 +382,7 @@ type
       variable and the class has a record / class field of that name: the
       field shadows the global, as it does for a bare identifier. }
     function  FieldShadowsGlobal(const AName: string; ASym: TSymbol): Boolean;
+    function  SelfMemberShadows(ASym: TSymbol): Boolean;
     { True when AExpr (already analysed) denotes storage that @ may address. }
     function  IsAddressable(AExpr: TASTExpr): Boolean;
     { O.P[I] := V with P a NON-indexed array-typed property: an element write
@@ -5300,14 +5301,25 @@ begin
   Result := AExpr is TDerefExpr;
 end;
 
+{ Inside a method an implicit-Self member beats every symbol declared
+  outside the routine (a global variable, a unit or built-in routine such as
+  Pos, a constant, a type): only a local variable or parameter shadows it.
+  The rule of AnalyseIdentExpr and AnalyseProcCall, for every other path
+  (BUG-20261103-field-named-like-builtin). }
+function TSemanticAnalyser.SelfMemberShadows(ASym: TSymbol): Boolean;
+begin
+  Result := (FCurrentClass <> nil) and
+    ((ASym = nil) or ASym.IsGlobal or
+     not (ASym.Kind in [skVariable, skParameter, skVarParameter]));
+end;
+
 function TSemanticAnalyser.FieldShadowsGlobal(const AName: string;
   ASym: TSymbol): Boolean;
 var
   FI: TFieldInfo;
 begin
   Result := False;
-  if (FCurrentClass = nil) or (ASym = nil) or not ASym.IsGlobal or
-     (ASym.Kind <> skVariable) then
+  if (ASym = nil) or not Self.SelfMemberShadows(ASym) then
     Exit;
   FI := FCurrentClass.FindField(AName);
   Result := (FI <> nil) and (FI.TypeDesc <> nil) and
@@ -15081,9 +15093,8 @@ begin
   end;
   { Inside a method, class fields shadow same-named globals.  Try the
     implicit Self.Field path when there is no match (ObjSym=nil) OR when
-    the only match is a global variable that a class field should shadow. }
-  if (FCurrentClass <> nil) and
-     ((ObjSym = nil) or ObjSym.IsGlobal) then
+    the only match is not a local (SelfMemberShadows). }
+  if Self.SelfMemberShadows(ObjSym) then
   begin
     ACall.ImplicitBaseInfo :=
       FCurrentClass.FindField(ACall.ObjectName);
@@ -15401,9 +15412,9 @@ begin
   { Inside a method, class fields shadow same-named globals.  Mirror the
     priority of the expression read path (see TIdentExpr handling): try the
     class field when there is no local/param match (VarSym=nil) OR when the
-    only match found is a global variable that the field should shadow. }
-  if (FCurrentClass <> nil) and
-     ((VarSym = nil) or VarSym.IsGlobal) then
+    only match found is not a local: a global variable, or a routine such
+    as the built-in Pos (SelfMemberShadows). }
+  if Self.SelfMemberShadows(VarSym) then
   begin
     FldInfo := FCurrentClass.FindField(AAssign.Name);
     if FldInfo <> nil then
@@ -20396,6 +20407,11 @@ begin
     ResolvedObjName := ResolveScopeBoundTypeParams(AExpr.ObjectName);
     ObjSym := Self.InstanceSymbol(ResolvedObjName);
   end;
+  { a field of Self shadows anything but a local (SelfMemberShadows) }
+  if (ObjSym <> nil) and (AExpr.QualifierUnit = '') and
+     Self.SelfMemberShadows(ObjSym) and
+     (FCurrentClass.FindField(AExpr.ObjectName) <> nil) then
+    ObjSym := nil;
   if ObjSym = nil then
   begin
     { Implicit Self.Field.Method — ObjectName is a field of current class.
@@ -25147,6 +25163,10 @@ begin
     Exit;
   end;
   Sym := FTable.Lookup(AStmt.ArrayName);
+  { a field of Self shadows anything but a local (SelfMemberShadows) }
+  if (Sym <> nil) and Self.SelfMemberShadows(Sym) and
+     (FCurrentClass.FindField(AStmt.ArrayName) <> nil) then
+    Sym := nil;
   if Sym = nil then
   begin
     { Implicit Self.Field[I] := V — ArrayName is an array-typed field of the
