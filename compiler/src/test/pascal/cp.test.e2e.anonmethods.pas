@@ -161,6 +161,11 @@ type
       arm64 called it as a scalar function, so the getter wrote through a
       stale x8 and crashed. }
     procedure TestRun_ForInOverClosureList;
+    { a literal nested in a literal of a method reaches the method's
+      members bare (FName, FCount := ..., Greet()) as well as through
+      Self.: it named no outer variable, so it took no Self, and without
+      Self its body had no class context ("Undeclared identifier") }
+    procedure TestRun_NestedLiteral_ImplicitMembers;
     { BUG-20260922-record-closure-field-not-managed: a record whose only
       managed member is a 'reference to' field was reported "managed clean",
       so a whole-record copy shared the env with NO retain and the scope-exit
@@ -1957,6 +1962,47 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, 'a' + LineEnding + 'b 10' + LineEnding + '13' + LineEnding +
     '30' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedLiteral_ImplicitMembers;
+const
+  Src = '''
+    program P;
+    type
+      TProc = reference to procedure;
+      THolder = class
+        FName: string;
+        FCount: Int;
+        procedure Greet();
+        procedure Run();
+      end;
+    procedure THolder.Greet(); begin WriteLn('greet ', FName, ' ', FCount) end;
+    procedure THolder.Run();
+    var Outer: TProc;
+    begin
+      Outer := procedure
+        var Inner: TProc;
+        begin
+          Inner := procedure
+            begin
+              FCount := FCount + 2;
+              WriteLn('inner ', FName);
+              Greet()
+            end;
+          Inner()
+        end;
+      Outer()
+    end;
+    var H: THolder;
+    begin
+      H := THolder.Create();
+      H.FName := 'x';
+      H.Run()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'inner x' + LineEnding + 'greet x 2' + LineEnding, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_RecordCopy_ClosureField_EnvSurvivesCopy;

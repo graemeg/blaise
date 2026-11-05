@@ -23485,7 +23485,13 @@ begin
           'an anonymous method; copy it into a dynamic array first',
           [AThunk.CapturedVars.Strings[I]]), AThunk.Line, AThunk.Col);
     end;
-  if (AThunk.CapturedVars = nil) and (not InMethod) then Exit;
+  { A literal nested in a literal of a method shares the outer literal's
+    Self even when it names no outer variable: Self is what gives its body
+    the class context for bare member references (AnalyseStandaloneDecl),
+    so leaving here made 'FName' undeclared while 'Self.FName' worked. }
+  if (AThunk.CapturedVars = nil) and (not InMethod) and
+     not (Encl.IsAnonThunk and (Encl.EnvCaptured <> nil) and
+          (Encl.EnvCaptured.IndexOf('Self') >= 0)) then Exit;
 
   { Drop names shadowed by the literal's own params or locals — the walker
     only checks the OUTER name set, not the literal's own declarations. }
