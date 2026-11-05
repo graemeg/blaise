@@ -950,6 +950,23 @@ note, and this document.
   buffer across a call that can raise.  A unit section holding a try/except
   is lowered into a hidden routine (`__unitinit_<unit>`), which gives it a
   frame (a try/except there did not compile on arm64) and unwind tables.
+  x86-64 main's `.bss` deferred-release slots are described by address
+  (`UNW_F_ABS`: the location indexes the block's pointer table).
+
+| Destructors raising
+| A destructor that raises while the walk releases: on x86-64 the program's
+  field-cleanup and env-cleanup functions lay outside the unwind block, so
+  the destructor's own walk stopped there (the block now closes the
+  program's code); the aggregate hooks zero a field before releasing it,
+  so a walk that re-enters a hook releases each field once; the replaced
+  exception is released (D1).
+
+| 14 (benchmark)
+| macOS arm64, a raise caught 50 frames up, each frame holding a string:
+  4.9 µs per raise with tables against 2.5 µs without (which leaks the 50
+  strings); a raise caught one frame up: 0.13 µs against 0.07 µs.  The
+  non-raising path is unchanged (identical `.text` but for `_main`'s
+  `_UnwindInit` call); tables add 4.2 % to the compiler binary.
 |===
 
 Measured: the compiler carries 4.2 % of tables (231 KB of 5.46 MB), inside
@@ -959,16 +976,12 @@ the D5 budget.
 
 Each of these is a leak when an exception passes, never a double release:
 
-* x86-64 `.bss` temporaries of `main` (deferred releases, scratches), and
-  unit sections without a try/except (a raise there is never caught, so
-  nothing is left to leak into).
-* Other arm64 operand temporaries still pushed below `sp` (outside the
-  string operators, call arguments and receivers).
-* A destructor that raises while an aggregate hook releases a field: the
-  shared release walk zeroes a field after its release, so the next walk can
-  release that field again.  Changing the order would change ordinary
-  generated code; it is left for a separate change.
-* Step 14: the benchmark.
+* x86-64 `main`'s other `.bss` scratches (those not behind a deferred
+  release).  Unit sections without a try/except need nothing: a raise there
+  is never caught.
+* Other arm64 operand temporaries still pushed below `sp`, outside the
+  string operators, call arguments, constructors and receivers (for
+  example the owned receiver of a built-in `ToString`).
 
 [[risks]]
 == Risks
@@ -1020,7 +1033,9 @@ Each of these is a leak when an exception passes, never a double release:
 
 D1. *An exception escaping a destructor during unwinding* replaces the
 in-flight exception, and unwinding continues with the new one
-(Delphi-like); the original exception object leaks.
+(Delphi-like); the original exception object is released when the new one
+escapes to the same handler (one the destructor catches itself leaves the
+original in flight).
 Alternative rejected: `abort()` (C++-like), which turns a recoverable error
 in cleanup code into a process exit.
 
