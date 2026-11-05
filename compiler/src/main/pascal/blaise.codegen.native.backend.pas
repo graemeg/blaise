@@ -37,7 +37,7 @@ interface
 
 uses
   SysUtils, Classes, contnrs, uAST, uSymbolTable, blaise.codegen, strutils,
-  blaise.codegen.target, uDebugFacts;
+  blaise.codegen.target, uDebugFacts, uUnwindFacts;
 
 const
   { The string header the RTL lays out (runtime.str's layout block):
@@ -298,7 +298,23 @@ type
 
   TNativeBackendClass = class of TNativeBackend;
 
+{ The unwind table's code for a slot kind (uUnwindFacts.UNW_*). }
+function UnwKindCode(AKind: TUnwSlotKind): Int;
+
 implementation
+
+function UnwKindCode(AKind: TUnwSlotKind): Int;
+begin
+  case AKind of
+    uskStr: Result := UNW_STR;
+    uskClass: Result := UNW_CLASS;
+    uskIntf: Result := UNW_INTF;
+    uskDyn: Result := UNW_DYN;
+    uskRefEnv: Result := UNW_REFENV;
+    uskWeak: Result := UNW_WEAK;
+    uskAgg: Result := UNW_AGG;
+  end;
+end;
 
 constructor TUnwSlot.Create(const AName: string; AKind: TUnwSlotKind);
 begin

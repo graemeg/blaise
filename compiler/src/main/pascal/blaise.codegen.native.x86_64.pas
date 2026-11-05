@@ -1331,6 +1331,7 @@ type
       can run it twice. }
     function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
+    procedure RecordUnwindSlots(ASlots: TList<TUnwSlot>);
     procedure EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
     procedure EmitUnwindBlock;
     { Prologue init for a promoted param that arrived on the STACK (7th+
@@ -26450,6 +26451,25 @@ begin
   end;
 end;
 
+{ The frame slots an exception unwinding past this routine releases: the
+  epilogue's own list, at their %rbp offsets (an interface's obj half is its
+  slot's base).  Register-promoted variables are unmanaged, so every managed
+  slot is in the frame.  Aggregates follow with their release hooks. }
+procedure TX86_64Backend.RecordUnwindSlots(ASlots: TList<TUnwSlot>);
+var
+  I, Off: Int;
+  S: TUnwSlot;
+begin
+  if FUnw = nil then Exit;
+  for I := 0 to ASlots.Count - 1 do
+  begin
+    S := ASlots.Get(I);
+    if S.Kind = uskAgg then Continue;
+    if (FFrame <> nil) and FFrame.TryGetValue(S.Name, Off) then
+      FUnw.AddSlot(Off, UnwKindCode(S.Kind), 0, 0);
+  end;
+end;
+
 { Scope-exit release of the frame's managed values (Exit statements land
   here too).  Addressing is VarOperand (frame offsets); the sibling
   EmitGlobalReleases walk does the same job for program-level globals. }
@@ -26525,6 +26545,7 @@ procedure TX86_64Backend.EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean
 var
   I, J:    Int;
   UnwLbl:  string;
+  FrameSlots: TList<TUnwSlot>;
   P:       TMethodParam;
   Sym:     string;
   IntIdx:  Int;
@@ -27074,7 +27095,9 @@ begin
     params/locals.  For sret functions the caller's buffer already holds the
     result, so no load is needed. }
   Self.Emit(FExitLabel + ':');
-  Self.EmitFrameSlotReleases(Self.FrameSlotInventory(ADecl));
+  FrameSlots := Self.FrameSlotInventory(ADecl);
+  Self.RecordUnwindSlots(FrameSlots);
+  Self.EmitFrameSlotReleases(FrameSlots);
   { Now that every ARC release call is done (none can clobber the result), load
     Result into %rax (int) or %xmm0 (float).  sret functions return via the
     caller's buffer and need no load.  Reg-return records load into

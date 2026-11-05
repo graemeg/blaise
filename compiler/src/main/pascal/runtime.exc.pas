@@ -202,6 +202,13 @@ const
   UNW_MAGIC = 827807042;      { 'BUW1' }
   UNW_HDR_SIZE = 32;
   UNW_ROUTINE_SIZE = 32;
+  UNW_SLOT_SIZE = 8;
+  UNW_STR = 1;
+  UNW_CLASS = 2;
+  UNW_INTF = 3;
+  UNW_DYN = 4;
+  UNW_REFENV = 5;
+  UNW_WEAK = 6;
 {$IFDEF CPUARM64}
   JB_FP_OFS = 80;             { x29 in the jmp_buf }
 {$ELSE}
@@ -210,8 +217,13 @@ const
 
 type
   PUInt32 = ^UInt32;
+  PInt32 = ^Int32;
 
 function _blaise_getfp: Pointer; external name '_blaise_getfp';
+procedure _StringRelease(Ptr: Pointer); external name '_StringRelease';
+procedure _ClassRelease(Ptr: Pointer); external name '_ClassRelease';
+procedure _DynArrayRelease(Ptr: Pointer); external name '_DynArrayRelease';
+procedure _WeakClear(Slot: Pointer); external name '_WeakClear';
 
 var
   g_unw_start: Pointer;
@@ -291,8 +303,62 @@ end;
   catches -- it carries on running, so its own slots are left alone. }
 procedure UnwCleanFrame(ABlk, ARtn: Pointer; AFrame: Pointer; APC: UInt;
   AIsTarget: Boolean);
+var
+  Off: UInt;
+  NRtn, NPtrs, First, N, I: Int;
+  S: UInt;
+  A: PPointer;
+  V: Pointer;
 begin
   g_unw_frames := g_unw_frames + 1;
+  if AIsTarget then Exit;
+  { the frame's own slots, if its code at APC is past the prologue's
+    zeroing and before the epilogue's own release }
+  Off := APC - UInt(PPointer(ABlk + 8)^) - PUInt32(ARtn)^;
+  if (Off < PUInt32(ARtn + 8)^) or (Off >= PUInt32(ARtn + 12)^) then Exit;
+  NRtn := PUInt32(ABlk + 20)^;
+  NPtrs := PUInt32(ABlk + 24)^;
+  First := PUInt32(ARtn + 16)^;
+  N := PUInt32(ARtn + 24)^;
+  S := UInt(ABlk) + UNW_HDR_SIZE + UInt(NPtrs) * 8 +
+    UInt(NRtn) * UNW_ROUTINE_SIZE + UInt(First) * UNW_SLOT_SIZE;
+  for I := 0 to N - 1 do
+  begin
+    A := PPointer(AFrame + PInt32(Pointer(S))^);
+    { nil before release: a destructor this runs that raises in turn finds
+      the slot already empty }
+    case PUInt32(Pointer(S + 4))^ and $FF of
+      UNW_STR:
+      begin
+        V := A^; A^ := nil; _StringRelease(V);
+      end;
+      UNW_CLASS:
+      begin
+        V := A^; A^ := nil; _ClassRelease(V);
+      end;
+      UNW_DYN:
+      begin
+        V := A^; A^ := nil; _DynArrayRelease(V);
+      end;
+      UNW_INTF:
+      begin
+        { the obj half; the itab half is static }
+        V := A^; A^ := nil;
+        PPointer(Pointer(A) + 8)^ := nil;
+        _ClassRelease(V);
+      end;
+      UNW_REFENV:
+      begin
+        { the Env half of a 'reference to' closure }
+        V := PPointer(Pointer(A) + 8)^;
+        PPointer(Pointer(A) + 8)^ := nil;
+        _ClassRelease(V);
+      end;
+      UNW_WEAK:
+        _WeakClear(A);
+    end;
+    S := S + UNW_SLOT_SIZE;
+  end;
 end;
 
 procedure _UnwindCleanup(ATarget: Pointer);

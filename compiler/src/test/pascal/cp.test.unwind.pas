@@ -43,6 +43,15 @@ type
     { a raise walks every Blaise frame up to the handler's, through deep
       recursion too, and is still caught }
     procedure TestRun_WalkFindsEveryFrame;
+    { a frame an exception passes releases its strings, class references,
+      interfaces, dynamic arrays, closure environment and [Weak] slots --
+      by-value parameters too -- whether it has no try, a finally, an
+      unmatched handler or re-raises; the frame that catches keeps its own }
+    procedure TestDebug_ScalarLocals_ReleasedOnUnwind;
+    { the same inside a thread and inside a fibre, each with its own
+      exception chain }
+    procedure TestDebug_RaiseInThread_ReleasesLocals;
+    procedure TestDebug_RaiseInFiber_ReleasesLocals;
   end;
 
 implementation
@@ -308,6 +317,229 @@ begin
     end.
     ''',
     'deep 3' + #10 + 'bottom 1001' + #10 + 'here 1' + #10, 0);
+end;
+
+procedure TUnwindE2ETests.TestDebug_ScalarLocals_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwindLocals;
+    uses SysUtils;
+    type
+      TTrack = class
+        Name: string;
+        constructor Create(const AName: string);
+        destructor Destroy; override;
+      end;
+      ISome = interface
+        procedure Hello;
+      end;
+      TSome = class(ISome)
+        procedure Hello;
+        destructor Destroy; override;
+      end;
+      TFn = reference to function: Int;
+    var
+      Freed: Int;
+    constructor TTrack.Create(const AName: string);
+    begin
+      Name := AName;
+    end;
+    destructor TTrack.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    procedure TSome.Hello;
+    begin
+    end;
+    destructor TSome.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    procedure Boom;
+    begin
+      raise Exception.Create('boom');
+    end;
+    procedure Strs(const C: string; P: string);
+    var S: string;
+    begin
+      S := IntToStr(Length(P)) + C;
+      Boom();
+    end;
+    { the argument is a local, passed borrowed: main's own temporaries (a
+      call result, or a global it pins) are step 12 }
+    procedure RunStrs;
+    var A: string;
+    begin
+      A := IntToStr(12345);
+      Strs('c', A);
+    end;
+    procedure Objs;
+    var
+      O: TTrack;
+      I: ISome;
+      D: array of TTrack;
+      [Weak] W: TTrack;
+    begin
+      O := TTrack.Create('o');
+      I := TSome.Create();
+      SetLength(D, 2);
+      D[0] := TTrack.Create('d0');
+      D[1] := TTrack.Create('d1');
+      W := O;
+      Boom();
+    end;
+    procedure Closure;
+    var
+      K: Int;
+      O: TTrack;
+      F: TFn;
+    begin
+      K := 7;
+      O := TTrack.Create('c');
+      F := function: Int begin Result := K + Length(O.Name) end;
+      Boom();
+    end;
+    procedure Mid;
+    begin
+      Objs();
+    end;
+    procedure WithFinally;
+    var O: TTrack;
+    begin
+      O := TTrack.Create('f');
+      try
+        Boom();
+      finally
+        Write('finally ');
+      end;
+    end;
+    procedure Unmatched;
+    var O: TTrack;
+    begin
+      O := TTrack.Create('u');
+      try
+        Boom();
+      except
+        on E: EConvertError do WriteLn('no');
+      end;
+    end;
+    procedure ReRaise;
+    var O: TTrack;
+    begin
+      O := TTrack.Create('r');
+      try
+        Boom();
+      except
+        raise;
+      end;
+    end;
+    procedure KeepsOwn;
+    var O: TTrack;
+    begin
+      O := TTrack.Create('k');
+      try
+        Boom();
+      except
+        on E: Exception do Write('kept ', O.Name, ' ', Freed, ' ');
+      end;
+    end;
+    procedure Step(const ATag: string);
+    begin
+      WriteLn(ATag, ' ', Freed);
+      Freed := 0;
+    end;
+    begin
+      Freed := 0;
+      try RunStrs(); except on E: Exception do Step('strs'); end;
+      try Mid(); except on E: Exception do Step('objs'); end;
+      try Closure(); except on E: Exception do Step('closure'); end;
+      try WithFinally(); except on E: Exception do Step('finally'); end;
+      try Unmatched(); except on E: Exception do Step('unmatched'); end;
+      try ReRaise(); except on E: Exception do Step('reraise'); end;
+      KeepsOwn();
+      Step('keepsown');
+      WriteLn('done');
+    end.
+    ''',
+    'strs 0' + #10 + 'objs 4' + #10 + 'closure 1' + #10 +
+    'finally finally 1' + #10 + 'unmatched 1' + #10 + 'reraise 1' + #10 +
+    'kept k 0 keepsown 1' + #10 + 'done');
+end;
+
+procedure TUnwindE2ETests.TestDebug_RaiseInThread_ReleasesLocals;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwThread;
+    uses SysUtils, Classes;
+    type
+      TW = class(TThread)
+        procedure Execute; override;
+      end;
+    var Seen: string;
+    procedure Deep(const ATag: string);
+    var S: string; L: TStringList;
+    begin
+      S := ATag + IntToStr(Length(ATag));
+      L := TStringList.Create();
+      L.Add(S);
+      raise Exception.Create(S);
+    end;
+    procedure TW.Execute;
+    begin
+      try
+        Deep('worker');
+      except
+        on E: Exception do Seen := E.Message;
+      end;
+    end;
+    var T: TW;
+    begin
+      T := TW.Create(False);
+      T.WaitFor();
+      T := nil;
+      WriteLn(Seen);
+    end.
+    ''', 'worker6');
+end;
+
+procedure TUnwindE2ETests.TestDebug_RaiseInFiber_ReleasesLocals;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwFiber;
+    uses SysUtils, Classes, async.fibers.context;
+    var
+      MainF, F: PFiber;
+      Seen: string;
+    procedure Deep(N: Int);
+    var S: string; L: TStringList;
+    begin
+      S := 'fib' + IntToStr(N);
+      L := TStringList.Create();
+      L.Add(S);
+      if N = 0 then raise Exception.Create(S);
+      Deep(N - 1);
+    end;
+    procedure Work(AArg: Pointer);
+    begin
+      try
+        Deep(3);
+      except
+        on E: Exception do Seen := E.Message;
+      end;
+      FiberSwitch(F, MainF);
+    end;
+    begin
+      MainF := FiberCreateMain();
+      F := FiberSpawn(@Work, nil, 0);
+      FiberSwitch(MainF, F);
+      WriteLn(Seen);
+    end.
+    ''', 'fib0');
 end;
 
 initialization
