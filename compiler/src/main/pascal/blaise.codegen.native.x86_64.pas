@@ -1342,6 +1342,8 @@ type
     procedure RecordUnwindSlots(ADecl: TMethodDecl; ASlots: TList<TUnwSlot>);
     function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure UnwHoistOpen(AKind: Int);
+    function UnwStrTempOpen(AExpr: TASTExpr): Int;
+    procedure UnwStrTempClose(var AHandle: Int);
     procedure UnwPendOpen(AIdx: Int);
     procedure UnwPendClose(AIdx: Int);
     procedure UnwPendCloseAll;
@@ -9143,6 +9145,7 @@ end;
 
 procedure TX86_64Backend.EmitExprToEax(AExpr: TASTExpr);
 var
+  UnwH: Int;
   BE:  TBinaryExpr;
   FC:  TFuncCallExpr;
   JDest: string;
@@ -10876,12 +10879,16 @@ begin
         Self.Emit(#9'subq $32, %rsp');
         Self.EmitExprToEax(BE.Left);
         Self.Emit(#9'movq %rax, (%rsp)');
+        { a transient left operand is the frame's while the right one is
+          evaluated (it may raise) }
+        UnwH := Self.UnwStrTempOpen(BE.Left);
         Self.EmitExprToEax(BE.Right);
         Self.Emit(#9'movq %rax, 8(%rsp)');
         Self.Emit(#9'movq (%rsp), %rdi');
         Self.Emit(#9'movq 8(%rsp), %rsi');
         Self.Emit(#9'callq _StringConcat');
         Self.Emit(#9'movq %rax, 16(%rsp)');
+        Self.UnwStrTempClose(UnwH);
         if ArcBuiltinStrArgOwnsRef(BE.Left) then
           Self.EmitStrDisposeFromSlot(BE.Left, '(%rsp)');
         if ArcBuiltinStrArgOwnsRef(BE.Right) then
@@ -22062,6 +22069,7 @@ procedure TX86_64Backend.EmitBuiltinStrCall2(AArg0, AArg1: TASTExpr;
   const ARtl: string);
 var
   O0, O1: Boolean;
+  UnwH: Int;
 begin
   O0 := ArcBuiltinStrArgOwnsRef(AArg0);
   O1 := ArcBuiltinStrArgOwnsRef(AArg1);
@@ -22080,12 +22088,14 @@ begin
   Self.Emit(#9'subq $32, %rsp');
   Self.EmitExprToEax(AArg0);
   Self.Emit(#9'movq %rax, (%rsp)');
+  UnwH := Self.UnwStrTempOpen(AArg0);
   Self.EmitExprToEax(AArg1);
   Self.Emit(#9'movq %rax, 8(%rsp)');
   Self.Emit(#9'movq (%rsp), %rdi');
   Self.Emit(#9'movq 8(%rsp), %rsi');
   Self.Emit(#9'callq ' + ARtl);
   Self.Emit(#9'movq %rax, 16(%rsp)');
+  Self.UnwStrTempClose(UnwH);
   if O0 then
     Self.EmitStrDisposeFromSlot(AArg0, '(%rsp)');
   if O1 then
@@ -26637,6 +26647,31 @@ begin
     if Lbl <> '' then Self.Emit(Lbl + ':');
     FUnwPend.SetItem(I, -1);
   end;
+end;
+
+{ A string operand just stored at (%rsp) that the frame owns -- an rc = 1
+  call result or an rc = 0 concat/built-in transient -- while the next
+  operand is evaluated: a depth range (-1: borrowed, nothing to release). }
+function TX86_64Backend.UnwStrTempOpen(AExpr: TASTExpr): Int;
+var
+  K: Int;
+  Lbl: string;
+begin
+  Result := -1;
+  if (FUnw = nil) or not ArcBuiltinStrArgOwnsRef(AExpr) then Exit;
+  if ArcExprOwnsRef(AExpr) then K := UNW_STR else K := UNW_STR0;
+  Result := FUnw.OpenRange(K, FSPDepth, 0, 0, True, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+procedure TX86_64Backend.UnwStrTempClose(var AHandle: Int);
+var
+  Lbl: string;
+begin
+  if (FUnw = nil) or (AHandle < 0) then Exit;
+  FUnw.CloseRange(AHandle, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  AHandle := -1;
 end;
 
 procedure TX86_64Backend.UnwHoistOpen(AKind: Int);

@@ -72,6 +72,9 @@ type
     { a raise statement's own deferred base is not released under the
       exception it owns (BUG-049: it is left to leak) }
     procedure TestRun_RaiseOperandBase_NotFreedUnderIt;
+    { an owned string operand -- an rc = 1 call result or an rc = 0 concat --
+      held while the other operand of + or a comparison raises }
+    procedure TestDebug_StringOperands_ReleasedOnUnwind;
   end;
 
 implementation
@@ -921,6 +924,51 @@ begin
       end;
     end.
     ''', 'raise owned Exception' + #10, 0);
+end;
+
+procedure TUnwindE2ETests.TestDebug_StringOperands_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwOperands;
+    uses SysUtils;
+    function MkStr(N: Int): string;
+    begin
+      Result := IntToStr(N) + 'x';
+    end;
+    function Boom(): Int;
+    begin
+      raise Exception.Create('b');
+    end;
+    function BoomS(): string;
+    begin
+      raise Exception.Create('s');
+    end;
+    procedure Concat;
+    var S: string;
+    begin
+      S := MkStr(1) + IntToStr(Boom());
+    end;
+    procedure Nested;
+    var S: string;
+    begin
+      S := (MkStr(2) + '-') + BoomS();
+    end;
+    procedure Compare;
+    begin
+      if MkStr(3) = BoomS() then WriteLn('eq');
+    end;
+    procedure Order;
+    begin
+      if (MkStr(4) + 'y') < BoomS() then WriteLn('lt');
+    end;
+    begin
+      try Concat(); except on E: Exception do WriteLn('concat ', E.Message); end;
+      try Nested(); except on E: Exception do WriteLn('nested ', E.Message); end;
+      try Compare(); except on E: Exception do WriteLn('compare ', E.Message); end;
+      try Order(); except on E: Exception do WriteLn('order ', E.Message); end;
+    end.
+    ''', 'concat b' + #10 + 'nested s' + #10 + 'compare s' + #10 + 'order s');
 end;
 
 initialization

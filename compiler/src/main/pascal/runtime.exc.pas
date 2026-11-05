@@ -211,6 +211,7 @@ const
   UNW_REFENV = 5;
   UNW_WEAK = 6;
   UNW_AGG = 7;
+  UNW_STR0 = 8;
   UNW_F_INDIRECT = 1;
   UNW_F_SPANS_TRY = 2;
 {$IFDEF CPUARM64}
@@ -228,6 +229,7 @@ type
 
 function _blaise_getfp: Pointer; external name '_blaise_getfp';
 procedure _StringRelease(Ptr: Pointer); external name '_StringRelease';
+procedure _StringAddRef(Ptr: Pointer); external name '_StringAddRef';
 procedure _ClassRelease(Ptr: Pointer); external name '_ClassRelease';
 procedure _DynArrayRelease(Ptr: Pointer); external name '_DynArrayRelease';
 procedure _WeakClear(Slot: Pointer); external name '_WeakClear';
@@ -317,6 +319,16 @@ begin
     UNW_STR:
     begin
       V := A^; A^ := nil; _StringRelease(V);
+    end;
+    UNW_STR0:
+    begin
+      { a bare release would drive an rc = 0 buffer to -1 (immortal) }
+      V := A^; A^ := nil;
+      if V <> nil then
+      begin
+        _StringAddRef(V);
+        _StringRelease(V);
+      end;
     end;
     UNW_CLASS:
     begin

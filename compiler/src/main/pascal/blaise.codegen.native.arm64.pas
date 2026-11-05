@@ -218,6 +218,10 @@ type
                                    address of the procedural value to call }
     FJArgN: Int;             { counter for '__jarg_<n>' jumbo-set
                                    argument snapshots }
+    { '__opnd_<n>' park slots in use by the string operators being emitted
+      (unwind design D4: an operand held across a later call lives at a
+      fixed x29 offset the unwind tables can name, not in an sp push) }
+    FOpndTop: Int;
     FStrTransTop: Int;       { '__strtrans_<n>' park slots in use by the
                                    calls currently being emitted -- a call
                                    nested in an argument parks ABOVE its
@@ -331,6 +335,9 @@ type
       down to a saved mark. }
     procedure ReservePendRelSlots;
     function StrTransSlot(AIdx: Int): string;
+    function OpndSlot(AIdx: Int): string;
+    function UnwStrOpndOpen(AExpr: TASTExpr; const ASlot: string): Int;
+    procedure UnwStrOpndClose(var AHandle: Int);
     function NextIntArgDest(var ANInt, AStackOff: Int): string;
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
@@ -1693,6 +1700,39 @@ begin
     Result := 'x' + IntToStr(ANInt);
     Inc(ANInt);
   end;
+end;
+
+function TArm64Backend.OpndSlot(AIdx: Int): string;
+begin
+  Result := '__opnd_' + IntToStr(AIdx);
+  if not FFrame.ContainsKey(Result) then
+    AddLocal(Result, 8);
+end;
+
+{ A string operand just parked in ASlot that the frame owns -- an rc = 1
+  call result or an rc = 0 concat/built-in transient -- while the next
+  operand is evaluated (-1: borrowed, nothing to release). }
+function TArm64Backend.UnwStrOpndOpen(AExpr: TASTExpr; const ASlot: string): Int;
+var
+  K, Off: Int;
+  Lbl: string;
+begin
+  Result := -1;
+  if (FUnw = nil) or not ArcBuiltinStrArgOwnsRef(AExpr) then Exit;
+  if not FFrame.TryGetValue(ASlot, Off) then Exit;
+  if ArcExprOwnsRef(AExpr) then K := UNW_STR else K := UNW_STR0;
+  Result := FUnw.OpenRange(K, -Off, 0, 0, False, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+procedure TArm64Backend.UnwStrOpndClose(var AHandle: Int);
+var
+  Lbl: string;
+begin
+  if (FUnw = nil) or (AHandle < 0) then Exit;
+  FUnw.CloseRange(AHandle, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+  AHandle := -1;
 end;
 
 function TArm64Backend.StrTransSlot(AIdx: Int): string;
@@ -5458,6 +5498,8 @@ end;
 
 procedure TArm64Backend.EmitExprToX0(AExpr: TASTExpr);
 var
+  LSlot, RSlot: string;
+  UnwH: Int;
   BE: TBinaryExpr;
   FA: TFieldAccessExpr;
   JTmp, RecTmp: string;
@@ -6972,13 +7014,21 @@ begin
     if (BE.Op = boAdd) and (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tyString) then
     begin
+      { the operands live in x29-relative park slots, so an owned left one
+        is the frame's -- in the unwind tables -- while the right one is
+        evaluated }
+      LSlot := OpndSlot(FOpndTop);
+      RSlot := OpndSlot(FOpndTop + 1);
+      FOpndTop := FOpndTop + 2;
       Self.EmitExprToX0(BE.Left);
-      EmitPushX0();
+      EmitStoreSlot('x0', LSlot);
+      UnwH := UnwStrOpndOpen(BE.Left, LSlot);
       Self.EmitExprToX0(BE.Right);
-      EmitPushX0();
-      Self.Emit(#9'ldur x1, [sp]');        { right }
-      Self.Emit(#9'ldur x0, [sp, #16]');   { left  }
+      EmitStoreSlot('x0', RSlot);
+      Self.Emit(#9'mov x1, x0');           { right }
+      EmitLoadSlot('x0', LSlot);           { left  }
       EmitCallSym('_StringConcat');
+      UnwStrOpndClose(UnwH);
       { dispose operand transients by shape — nested concats produce rc=0
         intermediates that would otherwise leak permanently }
       if ArcBuiltinStrArgOwnsRef(BE.Left) or
@@ -6987,17 +7037,17 @@ begin
         EmitPushX0();                      { park the result }
         if ArcBuiltinStrArgOwnsRef(BE.Right) then
         begin
-          Self.Emit(#9'ldur x0, [sp, #16]');
+          EmitLoadSlot('x0', RSlot);
           EmitStrDisposeX0(BE.Right);
         end;
         if ArcBuiltinStrArgOwnsRef(BE.Left) then
         begin
-          Self.Emit(#9'ldur x0, [sp, #32]');
+          EmitLoadSlot('x0', LSlot);
           EmitStrDisposeX0(BE.Left);
         end;
         EmitPopTo('x0');
       end;
-      Self.Emit(#9'add sp, sp, #32');      { drop the operand brackets }
+      FOpndTop := FOpndTop - 2;
       Exit;
     end;
     { string comparisons: content comparison via the RTL helpers — an int
@@ -7008,29 +7058,35 @@ begin
        (BE.Left.ResolvedType <> nil) and
        BE.Left.ResolvedType.IsString() then
     begin
+      { operands in park slots, as for concatenation }
+      LSlot := OpndSlot(FOpndTop);
+      RSlot := OpndSlot(FOpndTop + 1);
+      FOpndTop := FOpndTop + 2;
       Self.EmitExprToX0(BE.Left);
-      EmitPushX0();
+      EmitStoreSlot('x0', LSlot);
+      UnwH := UnwStrOpndOpen(BE.Left, LSlot);
       Self.EmitExprToX0(BE.Right);
-      EmitPushX0();
-      Self.Emit(#9'ldur x0, [sp, #16]');   { left  (peek) }
-      Self.Emit(#9'ldur x1, [sp]');        { right (peek) }
+      EmitStoreSlot('x0', RSlot);
+      Self.Emit(#9'mov x1, x0');           { right }
+      EmitLoadSlot('x0', LSlot);           { left  }
       if BE.Op in [boEQ, boNE] then
         EmitCallSym('_StringEquals')
       else
         EmitCallSym('_StringCompare');
+      UnwStrOpndClose(UnwH);
       EmitPushX0();                        { result bracket }
       if ArcBuiltinStrArgOwnsRef(BE.Right) then
       begin
-        Self.Emit(#9'ldur x0, [sp, #16]');
+        EmitLoadSlot('x0', RSlot);
         EmitStrDisposeX0(BE.Right);
       end;
       if ArcBuiltinStrArgOwnsRef(BE.Left) then
       begin
-        Self.Emit(#9'ldur x0, [sp, #32]');
+        EmitLoadSlot('x0', LSlot);
         EmitStrDisposeX0(BE.Left);
       end;
       EmitPopTo('x0');
-      Self.Emit(#9'add sp, sp, #32');      { drop the operand brackets }
+      FOpndTop := FOpndTop - 2;
       case BE.Op of
         boEQ: ;                            { 0/1 already }
         boNE:

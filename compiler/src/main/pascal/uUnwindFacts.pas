@@ -51,6 +51,8 @@ const
   UNW_REFENV = 5;
   UNW_WEAK = 6;
   UNW_AGG = 7;
+  UNW_STR0 = 8;      { an rc = 0 string transient (a concat or built-in
+                       result): retained, then released, which frees it }
 
   { Slot flags }
   UNW_F_INDIRECT = 1;          { the slot holds the value's address }
