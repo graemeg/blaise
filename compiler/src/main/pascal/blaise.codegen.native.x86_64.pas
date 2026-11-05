@@ -14993,6 +14993,29 @@ begin
         ACall.ObjExpr,
         (ACall.ResolvedReturnTypeDesc <> nil) and
         (ACall.ResolvedReturnTypeDesc.Kind = tyInterface));
+    { a discarded owned scalar result (in %rax) is the caller's to release,
+      as on every other call-statement path }
+    if ACall.ResolvedReturnTypeDesc <> nil then
+      case ACall.ResolvedReturnTypeDesc.Kind of
+        tyString:
+        begin
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _StringRelease');
+        end;
+        tyClass:
+        begin
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _ClassRelease');
+        end;
+        tyDynArray:
+        begin
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _DynArrayRelease');
+        end;
+      else
+        { an interface result is released by EmitInterfaceCall; records
+          and the rest own nothing in %rax }
+      end;
     Exit;
   end;
 

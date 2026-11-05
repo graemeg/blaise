@@ -792,6 +792,7 @@ type
     procedure EmitMethodCallOnExpr(AMethod: TMethodDecl; const AName: string;
       AArgs: TObjectList; AObjExpr: TASTExpr);
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
+    procedure EmitReleaseDiscardedResult(AType: TTypeDesc);
     procedure EmitMethodCallExpr(AExpr: TMethodCallExpr);
     procedure EmitClassCreate(AExpr: TFuncCallExpr);
     { A failed `as`: SysUtils' _RaiseInvalidCast (a catchable EInvalidCast)
@@ -18703,12 +18704,7 @@ begin
       TInterfaceTypeDesc(AStmt.ResolvedClassType),
       TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
       AStmt.Args, AStmt.ObjExpr, AStmt.IsVarParam, AStmt.ImplicitBaseInfo);
-    if (AStmt.ResolvedReturnTypeDesc <> nil) and
-       (AStmt.ResolvedReturnTypeDesc.Kind = tyClass) then
-      EmitCallSym('_ClassRelease');
-    if (AStmt.ResolvedReturnTypeDesc <> nil) and
-       (AStmt.ResolvedReturnTypeDesc.Kind = tyString) then
-      EmitCallSym('_StringRelease');
+    EmitReleaseDiscardedResult(AStmt.ResolvedReturnTypeDesc);
     Exit;
   end;
   if AStmt.IsConstructorCall and AStmt.IsMetaclassDispatch then
@@ -18913,13 +18909,21 @@ begin
     end;
     EmitMethodCallCommon(MD, AStmt.Name, AStmt.Args);
   end;
-  { a discarded owned result (class-typed) must be released }
-  if (AStmt.ResolvedReturnTypeDesc <> nil) and
-     (AStmt.ResolvedReturnTypeDesc.Kind = tyClass) then
-    EmitCallSym('_ClassRelease');
-  if (AStmt.ResolvedReturnTypeDesc <> nil) and
-     (AStmt.ResolvedReturnTypeDesc.Kind = tyString) then
-    EmitCallSym('_StringRelease');
+  EmitReleaseDiscardedResult(AStmt.ResolvedReturnTypeDesc);
+end;
+
+{ A discarded owned result in x0 -- a string, a class reference or a
+  dynamic array -- is the caller's to release.  (A dynamic array here
+  leaked until the leak tracker learned to see SetLength's blocks.) }
+procedure TArm64Backend.EmitReleaseDiscardedResult(AType: TTypeDesc);
+begin
+  if AType = nil then Exit;
+  if AType.Kind = tyString then
+    EmitCallSym('_StringRelease')
+  else if AType.Kind = tyClass then
+    EmitCallSym('_ClassRelease')
+  else if AType.Kind = tyDynArray then
+    EmitCallSym('_DynArrayRelease');
 end;
 
 procedure TArm64Backend.EmitRaiseInvalidCast;

@@ -109,6 +109,9 @@ type
       object's own graph (a signal wrapping its handlers in its own
       methods): the closures do not keep the object alive.  Self was
       captured strongly whatever the body used, a reference cycle. }
+    { a discarded dynamic-array result of a method called on a receiver or
+      through an interface is released (the tracker made it visible) }
+    procedure TestDebug_DiscardedResults_ReceiverAndInterface_NoLeak;
     procedure TestDebug_MethodLiteral_SelfUnused_NoCycle;
     { every way a literal reaches its method's Self -- field read and
       write, method call as statement and expression, property, explicit
@@ -4126,6 +4129,45 @@ begin
     'exit 3 alive=0' + #10 +
     'break 3 alive=0' + #10 +
     'retries 3 alive=0');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_DiscardedResults_ReceiverAndInterface_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program Discards;
+    type
+      TArr = array of Int;
+      IA = interface
+        function GetA(): TArr;
+        function GetS(): string;
+        function GetO(): TObject;
+      end;
+      TC = class(IA)
+        Inner: TC;
+        function GetA(): TArr;
+        function GetS(): string;
+        function GetO(): TObject;
+      end;
+    function TC.GetA(): TArr; begin SetLength(Result, 3); end;
+    function TC.GetS(): string; begin Result := 's' + Chr(49); end;
+    function TC.GetO(): TObject; begin Result := TObject.Create(); end;
+    function MkC(): TC; begin Result := TC.Create(); end;
+    procedure InRoutine(L: TC; J: IA);
+    begin
+      L.GetA(); L.Inner.GetA(); J.GetA(); J.GetS(); J.GetO();
+    end;
+    var C: TC; I: IA;
+    begin
+      C := TC.Create();
+      C.Inner := TC.Create();
+      I := TC.Create();
+      C.GetA(); C.Inner.GetA(); MkC().GetA();
+      I.GetA(); I.GetS(); I.GetO();
+      InRoutine(C, I);
+      WriteLn('done');
+    end.
+    ''', 'done');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_MethodLiteral_SelfUnused_NoCycle;
