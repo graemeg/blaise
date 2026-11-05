@@ -92,6 +92,11 @@ type
       a call -- is released when its call's argument or the call raises:
       scalar, interface and record results, statement and expression }
     procedure TestDebug_OwnedReceivers_ReleasedOnUnwind;
+    { a try/except in a unit's initialization or finalization section:
+      named and unnamed handlers bind their exception (arm64 had no slot for
+      it -- an internal error), and the temporaries a caught raise passes
+      are released }
+    procedure TestDebug_UnitSectionTryExcept;
   end;
 
 implementation
@@ -1247,6 +1252,55 @@ begin
     end.
     ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + 'e b' + #10 +
       'f b' + #10 + 'g b' + #10 + '8910');
+end;
+
+procedure TUnwindE2ETests.TestDebug_UnitSectionTryExcept;
+var
+  Output: string;
+  RCode: Int;
+  Ok: Boolean;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  WriteFile(FScratch + '/unwsect.pas', '''
+    unit unwsect;
+    interface
+    uses SysUtils;
+    var Log: string;
+    implementation
+    type
+      IThing = interface function Name(): string; end;
+      TThing = class(IThing) function Name(): string; end;
+    function TThing.Name(): string; begin Result := 'n'; end;
+    function MkS(N: Int): string; begin Result := IntToStr(N) + 's'; end;
+    function MkI(): IThing; begin Result := TThing.Create(); end;
+    function Boom(): Int; begin raise Exception.Create('b'); end;
+    procedure Take(const S: string; N: Int); begin Log := Log + S; end;
+    procedure TakeI(const I: IThing; N: Int); begin Log := Log + I.Name(); end;
+    initialization
+      try Take(MkS(1), Boom()); except on E: Exception do Log := Log + E.Message; end;
+      try TakeI(MkI(), Boom()); except Log := Log + 'y'; end;
+      try
+        Log := Log + MkS(2) + IntToStr(Boom());
+      except
+        on E: EConvertError do Log := Log + 'wrong';
+        on E: Exception do Log := Log + 'z';
+      end;
+    finalization
+      try raise Exception.Create('f'); except on X: Exception do WriteLn('fin ', X.Message); end;
+    end.
+    ''');
+  Ok := CompileAndRunNativeCLI('''
+    program UnwSectProg;
+    uses unwsect;
+    begin
+      WriteLn(Log);
+    end.
+    ''', True, FScratch, Output, RCode);
+  AssertTrue('compile+run: ' + Output, Ok);
+  AssertEquals('exit code (output: ' + Output + ')', 0, RCode);
+  AssertTrue('sections ran, got: ' + Output,
+    Pos('byz' + #10 + 'fin f', Output) >= 0);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;

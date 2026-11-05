@@ -1002,6 +1002,7 @@ type
     procedure AnalyseStaticSubscriptAssign(AStmt: TStaticSubscriptAssign);
 
     procedure AnalyseCompoundBody(ABody: TCompoundStmt);
+    procedure LowerUnitSection(AUnit: TUnit; AFinal: Boolean);
     function  FindMethodDecl(const ATypeName, AMethodName: string): TMethodDecl;
     { Walks ART's class hierarchy upward and returns the class that actually
       declares accessor AMethodName (ART itself when none does, e.g. an
@@ -3368,7 +3369,11 @@ begin
     { After all unit-impl bodies are analysed, mark inline candidates. }
     MarkInlineCandidates(AUnit.ImplBlock);
 
-    { Analyse initialization/finalization section statements at unit scope. }
+    { Analyse initialization/finalization section statements at unit scope.
+      A section holding a try/except is first lowered into a hidden routine
+      (LowerUnitSection). }
+    Self.LowerUnitSection(AUnit, False);
+    Self.LowerUnitSection(AUnit, True);
     if AUnit.InitStmts <> nil then
       for I := 0 to AUnit.InitStmts.Count - 1 do
         AnalyseStmt(TASTStmt(AUnit.InitStmts.Items[I]));
@@ -4022,7 +4027,11 @@ begin
     { After all unit-impl bodies are analysed, mark inline candidates. }
     MarkInlineCandidates(AUnit.ImplBlock);
 
-    { Analyse initialization/finalization section statements at unit scope. }
+    { Analyse initialization/finalization section statements at unit scope.
+      A section holding a try/except is first lowered into a hidden routine
+      (LowerUnitSection). }
+    Self.LowerUnitSection(AUnit, False);
+    Self.LowerUnitSection(AUnit, True);
     if AUnit.InitStmts <> nil then
       for I := 0 to AUnit.InitStmts.Count - 1 do
         AnalyseStmt(TASTStmt(AUnit.InitStmts.Items[I]));
@@ -13838,6 +13847,106 @@ begin
   end;
 end;
 
+{ True when AStmt is, or holds, a try/except statement. }
+function StmtHasTryExcept(AStmt: TASTStmt): Boolean;
+var
+  I: Int;
+  TE: TTryExceptStmt;
+begin
+  Result := False;
+  if AStmt = nil then Exit;
+  if AStmt is TTryExceptStmt then Exit(True);
+  if AStmt is TCompoundStmt then
+  begin
+    for I := 0 to TCompoundStmt(AStmt).Stmts.Count - 1 do
+      if StmtHasTryExcept(TASTStmt(TCompoundStmt(AStmt).Stmts.Items[I])) then
+        Exit(True);
+    Exit;
+  end;
+  if AStmt is TIfStmt then
+    Exit(StmtHasTryExcept(TIfStmt(AStmt).ThenStmt) or
+         StmtHasTryExcept(TIfStmt(AStmt).ElseStmt));
+  if AStmt is TWhileStmt then Exit(StmtHasTryExcept(TWhileStmt(AStmt).Body));
+  if AStmt is TRepeatStmt then Exit(StmtHasTryExcept(TRepeatStmt(AStmt).Body));
+  if AStmt is TForStmt then Exit(StmtHasTryExcept(TForStmt(AStmt).Body));
+  if AStmt is TForInStmt then Exit(StmtHasTryExcept(TForInStmt(AStmt).Body));
+  if AStmt is TCaseStmt then
+  begin
+    for I := 0 to TCaseStmt(AStmt).Branches.Count - 1 do
+      if StmtHasTryExcept(TCaseBranch(TCaseStmt(AStmt).Branches.Items[I]).Stmt) then
+        Exit(True);
+    Exit(StmtHasTryExcept(TCaseStmt(AStmt).ElseStmt));
+  end;
+  if AStmt is TTryFinallyStmt then
+    Exit(StmtHasTryExcept(TTryFinallyStmt(AStmt).TryBody) or
+         StmtHasTryExcept(TTryFinallyStmt(AStmt).FinallyBody));
+end;
+
+{ A unit's initialization (or finalization) section that holds a try/except
+  becomes the body of a hidden implementation-section procedure, and the
+  section calls it.  The section has no frame of its own: a handler's
+  exception variable (every handler has one, BindHandlersToHiddenVars) had
+  no slot on arm64 -- an internal error -- and was written to an undefined
+  global on x86-64.  As a routine the body gets a frame for it, and unwind
+  tables for the temporaries a caught raise passes.  Other sections keep
+  their direct lowering. }
+procedure TSemanticAnalyser.LowerUnitSection(AUnit: TUnit; AFinal: Boolean);
+var
+  Stmts: TObjectList;
+  I: Int;
+  Has: Boolean;
+  D: TMethodDecl;
+  Call: TProcCall;
+  Sym: TSymbol;
+  First: TASTStmt;
+  Mangled: string;
+begin
+  if AFinal then Stmts := AUnit.FinalStmts else Stmts := AUnit.InitStmts;
+  if (Stmts = nil) or (Stmts.Count = 0) then Exit;
+  Has := False;
+  for I := 0 to Stmts.Count - 1 do
+    if StmtHasTryExcept(TASTStmt(Stmts.Items[I])) then
+      Has := True;
+  if not Has then Exit;
+  First := TASTStmt(Stmts.Items[0]);
+  D := TMethodDecl.Create();
+  D.Line := First.Line;
+  D.Col := First.Col;
+  { the unit's name with its dots as underscores: unmangled (RTL) units share
+    one prefix, so the name itself must be unique }
+  Mangled := '';
+  for I := 0 to Length(AUnit.Name) - 1 do
+    if StrAt(AUnit.Name, I) = 46 then
+      Mangled := Mangled + '_'
+    else
+      Mangled := Mangled + StrCopyFrom(AUnit.Name, I, 1);
+  if AFinal then
+    D.Name := '__unitfinal_' + Mangled
+  else
+    D.Name := '__unitinit_' + Mangled;
+  D.IsUnitSection := True;
+  D.Body := TBlock.Create();
+  D.Body.Stmts.Free();
+  D.Body.Stmts := Stmts;
+  D.ResolvedEmitName := CurrentUnitPrefix() + D.Name;
+  AUnit.ImplBlock.ProcDecls.Add(D);
+  Sym := TSymbol.Create(D.Name, skProcedure, nil);
+  Sym.Decl := D;
+  if not FTable.Define(Sym) then
+    Sym.Free();
+  Call := TProcCall.Create();
+  Call.Line := D.Line;
+  Call.Col := D.Col;
+  Call.Name := D.Name;
+  { bound here: the hidden routine is in no proc index, and the call needs
+    no overload resolution }
+  Call.ResolvedDecl := D;
+  Stmts := TObjectList.Create(True);
+  Stmts.Add(Call);
+  if AFinal then AUnit.FinalStmts := Stmts else AUnit.InitStmts := Stmts;
+  AnalyseStandaloneDecl(D);
+end;
+
 procedure TSemanticAnalyser.AnalyseCompoundBody(ABody: TCompoundStmt);
 var
   I: Int;
@@ -23574,7 +23683,9 @@ var
 begin
   Frame := FCurrentEnclosingDecl;
   if Frame = nil then Frame := FCurrentMethodDecl;
-  if Frame = nil then
+  { a unit section lowered into a routine (LowerUnitSection) is still a
+    unit section }
+  if (Frame = nil) or Frame.IsUnitSection then
     SemanticError('Block-scoped ''var'' is only allowed inside a routine ' +
       'or method body', AStmt.Line, AStmt.Col);
   Name := AStmt.Decl.Names.Strings[0];

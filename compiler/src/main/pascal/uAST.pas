@@ -1202,6 +1202,9 @@ type
     TypeParamConstraints: TStringList; { parallel to TypeParams; '' = unconstrained,
                                          'class', 'record', or a concrete type name }
     OwnerTypeParams:    TStringList; { non-nil = generic owner: 'T' in TList<T>.Add }
+    IsUnitSection:      Boolean;     { set by uSemantic — the hidden procedure a unit's
+                                       initialization or finalization section was lowered
+                                       into (LowerUnitSection) }
     IsInlineCandidate:  Boolean;     { set by uSemantic — body is small, leaf-only, primitive
                                        params and locals, no try/loops/raise/nested defs.
                                        Codegen may inline calls to this function at the call
