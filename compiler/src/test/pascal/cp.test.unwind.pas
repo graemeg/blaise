@@ -112,6 +112,10 @@ type
       elements, a two-string built-in's first operand; and Format's owned
       transients are released without a raise too (x86-64 leaked them) }
     procedure TestDebug_ParkedOperands_ReleasedOnUnwind;
+    { a closure a call returns, called at once (MkFn()(Boom())): the callee
+      copy's own Env reference is released when an argument or the body
+      raises, for a scalar and a record result }
+    procedure TestDebug_ClosureCalleeCopy_ReleasedOnUnwind;
   end;
 
 implementation
@@ -1447,6 +1451,42 @@ begin
     end.
     ''', 'a b' + #10 + 'b b' + #10 + 'c b' + #10 + 'd b' + #10 + 'e s' + #10 +
       '3-7abc1 97');
+end;
+
+procedure TUnwindE2ETests.TestDebug_ClosureCalleeCopy_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwCallee;
+    uses SysUtils;
+    type
+      TRec = record S: string; N: Int; T: string; end;
+      TFn = reference to function(N: Int): Int;
+      TRecFn = reference to function(N: Int): TRec;
+    function MkFn(): TFn;
+    var K: string;
+    begin
+      K := IntToStr(3) + 'k';
+      Result := function(N: Int): Int begin Result := N + Length(K); end;
+    end;
+    function MkRecFn(): TRecFn;
+    var K: string;
+    begin
+      K := IntToStr(4) + 'k';
+      Result := function(N: Int): TRec begin Result.S := K; Result.N := N; end;
+    end;
+    function Boom(): Int; begin raise Exception.Create('b'); end;
+    var X: Int; R: TRec;
+    procedure P; begin X := MkFn()(Boom()); end;
+    procedure Q; begin R := MkRecFn()(Boom()); end;
+    begin
+      try P(); except on E: Exception do WriteLn('p ', E.Message); end;
+      try Q(); except on E: Exception do WriteLn('q ', E.Message); end;
+      try X := MkFn()(Boom()); except on E: Exception do WriteLn('m ', E.Message); end;
+      R := MkRecFn()(5);
+      WriteLn(MkFn()(4), ' ', R.S, R.N);
+    end.
+    ''', 'p b' + #10 + 'q b' + #10 + 'm b' + #10 + '6 4k5');
 end;
 
 procedure TUnwindE2ETests.TestDebug_MainTemporaries_ReleasedOnUnwind;

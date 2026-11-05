@@ -1353,6 +1353,7 @@ type
     function UnwStrTempOpen(AExpr: TASTExpr): Int;
     function UnwCtorOpen(): Int;
     function UnwIntfRecvOpen(): Int;
+    function UnwRefEnvOpen(AIsRef: Boolean): Int;
     function UnwRecvBufOpen(AObjExpr: TASTExpr): Int;
     function EmitCtorHoldBegin(): Int;
     procedure EmitCtorHoldEnd(var AHandle: Int);
@@ -7644,6 +7645,7 @@ procedure TX86_64Backend.EmitIndirectExprCallSret(AExpr: TIndirectFuncCallExpr;
 var
   PT: TProceduralTypeDesc;
   IsFat: Boolean;
+  UnwH: Int;
 begin
   { GetFn()(X) returning an aggregate (a record, a closure, an interface):
     the callee value the expression yields is parked in a stack buffer whose
@@ -7668,7 +7670,9 @@ begin
     Self.Emit(#9'movq %rax, (%rsp)');
   end;
   Self.Emit(#9'movq %rsp, %rbx');
+  UnwH := Self.UnwRefEnvOpen(IsFat and PT.IsReference);
   Self.EmitCallIndirectRec('(%rbx)', PT, AExpr.Args, IsFat, '16(%rbx)', True);
+  Self.UnwStrTempClose(UnwH);
   { a 'reference to' callee copy / call result holds an Env reference of
     its own -- the result is in memory, so no register needs keeping }
   if IsFat and PT.IsReference then
@@ -12642,9 +12646,12 @@ begin
         TProceduralTypeDesc(
           TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference);
       Self.Emit(#9'movq %rsp, %rbx');
+      UnwH := Self.UnwRefEnvOpen(TProceduralTypeDesc(
+        TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference);
       Self.EmitMethodPtrCall('(%rbx)',
         TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType),
         TIndirectFuncCallExpr(AExpr).Args);
+      Self.UnwStrTempClose(UnwH);
       { the 'reference to' copy's own Env reference -- drop it now the call
         is done, keeping the result in %rax / %xmm0 (MakeAdder(1)(41),
         Obj.Make(7)(6)) }
@@ -26799,6 +26806,19 @@ begin
   Result := -1;
   if FUnw = nil then Exit;
   Result := FUnw.OpenRange(UNW_CLASS, FSPDepth, 0, 0, True, Lbl);
+  if Lbl <> '' then Self.Emit(Lbl + ':');
+end;
+
+{ A 'reference to' callee copy just made at (%rsp) (Code at 0, Env at 8),
+  holding its own Env reference until the release after its call: a REFENV
+  range until then (-1: a method pointer, which owns nothing). }
+function TX86_64Backend.UnwRefEnvOpen(AIsRef: Boolean): Int;
+var
+  Lbl: string;
+begin
+  Result := -1;
+  if (FUnw = nil) or not AIsRef then Exit;
+  Result := FUnw.OpenRange(UNW_REFENV, FSPDepth, 0, 0, True, Lbl);
   if Lbl <> '' then Self.Emit(Lbl + ':');
 end;
 

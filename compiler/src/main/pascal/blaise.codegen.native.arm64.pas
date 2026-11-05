@@ -4299,6 +4299,8 @@ var
   PT: TProceduralTypeDesc;
   Slot: string;
   Owned: Boolean;
+  EnvH, Off: Int;
+  Lbl: string;
 begin
   { The callee value is parked in a per-site frame slot -- the arguments may
     themselves call -- and the call goes through EmitFatPtrCall's plain-pointer
@@ -4325,8 +4327,17 @@ begin
       Self.Emit(#9'mov x0, x10');
       EmitCallSym('_ClassAddRef');
     end;
+    { the copy's Env reference is the frame's while the arguments are
+      evaluated and the call runs }
+    EnvH := -1;
+    if PT.IsReference and (FUnw <> nil) and FFrame.TryGetValue(Slot, Off) then
+    begin
+      EnvH := FUnw.OpenRange(UNW_REFENV, -Off, 0, 0, False, Lbl);
+      if Lbl <> '' then Self.Emit(Lbl + ':');
+    end;
     EmitSlotAddr('x9', Slot);
     EmitFatPtrCall('x9', PT, AExpr.Args, True, ASret, ASretSpOff);
+    UnwStrOpndClose(EnvH);
     if PT.IsReference then
     begin
       { every result register survives the release: x0:x1 (a 16-byte
