@@ -26,6 +26,9 @@ interface
 
 function  _blaise_setjmp(Buf: Pointer): Int32;
 procedure _blaise_longjmp(Buf: Pointer; Val: Int32);
+{ The caller's frame pointer (nostackframe: the register still holds it).
+  The exception unwinder starts its frame-pointer walk here. }
+function  _blaise_getfp: Pointer;
 
 implementation
 
@@ -85,6 +88,12 @@ asm
 .Llj_nonzero:
     ret
 end;
+
+function _blaise_getfp: Pointer; assembler; nostackframe;
+asm
+    mov x0, x29
+    ret
+end;
 {$ELSE}
 { Save the machine context into Buf; returns 0 on the direct call. }
 function _blaise_setjmp(Buf: Pointer): Int32; assembler; nostackframe;
@@ -120,6 +129,12 @@ asm
     mov  40(%rdi), %r15
     mov  48(%rdi), %rsp
     jmp *56(%rdi)
+end;
+
+function _blaise_getfp: Pointer; assembler; nostackframe;
+asm
+    movq %rbp, %rax
+    ret
 end;
 {$ENDIF}
 

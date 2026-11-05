@@ -28,7 +28,7 @@ interface
 uses
   SysUtils, Classes, contnrs, Generics.Collections, uAST, uSymbolTable, uStrCompat,
   blaise.codegen, blaise.codegen.arcshapes, uDebugFacts, strutils,
-  blaise.codegen.native.backend, blaise.codegen.target;
+  blaise.codegen.native.backend, blaise.codegen.target, uUnwindFacts;
 
 const
   { Per-argument hoist kinds recorded by EmitArgHoist, parallel to the
@@ -96,6 +96,9 @@ type
       the push is PENDED (so AlignFreshBytes and the callq wrap pad see the
       true depth) and rolled back on fusion. }
     FPendingPush: string;
+    { exception unwind facts for this object (nil under --no-unwind-tables) }
+    FUnw: TUnwindFacts;
+    FUnwDone: Boolean;
     { --- Stage-1 register promotion (two-pass) -----------------------
       Hot, safe scalar locals/params live in callee-saved %r14/%r15 for
       the whole function instead of frame slots.  Pass 1 emits the
@@ -1329,6 +1332,7 @@ type
     function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
     procedure EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
+    procedure EmitUnwindBlock;
     { Prologue init for a promoted param that arrived on the STACK (7th+
       integer arg): load the caller-pushed slot into the register.  No-op
       for locals, Result, and register-passed params. }
@@ -1769,6 +1773,8 @@ end;
 constructor TX86_64Backend.Create(const ATarget: TTargetDesc);
 begin
   inherited Create(ATarget);
+  if not GNoUnwindTables then
+    FUnw := TUnwindFacts.Create('.L');
   FLabelCount          := 0;
   FDataGlobals         := TOrderedDictionary<string, TTypeDesc>.Create();
   FGlobalOwners        := TDictionary<string, string>.Create();
@@ -1837,6 +1843,7 @@ end;
 
 destructor TX86_64Backend.Destroy;
 begin
+  FUnw.Free();
   FProgScratch.Free();
   FProgScratchSz.Free();
   FIntfSplitHalf.Free();
@@ -2362,6 +2369,7 @@ var
   InitCD:   TConstDecl;
 begin
   Self.EmitDynElemHooks();
+  Self.EmitUnwindBlock();
   if (FDataGlobals.Count = 0) and (FProgExcFrameCount = 0) and
      (not FProgHasJumboSet) and (not FProgHasPendRel) and
      (FProgScratch.Count = 0) then
@@ -26174,6 +26182,7 @@ var
   I, J:        Int;
   P:           TMethodParam;
   Mark:        Int;
+  UnwMark:     Int;
   NestedDecl:  TMethodDecl;
   SavedOuterDecl: TMethodDecl;
   AddrTaken:   TStringList;
@@ -26258,6 +26267,7 @@ begin
   end;
 
   Mark := Self.AsmMark();
+  if FUnw <> nil then UnwMark := FUnw.RoutineCount() else UnwMark := 0;
   FPromoActive := False;
   for I := 0 to 3 do
   begin
@@ -26287,6 +26297,7 @@ begin
         FPromoVars[0], '/', FPromoVars[1], '/', FPromoVars[2], '/',
         FPromoVars[3], ']');
     Self.AsmRollback(Mark);
+    if FUnw <> nil then FUnw.TruncateTo(UnwMark);
     FPromoActive := True;
     FPromoFunc := FuncSymbolFromDecl(ADecl);
     Self.EmitFunctionCore(ADecl, AExported);
@@ -26490,6 +26501,7 @@ end;
 procedure TX86_64Backend.EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
 var
   I, J:    Int;
+  UnwLbl:  string;
   P:       TMethodParam;
   Sym:     string;
   IntIdx:  Int;
@@ -26556,6 +26568,12 @@ begin
     FEnvVarNames  := nil;
     FBlockEnvVarNames := nil;
     Exit;
+  end;
+  if FUnw <> nil then
+  begin
+    UnwLbl := FUnw.NewLabel('s');
+    Self.Emit(UnwLbl + ':');
+    FUnw.BeginRoutine(UnwLbl);
   end;
   Self.Emit(#9'pushq %rbp');
   Self.Emit(#9'movq %rsp, %rbp');
@@ -27017,6 +27035,13 @@ begin
         [Self.VarOperand('__envp_b' + IntToStr(I))]));
   FExitLabel := Self.NewLabel('exit');
   Self.TvArmMark();   { arm managed threadvars here, after the spills }
+  { unwind coverage starts here: every managed slot has been zeroed }
+  if FUnw <> nil then
+  begin
+    UnwLbl := FUnw.NewLabel('c');
+    Self.Emit(UnwLbl + ':');
+    FUnw.SetCoverage(UnwLbl, FExitLabel);
+  end;
   if ADecl.Body <> nil then
     Self.EmitStmtList(ADecl.Body.Stmts);
   { Epilogue: Exit lands here.  The Result is loaded into %rax/%xmm0 only AFTER
@@ -27061,6 +27086,12 @@ begin
   Self.Emit(#9'movq %rbp, %rsp');
     Self.Emit(#9'popq %rbp');
     Self.Emit(#9'ret');
+    if FUnw <> nil then
+    begin
+      UnwLbl := FUnw.NewLabel('e');
+      Self.Emit(UnwLbl + ':');
+      FUnw.EndRoutine(UnwLbl);
+    end;
   finally
     Self.TvArmEnd(SavedArmNodes, SavedArmPos);
     FAsm := SavedAsm;
@@ -27200,6 +27231,14 @@ begin
   { RTL one-time setup the per-unit init dispatch below misses for archive
     units (e.g. blaise_weak's WeakMutex — see _BlaiseInit). }
   Self.Emit(#9'callq _BlaiseInit');
+  { hand the runtime the linked unwind tables, before any unit
+    initialisation can raise }
+  if FUnw <> nil then
+  begin
+    Self.Emit(#9'leaq __start_blaise_unwind(%rip), %rdi');
+    Self.Emit(#9'leaq __stop_blaise_unwind(%rip), %rsi');
+    Self.Emit(#9'callq _UnwindInit');
+  end;
   { Assign GPlatformLayout for the compile-time --target by calling the host
     layout unit's init BY NAME (rtl.platform.layout.<os>_init).  The layout unit
     is linked by the driver (BuildRTLUnitList) but not imported by posix, so it
@@ -27567,6 +27606,28 @@ begin
     FUnitFiniNames.Add(NativeMangle(AUnit.Name)). }
   if AHasFini then
     FUnitFiniNames.Add(NativeMangle(AUnitName));
+end;
+
+{ The object's unwind block (docs/exception-unwind-cleanup-design.adoc):
+  a label closing the object's text, then the block in blaise_unwind.
+  Once per object; the section is .text again afterwards. }
+procedure TX86_64Backend.EmitUnwindBlock;
+var
+  Hi: string;
+begin
+  if (FUnw = nil) or FUnwDone then Exit;
+  FUnwDone := True;
+  Hi := FUnw.NewLabel('hi');
+  { the label closes the object's text: switch back to it, since the last
+    thing emitted may have been data (an RTL unit's tail is) }
+  if FUnw.RoutineCount() > 0 then
+  begin
+    Self.Emit('.text');
+    Self.Emit(Hi + ':');
+  end;
+  FAsm.Append(FUnw.BlockText(#9'.section blaise_unwind,"aw",@progbits',
+    #9'.balign 8', '.long', Hi));
+  Self.Emit('.text');
 end;
 
 procedure TX86_64Backend.FinalizeEmit;

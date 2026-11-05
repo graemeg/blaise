@@ -37,7 +37,7 @@ unit cp.test.harness;
 interface
 
 uses
-  SysUtils, uLexer, uParser, uAST, uSemantic,
+  SysUtils, Classes, uLexer, uParser, uAST, uSemantic,
   blaise.codegen.native, blaise.codegen.target;
 
 const
@@ -241,12 +241,33 @@ begin
   end;
 end;
 
+{ AAsm without the exception unwind tables' code labels (Lunw_* / .Lunw_*):
+  they mark positions, not instructions, and would split the instruction
+  sequences the AsmMissing checks look for. }
+function WithoutUnwindLabels(const AAsm: string): string;
+var
+  L: TStringList;
+  I: Int;
+begin
+  L := TStringList.Create();
+  try
+    L.Text := AAsm;
+    for I := L.Count - 1 downto 0 do
+      if (Pos('Lunw_', L.Strings[I]) >= 0) and
+         (Pos(':', L.Strings[I]) = Length(L.Strings[I]) - 1) then
+        L.Delete(I);
+    Result := L.Text;
+  finally
+    L.Free();
+  end;
+end;
+
 function AsmMissing(const ASrc, AX86, AArm64: string): string;
 begin
   Result := '';
-  if Pos(AX86, GenAsm(ASrc, TargetX86_64)) < 0 then
+  if Pos(AX86, WithoutUnwindLabels(GenAsm(ASrc, TargetX86_64))) < 0 then
     Result := TargetX86_64 + ' lacks [' + AX86 + ']';
-  if Pos(AArm64, GenAsm(ASrc, TargetArm64)) < 0 then
+  if Pos(AArm64, WithoutUnwindLabels(GenAsm(ASrc, TargetArm64))) < 0 then
   begin
     if Result <> '' then
       Result := Result + '; ';

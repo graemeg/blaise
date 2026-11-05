@@ -103,6 +103,7 @@ uses
   cp.test.e2e.exceptions,
   cp.test.e2e.arc,
   cp.test.e2e.leakcheck,
+  cp.test.unwind,
   cp.test.e2e.stringops,
   cp.test.e2e.collections2,
   cp.test.e2e.sysutils,

@@ -46,7 +46,7 @@ interface
 uses
   SysUtils, Classes, contnrs, Generics.Collections, uAST, uSymbolTable,
   uStrCompat, blaise.codegen, blaise.codegen.native.backend, strutils,
-  blaise.codegen.target, uDebugFacts;
+  blaise.codegen.target, uDebugFacts, uUnwindFacts;
 
 const
   VIRT_NONE = -1;   { EmitCall: no virtual dispatch — direct bl }
@@ -88,6 +88,9 @@ type
       (HighPC), every named frame slot at its signed x29 offset, and a
       .Ldbg_N label before each statement.  nil when debug info is off. }
     [Unretained] FDbgFacts: TDbgFacts;
+    { exception unwind facts for this object (nil under --no-unwind-tables) }
+    FUnw: TUnwindFacts;
+    FUnwDone: Boolean;
     [Unretained] FDbgCur: TDbgFunc;   { facts entry for the routine being emitted }
     FDbgSeq: Int;                 { .Ldbg_N label counter }
     { enclosing routine while its nested routines are emitted, so
@@ -558,6 +561,7 @@ type
     procedure EmitExit(AStmt: TExitStmt);
     function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
+    procedure EmitUnwindBlock;
     procedure EmitFunctionDef(ADecl: TMethodDecl;
       AWeakBind: Boolean = False);
     { Each generic function instance's body, reporting its allocations
@@ -1049,6 +1053,8 @@ end;
 constructor TArm64Backend.Create(const ATarget: TTargetDesc);
 begin
   inherited Create(ATarget);
+  if not GNoUnwindTables then
+    FUnw := TUnwindFacts.Create('L');
   FFrame       := TDictionary<string, Int>.Create();
   FGlobalNames := TStringList.Create();
   FStrLits     := TStringList.Create();
@@ -1109,6 +1115,7 @@ end;
 
 destructor TArm64Backend.Destroy;
 begin
+  FUnw.Free();
   FEnvCaps.Free();
   FEnvPacked.Free();
   FHandlerVars.Free();
@@ -14796,6 +14803,7 @@ procedure TArm64Backend.EmitFunctionDef(ADecl: TMethodDecl;
   AWeakBind: Boolean);
 var
   I, J, K, FIdx: Int;
+  UnwLbl: string;
   SPOff, SPSz: Int;
   SavedAsm, BodyBuf: TStringBuilder;
   FrameAligned: Int;
@@ -14956,6 +14964,12 @@ begin
   else
     EmitGloblDef(Sym);
   Self.Emit(Sym + ':');
+  if FUnw <> nil then
+  begin
+    UnwLbl := FUnw.NewLabel('s');
+    Self.Emit(UnwLbl + ':');
+    FUnw.BeginRoutine(UnwLbl);
+  end;
   Self.Emit(#9'stp x29, x30, [sp, #-16]!');
   Self.Emit(#9'mov x29, sp');
   { the rest is buffered so try statements can lazily grow the frame —
@@ -15462,6 +15476,13 @@ begin
       EmitStoreSlot('xzr', '__envp_b' + IntToStr(I));
 
   TvArmMark();   { arm managed threadvars here, after the spills }
+  { unwind coverage starts here: every managed slot has been zeroed }
+  if FUnw <> nil then
+  begin
+    UnwLbl := FUnw.NewLabel('c');
+    Self.Emit(UnwLbl + ':');
+    FUnw.SetCoverage(UnwLbl, FExitLabel);
+  end;
   EmitStmtList(ADecl.Body.Stmts);
 
   Self.Emit(FExitLabel + ':');
@@ -15544,6 +15565,12 @@ begin
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
+  if FUnw <> nil then
+  begin
+    UnwLbl := FUnw.NewLabel('e');
+    Self.Emit(UnwLbl + ':');
+    FUnw.EndRoutine(UnwLbl);
+  end;
   Self.DbgEndFunc();
   FDbgCur := SavedDbgCur;
   TvArmEnd(SavedArmNodes, SavedArmPos);
@@ -19442,6 +19469,16 @@ begin
   FLoopExcDepth.Clear();
   EmitCallSym('_SetArgs');
   EmitCallSym('_BlaiseInit');
+  { hand the runtime the linked unwind tables, before any unit
+    initialisation can raise }
+  if FUnw <> nil then
+  begin
+    Self.Emit(#9'adrp x0, section$start$__DATA$__blaise_unw@PAGE');
+    Self.Emit(#9'add x0, x0, section$start$__DATA$__blaise_unw@PAGEOFF');
+    Self.Emit(#9'adrp x1, section$end$__DATA$__blaise_unw@PAGE');
+    Self.Emit(#9'add x1, x1, section$end$__DATA$__blaise_unw@PAGEOFF');
+    EmitCallSym('_UnwindInit');
+  end;
   { unit initialization sections, in dependency (append) order }
   for I := 0 to FUnitInits.Count - 1 do
     Self.Emit(Format(#9'bl %s', [FUnitInits.Strings[I]]));
@@ -19525,6 +19562,7 @@ begin
   BodyBuf.Free();
 
   EmitDynElemHooks();
+  EmitUnwindBlock();
   EmitArrayConstData(AProg.Block);
   EmitStrLitSection();
   EmitFloatLitSection();
@@ -20234,6 +20272,28 @@ begin
   end;
 end;
 
+{ The object's unwind block (docs/exception-unwind-cleanup-design.adoc):
+  a label closing the object's text, then the block in __DATA,__blaise_unw.
+  Once per object; the section is .text again afterwards. }
+procedure TArm64Backend.EmitUnwindBlock;
+var
+  Hi: string;
+begin
+  if (FUnw = nil) or FUnwDone then Exit;
+  FUnwDone := True;
+  Hi := FUnw.NewLabel('hi');
+  { the label closes the object's text: switch back to it, since the last
+    thing emitted may have been data (an RTL unit's tail is) }
+  if FUnw.RoutineCount() > 0 then
+  begin
+    Self.Emit('.text');
+    Self.Emit(Hi + ':');
+  end;
+  FAsm.Append(FUnw.BlockText(#9'.section __DATA,__blaise_unw', #9'.p2align 3',
+    '.word', Hi));
+  Self.Emit('.text');
+end;
+
 procedure TArm64Backend.FinalizeEmit;
 begin
   { unit-as-top compiles (separate compilation) emit their data sections
@@ -20246,6 +20306,7 @@ begin
   if FClassDecls.Count > 0 then
     EmitClassCleanupFns();
   EmitDynElemHooks();
+  EmitUnwindBlock();
   EmitStrLitSection();
   EmitFloatLitSection();
   EmitGlobalsSection();

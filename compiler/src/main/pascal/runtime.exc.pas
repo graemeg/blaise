@@ -58,6 +58,11 @@ function  _ImplementsInterface(Obj: Pointer; IntfTI: Pointer): Int32;
 function  _GetItab(Obj: Pointer; IntfTI: Pointer): Pointer;
 procedure _Raise_InvalidCast;
 procedure _CheckNil(Obj: Pointer);
+{ Exception unwind cleanup (docs/exception-unwind-cleanup-design.adoc).
+  Generated _main passes the bounds of the linked unwind section. }
+procedure _UnwindInit(AStart, AStop: Pointer);
+{ Test hook: how many frames the last raise's walk found a routine for. }
+function  _UnwindLastWalk: Int;
 
 implementation
 
@@ -183,12 +188,154 @@ begin
   g_current_exception := AExc;
 end;
 
+{ ---- exception unwind cleanup ------------------------------------------
+  docs/exception-unwind-cleanup-design.adoc.  Every object the compiler
+  writes carries one unwind block; the linker gathers them into one section
+  and generated _main hands its bounds to _UnwindInit.  _Raise walks the
+  frame-pointer chain from the raise up to the frame of the try that will
+  catch, and for each frame it passes releases what the frame's routine
+  record lists.  The walker keeps its state in its own frame, allocates
+  nothing and holds no managed value, so it is re-entrant and needs no
+  per-fibre state.  Block layout: uUnwindFacts.pas. }
+
+const
+  UNW_MAGIC = 827807042;      { 'BUW1' }
+  UNW_HDR_SIZE = 32;
+  UNW_ROUTINE_SIZE = 32;
+{$IFDEF CPUARM64}
+  JB_FP_OFS = 80;             { x29 in the jmp_buf }
+{$ELSE}
+  JB_FP_OFS = 8;              { %rbp in the jmp_buf }
+{$ENDIF}
+
+type
+  PUInt32 = ^UInt32;
+
+function _blaise_getfp: Pointer; external name '_blaise_getfp';
+
+var
+  g_unw_start: Pointer;
+  g_unw_stop: Pointer;
+
+threadvar
+  g_unw_frames: Int;          { frames the last walk found a routine for }
+
+procedure _UnwindInit(AStart, AStop: Pointer);
+begin
+  g_unw_start := AStart;
+  g_unw_stop := AStop;
+end;
+
+function _UnwindLastWalk: Int;
+begin
+  Result := g_unw_frames;
+end;
+
+{ The block whose text holds APC, or nil (a foreign frame). }
+function UnwFindBlock(APC: UInt): Pointer;
+var
+  P, Stop: UInt;
+  Bytes, TextLen: UInt;
+  Anchor: UInt;
+begin
+  Result := nil;
+  P := UInt(g_unw_start);
+  Stop := UInt(g_unw_stop);
+  while P + UNW_HDR_SIZE <= Stop do
+  begin
+    if PUInt32(Pointer(P))^ <> UNW_MAGIC then
+    begin
+      { alignment padding between objects' blocks }
+      P := P + 8;
+      Continue;
+    end;
+    Bytes := PUInt32(Pointer(P + 4))^;
+    Anchor := UInt(PPointer(Pointer(P + 8))^);
+    TextLen := PUInt32(Pointer(P + 16))^;
+    if (APC >= Anchor) and (APC < Anchor + TextLen) then
+      Exit(Pointer(P));
+    if (Bytes < UNW_HDR_SIZE) or ((Bytes and 7) <> 0) then
+      Exit;                    { not a block we understand: stop }
+    P := P + Bytes;
+  end;
+end;
+
+{ The innermost routine record of ABlk that contains APC, or nil. }
+function UnwFindRoutine(ABlk: Pointer; APC: UInt): Pointer;
+var
+  Off, Start, Len, BestLen: UInt;
+  N, NPtrs, I: Int;
+  R: UInt;
+begin
+  Result := nil;
+  Off := APC - UInt(PPointer(ABlk + 8)^);
+  N := PUInt32(ABlk + 20)^;
+  NPtrs := PUInt32(ABlk + 24)^;
+  R := UInt(ABlk) + UNW_HDR_SIZE + UInt(NPtrs) * 8;
+  BestLen := 0;
+  for I := 0 to N - 1 do
+  begin
+    Start := PUInt32(Pointer(R))^;
+    Len := PUInt32(Pointer(R + 4))^;
+    if (Off >= Start) and (Off < Start + Len) and
+       ((Result = nil) or (Len < BestLen)) then
+    begin
+      Result := Pointer(R);
+      BestLen := Len;
+    end;
+    R := R + UNW_ROUTINE_SIZE;
+  end;
+end;
+
+{ Release what AFrame owns at APC.  AIsTarget: the frame of the try that
+  catches -- it carries on running, so its own slots are left alone. }
+procedure UnwCleanFrame(ABlk, ARtn: Pointer; AFrame: Pointer; APC: UInt;
+  AIsTarget: Boolean);
+begin
+  g_unw_frames := g_unw_frames + 1;
+end;
+
+procedure _UnwindCleanup(ATarget: Pointer);
+var
+  TargetFP, Callee, FP: UInt;
+  RA, PC: UInt;
+  Blk, Rtn: Pointer;
+begin
+  g_unw_frames := 0;
+  if g_unw_start = nil then Exit;
+  TargetFP := UInt(PPointer(ATarget + JB_FP_OFS)^);
+  { this frame, then _Raise's: the walk starts in _Raise's caller }
+  Callee := UInt(_blaise_getfp());
+  Callee := UInt(PPointer(Pointer(Callee))^);
+  while True do
+  begin
+    FP := UInt(PPointer(Pointer(Callee))^);
+    RA := UInt(PPointer(Pointer(Callee + 8))^);
+    { a broken or foreign chain ends the walk: the frames above leak, as
+      they did before the tables }
+    if (FP = 0) or (FP <= Callee) or (FP > TargetFP) or ((FP and 7) <> 0) then
+      Exit;
+    PC := RA - 1;
+    Blk := UnwFindBlock(PC);
+    if Blk = nil then Exit;
+    Rtn := UnwFindRoutine(Blk, PC);
+    if Rtn <> nil then
+      UnwCleanFrame(Blk, Rtn, Pointer(FP), PC, FP = TargetFP);
+    if FP = TargetFP then Exit;
+    Callee := FP;
+  end;
+end;
+
 procedure _Raise(Obj: Pointer);
 var
   ExcSlot: PPointer;
 begin
   if g_exc_top = nil then
     _libc_abort();
+  { release what the frames between here and the handler own; a
+    destructor that runs may raise and catch on its own, so the exception
+    state is set afterwards }
+  _UnwindCleanup(g_exc_top);
   g_current_exception := Obj;
   ExcSlot := g_exc_top + OFS_EXCEPTION;
   ExcSlot^ := Obj;

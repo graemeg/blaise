@@ -28,7 +28,7 @@ uses
   blaise.codegen.target,
   blaise.codegen.driver,
   blaise.codegen.native.driver,
-  uUnitLoader, uDebugOPDF, uDebugFacts, uUnitInterface, uSemanticExport, uSemanticImport,
+  uUnitLoader, uDebugOPDF, uDebugFacts, uUnwindFacts, uUnitInterface, uSemanticExport, uSemanticImport,
   uUnitInterfaceIO, uIfaceObject, uASTDump,
   blaise.frontend.opts, uConfig, uToolchain;
 
@@ -512,6 +512,10 @@ begin
       AOpts.DebugMode := True
     else if Arg = '--warn-narrowing' then
       GWarnNarrowing := True
+    else if Arg = '--no-unwind-tables' then
+      { undocumented diagnostic (unwind design D6): no exception unwind
+        tables, for the .text identity test and the benchmark baseline }
+      GNoUnwindTables := True
     else if Arg = '--debug-opdf' then
       AOpts.OPDFEnabled := True
     else if (Arg = '--entitlements') and (I < ParamCount()) then
