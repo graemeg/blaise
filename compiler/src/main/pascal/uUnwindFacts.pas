@@ -86,6 +86,7 @@ type
     FCur: TUnwRoutine;
     FLabelN: Int;
     FPrefix: string;
+    FPtrs: TStringList;          { symbols of the block's Ptrs[] }
   public
     { ALocalPrefix: the target's local-label prefix ('L' on Darwin, '.L' on
       ELF). }
@@ -100,6 +101,8 @@ type
       the slots itself and does not nil them). }
     procedure SetCoverage(const ALoLbl, AHiLbl: string);
     procedure AddSlot(ALoc, AKind, AFlags, AAux: Int);
+    { The index of ASym in the block's pointer table (added once). }
+    function AddPtr(const ASym: string): Int;
     procedure EndRoutine(const AEndLbl: string);
     { Forget the open routine (a backend that re-emits a routine). }
     procedure DiscardRoutine;
@@ -130,12 +133,14 @@ constructor TUnwindFacts.Create(const ALocalPrefix: string);
 begin
   inherited Create();
   FRoutines := TList<TUnwRoutine>.Create();
+  FPtrs := TStringList.Create();
   FPrefix := ALocalPrefix;
 end;
 
 destructor TUnwindFacts.Destroy;
 begin
   FRoutines.Free();
+  FPtrs.Free();
   inherited Destroy();
 end;
 
@@ -173,6 +178,13 @@ begin
   S.Flags := AFlags;
   S.Aux := AAux;
   FCur.Slots.Add(S);
+end;
+
+function TUnwindFacts.AddPtr(const ASym: string): Int;
+begin
+  Result := FPtrs.IndexOf(ASym);
+  if Result < 0 then
+    Result := FPtrs.Add(ASym);
 end;
 
 procedure TUnwindFacts.EndRoutine(const AEndLbl: string);
@@ -231,7 +243,7 @@ begin
   NSlots := 0;
   for I := 0 to FRoutines.Count - 1 do
     NSlots := NSlots + FRoutines.Get(I).Slots.Count;
-  Bytes := UNW_HDR_SIZE + FRoutines.Count * UNW_ROUTINE_SIZE +
+  Bytes := UNW_HDR_SIZE + FPtrs.Count * 8 + FRoutines.Count * UNW_ROUTINE_SIZE +
     NSlots * UNW_SLOT_SIZE;
   { the anchor is the first routine; an object with none (its text may be
     empty, so no label can go there) describes no text at all }
@@ -256,8 +268,10 @@ begin
       W(#9 + AWord + ' ' + AHiLbl + ' - ' + Anchor);
     end;
     W(#9 + AWord + ' ' + IntToStr(FRoutines.Count));
-    W(#9 + AWord + ' 0');                 { NPtrs }
+    W(#9 + AWord + ' ' + IntToStr(FPtrs.Count));
     W(#9 + AWord + ' 0');                 { Reserved }
+    for I := 0 to FPtrs.Count - 1 do
+      W(#9'.quad ' + FPtrs.Strings[I]);
     J := 0;
     for I := 0 to FRoutines.Count - 1 do
     begin

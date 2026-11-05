@@ -52,6 +52,9 @@ type
       exception chain }
     procedure TestDebug_RaiseInThread_ReleasesLocals;
     procedure TestDebug_RaiseInFiber_ReleasesLocals;
+    { records with managed fields (nested, with a [Weak] field) and static
+      arrays of managed elements, as locals and as by-value parameters }
+    procedure TestDebug_AggregateLocals_ReleasedOnUnwind;
   end;
 
 implementation
@@ -147,37 +150,55 @@ begin
   Result := -1;
 end;
 
-{ The assembly with every unwind-only line removed: the labels (and the
-  .text switch that opens the object's end-of-text label), the block (from
-  its section directive to the section switch that ends it) and the
-  _UnwindInit call in _main. }
+{ The assembly with every unwind-only line removed: the code labels, the
+  object's tail (the aggregate release hooks and the end-of-text label), the
+  block and the _UnwindInit call in _main. }
 function StripUnwind(const AAsm: string): string;
 var
   L, R: TStringList;
-  I: Int;
+  I, Phase: Int;
   S: string;
-  InBlock: Boolean;
 begin
   L := Lines(AAsm);
   R := TStringList.Create();
   try
-    InBlock := False;
+    { Phase 1: the object's unwind-only tail -- the .text switch, the
+      aggregate hooks and the end-of-text label -- up to the block's section
+      directive; phase 2: the block, up to the .text switch that ends it }
+    Phase := 0;
     for I := 0 to L.Count - 1 do
     begin
       S := L.Strings[I];
-      if InBlock then
+      if Phase = 1 then
       begin
-        if Trim(S) = '.text' then InBlock := False;
+        if (Pos('.section', S) >= 0) and ((Pos('__blaise_unw', S) >= 0) or
+           (Pos('blaise_unwind', S) >= 0)) then
+          Phase := 2;
         Continue;
       end;
-      if (Pos('__blaise_unw', S) >= 0) or (Pos('blaise_unwind', S) >= 0) then
+      if Phase = 2 then
       begin
-        if Pos('.section', S) >= 0 then InBlock := True;
+        if Trim(S) = '.text' then Phase := 0;
         Continue;
       end;
-      if (Pos('unw_', S) >= 0) or (Pos('_UnwindInit', S) >= 0) then Continue;
       if (Trim(S) = '.text') and (I + 1 < L.Count) and
-         (Pos('unw_hi', L.Strings[I + 1]) >= 0) then Continue;
+         ((Pos('unw_agg', L.Strings[I + 1]) >= 0) or
+          (Pos('unw_hi', L.Strings[I + 1]) >= 0)) then
+      begin
+        Phase := 1;
+        Continue;
+      end;
+      if (Pos('.section', S) >= 0) and ((Pos('__blaise_unw', S) >= 0) or
+         (Pos('blaise_unwind', S) >= 0)) then
+      begin
+        { a block with no routine has no tail before it }
+        Phase := 2;
+        Continue;
+      end;
+      { the code labels, and the _UnwindInit call with its two bound
+        arguments (named after the section) }
+      if (Pos('unw_', S) >= 0) or (Pos('_UnwindInit', S) >= 0) or
+         (Pos('blaise_unw', S) >= 0) then Continue;
       R.Add(S);
     end;
     Result := R.Text;
@@ -540,6 +561,75 @@ begin
       WriteLn(Seen);
     end.
     ''', 'fib0');
+end;
+
+procedure TUnwindE2ETests.TestDebug_AggregateLocals_ReleasedOnUnwind;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program UnwAgg;
+    uses SysUtils;
+    type
+      TTrack = class
+        destructor Destroy; override;
+      end;
+      TInner = record
+        S: string;
+        O: TTrack;
+      end;
+      TRec = record
+        N: Int;
+        Name: string;
+        Inner: TInner;
+        [Weak] Peer: TTrack;
+        Arr: array of string;
+      end;
+      TStrs = array[0..2] of string;
+    var
+      Freed: Int;
+    destructor TTrack.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    procedure Boom;
+    begin
+      raise Exception.Create('boom');
+    end;
+    procedure Locals;
+    var
+      R: TRec;
+      A: TStrs;
+      K: TTrack;
+    begin
+      K := TTrack.Create();
+      R.Name := 'n' + IntToStr(1);
+      R.Inner.S := 's' + IntToStr(2);
+      R.Inner.O := TTrack.Create();
+      R.Peer := K;
+      SetLength(R.Arr, 2);
+      R.Arr[1] := 'a' + IntToStr(3);
+      A[0] := 'x' + IntToStr(4);
+      A[2] := 'y' + IntToStr(5);
+      Boom();
+    end;
+    procedure Params(R: TRec; A: TStrs);
+    begin
+      Boom();
+    end;
+    var
+      R: TRec;
+      A: TStrs;
+    begin
+      try Locals(); except on E: Exception do WriteLn('locals ', Freed); end;
+      Freed := 0;
+      R.Name := 'p' + IntToStr(6);
+      R.Inner.O := TTrack.Create();
+      A[1] := 'q' + IntToStr(7);
+      try Params(R, A); except on E: Exception do WriteLn('params ', Freed); end;
+      WriteLn('done');
+    end.
+    ''', 'locals 2' + #10 + 'params 0' + #10 + 'done');
 end;
 
 initialization

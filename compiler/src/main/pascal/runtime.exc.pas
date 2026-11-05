@@ -209,6 +209,8 @@ const
   UNW_DYN = 4;
   UNW_REFENV = 5;
   UNW_WEAK = 6;
+  UNW_AGG = 7;
+  UNW_F_INDIRECT = 1;
 {$IFDEF CPUARM64}
   JB_FP_OFS = 80;             { x29 in the jmp_buf }
 {$ELSE}
@@ -218,6 +220,9 @@ const
 type
   PUInt32 = ^UInt32;
   PInt32 = ^Int32;
+  { an aggregate's release hook: releases and zeroes every managed field or
+    element of the record or static array at Addr }
+  TUnwAggHook = procedure(Addr: Pointer);
 
 function _blaise_getfp: Pointer; external name '_blaise_getfp';
 procedure _StringRelease(Ptr: Pointer); external name '_StringRelease';
@@ -309,6 +314,8 @@ var
   S: UInt;
   A: PPointer;
   V: Pointer;
+  W: UInt32;
+  Hook: TUnwAggHook;
 begin
   g_unw_frames := g_unw_frames + 1;
   if AIsTarget then Exit;
@@ -325,9 +332,10 @@ begin
   for I := 0 to N - 1 do
   begin
     A := PPointer(AFrame + PInt32(Pointer(S))^);
+    W := PUInt32(Pointer(S + 4))^;
     { nil before release: a destructor this runs that raises in turn finds
       the slot already empty }
-    case PUInt32(Pointer(S + 4))^ and $FF of
+    case W and $FF of
       UNW_STR:
       begin
         V := A^; A^ := nil; _StringRelease(V);
@@ -356,6 +364,16 @@ begin
       end;
       UNW_WEAK:
         _WeakClear(A);
+      UNW_AGG:
+      begin
+        { a by-value aggregate parameter's slot holds the address of the
+          frame's copy }
+        if ((W shr 8) and UNW_F_INDIRECT) <> 0 then
+          A := PPointer(A^);
+        Hook := TUnwAggHook(PPointer(ABlk + UNW_HDR_SIZE + (W shr 16) * 8)^);
+        if A <> nil then
+          Hook(Pointer(A));
+      end;
     end;
     S := S + UNW_SLOT_SIZE;
   end;

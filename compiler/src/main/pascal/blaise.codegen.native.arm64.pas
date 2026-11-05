@@ -91,6 +91,9 @@ type
     { exception unwind facts for this object (nil under --no-unwind-tables) }
     FUnw: TUnwindFacts;
     FUnwDone: Boolean;
+    { aggregate types the unwind tables release, each through one hook }
+    FUnwAggTypes: TList<TTypeDesc>;
+    FUnwAggLbls: TStringList;
     [Unretained] FDbgCur: TDbgFunc;   { facts entry for the routine being emitted }
     FDbgSeq: Int;                 { .Ldbg_N label counter }
     { enclosing routine while its nested routines are emitted, so
@@ -562,6 +565,7 @@ type
     function FrameSlotInventory(ADecl: TMethodDecl): TList<TUnwSlot>;
     procedure EmitFrameSlotReleases(ASlots: TList<TUnwSlot>);
     procedure RecordUnwindSlots(ASlots: TList<TUnwSlot>);
+    function UnwAggHookPtr(AType: TTypeDesc): Int;
     procedure EmitUnwindBlock;
     procedure EmitFunctionDef(ADecl: TMethodDecl;
       AWeakBind: Boolean = False);
@@ -1057,6 +1061,8 @@ begin
   inherited Create(ATarget);
   if not GNoUnwindTables then
     FUnw := TUnwindFacts.Create('L');
+  FUnwAggTypes := TList<TTypeDesc>.Create();
+  FUnwAggLbls := TStringList.Create();
   FFrame       := TDictionary<string, Int>.Create();
   FGlobalNames := TStringList.Create();
   FStrLits     := TStringList.Create();
@@ -1118,6 +1124,8 @@ end;
 destructor TArm64Backend.Destroy;
 begin
   FUnw.Free();
+  FUnwAggTypes.Free();
+  FUnwAggLbls.Free();
   FEnvCaps.Free();
   FEnvPacked.Free();
   FHandlerVars.Free();
@@ -14778,10 +14786,26 @@ begin
   for I := 0 to ASlots.Count - 1 do
   begin
     S := ASlots.Get(I);
-    if S.Kind = uskAgg then Continue;
-    if FFrame.TryGetValue(S.Name, Off) then
+    if not FFrame.TryGetValue(S.Name, Off) then Continue;
+    if S.Kind = uskAgg then
+      FUnw.AddSlot(-Off, UNW_AGG, 0, UnwAggHookPtr(S.AggType))
+    else
       FUnw.AddSlot(-Off, UnwKindCode(S.Kind), 0, 0);
   end;
+end;
+
+{ The pointer-table index of AType's unwind release hook, one per distinct
+  aggregate type in the object (emitted by EmitUnwindBlock). }
+function TArm64Backend.UnwAggHookPtr(AType: TTypeDesc): Int;
+var
+  I: Int;
+begin
+  for I := 0 to FUnwAggTypes.Count - 1 do
+    if FUnwAggTypes.Get(I) = AType then
+      Exit(FUnw.AddPtr(FUnwAggLbls.Strings[I]));
+  FUnwAggTypes.Add(AType);
+  FUnwAggLbls.Add(FUnw.NewLabel('agg'));
+  Result := FUnw.AddPtr(FUnwAggLbls.Strings[FUnwAggLbls.Count - 1]);
 end;
 
 { Scope-exit release of the frame's managed values (Exit statements land
@@ -20321,6 +20345,7 @@ end;
 procedure TArm64Backend.EmitUnwindBlock;
 var
   Hi: string;
+  I: Int;
 begin
   if (FUnw = nil) or FUnwDone then Exit;
   FUnwDone := True;
@@ -20330,6 +20355,20 @@ begin
   if FUnw.RoutineCount() > 0 then
   begin
     Self.Emit('.text');
+    { each aggregate's release hook (x0 = its address): releases and zeroes
+      every managed field or element }
+    for I := 0 to FUnwAggTypes.Count - 1 do
+    begin
+      Self.Emit(FUnwAggLbls.Strings[I] + ':');
+      Self.Emit(#9'stp x29, x30, [sp, #-16]!');
+      Self.Emit(#9'mov x29, sp');
+      Self.Emit(#9'str x19, [sp, #-16]!');
+      Self.Emit(#9'mov x19, x0');
+      Self.EmitManagedReleaseAt(FUnwAggTypes.Get(I), 'x19', True);
+      Self.Emit(#9'ldr x19, [sp], #16');
+      Self.Emit(#9'ldp x29, x30, [sp], #16');
+      Self.Emit(#9'ret');
+    end;
     Self.Emit(Hi + ':');
   end;
   FAsm.Append(FUnw.BlockText(#9'.section __DATA,__blaise_unw', #9'.p2align 3',
