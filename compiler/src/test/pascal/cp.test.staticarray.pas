@@ -38,6 +38,9 @@ type
     { R.A := G with A a static-array field copies the bytes (x86-64 stored
       G's ADDRESS over A[0..1]) }
     procedure TestNative_StaticArrayFieldStore_CopiesBytes;
+    { GH #260: R.A := C for a typed-constant C copies from C's data blob
+      (arm64 raised 'neither a frame slot nor a global') }
+    procedure TestNative_ConstArrayFieldStore_CopiesFromBlob;
     { F := G inside a method, F a static array of strings: the element walk
       retains (x86-64 handed the array type to the RECORD walk, which read
       its descriptor as a field list -- a layout-dependent compiler crash) }
@@ -1778,6 +1781,26 @@ begin
       #9'movq %r15, %rdi' + #10 + #9'movq %rbx, %rsi' + #10 +
         #9'movq $12, %rdx' + #10 + #9'callq memcpy',
       #9'add x0, x0, #4' + #10 + #9'movz x2, #12' + #10 + #9'bl _memcpy'));
+end;
+
+procedure TStaticArrayTests.TestNative_ConstArrayFieldStore_CopiesFromBlob;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..2] of Int32;
+      TRec = record N: Int32; A: TArr; end;
+    const C: TArr = (7, 8, 9);
+    var R: TRec;
+    begin
+      R.A := C;
+    end.
+    ''';
+begin
+  AssertEquals('the source address is the constant''s data blob', '',
+    AsmMissing(Src,
+      #9'leaq __bac_1_C(%rip), %rax',
+      #9'adrp x0, __bac_1_C@PAGE' + #10 + #9'add x0, x0, __bac_1_C@PAGEOFF'));
 end;
 
 procedure TStaticArrayTests.TestNative_ImplicitSelfStaticArrayStore_RetainsElements;

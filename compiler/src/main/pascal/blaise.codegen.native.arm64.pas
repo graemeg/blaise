@@ -2032,6 +2032,18 @@ begin
     slot IS its address (leg 17); an implicit-Self FIELD lives at Self +
     field offset (no frame slot exists for it); a var param's slot holds the
     caller's address; everything else is a frame slot }
+  if AE.ConstArraySymbol <> '' then
+  begin
+    { a typed constant (const C: T4 = (...)) has no slot: its storage is
+      its data blob, so R.F := C copies out of the blob.  Without this a
+      record-field store of C stopped with 'neither a frame slot nor a
+      global' (GH #260) }
+    Self.Emit(Format(#9'adrp %s, %s@PAGE',
+      [AReg, CodegenMangle(AE.ConstArraySymbol)]));
+    Self.Emit(Format(#9'add %s, %s, %s@PAGEOFF',
+      [AReg, AReg, CodegenMangle(AE.ConstArraySymbol)]));
+    Exit;
+  end;
   if IsCaptured(AE.Name) then
   begin
     EmitLoadSlot(AReg, '_cap_' + AE.Name);

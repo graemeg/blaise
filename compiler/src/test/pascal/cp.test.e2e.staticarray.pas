@@ -79,6 +79,11 @@ type
     { Range-indexed const array: const X: array[L..H] of T = (...) }
     procedure TestRun_ConstArray_RangeIndexed_Strings;
     procedure TestRun_ConstArray_RangeIndexed_Integers;
+    { GH #260: a typed-constant static array stored into a record or class
+      FIELD (H.R := C, O.I.R := C, A[1].R := C, an implicit-Self field)
+      copies the constant's data blob; arm64 stopped with an internal error
+      'address of C, which is neither a frame slot nor a global' }
+    procedure TestRun_ConstArray_StoredIntoFields;
 
     { Class-level array constants }
     procedure TestRun_ClassConstArray_RangeIndexed;
@@ -592,6 +597,68 @@ begin
     AssertEquals('Primes[0]', '2', Lines.Strings[0]);
     AssertEquals('Primes[2]', '5', Lines.Strings[1]);
     AssertEquals('Primes[4]', '11', Lines.Strings[2]);
+  finally Lines.Free() end
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ConstArray_StoredIntoFields;
+const
+  Src =
+    '''
+    program P;
+    type
+      T4 = array[0..3] of Byte;
+      TRec = record N: Int32; R: T4; end;
+      TOuter = record I: TRec; end;
+      TObj = class F: T4; G: TRec; procedure Put(); end;
+    const CG: T4 = (1, 2, 3, 4);
+    procedure TObj.Put();
+    const CL: T4 = (5, 6, 7, 8);
+    begin
+      F := CL;
+      G.R := CG;
+    end;
+    procedure Init(var H: TRec);
+    const CL: T4 = (82, 73, 70, 70);
+    begin
+      H.R := CL;
+    end;
+    procedure Local();
+    const CL: T4 = (9, 10, 11, 12);
+    var O: TOuter; A: array[0..1] of TRec;
+    begin
+      O.I.R := CL;
+      A[1].R := CG;
+      WriteLn(O.I.R[0], ' ', O.I.R[3], ' ', A[1].R[1], ' ', A[1].R[3]);
+    end;
+    var Obj: TObj; R: TRec;
+    begin
+      Init(R);
+      WriteLn(R.R[0], ' ', R.R[1], ' ', R.R[3]);
+      R.R := CG;
+      WriteLn(R.R[0], ' ', R.R[3]);
+      Obj := TObj.Create();
+      Obj.Put();
+      WriteLn(Obj.F[0], ' ', Obj.F[3], ' ', Obj.G.R[0], ' ', Obj.G.R[3]);
+      Obj.Free();
+      Local();
+    end.
+    ''';
+var Output: string; RCode: Int;
+  Lines: TStringList;
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  Lines := TStringList.Create();
+  try
+    Lines.Text := Trim(Output);
+    AssertEquals('line count', 4, Lines.Count);
+    AssertEquals('local const into var-param field', '82 73 70', Lines.Strings[0]);
+    AssertEquals('global const into global record field', '1 4', Lines.Strings[1]);
+    AssertEquals('implicit-Self field and Self record field', '5 8 1 4',
+      Lines.Strings[2]);
+    AssertEquals('nested field and array-element field', '9 12 2 4',
+      Lines.Strings[3]);
   finally Lines.Free() end
 end;
 
