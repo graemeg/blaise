@@ -177,29 +177,28 @@ end;
   non-empty, starts and ends with a digit and has no doubled underscore. }
 function TPValidDigitRun(const S: string; ABase: Int): Boolean;
 var
-  I, C: Int;
+  C: Byte;
   PrevUnderscore: Boolean;
 begin
-  Result := Length(S) > 0;
+  Result := False;
   PrevUnderscore := True;    { a leading underscore is rejected }
-  I := 0;
-  while Result and (I < Length(S)) do
+  for C in S do
   begin
-    C := Byte(S[I]);
     if C = Ord('_') then
     begin
-      Result := not PrevUnderscore;
+      if PrevUnderscore then
+        Exit;
       PrevUnderscore := True;
     end
     else
     begin
-      Result := (TPHexVal(C) >= 0) and (TPHexVal(C) < ABase);
+      if (TPHexVal(C) < 0) or (TPHexVal(C) >= ABase) then
+        Exit;
       PrevUnderscore := False;
     end;
-    I := I + 1;
   end;
-  if Result then
-    Result := not PrevUnderscore;
+  { Empty, or ending in an underscore, leaves PrevUnderscore set. }
+  Result := not PrevUnderscore;
 end;
 
 function TPStripUnderscores(const S: string): string;
