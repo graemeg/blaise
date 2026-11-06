@@ -671,7 +671,8 @@ var
   TDecl:    TTypeDecl;
   GenDef:   TGenericTypeDef;
   GBody:    TGenericBody;
-  J:        Int;
+  J, K:     Int;
+  Methods:  TObjectList;
 begin
   if AUnit.IntfBlock = nil then Exit;
 
@@ -725,6 +726,40 @@ begin
         GBody.Constraints.Add('');
     end;
     AIface.AddGenericBody(GBody);
+  end;
+
+  { Generic METHODS of a non-generic class or record (method-level <T>).
+    A consumer monomorphises them itself, so the template travels with its
+    body, in the GENROUT block under 'Owner.Method'.  Without it a cached
+    unit's generic method was "no generic method" to every consumer
+    (BUG-20261106-static-generic-method-call). }
+  for I := 0 to AUnit.IntfBlock.TypeDecls.Count - 1 do
+  begin
+    TDecl := TTypeDecl(AUnit.IntfBlock.TypeDecls.Items[I]);
+    if TDecl.Def is TClassTypeDef then
+      Methods := TClassTypeDef(TDecl.Def).Methods
+    else if TDecl.Def is TRecordTypeDef then
+      Methods := TRecordTypeDef(TDecl.Def).Methods
+    else
+      Continue;
+    for K := 0 to Methods.Count - 1 do
+    begin
+      Decl := TMethodDecl(Methods.Items[K]);
+      if (Decl.TypeParams = nil) or (Decl.Body = nil) then Continue;
+      GBody := TGenericBody.Create();
+      GBody.Name       := TDecl.Name + '.' + Decl.Name;
+      GBody.IsType     := False;
+      GBody.MethodDecl := CloneMethodDecl(Decl);
+      for J := 0 to Decl.TypeParams.Count - 1 do
+      begin
+        GBody.TypeParams.Add(Decl.TypeParams.Strings[J]);
+        if Decl.TypeParamConstraints <> nil then
+          GBody.Constraints.Add(Decl.TypeParamConstraints.Strings[J])
+        else
+          GBody.Constraints.Add('');
+      end;
+      AIface.AddGenericBody(GBody);
+    end;
   end;
 end;
 

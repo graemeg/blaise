@@ -253,6 +253,12 @@ type
       destructor silently never ran (a TThread subclass then was never
       joined). }
     procedure TestWarmRebuild_InheritedDestructorOfImportedClassRuns;
+    { Generic methods (method-level <T>) of a cached unit's ordinary class
+      and record -- instance, static, inherited, called from the program --
+      instantiate on a warm rebuild.  The .bif carried no template body, so
+      every one was "no generic method" once the unit came from the cache
+      (BUG-20261106-static-generic-method-call). }
+    procedure TestWarmRebuild_GenericMethodsOfImportedTypes;
     { Regression (reported by blaise-canvas-ui): under --no-incremental every
       module is appended to one assembly buffer, and the typeinfo of a generic
       INTERFACE instance (IMap<string, TFoo>, implemented by the dictionary)
@@ -3858,6 +3864,114 @@ begin
   Rc := RunBinary(Dir + '/dtorapp2', Captured);
   AssertEquals('warm rebuild: the inherited destructor still runs',
     'base destroy' + #10 + 'end' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestWarmRebuild_GenericMethodsOfImportedTypes;
+const
+  GenSrc =
+    '''
+    unit ugenm;
+    interface
+    type
+      TBase = class
+      public
+        static function Conv<T>(const A: T): T;
+        function Id<T>(const A: T): T;
+      end;
+      TUtil = class(TBase)
+      private
+        static function Hid<T>(const A: T): T;
+      public
+        static procedure Say<T>(const A: T);
+      end;
+      TRec = record
+        N: Int;
+        static function Wrap<T>(const A: T): T;
+      end;
+    implementation
+    static function TBase.Conv<T>(const A: T): T;
+    begin
+      Result := A;
+    end;
+    function TBase.Id<T>(const A: T): T;
+    begin
+      Result := A;
+    end;
+    static function TUtil.Hid<T>(const A: T): T;
+    begin
+      Result := A;
+    end;
+    static procedure TUtil.Say<T>(const A: T);
+    begin
+      WriteLn(Hid<T>(Conv<T>(A)));
+    end;
+    static function TRec.Wrap<T>(const A: T): T;
+    begin
+      Result := A;
+    end;
+    end.
+    ''';
+  AppSrc =
+    '''
+    program GenMApp;
+    uses ugenm;
+    var
+      U: TUtil;
+    begin
+      U := TUtil.Create();
+      WriteLn(TUtil.Conv<string>('a') + U.Id<string>('b'));
+      TUtil.Say<Int>(7);
+      U.Say<string>('c');
+      WriteLn(TRec.Wrap<Int>(41) + 1)
+    end.
+    ''';
+  PeekSrc =
+    '''
+    program GenMPeek;
+    uses ugenm;
+    begin
+      WriteLn(TUtil.Hid<string>('x'))
+    end.
+    ''';
+  Expected = 'ab' + #10 + '7' + #10 + 'c' + #10 + '42' + #10;
+var
+  Dir, CacheDir, AppPas, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir      := FScratch + '/imported_generic_methods';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  AppPas   := Dir + '/genmapp.pas';
+  WriteFile(Dir + '/ugenm.pas', GenSrc);
+  WriteFile(AppPas, AppSrc);
+
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/genmapp1',
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('cold build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/genmapp1', Captured);
+  AssertEquals('cold build', Expected, Captured);
+
+  { The program now compiles against ugenm's cached interface. }
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/genmapp2',
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('warm rebuild exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/genmapp2', Captured);
+  AssertEquals('warm rebuild: generic methods instantiate from the cache',
+    Expected, Captured);
+
+  { a private generic method stays private through the cached interface }
+  WriteFile(Dir + '/genmpeek.pas', PeekSrc);
+  Rc := RunBlaise(['--source', Dir + '/genmpeek.pas', '--output',
+                   Dir + '/genmpeek', '--unit-cache', CacheDir,
+                   '--unit-path', Dir], Captured);
+  AssertTrue('a private generic method is rejected (out: ' + Captured + ')',
+    (Rc <> 0) and (Pos('not accessible', Captured) >= 0))
 end;
 
 procedure TSepCompileTests.TestNoIncremental_GenericIntfInstanceInTwoModules_Links;

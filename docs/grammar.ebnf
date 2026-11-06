@@ -1400,7 +1400,12 @@ MethodCall
  * semantic pass monomorphises the method on first use.  The leading-'<' is
  * disambiguated from a comparison by the same two-token lookahead used for
  * generic free-function calls.  Both the inline-body method form and the
- * out-of-line impl  function TOwner.Method<T>(...)  are supported. *)
+ * out-of-line impl  function TOwner.Method<T>(...)  are supported.  The rule
+ * holds in statement and expression position alike, and the leading IDENT may
+ * name a type: TOwner.Method<T>(...) calls a static generic method.  Inside
+ * the owner's methods the unqualified Method<T>(...) is the generic routine
+ * call form (IDENT LESS TypeArgList GREATER LPAREN ...), resolved against the
+ * owner's methods first. *)
 
 (* Semantic disambiguation of  IDENT DOT IDENT  in Stmt:
  *   - Followed by ASSIGN or LBRACKET ASSIGN → FieldAssignment (plain or indexed)

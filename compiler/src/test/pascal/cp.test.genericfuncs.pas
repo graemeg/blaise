@@ -76,6 +76,20 @@ type
       (BUG-20261028-arm64-typeparam-cast). }
     procedure TestCodegen_GenericClass_TypeParamCast_Narrows;
     procedure TestCodegen_GenericFunc_TypeParamCast_Narrows;
+    { Every explicit call form of a generic method resolves: a STATIC
+      generic method through the type name, an inherited one, the
+      unqualified call from an instance and from a static method, and the
+      statement forms (BUG-20261106-static-generic-method-call: all but
+      Obj.M<T>(..) as an expression failed). }
+    procedure TestSemantic_GenericMethod_EveryExplicitCallForm;
+    procedure TestSemantic_StaticGenericMethod_InstanceIsStatic;
+    procedure TestSemantic_StaticGenericMethod_ArgTypeChecked;
+    { type arguments of a generic method are never inferred: a call without
+      them says so, instead of "No matching overload" }
+    procedure TestSemantic_GenericMethod_NoTypeArgs_SaysExplicit;
+    { a RECORD may declare generic methods too, instance and static (its
+      method pre-pass resolved their params eagerly: "Unknown type 'T'") }
+    procedure TestSemantic_GenericMethod_OnRecord;
   end;
 
 implementation
@@ -186,6 +200,122 @@ end;
 
 { A borrowed (const) key takes no ARC in the Probe body; a by-value key is
   retained on entry. }
+const
+  SrcGenMethodCallForms =
+    '''
+        program P;
+        type
+          TBase = class
+          public
+            static function Conv<T>(const A: T): T;
+          end;
+          TBox = class(TBase)
+          public
+            function Id<T>(const A: T): T;
+            procedure Show<T>(const A: T);
+            static procedure SShow<T>(const A: T);
+            procedure Inner();
+            static procedure SInner();
+          end;
+        static function TBase.Conv<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        function TBox.Id<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        procedure TBox.Show<T>(const A: T);
+        begin
+          WriteLn(A);
+        end;
+        static procedure TBox.SShow<T>(const A: T);
+        begin
+          WriteLn(A);
+        end;
+        procedure TBox.Inner();
+        begin
+          WriteLn(Id<string>('i1') + Conv<string>('i2'));
+          Show<string>('i3');
+          SShow<string>('i4');
+          Self.Show<Int>(5);
+        end;
+        static procedure TBox.SInner();
+        begin
+          WriteLn(Conv<string>('s1'));
+          SShow<string>('s2');
+          TBox.SShow<Int>(3);
+        end;
+        var B: TBox;
+        begin
+          B := TBox.Create();
+          WriteLn(TBox.Conv<string>('m1') + TBase.Conv<string>('m2'));
+          TBox.SShow<string>('m3');
+          B.Show<string>('m4');
+          B.Inner();
+          TBox.SInner();
+          WriteLn(TBox.Conv<Int>(41) + 1);
+        end.
+        ''';
+
+  SrcStaticGenMethodNoTypeArgs =
+    '''
+        program P;
+        type
+          TBox = class
+          public
+            static function Conv<T>(const A: T): T;
+          end;
+        static function TBox.Conv<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        begin
+          WriteLn(TBox.Conv('x'));
+        end.
+        ''';
+
+  SrcRecordGenMethods =
+    '''
+        program R;
+        type
+          TRec = record
+            N: Int;
+            static function Wrap<T>(const A: T): T;
+            function Id<T>(const A: T): T;
+          end;
+        static function TRec.Wrap<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        function TRec.Id<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        var V: TRec;
+        begin
+          WriteLn(V.Id<string>('r'));
+          WriteLn(TRec.Wrap<Int>(41) + 1);
+        end.
+        ''';
+
+  SrcStaticGenMethodBadArg =
+    '''
+        program P;
+        type
+          TBox = class
+          public
+            static function Conv<T>(const A: T): T;
+          end;
+        static function TBox.Conv<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        begin
+          WriteLn(TBox.Conv<string>(5));
+        end.
+        ''';
+
 procedure TGenericFuncTests.AssertProbeARC(const ASrc, ATarget: string;
   ABorrowed: Boolean);
 var
@@ -642,6 +772,76 @@ const
 begin
   AssertEquals('T(X) at T = Byte narrows to a byte', '',
     AsmMissing(Src, 'movzbq %al, %rax', 'lsr x0, x0, #56'));
+end;
+
+procedure TGenericFuncTests.TestSemantic_GenericMethod_EveryExplicitCallForm;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(SrcGenMethodCallForms);
+  Prog.Free();
+end;
+
+procedure TGenericFuncTests.TestSemantic_StaticGenericMethod_InstanceIsStatic;
+var
+  Prog: TProgram;
+  GMI: TGenericMethodInstance;
+  I: Int;
+  Found: Boolean;
+begin
+  Prog := Analyse(SrcGenMethodCallForms);
+  try
+    Found := False;
+    for I := 0 to Prog.GenericMethodInstances.Count - 1 do
+    begin
+      GMI := TGenericMethodInstance(Prog.GenericMethodInstances.Items[I]);
+      if SameText(GMI.InstName, 'Conv<string>') then
+      begin
+        Found := True;
+        AssertEquals('inherited static generic instance owner', 'TBase',
+          GMI.OwnerType);
+        AssertTrue('static survives monomorphisation',
+          GMI.MethodDecl.IsStatic);
+      end
+      else if SameText(GMI.InstName, 'Id<string>') then
+        AssertFalse('an instance generic method stays an instance method',
+          GMI.MethodDecl.IsStatic);
+    end;
+    AssertTrue('TBase.Conv<string> was instantiated', Found);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_StaticGenericMethod_ArgTypeChecked;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(SrcStaticGenMethodBadArg);
+  AssertTrue('a wrong-typed argument is rejected: ' + Msg,
+    (Pos('mismatch', Msg) >= 0) or (Pos('No matching', Msg) >= 0));
+end;
+
+procedure TGenericFuncTests.TestSemantic_GenericMethod_NoTypeArgs_SaysExplicit;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(SrcStaticGenMethodNoTypeArgs);
+  AssertTrue('names the missing type arguments: ' + Msg,
+    Pos('give its type arguments explicitly', Msg) >= 0);
+end;
+
+procedure TGenericFuncTests.TestSemantic_GenericMethod_OnRecord;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(SrcRecordGenMethods);
+  try
+    AssertEquals('both record generic methods instantiated', 2,
+      Prog.GenericMethodInstances.Count);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

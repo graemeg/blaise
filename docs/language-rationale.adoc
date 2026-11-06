@@ -5545,6 +5545,24 @@ and the out-of-line implementation `function TUtil.Pick<T>(...)` with the body
 separated from the class declaration (the body is transferred onto the in-class
 generic-method template before instantiation).
 
+A generic method may be `static`, and every call form an ordinary method has
+is open to a generic one: through an instance (`u.Pick<Int>(..)`), through the
+type name for a static method (`TUtil.Make<Int>(..)`), unqualified from the
+owner's own methods (`Pick<Int>(..)`, `Make<Int>(..)`), and as a statement.  A
+generic method declared by an ancestor is reached through a descendant, and is
+instantiated on the type that declares it, so `TDerived.Make<Int>` and
+`TBase.Make<Int>` are one instance.
+
+A unit's compiled interface (`.bif`) carries each generic method's template,
+body included, because the consumer is the one that monomorphises it.  An
+instance's visibility is judged against the unit that declared the template,
+not the one that happened to instantiate it, so a `private` generic method
+stays private however it is reached.
+
+Because the type arguments are not inferred, a call that omits them is
+reported as such ("give its type arguments explicitly") rather than as a
+failed overload match: there is no overload set for it to fail against.
+
 == Platform constants — one name per concept
 
 Delphi and FPC carry multiple aliases for the same platform constant:

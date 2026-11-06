@@ -3010,7 +3010,8 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 34 since
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 35 since
+      GENROUT carries the generic methods of non-generic types; 34 since
       a field carries its [Unretained] flag; 33 since
       the META block carries the prebuilt-dependency hashes; 32 since
       a method sig carries its operator flag and kind; 31 since
@@ -3043,7 +3044,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 34', Buf) = 0);
+      Pos('BLAISE-IFACE 35', Buf) = 0);
   finally
     Iface.Free();
   end;

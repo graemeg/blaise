@@ -82,6 +82,10 @@ type
       type-argument list: well formed, closed by '>', and followed by '.' or
       '('.  Scans ahead without consuming anything. }
     function  GenericArgsAhead(APos: Int): Boolean;
+    { When GenericArgsAhead(0), consume the type-argument list and append it
+      to AName ('Pick' -> 'Pick<Int>'), the form the semantic pass
+      instantiates a generic method or function from. }
+    procedure FoldGenericArgs(var AName: string);
     function  TryCollapseUnitQualifier(var AName: string;
                                        var ALine, ACol: Int;
                                        out AUnit: string): Boolean;
@@ -384,6 +388,20 @@ begin
       P := P + 1;
     end;
   end;
+end;
+
+procedure TParser.FoldGenericArgs(var AName: string);
+begin
+  if not GenericArgsAhead(0) then Exit;
+  Advance();  { consume '<' }
+  AName := AName + '<' + Self.ParseTypeName();
+  while Check(tkComma) do
+  begin
+    Advance();
+    AName := AName + ',' + Self.ParseTypeName();
+  end;
+  Expect(tkGreaterThan);
+  AName := AName + '>';
 end;
 
 { Case-insensitive membership test against the parsed 'uses' names. }
@@ -4730,6 +4748,9 @@ begin
     SecondLine := FCurrent.Line;
     SecondCol := FCurrent.Col;
     Advance();
+    { Obj.Method<Args>(..) / TypeName.Method<Args>(..) as a statement: the
+      type arguments join the method name, as in an expression }
+    Self.FoldGenericArgs(SecondIdent);
 
     if Check(tkLBracket) then
     begin
@@ -6803,18 +6824,7 @@ begin
             Fold the explicit type arguments into the method name
             (Pick<Integer>), mirroring the generic free-function call site; the
             semantic pass instantiates on the '<' in the name. }
-          if GenericArgsAhead(0) then
-          begin
-            Advance();  { consume '<' }
-            SecondName := SecondName + '<' + ParseTypeName();
-            while Check(tkComma) do
-            begin
-              Advance();
-              SecondName := SecondName + ',' + ParseTypeName();
-            end;
-            Expect(tkGreaterThan);
-            SecondName := SecondName + '>';
-          end;
+          Self.FoldGenericArgs(SecondName);
           if Check(tkLParen) then
           begin
             { IDENT '.' IDENT '(' ... ')' — method call expression }

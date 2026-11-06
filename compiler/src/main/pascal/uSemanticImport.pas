@@ -1680,17 +1680,56 @@ end;
 
 { ----- Top-level ------------------------------------------------ }
 
-procedure RegisterGenericRoutines(AIface: TUnitInterface; ATable: TSymbolTable);
+{ The visibility a cached unit recorded for generic method AMethod of type
+  AOwner: the GENROUT payload carries no visibility, the TYPE block's method
+  signature does. }
+function GenericMethodVisibility(AIface: TUnitInterface;
+  const AOwner, AMethod: string): TMemberVisibility;
+var
+  I, J: Int;
+  E: TTypeEntry;
+  Sig: TRoutineSig;
+begin
+  Result := mvPublic;
+  for I := 0 to AIface.Types.Count - 1 do
+  begin
+    E := TTypeEntry(AIface.Types.Items[I]);
+    if not SameText(E.Name, AOwner) or (E.Methods = nil) then Continue;
+    for J := 0 to E.Methods.Count - 1 do
+    begin
+      Sig := TRoutineSig(E.Methods.Items[J]);
+      if SameText(Sig.Name, AMethod) and (Sig.TypeParams <> nil) then
+        Exit(Sig.Visibility);
+    end;
+  end;
+end;
+
+procedure RegisterGenericRoutines(AIface: TUnitInterface; ATable: TSymbolTable;
+                                  ASemantic: TSemanticAnalyser);
 var
   I: Int;
   G: TGenericBody;
   PrevUnit: string;
+  Dot: Int;
 begin
   for I := 0 to AIface.GenericBodies.Count - 1 do
   begin
     G := TGenericBody(AIface.GenericBodies.Items[I]);
     if G.IsType then Continue;
     if G.MethodDecl = nil then Continue;
+    { 'Owner.Method': a generic method of a non-generic class or record }
+    Dot := StrPos('.', G.Name);
+    if Dot >= 0 then
+    begin
+      if ASemantic <> nil then
+      begin
+        G.MethodDecl.Visibility := GenericMethodVisibility(AIface,
+          StrHead(G.Name, Dot), G.MethodDecl.Name);
+        ASemantic.RegisterImportedGenericMethod(StrHead(G.Name, Dot),
+          G.MethodDecl, AIface.Name);
+      end;
+      Continue;
+    end;
     PrevUnit := ATable.RegisterGenericRoutine(G.Name, G.MethodDecl, AIface.Name);
     if PrevUnit <> '' then
       raise EImportError.Create(
@@ -1715,7 +1754,7 @@ begin
     RegisterConsts (AIface, ATable, ASemantic);
     RegisterVars   (AIface, ATable, ASemantic);
     RegisterRoutines(AIface, ATable, ASemantic);
-    RegisterGenericRoutines(AIface, ATable);
+    RegisterGenericRoutines(AIface, ATable, ASemantic);
   finally
     ATable.DefineOwningUnit := Saved;
   end;

@@ -54,7 +54,12 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 34; { v34: a field carries IsUnretained after IsWeak, so an
+  IFACE_VERSION = 35; { v35: the GENROUT block also carries the generic
+                          methods (method-level <T>) of non-generic classes
+                          and records, named 'Owner.Method', with their
+                          bodies, so a consumer can instantiate them from a
+                          cached unit (they were "no generic method").
+                        v34: a field carries IsUnretained after IsWeak, so an
                           importer knows the field is non-owning (it was
                           treated as strong: stored with addref, released by
                           the cleanup).

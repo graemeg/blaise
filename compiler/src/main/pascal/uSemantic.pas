@@ -419,6 +419,12 @@ type
       on demand, preserving the implicit Self.  Returns the monomorphised
       TMethodDecl (with ResolvedEmitName set), or nil if not a generic method. }
     function  InstantiateGenericMethod(const AOwnerType, AInstName: string): TMethodDecl;
+    { The instance of generic method AInstName ('Pick<Int>') reached through
+      type ATypeName: the template is looked up on ATypeName and then on each
+      ancestor, and instantiated on the type that declares it.  nil when
+      AInstName carries no type arguments or no type in the chain declares
+      such a generic method. }
+    function  GenericMethodInstanceVia(const ATypeName, AInstName: string): TMethodDecl;
 
     procedure AnalyseBlock(ABlock: TBlock; AIsProgramTop: Boolean = False);
     function FoldScalarConst(CD: TConstDecl): TTypeDesc;
@@ -1159,6 +1165,11 @@ type
     { Record that routine AName in the flat slot shadows another unit's (the
       cached-interface import path's last-wins collision). }
     procedure NoteShadowedRoutine(const AName: string);
+    { Register generic method AMethod (method-level <T>, with its body) of
+      the non-generic type AOwner, read from cached unit ADeclUnit's .bif,
+      as the template InstantiateGenericMethod clones. }
+    procedure RegisterImportedGenericMethod(const AOwner: string;
+      AMethod: TMethodDecl; const ADeclUnit: string);
     procedure Analyse(AProg: TProgram);
     procedure AnalyseUnit(AUnit: TUnit);
     { Like AnalyseUnit but promotes interface-section symbols to the global
@@ -7479,6 +7490,43 @@ begin
   end;
 end;
 
+procedure TSemanticAnalyser.RegisterImportedGenericMethod(
+  const AOwner: string; AMethod: TMethodDecl; const ADeclUnit: string);
+var
+  Sym: TSymbol;
+  Key: string;
+begin
+  AMethod.OwnerTypeName := AOwner;
+  AMethod.OwningUnit := ADeclUnit;
+  Sym := FTable.Lookup(AOwner);
+  AMethod.IsRecordMethod := (Sym <> nil) and (Sym.TypeDesc <> nil) and
+    (Sym.TypeDesc.Kind = tyRecord);
+  Key := AOwner + '.' + AMethod.Name;
+  if FGenericMethodTemplates.IndexOf(Key) < 0 then
+    FGenericMethodTemplates.AddObject(Key, AMethod);
+end;
+
+function TSemanticAnalyser.GenericMethodInstanceVia(
+  const ATypeName, AInstName: string): TMethodDecl;
+var
+  Sym: TSymbol;
+  Walk: TRecordTypeDesc;
+  Base: string;
+begin
+  Result := nil;
+  if StrPos('<', AInstName) < 0 then Exit;
+  Base := GenericTypeBaseName(AInstName);
+  Sym := FTable.Lookup(ATypeName);
+  if (Sym = nil) or not (Sym.TypeDesc is TRecordTypeDesc) then Exit;
+  Walk := TRecordTypeDesc(Sym.TypeDesc);
+  while Walk <> nil do
+  begin
+    if FGenericMethodTemplates.IndexOf(Walk.Name + '.' + Base) >= 0 then
+      Exit(InstantiateGenericMethod(Walk.Name, CanonGenericArgs(AInstName)));
+    Walk := Walk.Parent;
+  end;
+end;
+
 function TSemanticAnalyser.InstantiateGenericMethodCore(
   const AOwnerType, AInstName: string): TMethodDecl;
 { AInstName is the method name with type args, e.g. 'Pick<Integer>'.  Mirrors
@@ -7555,6 +7603,15 @@ begin
     NewMDecl.Name         := AInstName;
     NewMDecl.OwnerTypeName := AOwnerType;
     NewMDecl.IsRecordMethod := Templ.IsRecordMethod;
+    { a static generic method stays static: no Self is passed or received }
+    NewMDecl.IsStatic     := Templ.IsStatic;
+    { visibility is judged against the DECLARING unit: the instance belongs
+      to whichever compilation monomorphised it }
+    NewMDecl.Visibility   := Templ.Visibility;
+    if Templ.VisibilityUnit <> '' then
+      NewMDecl.VisibilityUnit := Templ.VisibilityUnit
+    else
+      NewMDecl.VisibilityUnit := Templ.OwningUnit;
     { Mangled symbol: <Owner>_<Method><args> -> CodegenMangle drops the <>
       and joins with '_', e.g. TUtil_Pick_Integer.  Bare (no unit prefix):
       monomorphised on demand by any consumer, deduped by weak linkage in
@@ -10381,6 +10438,18 @@ begin
         begin
           MDecl := TMethodDecl(MethodList.Items[J]);
           MDecl.IsRecordMethod := True;
+          { Generic method (method-level <T>): as for a class, its params
+            name the method's own type params, unknown until a call site
+            instantiates it -- register the template and skip resolution.
+            Records lacked this skip, so a record's generic method failed
+            with "Unknown type 'T'". }
+          if MDecl.TypeParams <> nil then
+          begin
+            MDecl.OwnerTypeName := RT.Name;
+            if FGenericMethodTemplates.IndexOf(RT.Name + '.' + MDecl.Name) < 0 then
+              FGenericMethodTemplates.AddObject(RT.Name + '.' + MDecl.Name, MDecl);
+            Continue;
+          end;
           for K := 0 to MDecl.Params.Count - 1 do
           begin
             Par              := TMethodParam(MDecl.Params.Items[K]);
@@ -11273,6 +11342,9 @@ var
   Grp:      TObjectList;
   Walk:     TRecordTypeDesc;
 begin
+  { Pick<Int>: a generic method's instance, never in the method index }
+  if StrPos('<', AMethodName) >= 0 then
+    Exit(Self.GenericMethodInstanceVia(ATypeName, AMethodName));
   Walk := nil;
   CurrName := ATypeName;
   while CurrName <> '' do
@@ -11393,11 +11465,36 @@ var
   Walk:        TRecordTypeDesc;
   LevelOwner:  string;
   HasOwn:      Boolean;
+  AllGeneric:  Boolean;
 begin
   Result    := nil;
+  AllGeneric := True;
   { Consume the one-shot receiver owner hint set by the caller. }
   OwnerHint := FMethodOwnerHint;
   FMethodOwnerHint := '';
+  { Pick<Int>(..): explicit type arguments name exactly one instance (a
+    generic method is not overloaded); it matches when the arguments fit }
+  if StrPos('<', AMethodName) >= 0 then
+  begin
+    Cand := Self.GenericMethodInstanceVia(ATypeName, AMethodName);
+    if (Cand = nil) or (AArgs = nil) then Exit(Cand);
+    if (AArgs.Count < MinArity(Cand)) or (AArgs.Count > Cand.Params.Count) then
+      SemanticError(
+        Format('Method ''%s.%s'' expects %d argument(s) but got %d',
+          [ATypeName, AMethodName, Cand.Params.Count, AArgs.Count]),
+        ALine, ACol);
+    if AArgs.Count = 0 then Exit(Cand);
+    ArityMatch := TObjectList.Create(False);
+    try
+      ArityMatch.Add(Cand);
+      if Self.PickBestCandidate(ArityMatch, AArgs, Ambiguous) = nil then
+        Self.RejectCallArgs(ArityMatch, AArgs, ATypeName + '.' + AMethodName,
+          ALine, ACol);
+    finally
+      ArityMatch.Free();
+    end;
+    Exit(Cand);
+  end;
   if AArgs <> nil then Arity := AArgs.Count else Arity := -1;
   TotalCnt  := 0;
   ArityMatch := TObjectList.Create(False);
@@ -11458,6 +11555,7 @@ begin
              not SameText(Cand.OwningUnit, OwnerHint) then
             Continue;
           Inc(TotalCnt);
+          if Cand.TypeParams = nil then AllGeneric := False;
           { A method declared WITHOUT `overload` hides all inherited methods of
             the same name — once seen at this (more-derived) level, the parent
             chain is not consulted.  Methods WITH `overload` merge with the
@@ -11486,6 +11584,14 @@ begin
     end;
 
     if TotalCnt = 0 then Exit;  { caller treats nil as "no method on class" }
+    { only generic templates by that name: a call without type arguments
+      cannot reach them, since a generic method's type arguments are never
+      inferred (language-rationale, "Generic Methods") }
+    if AllGeneric then
+      SemanticError(
+        Format('''%s.%s'' is a generic method: give its type arguments ' +
+          'explicitly, as %s<T>(...)', [ATypeName, AMethodName, AMethodName]),
+        ALine, ACol);
 
     if ArityMatch.Count = 0 then
       SemanticError(
@@ -20948,7 +21054,7 @@ begin
     directly (it is not part of the overload set). }
   if StrPos('<', AExpr.Name) >= 0 then
   begin
-    MDecl := InstantiateGenericMethod(RT.Name, CanonGenericArgs(AExpr.Name));
+    MDecl := GenericMethodInstanceVia(RT.Name, AExpr.Name);
     if MDecl = nil then
       SemanticError(Format('Class ''%s'' has no generic method ''%s''',
         [RT.Name, AExpr.Name]), AExpr.Line, AExpr.Col);
@@ -20971,6 +21077,7 @@ begin
         Format('argument %d of ''%s''', [I + 1, AExpr.Name]),
         AExpr.Line, AExpr.Col);
     ValidateMethodVarArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
+    EnforceMethodVisible(MDecl, AExpr.Line, AExpr.Col);
     AExpr.ResolvedClassType := RT;
     AExpr.ResolvedMethod    := MDecl;
     AExpr.IsGlobal          := ObjSym.IsGlobal;

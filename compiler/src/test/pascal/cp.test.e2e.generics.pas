@@ -74,6 +74,11 @@ type
     procedure TestRun_GenericMethod_UsesSelfField;
     procedure TestRun_GenericMethod_TwoTypeParams;
     procedure TestRun_GenericMethod_OutOfLineImpl;
+    { Every explicit call form of a generic method runs: static through the
+      type name (own and inherited), unqualified from an instance and a
+      static method, and as statements
+      (BUG-20261106-static-generic-method-call). }
+    procedure TestRun_GenericMethod_EveryExplicitCallForm;
 
     { Open-array parameters whose ELEMENT type is the class's type parameter
       (BUG-20260803-generic-open-array-elem-type) }
@@ -574,6 +579,72 @@ const
       u := nil
     end.
     ''';
+
+const
+  SrcGenMethodCallForms =
+    '''
+        program P;
+        type
+          TBase = class
+          public
+            static function Conv<T>(const A: T): T;
+          end;
+          TBox = class(TBase)
+          public
+            function Id<T>(const A: T): T;
+            procedure Show<T>(const A: T);
+            static procedure SShow<T>(const A: T);
+            procedure Inner();
+            static procedure SInner();
+          end;
+        static function TBase.Conv<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        function TBox.Id<T>(const A: T): T;
+        begin
+          Result := A;
+        end;
+        procedure TBox.Show<T>(const A: T);
+        begin
+          WriteLn(A);
+        end;
+        static procedure TBox.SShow<T>(const A: T);
+        begin
+          WriteLn(A);
+        end;
+        procedure TBox.Inner();
+        begin
+          WriteLn(Id<string>('i1') + Conv<string>('i2'));
+          Show<string>('i3');
+          SShow<string>('i4');
+          Self.Show<Int>(5);
+        end;
+        static procedure TBox.SInner();
+        begin
+          WriteLn(Conv<string>('s1'));
+          SShow<string>('s2');
+          TBox.SShow<Int>(3);
+        end;
+        var B: TBox;
+        begin
+          B := TBox.Create();
+          WriteLn(TBox.Conv<string>('m1') + TBase.Conv<string>('m2'));
+          TBox.SShow<string>('m3');
+          B.Show<string>('m4');
+          B.Inner();
+          TBox.SInner();
+          WriteLn(TBox.Conv<Int>(41) + 1);
+        end.
+        ''';
+
+procedure TE2EGenericsTests.TestRun_GenericMethod_EveryExplicitCallForm;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcGenMethodCallForms,
+    'm1m2' + LE + 'm3' + LE + 'm4' + LE + 'i1i2' + LE + 'i3' + LE + 'i4' + LE +
+    '5' + LE + 's1' + LE + 's2' + LE + '3' + LE + '42' + LE, 0);
+end;
 
 procedure TE2EGenericsTests.TestRun_GenericMethod_OutOfLineImpl;
 begin
