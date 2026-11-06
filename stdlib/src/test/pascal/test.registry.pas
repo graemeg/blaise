@@ -23,6 +23,7 @@ interface
 uses
   Testing.Tests,
   Json.Tests,
+  Toml.Tests,
   Functional.Tests,
   ListOps.Tests,
   Collections.Tests,
