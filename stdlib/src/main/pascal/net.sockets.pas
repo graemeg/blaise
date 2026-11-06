@@ -262,11 +262,12 @@ type
 
   Uses the C library's getaddrinfo, so /etc/hosts, the system resolver and
   (on macOS) per-domain resolver settings such as a VPN's all apply.  It is a
-  BLOCKING call: under a fiber scheduler it holds the worker thread for the
-  duration of the lookup, stalling the other fibers on that worker (the DNS
-  pinning hazard of docs/async-networking-design.adoc).  Lookups are normally
-  served from a cache in milliseconds; a cold lookup against a slow resolver
-  can take seconds.  A non-blocking resolver is the planned Net.Dns. }
+  BLOCKING call: run directly under a fiber scheduler it would hold the worker
+  thread for the duration of the lookup, stalling the other fibers on it (the
+  DNS pinning hazard of docs/async-networking-design.adoc).  Fiber code should
+  call async.io.ResolveHostFiber, which does the lookup on a helper thread;
+  TTcpClient.Connect already does.  Lookups are normally served from a cache
+  in milliseconds; a cold lookup against a slow resolver can take seconds. }
 function ResolveHost(const AHost: string; APort: UInt16): TResolvedAddrs;
 
 { Wait until AFd is readable (AForWrite = False) or writable (True), for at

@@ -18,9 +18,9 @@ unit Net.Tcp;
 //
 // TTcpClient.Connect dials a host name or a numeric IPv4/IPv6 address.  Names
 // resolve through Net.Sockets.ResolveHost (getaddrinfo), which BLOCKS the
-// calling thread: under a scheduler that pins the worker for the lookup -- the
-// DNS hazard called out in the design, accepted until a non-blocking Net.Dns
-// exists (see ResolveHost).  TTcpServer runs
+// calling thread, so under a scheduler Connect goes through
+// async.io.ResolveHostFiber: the lookup runs on a helper thread while the
+// fiber parks and the worker keeps serving the others.  TTcpServer runs
 // an accept loop that spawns ONE FIBER PER CONNECTION running a supplied
 // handler, the whole point of the C10k/C100k design.
 //
@@ -345,7 +345,7 @@ var
   I, Fd, Rc: Int;
 begin
   Result := nil;
-  Addrs := ResolveHost(AHost, APort);
+  Addrs := ResolveHostFiber(AHost, APort);
   for I := 0 to Length(Addrs) - 1 do
   begin
     Fd := Socket(Addrs[I].Family, Addrs[I].SockType, Addrs[I].Protocol);

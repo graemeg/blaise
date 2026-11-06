@@ -29,6 +29,9 @@ unit async.io;
 
 interface
 
+uses
+  Net.Sockets;
+
 const
   { Negative sentinels the primitives return in addition to the raw kernel
     error (which is also negative in the static profile).  ETIMEDOUT is the
@@ -63,10 +66,33 @@ function FiberConnectT(AFd: Int; AAddr: Pointer; AAddrLen: Int; ADeadlineMs: Int
 { Flip AFd to non-blocking (the fiber I/O primitives require it). }
 procedure SetNonBlocking(AFd: Int);
 
+type
+  TResolveFunc = function(const AHost: string; APort: UInt16): TResolvedAddrs;
+
+var
+  { The lookup ResolveHostFiber runs.  Defaults to Net.Sockets.ResolveHost
+    (getaddrinfo).  A replacement must be thread-safe, because under a
+    scheduler it runs on a helper thread.  This is the seam for a pure-Pascal
+    resolver (the planned Net.Dns) and for tests. }
+  GResolveFunc: TResolveFunc;
+
+{ Resolve AHost like Net.Sockets.ResolveHost, without stalling the scheduler.
+
+  Under a fiber scheduler the lookup runs on a short-lived helper thread (one
+  per call) while the calling fiber parks, so the worker keeps running every
+  other fiber for as long as DNS takes.  With no scheduler it is a plain
+  call to GResolveFunc on the calling thread.
+
+  A lookup cannot be interrupted: getaddrinfo has no cancellation.  If the
+  fiber is cancelled during one, the call waits (blocking its worker) for
+  the lookup to finish before raising, so the helper never outlives its
+  request.  Connect timeouts do not cover the lookup itself. }
+function ResolveHostFiber(const AHost: string; APort: UInt16): TResolvedAddrs;
+
 implementation
 
 uses
-  SysUtils, async.fibers, async.reactor, Net.Sockets;
+  SysUtils, async.fibers, async.reactor, async.sync, runtime.atomic;
 
 { WouldBlock/Interrupted/FdExhausted are the P3 errno abstraction
   (runtime.errno.*), swapped per build profile at link time. }
@@ -381,5 +407,94 @@ function FiberConnect(AFd: Int; AAddr: Pointer; AAddrLen: Int): Int;
 begin
   Result := FiberConnectT(AFd, AAddr, AAddrLen, 0);
 end;
+
+{ ---- name resolution off the worker thread ---------------------------------- }
+
+function pthread_create(Thread: Pointer; Attr: Pointer;
+  StartRoutine: Pointer; Arg: Pointer): Int32;
+  external 'pthread' name 'pthread_create';
+function pthread_detach(Thread: Int64): Int32;
+  external 'pthread' name 'pthread_detach';
+function c_pipe(AFds: Pointer): Int32; external name 'pipe';
+function c_write(AFd: Int32; ABuf: Pointer; ALen: Int64): Int64;
+  external name 'write';
+
+type
+  { One lookup in flight.  Shared by the parked fiber and the helper thread;
+    ARC keeps it alive until both have let go.  The helper reports completion
+    by writing a byte to a pipe the fiber is parked on: the same reactor path
+    every other fiber wait uses, so it works under the single-worker
+    scheduler (which has no cross-thread wake) as well as the multicore one. }
+  TResolveJob = class
+  public
+    Host: string;
+    Port: UInt16;
+    Addrs: TResolvedAddrs;
+    WriteFd: Int;
+    Done: Int32;                  { set atomically once the helper is finished }
+    constructor Create(const AHost: string; APort: UInt16; AWriteFd: Int);
+  end;
+
+constructor TResolveJob.Create(const AHost: string; APort: UInt16; AWriteFd: Int);
+begin
+  Host := AHost;
+  Port := APort;
+  WriteFd := AWriteFd;
+  Done := 0;
+end;
+
+procedure ResolveThreadEntry(Arg: Pointer);
+var
+  Job: TResolveJob;
+  B: Byte;
+begin
+  Job := TResolveJob(Arg);
+  Job.Addrs := GResolveFunc(Job.Host, Job.Port);
+  B := 1;
+  c_write(Job.WriteFd, @B, 1);    { wakes the parked fiber; Addrs is final }
+  CloseSocket(Job.WriteFd);
+  _AtomicAddInt32(@Job.Done, 1);
+end;
+
+function ResolveHostFiber(const AHost: string; APort: UInt16): TResolvedAddrs;
+var
+  Job: TResolveJob;
+  Fds: array[0..1] of Int32;
+  Tid: Int64;
+  Cancelled: Boolean;
+begin
+  if CurrentFiberTask() = nil then
+    Exit(GResolveFunc(AHost, APort));
+  if c_pipe(@Fds[0]) <> 0 then
+    Exit(GResolveFunc(AHost, APort));      { no pipe: block rather than fail }
+  SetNonBlocking(Fds[0]);
+  Job := TResolveJob.Create(AHost, APort, Fds[1]);
+  Tid := 0;
+  if pthread_create(@Tid, nil, Pointer(@ResolveThreadEntry), Pointer(Job)) <> 0 then
+  begin
+    CloseSocket(Fds[0]);
+    CloseSocket(Fds[1]);
+    Exit(GResolveFunc(AHost, APort));      { no thread: block rather than fail }
+  end;
+  pthread_detach(Tid);
+  Cancelled := False;
+  try
+    ParkForIo(Fds[0], [ioRead], 0);
+  except
+    Cancelled := True;
+  end;
+  { The helper has written (or is about to) and then closes its end; only then
+    is it safe to drop ours, or its write would hit a closed pipe. }
+  if Cancelled then
+    while Job.Done = 0 do
+      WaitFd(-1, False, 5);
+  CloseSocket(Fds[0]);
+  if Cancelled then
+    raise EFiberCancelled.Create('fiber cancelled');
+  Result := Job.Addrs;
+end;
+
+initialization
+  GResolveFunc := @ResolveHost;
 
 end.

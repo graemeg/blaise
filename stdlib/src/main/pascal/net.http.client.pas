@@ -29,7 +29,7 @@ unit Net.Http.Client;
 // FIBER-NATIVE: the Read/Write inherited from Net.Tcp/async.io park the calling
 // fiber under a running scheduler and wait in poll(2) otherwise, so the same
 // client code works in a fiber and in a plain program.  The URL's host may be a
-// name: Net.Tcp resolves it (a blocking lookup -- see Net.Sockets.ResolveHost).
+// name: Net.Tcp resolves it (off-thread inside a fiber -- see async.io.ResolveHostFiber).
 // ConnectTimeoutMs and ReadTimeoutMs bound the waits; both default to 0, no
 // limit.
 //

@@ -30,7 +30,7 @@ interface
 
 uses
   blaise.testing, Classes, SysUtils, StrUtils,
-  Net.Sockets, Net.Tcp, Net.Http.Client, async.fibers;
+  Net.Sockets, Net.Tcp, Net.Http.Client, async.fibers, async.io;
 
 type
   TTcpDialTests = class(TTestCase)
@@ -45,6 +45,15 @@ type
     procedure TestHttpGetByName_NoScheduler;
     procedure TestHttpReadTimeout_NoScheduler;
     procedure TestTcpReadTimeout_NoScheduler;
+  end;
+
+  { Name resolution from inside a fiber: getaddrinfo is offloaded to a helper
+    thread, so the worker keeps running the other fibers meanwhile. }
+  TResolveFiberTests = class(TTestCase)
+  published
+    procedure TestResolveInFiber;
+    procedure TestResolveDoesNotStallOtherFibers;
+    procedure TestConnectByNameInFiber;
   end;
 
   TLiveNetTests = class(TTestCase)
@@ -295,6 +304,95 @@ begin
   Close(L);
 end;
 
+{ ---- resolution inside a fiber --------------------------------------------- }
+
+var
+  GFibAddrs: TResolvedAddrs;
+  GFibDone: Boolean;
+  GFibTicks: Int;
+  GFibConnected: Boolean;
+  GFibPort: UInt16;
+
+{ A resolver that takes 400 ms, standing in for a slow DNS server. }
+function SlowResolver(const AHost: string; APort: UInt16): TResolvedAddrs;
+begin
+  WaitFd(-1, False, 400);        { poll with no fds: a plain thread sleep }
+  Result := ResolveHost(AHost, APort);
+end;
+
+procedure ResolveFiber(AArg: Pointer);
+begin
+  GFibAddrs := ResolveHostFiber('localhost', 80);
+  GFibDone := True;
+end;
+
+procedure TickFiber(AArg: Pointer);
+begin
+  while not GFibDone do
+  begin
+    FiberSleep(10);
+    Inc(GFibTicks);
+  end;
+end;
+
+procedure ConnectNameFiber(AArg: Pointer);
+var
+  Cli: TTcpClient;
+  Conn: TTcpConn;
+begin
+  Cli := TTcpClient.Create();
+  Conn := Cli.Connect('localhost', GFibPort);
+  Cli.Free();
+  GFibConnected := Conn <> nil;
+  if Conn <> nil then
+    Conn.Free();
+end;
+
+procedure TResolveFiberTests.TestResolveInFiber;
+begin
+  GFibDone := False;
+  SetLength(GFibAddrs, 0);
+  SpawnFiber(@ResolveFiber, nil);
+  RunScheduler();
+  ResetScheduler();
+  AssertTrue('resolved from a fiber', Length(GFibAddrs) > 0);
+end;
+
+procedure TResolveFiberTests.TestResolveDoesNotStallOtherFibers;
+begin
+  GFibDone := False;
+  GFibTicks := 0;
+  SetLength(GFibAddrs, 0);
+  GResolveFunc := @SlowResolver;
+  SpawnFiber(@ResolveFiber, nil);
+  SpawnFiber(@TickFiber, nil);
+  RunScheduler();
+  ResetScheduler();
+  GResolveFunc := @ResolveHost;
+  AssertTrue('lookup result delivered', Length(GFibAddrs) > 0);
+  { A blocking lookup would hold the worker for the full 400 ms: the ticker
+    would run once or twice.  Offloaded, it runs for the whole lookup. }
+  AssertTrue('other fibers ran during the lookup (' + IntToStr(GFibTicks) +
+    ' ticks)', GFibTicks >= 10);
+end;
+
+procedure TResolveFiberTests.TestConnectByNameInFiber;
+var
+  L, S: Int;
+begin
+  L := TcpListenEphemeral(INADDR_LOOPBACK, 4, GFibPort);
+  AssertTrue('listen', L >= 0);
+  GFibConnected := False;
+  SpawnFiber(@ConnectNameFiber, nil);
+  RunScheduler();
+  ResetScheduler();
+  AssertTrue('connected by name from a fiber', GFibConnected);
+  S := AcceptConn(L);
+  if S >= 0 then
+    Close(S);
+  Close(L);
+end;
+
 { ---- live network (opt-in) -------------------------------------------------- }
 
 function LiveNetEnabled: Boolean;
@@ -344,6 +442,7 @@ end;
 
 initialization
   RegisterTest(TTcpDialTests);
+  RegisterTest(TResolveFiberTests);
   RegisterTest(TLiveNetTests);
 
 end.
