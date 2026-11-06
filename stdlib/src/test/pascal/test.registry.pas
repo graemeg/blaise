@@ -62,6 +62,7 @@ uses
   Nntp.Tests,
   Regex.Tests,
   IOFiles.Tests,
+  FileSystem.Tests,
   IOProcess.Tests,
   IOWatch.Tests,
   ClassicPascalTypes.Tests;

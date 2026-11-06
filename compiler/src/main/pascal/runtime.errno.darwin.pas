@@ -35,6 +35,12 @@ function FdExhausted(N: Int64): Boolean;
   waits for the socket to become writable and reads SO_ERROR. }
 function ConnectPending(N: Int64): Boolean;
 
+{ The OS error code (an errno value, positive) behind N, a failed call's
+  return value: errno for -1 in the libc profiles, -N in the freestanding
+  ones, where a raw syscall returns the negated code.  0 when N is not a
+  failure. }
+function OsErrorOf(N: Int64): Int;
+
 { The current thread's errno value. }
 function GetOsErrno: Int;
 
@@ -79,6 +85,14 @@ function ConnectPending(N: Int64): Boolean;
 begin
   Result := (N = -1) and
     ((GetOsErrno() = EINPROGRESS) or (GetOsErrno() = EINTR));
+end;
+
+function OsErrorOf(N: Int64): Int;
+begin
+  if N = -1 then
+    Result := GetOsErrno()
+  else
+    Result := 0;
 end;
 
 end.

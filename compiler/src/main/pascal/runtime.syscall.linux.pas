@@ -56,6 +56,11 @@ function unlink(Path: PChar): Int32;
 function rename(OldPath, NewPath: PChar): Int32;
 function chdir(Path: PChar): Int32;
 function chmod(Path: PChar; Mode: Int32): Int32;
+{ symlink(target, linkpath), access(path, mode) and futimens(fd, times[2]):
+  the stdlib's IO.Files binds them by these libc names. }
+function symlink(Target, LinkPath: PChar): Int32;
+function access(Path: PChar; Mode: Int32): Int32;
+function futimens(Fd: Int32; Times: Pointer): Int32;
 { readlink(path, buf, size): the symlink's target, unterminated; returns its
   length, or -errno when Path is not a link. }
 function readlink(Path: PChar; Buf: PChar; Size: Int64): Int64;
@@ -298,6 +303,34 @@ function chmod(Path: PChar; Mode: Int32): Int32;
   assembler; nostackframe;
 asm
     movq $90, %rax       { SYS_chmod }
+    syscall
+    ret
+end;
+
+function symlink(Target, LinkPath: PChar): Int32;
+  assembler; nostackframe;
+asm
+    movq $88, %rax       { SYS_symlink }
+    syscall
+    ret
+end;
+
+function access(Path: PChar; Mode: Int32): Int32;
+  assembler; nostackframe;
+asm
+    movq $21, %rax       { SYS_access }
+    syscall
+    ret
+end;
+
+{ futimens(fd, times) is utimensat(fd, NULL, times, 0) on Linux. }
+function futimens(Fd: Int32; Times: Pointer): Int32;
+  assembler; nostackframe;
+asm
+    movq %rsi, %rdx      { times: arg2 -> arg3 }
+    xorl %esi, %esi      { pathname = NULL: the fd itself }
+    xorl %r10d, %r10d    { flags = 0 }
+    movq $280, %rax      { SYS_utimensat }
     syscall
     ret
 end;

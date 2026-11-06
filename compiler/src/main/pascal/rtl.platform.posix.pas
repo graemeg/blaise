@@ -254,6 +254,13 @@ function  _FileAge(const Path: string): Int64;
 function  _DirectoryExists(const Path: string): Int32;
 { Not a compiler builtin: stdlib's IO.Files imports it via `external name`. }
 function  _PathKind(const Path: string; FollowLinks: Int32): Int32;
+{ Not a compiler builtin: stdlib's IO.Files imports it via `external name`.
+  stat(2) (FollowLinks <> 0) or lstat(2) of Path into AOut, a record laid out
+  as: Kind Int32 (as _PathKind), Mode Int32 (the permission bits, 12 low
+  bits of st_mode), Size Int64, MtimeSec Int64, MtimeNsec Int64.  Returns the
+  call's result: 0 on success, else the failure (-1 with errno, or -errno in
+  the freestanding profile); AOut is untouched on failure. }
+function  _PathStat(const Path: string; FollowLinks: Int32; AOut: Pointer): Int64;
 function  _ForceDirectories(const Path: string): Int32;
 procedure _RemoveDir(const Path: string);
 function  _GetCurrentDir: Pointer;
@@ -1413,6 +1420,43 @@ end;
 function _PathKind(const Path: string; FollowLinks: Int32): Int32;
 begin
   Result := GRtlPlatform.PathKind(Path, FollowLinks <> 0);
+end;
+
+function _StatMtimeNsec(Buf: Pointer): Int64; external name '_StatMtimeNsec';
+
+function _PathStat(const Path: string; FollowLinks: Int32; AOut: Pointer): Int64;
+var
+  St: TStatBuf;
+  Mode, Fmt, Kind: Int32;
+  PI: ^Int32;
+  PL: ^Int64;
+begin
+  if FollowLinks <> 0 then
+    Result := libc_stat(StrData(Pointer(Path)), @St)
+  else
+    Result := libc_lstat(StrData(Pointer(Path)), @St);
+  if Result <> 0 then
+    Exit;
+  Mode := GPlatformLayout.StatMode(@St);
+  Fmt := Mode and GPlatformLayout.S_IFMT();
+  if Fmt = GPlatformLayout.S_IFREG() then
+    Kind := 1
+  else if Fmt = GPlatformLayout.S_IFDIR() then
+    Kind := 2
+  else if Fmt = GPlatformLayout.S_IFLNK() then
+    Kind := 3
+  else
+    Kind := 4;
+  PI := AOut;
+  PI^ := Kind;
+  PI := Pointer(PChar(AOut) + 4);
+  PI^ := Mode and $FFF;
+  PL := Pointer(PChar(AOut) + 8);
+  PL^ := GPlatformLayout.StatSize(@St);
+  PL := Pointer(PChar(AOut) + 16);
+  PL^ := GPlatformLayout.StatMtime(@St);
+  PL := Pointer(PChar(AOut) + 24);
+  PL^ := _StatMtimeNsec(@St);
 end;
 
 function _ForceDirectories(const Path: string): Int32;

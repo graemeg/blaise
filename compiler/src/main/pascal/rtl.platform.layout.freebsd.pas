@@ -119,6 +119,14 @@ function _SoNoSigPipe: Int32;    { unused — MSG_NOSIGNAL covers it — 0 }
 function _AddrInfoAddrOffset: Int32;   { 32 }
 function _AiAddrConfig: Int32;         { AI_ADDRCONFIG = $0400 }
 
+{ The nanosecond half of st_mtim (the timespec's tv_nsec, the Int64 after
+  the seconds StatMtime reads) from a filled struct stat buffer. }
+function _StatMtimeNsec(Buf: Pointer): Int64;
+
+{ UTIME_OMIT: the tv_nsec value that tells futimens to leave that time as it
+  is (-2 on FreeBSD). }
+function _UtimeOmit: Int64;
+
 { Fill a 16-byte struct sockaddr_in at P for AF_INET.  APortN/AAddrN are
   ALREADY in network byte order.  FreeBSD layout: sin_len (u8, = 16),
   sin_family (u8, = AF_INET), sin_port (u16), sin_addr (u32), sin_zero[8].
@@ -292,6 +300,19 @@ function _SockNonBlock: Int32; begin Result := $20000000; end;
 function _SoNoSigPipe: Int32;  begin Result := 0;         end;
 function _AddrInfoAddrOffset: Int32; begin Result := 32; end;
 function _AiAddrConfig: Int32;       begin Result := $0400; end;
+
+function _StatMtimeNsec(Buf: Pointer): Int64;
+var
+  P: ^Int64;
+begin
+  P := Pointer(PChar(Buf) + STAT_OFF_MTIME + 8);
+  Result := P^;
+end;
+
+function _UtimeOmit: Int64;
+begin
+  Result := -2;
+end;
 
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 var

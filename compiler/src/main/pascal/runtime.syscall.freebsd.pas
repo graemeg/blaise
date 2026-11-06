@@ -73,6 +73,11 @@ function unlink(Path: PChar): Int32;
 function rename(OldPath, NewPath: PChar): Int32;
 function chdir(Path: PChar): Int32;
 function chmod(Path: PChar; Mode: Int32): Int32;
+{ symlink(target, linkpath), access(path, mode) and futimens(fd, times[2]):
+  the stdlib's IO.Files binds them by these libc names. }
+function symlink(Target, LinkPath: PChar): Int32;
+function access(Path: PChar; Mode: Int32): Int32;
+function futimens(Fd: Int32; Times: Pointer): Int32;
 { readlink(path, buf, size): the symlink's target, unterminated; returns its
   length, or -errno when Path is not a link. }
 function readlink(Path: PChar; Buf: PChar; Size: Int64): Int64;
@@ -425,6 +430,39 @@ asm
     jae  .Lok_chmod
     negq %rax
 .Lok_chmod:
+    ret
+end;
+
+function symlink(Target, LinkPath: PChar): Int32;
+  assembler; nostackframe;
+asm
+    movq $57, %rax           { SYS_symlink }
+    syscall
+    jae  .Lok_symlink
+    negq %rax
+.Lok_symlink:
+    ret
+end;
+
+function access(Path: PChar; Mode: Int32): Int32;
+  assembler; nostackframe;
+asm
+    movq $33, %rax           { SYS_access }
+    syscall
+    jae  .Lok_access
+    negq %rax
+.Lok_access:
+    ret
+end;
+
+function futimens(Fd: Int32; Times: Pointer): Int32;
+  assembler; nostackframe;
+asm
+    movq $546, %rax          { SYS_futimens }
+    syscall
+    jae  .Lok_futimens
+    negq %rax
+.Lok_futimens:
     ret
 end;
 
