@@ -39,6 +39,14 @@ type
       statement position: x86-64 passed the instance as a first argument,
       so the method read it as its first parameter }
     procedure TestRun_StaticMethodThroughInstance_NoSelf;
+    { a static method called BARE inside a method of its type: from an
+      instance method (expression, statement, discarded result, argument,
+      Format list element, nested routine, closure, a subclass method, a
+      record method) and from a static method.  Inside an instance method the
+      instance was passed as a hidden first argument -- the callee read Self
+      as its first parameter and crashed (exit 139 on arm64); inside a static
+      method the call was "Undeclared function". }
+    procedure TestRun_BareStaticCall_EveryForm;
     { a float static property read: compiling it crashed the x86-64
       compiler }
     procedure TestRun_StaticFloatProperty_Read;
@@ -829,6 +837,159 @@ begin
       'program P;' + LE + 'uses SHost;' + LE + Main, RunOut, Code));
   AssertEquals('unit form exit code', 0, Code);
   AssertEquals('unit form stdout', '9' + LE + '59' + LE, RunOut);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_BareStaticCall_EveryForm;
+const Src =
+  '''
+  program P;
+  uses SysUtils;
+  type
+    TStrFn = reference to function(const S: string): string;
+    TBox = class
+      N: Int;
+    end;
+    TFoo = class
+    public
+      Tag: string;
+      static function Echo(const S: string): string;
+      static procedure Note(const S: string);
+      static function Add(A, B: Int): Int;
+      static function MakeBox(N: Int): TBox;
+      static procedure Bump(var X: Int);
+      function Unqualified(): string;
+      procedure Statements();
+      function InNested(): string;
+      function InClosure(): string;
+      static function FromStatic(): string;
+      static procedure StmtFromStatic();
+    end;
+    TSub = class(TFoo)
+    public
+      function FromSub(): string;
+    end;
+    TRec = record
+      V: Int;
+      static function Twice(X: Int): Int;
+      function Doubled(): Int;
+    end;
+  static function TFoo.Echo(const S: string): string;
+  begin
+    Result := '[' + S + ']';
+  end;
+  static procedure TFoo.Note(const S: string);
+  begin
+    WriteLn('note ', S);
+  end;
+  static function TFoo.Add(A, B: Int): Int;
+  begin
+    Result := A + B;
+  end;
+  static function TFoo.MakeBox(N: Int): TBox;
+  begin
+    Result := TBox.Create();
+    Result.N := N;
+  end;
+  static procedure TFoo.Bump(var X: Int);
+  begin
+    X := X + 1;
+  end;
+  function TFoo.Unqualified(): string;
+  begin
+    Result := Echo('hello') + Echo(Tag);
+  end;
+  procedure TFoo.Statements();
+  var
+    I: Int;
+  begin
+    Note(Tag);
+    Echo('discarded');
+    I := 41;
+    Bump(I);
+    WriteLn(Add(I, 1), ' ', MakeBox(7).N);
+    if Add(2, 3) = 5 then
+      WriteLn('cond ', Echo('ok'));
+    WriteLn(Format('%d %s', [Add(2, 2), Echo('fmt')]));
+  end;
+  function TFoo.InNested(): string;
+  var
+    Outer: string;
+    Count: Int;
+    function Inner(): string;
+    begin
+      Bump(Count);
+      Note(Outer);
+      Result := Echo(Outer) + IntToStr(Add(Count, 0));
+    end;
+  begin
+    Outer := 'nested';
+    Count := 1;
+    Result := Inner() + IntToStr(Count);
+  end;
+  function TFoo.InClosure(): string;
+  var
+    F: TStrFn;
+  begin
+    F := function(const S: string): string
+      begin
+        Result := Echo(S);
+      end;
+    Result := F('closure');
+  end;
+  static function TFoo.FromStatic(): string;
+  begin
+    Result := Echo('static') + IntToStr(Add(1, 2));
+  end;
+  static procedure TFoo.StmtFromStatic();
+  begin
+    Note('from static');
+  end;
+  function TSub.FromSub(): string;
+  begin
+    Result := Echo('sub');
+  end;
+  static function TRec.Twice(X: Int): Int;
+  begin
+    Result := X * 2;
+  end;
+  function TRec.Doubled(): Int;
+  begin
+    Result := Twice(V);
+  end;
+  var
+    F: TFoo;
+    S: TSub;
+    R: TRec;
+  begin
+    F := TFoo.Create();
+    F.Tag := 'tag';
+    WriteLn(F.Unqualified());
+    F.Statements();
+    WriteLn(F.InNested());
+    WriteLn(F.InClosure());
+    WriteLn(TFoo.FromStatic());
+    TFoo.StmtFromStatic();
+    S := TSub.Create();
+    WriteLn(S.FromSub());
+    R.V := 21;
+    WriteLn(R.Doubled());
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '[hello][tag]' + LineEnding +
+    'note tag' + LineEnding +
+    '43 7' + LineEnding +
+    'cond [ok]' + LineEnding +
+    '4 [fmt]' + LineEnding +
+    'note nested' + LineEnding +
+    '[nested]22' + LineEnding +
+    '[closure]' + LineEnding +
+    '[static]3' + LineEnding +
+    'note from static' + LineEnding +
+    '[sub]' + LineEnding +
+    '42' + LineEnding, 0);
 end;
 
 procedure TE2EStaticMembersTests.TestRun_StaticMethodThroughInstance_NoSelf;

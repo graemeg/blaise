@@ -7835,7 +7835,10 @@ A static member is reached the same way whatever names it: through the type
 (`TFoo.P`), through an instance (`H.P` -- the instance only names the type
 and is not passed), or bare inside any method of the type, static or not
 (`P := V`, `P[I]`).  A static method called through an instance (`H.M()`)
-likewise takes no `Self`.  Each form lowers to the plain static call or the
+likewise takes no `Self`, and so does one called bare inside a method of its
+type (`M(X)` is `TFoo.M(X)`, from an instance method or a static method).  A
+bare call of an *instance* method from a static method is refused by name: a
+static method has no `Self` to call it on.  Each form lowers to the plain static call or the
 static var, so a value of any kind -- an owned object, a float, a record --
 travels exactly as in an explicit `TFoo.SetP(V)`.  A class reference names
 its declared class the same way: `C.M()` with `C: class of TFoo` is
@@ -7844,7 +7847,11 @@ evaluated (see <<_constructors_and_static_methods_through_a_receiver>>).
 (Delphi accepts the same forms for `class` members.  Until 2026-10-21 only the type-name read worked:
 a write through the type name was rejected, a bare use inside a method was
 undeclared, a static-var accessor was taken for a method, and through an
-instance the x86-64 backend passed the instance as a first argument.)
+instance the x86-64 backend passed the instance as a first argument.  Until
+2026-11-06 a bare static method call inside an instance method was taken for
+`Self.M(X)` -- the instance was passed as a hidden first argument, which the
+callee read as its first parameter -- and inside a static method it was
+undeclared.)
 
 Inside a record, a method declared `static` is the record's factory /
 namespaced-function form — it takes no hidden `Self` pointer and is called as

@@ -858,6 +858,14 @@ type
       ARecvType: TRecordTypeDesc; AProp: TPropertyInfo): TTypeDesc;
     function  LowerBareStaticPropRead(AIdent: TIdentExpr;
       AOwner: TRecordTypeDesc): TTypeDesc;
+    { the type whose members a bare name inside a method may name: the
+      instance method's class, or a static method's owning type (a static
+      method leaves FCurrentClass unset -- it has no Self) }
+    function  BareMemberOwner: TRecordTypeDesc;
+    function  BareStaticCallExpr(AOwner: TRecordTypeDesc; AMDecl: TMethodDecl;
+      AExpr: TFuncCallExpr): TMethodCallExpr;
+    function  BareStaticCallStmt(AOwner: TRecordTypeDesc; AMDecl: TMethodDecl;
+      ACall: TProcCall): TMethodCallStmt;
     procedure LowerBareStaticPropWrite(AAssign: TAssignment;
       AOwner: TRecordTypeDesc; AProp: TPropertyInfo);
     function  BuildSetterCall(ARecv: TASTExpr; AProp: TPropertyInfo;
@@ -18505,6 +18513,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseProcCall(ACall: TProcCall);
 var
+  BareOwner: TRecordTypeDesc;
   InstName: string;
   GProp: TPropertyInfo;
   Sym:     TSymbol;
@@ -18535,28 +18544,32 @@ begin
     the ident-expression path applies to class fields vs globals). }
   { An explicit unit qualifier (qu.Save) names that unit's routine, never
     the method (BUG-20261103-unit-qualified-call-hits-method). }
-  if (FCurrentClass <> nil) and (ACall.QualifierUnit = '') and
+  { Inside a STATIC method FCurrentClass is unset (no Self), but the type's
+    own methods are still reachable bare: BareMemberOwner names the type.
+    A static callee lowers to the explicit static call TFoo.M(..) below. }
+  BareOwner := BareMemberOwner();
+  if (BareOwner <> nil) and (ACall.QualifierUnit = '') and
      ((Sym = nil) or
       (Sym.IsGlobal) or
       not (Sym.Kind in [skVariable, skParameter, skVarParameter])) then
   begin
-    MDecl := FindMethodDecl(FCurrentClass.Name, ACall.Name);
+    MDecl := FindMethodDecl(BareOwner.Name, ACall.Name);
     if MDecl <> nil then
     begin
       { Analyse args first so overload resolution can score by type
         ('->' lambda args are deferred and scored by shape — Phase 9b). }
-      HintBareEnumMethodArgs(FCurrentClass.Name, ACall.Name, ACall.Args);
+      HintBareEnumMethodArgs(BareOwner.Name, ACall.Name, ACall.Args);
       for I := 0 to ACall.Args.Count - 1 do
         Self.AnalyseArgSlot(ACall.Args, I);
       { Use overload resolution so the correct variant is chosen when
         multiple overloads exist (e.g. AssertEquals(string,string,string)
         vs AssertEquals(string,Integer,Integer)). }
-      MDecl := ResolveMethodOverload(FCurrentClass.Name, ACall.Name,
+      MDecl := ResolveMethodOverload(BareOwner.Name, ACall.Name,
         ACall.Args, ACall.Line, ACall.Col);
       if MDecl = nil then
         SemanticError(
           Format('No matching overload for ''%s.%s'' with %d argument(s)',
-            [FCurrentClass.Name, ACall.Name, ACall.Args.Count]),
+            [BareOwner.Name, ACall.Name, ACall.Args.Count]),
           ACall.Line, ACall.Col);
       ResolveDeferredArrowArgs(ACall.Args, MDecl);
       { Validate only var-param arguments (non-var compatibility was
@@ -18584,6 +18597,16 @@ begin
       RetypeSetLiteralArgs(ACall.Args, MDecl);
       CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
       AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
+      if MDecl.IsStatic then
+      begin
+        Self.BareStaticCallStmt(BareOwner, MDecl, ACall);
+        Exit;
+      end;
+      if FCurrentClass = nil then
+        SemanticError(
+          Format('''%s.%s'' is an instance method — a static method has ' +
+            'no Self to call it on', [BareOwner.Name, MDecl.Name]),
+          ACall.Line, ACall.Col);
       Self.CheckCtorAsMethod(MDecl, True, ACall.Line, ACall.Col);
       ACall.ResolvedDecl         := MDecl;
       ACall.IsImplicitSelfMethod := True;
@@ -18592,7 +18615,9 @@ begin
     { No method of that name — an unqualified procedural-typed field of the
       current class (implicit Self.Field) dispatches through its stored
       pointer, mirroring the explicit Self.Field() path. }
-    GProp := GetterProcProp(FCurrentClass, ACall.Name, ACall.Line, ACall.Col);
+    GProp := nil;
+    if FCurrentClass <> nil then
+      GProp := GetterProcProp(FCurrentClass, ACall.Name, ACall.Line, ACall.Col);
     if GProp <> nil then
     begin
       { OnEvent(X) inside a method: Self.OnEvent(X) }
@@ -18601,7 +18626,9 @@ begin
         ACall.Line, ACall.Col);
       Exit;
     end;
-    FldInfo := CallField(FCurrentClass, ACall.Name, ACall.Line, ACall.Col);
+    FldInfo := nil;
+    if FCurrentClass <> nil then
+      FldInfo := CallField(FCurrentClass, ACall.Name, ACall.Line, ACall.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) then
     begin
@@ -19132,6 +19159,7 @@ end;
 
 function TSemanticAnalyser.AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
 var
+  BareOwner: TRecordTypeDesc;
   InstName: string;
   GProp: TPropertyInfo;
   Sym:     TSymbol;
@@ -19405,25 +19433,29 @@ begin
     NoteNameXref(AExpr.Line, AExpr.Col, AExpr.Name, Sym, True);
   { A program-level global does not shadow an implicit-Self method — see
     the matching note in AnalyseProcCall (BUG-037). }
-  if (FCurrentClass <> nil) and (AExpr.QualifierUnit = '') and
+  { Inside a STATIC method FCurrentClass is unset (no Self), but the type's
+    own methods are still reachable bare: BareMemberOwner names the type.
+    A static callee lowers to the explicit static call TFoo.M(..) below. }
+  BareOwner := BareMemberOwner();
+  if (BareOwner <> nil) and (AExpr.QualifierUnit = '') and
      ((Sym = nil) or
       (Sym.IsGlobal) or
       not (Sym.Kind in [skVariable, skParameter, skVarParameter])) then
   begin
-    MDecl := FindMethodDecl(FCurrentClass.Name, AExpr.Name);
+    MDecl := FindMethodDecl(BareOwner.Name, AExpr.Name);
     if MDecl <> nil then
     begin
       { Analyse args first so overload resolution can score by type
         ('->' lambda args are deferred and scored by shape — Phase 9b). }
-      HintBareEnumMethodArgs(FCurrentClass.Name, AExpr.Name, AExpr.Args);
+      HintBareEnumMethodArgs(BareOwner.Name, AExpr.Name, AExpr.Args);
       for I := 0 to AExpr.Args.Count - 1 do
         Self.AnalyseArgSlot(AExpr.Args, I);
-      MDecl := ResolveMethodOverload(FCurrentClass.Name, AExpr.Name,
+      MDecl := ResolveMethodOverload(BareOwner.Name, AExpr.Name,
         AExpr.Args, AExpr.Line, AExpr.Col);
       if MDecl = nil then
         SemanticError(
           Format('No matching overload for ''%s.%s'' with %d argument(s)',
-            [FCurrentClass.Name, AExpr.Name, AExpr.Args.Count]),
+            [BareOwner.Name, AExpr.Name, AExpr.Args.Count]),
           AExpr.Line, AExpr.Col);
       ResolveDeferredArrowArgs(AExpr.Args, MDecl);
       for I := 0 to AExpr.Args.Count - 1 do
@@ -19449,6 +19481,16 @@ begin
       RetypeSetLiteralArgs(AExpr.Args, MDecl);
       CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
       AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
+      if MDecl.IsStatic then
+      begin
+        Result := Self.BareStaticCallExpr(BareOwner, MDecl, AExpr).ResolvedType;
+        Exit;
+      end;
+      if FCurrentClass = nil then
+        SemanticError(
+          Format('''%s.%s'' is an instance method — a static method has ' +
+            'no Self to call it on', [BareOwner.Name, MDecl.Name]),
+          AExpr.Line, AExpr.Col);
       Self.CheckCtorAsMethod(MDecl, True, AExpr.Line, AExpr.Col);
       AExpr.ResolvedDecl         := MDecl;
       AExpr.IsImplicitSelfMethod := True;
@@ -19459,7 +19501,9 @@ begin
     { No method of that name — an unqualified procedural-typed field of the
       current class (implicit Self.Field) called as an expression dispatches
       through its stored pointer and yields the signature's return type. }
-    GProp := GetterProcProp(FCurrentClass, AExpr.Name, AExpr.Line, AExpr.Col);
+    GProp := nil;
+    if FCurrentClass <> nil then
+      GProp := GetterProcProp(FCurrentClass, AExpr.Name, AExpr.Line, AExpr.Col);
     if GProp <> nil then
     begin
       { OnEvent(X) inside a method, as an expression: Self.OnEvent(X) }
@@ -19470,7 +19514,9 @@ begin
       AExpr.ResolvedType := Result;
       Exit;
     end;
-    FldInfo := CallField(FCurrentClass, AExpr.Name, AExpr.Line, AExpr.Col);
+    FldInfo := nil;
+    if FCurrentClass <> nil then
+      FldInfo := CallField(FCurrentClass, AExpr.Name, AExpr.Line, AExpr.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) then
     begin
@@ -19943,8 +19989,10 @@ begin
       analyse each element individually — types need not be homogeneous. }
     if (AExpr.Args.Count = 2) and (AExpr.Args.Items[1] is TArrayLiteralExpr) then
     begin
+      { through the slot helper, so an element that lowers (an operator
+        call, a bare static method call) is swapped in }
       for I := 0 to TArrayLiteralExpr(AExpr.Args.Items[1]).Elements.Count - 1 do
-        AnalyseExpr(TASTExpr(TArrayLiteralExpr(AExpr.Args.Items[1]).Elements.Items[I]));
+        Self.AnalyseListSlot(TArrayLiteralExpr(AExpr.Args.Items[1]).Elements, I);
       TArrayLiteralExpr(AExpr.Args.Items[1]).ResolvedType := FTable.TypeString;
     end
     else
@@ -21660,6 +21708,65 @@ begin
   Result := Self.AnalyseExprSlot(E);
   AIdent.LoweredExpr  := E;
   AIdent.ResolvedType := Result;
+end;
+
+function TSemanticAnalyser.BareMemberOwner: TRecordTypeDesc;
+begin
+  Result := FCurrentClass;
+  if Result = nil then
+    Result := FCurrentMethodOwner;
+end;
+
+{ M(Args) inside a method of AOwner, M (the resolved AMDecl) a STATIC method:
+  the explicit static call AOwner.M(Args), no Self, placed in the call's
+  LoweredCall for the slot helper to swap in.  The arguments are already
+  analysed against AMDecl and are SHARED with the bare call (the lists are
+  ARC-counted): the statement form keeps its TProcCall, and the walkers over
+  it -- nested-routine capture, address-taken locals, inline sizing -- read
+  the TProcCall's own Args.  Taking the bare call for
+  Self.M(Args) passed the instance as a hidden first argument, which the
+  callee read as its first parameter. }
+function TSemanticAnalyser.BareStaticCallExpr(AOwner: TRecordTypeDesc;
+  AMDecl: TMethodDecl; AExpr: TFuncCallExpr): TMethodCallExpr;
+var
+  I: Int;
+begin
+  Result := TMethodCallExpr.Create();
+  Result.Line := AExpr.Line;
+  Result.Col := AExpr.Col;
+  Result.ObjectName := AOwner.Name;
+  Result.Name := AMDecl.Name;
+  for I := 0 to AExpr.Args.Count - 1 do
+    Result.Args.Add(AExpr.Args.Items[I]);
+  Result.ResolvedClassType := AOwner;
+  Result.ResolvedMethod := AMDecl;
+  Result.IsStaticCall := True;
+  Result.ResolvedType := AMDecl.ResolvedReturnType;
+  AExpr.LoweredCall := Result;
+  AExpr.ResolvedType := Result.ResolvedType;
+end;
+
+{ The statement form of BareStaticCallExpr: M(Args); is AOwner.M(Args);. }
+function TSemanticAnalyser.BareStaticCallStmt(AOwner: TRecordTypeDesc;
+  AMDecl: TMethodDecl; ACall: TProcCall): TMethodCallStmt;
+var
+  I: Int;
+begin
+  Result := TMethodCallStmt.Create();
+  Result.Line := ACall.Line;
+  Result.Col := ACall.Col;
+  Result.ObjectName := AOwner.Name;
+  Result.Name := AMDecl.Name;
+  for I := 0 to ACall.Args.Count - 1 do
+    Result.Args.Add(ACall.Args.Items[I]);
+  Result.ResolvedClassType := AOwner;
+  Result.ResolvedMethod := AMDecl;
+  Result.IsStaticCall := True;
+  Result.ResolvedReturnTypeDesc := AMDecl.ResolvedReturnType;
+  { the walkers read the callee's var params through ResolvedDecl; codegen
+    emits LoweredCall and never sees the bare call }
+  ACall.ResolvedDecl := AMDecl;
+  ACall.LoweredCall := Result;
 end;
 
 { TypeName.StaticProp[I]: an INDEXED static property read is the static

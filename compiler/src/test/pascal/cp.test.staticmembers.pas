@@ -687,6 +687,9 @@ type
   private
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
+    function MethodBody(AProg: TProgram; const AName: string): TBlock;
+    procedure AssertStaticCallExpr(ABody: TBlock; const AWhat: string);
+    procedure AssertStaticCallStmt(ABody: TBlock; const AWhat: string);
   published
     { TFoo.StaticArr[I] reads and writes one element (the index was dropped,
       so the whole array was read and written) }
@@ -698,6 +701,17 @@ type
     { a static method called through an INSTANCE (H.M()) is a static call,
       no Self -- x86-64 passed the instance as a first argument }
     procedure TestSem_StaticMethodThroughInstance_IsStaticCall;
+    { a static method called BARE inside a method of its type -- from an
+      instance method and from a static method, as an expression and as a
+      statement -- is the static call TFoo.M(...), no Self.  Inside an
+      instance method it was taken for Self.M(...) and the instance was passed
+      as a hidden first argument; inside a static method it was undeclared. }
+    procedure TestSem_BareStaticCall_InInstanceMethod_IsStaticCall;
+    procedure TestSem_BareStaticCall_InStaticMethod_IsStaticCall;
+    procedure TestCodegen_BareStaticCall_NoSelfArgument;
+    { a bare INSTANCE method called from a static method is refused by name:
+      a static method has no Self to call it on }
+    procedure TestSem_BareInstanceCall_InStaticMethod_Rejected;
     { a float static property read compiles on x86-64 (the float arm
       dereferenced the absent FieldInfo: a compiler crash) }
     procedure TestCodegen_StaticFloatPropRead_X86Compiles;
@@ -1072,6 +1086,195 @@ begin
   finally
     P.Free();
   end;
+end;
+
+const
+  SrcBareStatic = '''
+    program P;
+    type
+      TFoo = class
+      public
+        static function Echo(const S: string): string;
+        static procedure Note(const S: string);
+        function Unqualified(): string;
+        procedure Stmt();
+        static function FromStatic(): string;
+        static procedure StmtFromStatic();
+      end;
+    static function TFoo.Echo(const S: string): string;
+    begin
+      Result := '[' + S + ']';
+    end;
+    static procedure TFoo.Note(const S: string);
+    begin
+      WriteLn(S);
+    end;
+    function TFoo.Unqualified(): string;
+    begin
+      Result := Echo('hello');
+    end;
+    procedure TFoo.Stmt();
+    begin
+      Note('x');
+    end;
+    static function TFoo.FromStatic(): string;
+    begin
+      Result := Echo('s');
+    end;
+    static procedure TFoo.StmtFromStatic();
+    begin
+      Note('y');
+    end;
+    begin
+      WriteLn(TFoo.Create().Unqualified());
+    end.
+    ''';
+
+function TStaticMembersSemTests.MethodBody(AProg: TProgram;
+  const AName: string): TBlock;
+var
+  I, J: Int;
+  TD: TTypeDecl;
+  M: TMethodDecl;
+begin
+  Result := nil;
+  for I := 0 to AProg.Block.TypeDecls.Count - 1 do
+  begin
+    TD := TTypeDecl(AProg.Block.TypeDecls.Items[I]);
+    if TD.Def is TClassTypeDef then
+      for J := 0 to TClassTypeDef(TD.Def).Methods.Count - 1 do
+      begin
+        M := TMethodDecl(TClassTypeDef(TD.Def).Methods.Items[J]);
+        if (M.Name = AName) and (M.Body <> nil) then
+          Result := M.Body;
+      end;
+  end;
+  AssertTrue('method ' + AName + ' has a body', Result <> nil);
+end;
+
+{ The first statement of ABody: Result := <static call>, or the bare static
+  procedure call. }
+procedure TStaticMembersSemTests.AssertStaticCallExpr(ABody: TBlock; const AWhat: string);
+var
+  A: TAssignment;
+begin
+  AssertTrue(AWhat + ': an assignment', ABody.Stmts.Items[0] is TAssignment);
+  A := TAssignment(ABody.Stmts.Items[0]);
+  AssertTrue(AWhat + ': the value is a method call (got ' +
+    A.Expr.ClassName + ')', A.Expr is TMethodCallExpr);
+  AssertTrue(AWhat + ': a static call', TMethodCallExpr(A.Expr).IsStaticCall);
+  AssertEquals(AWhat + ': on TFoo', 'TFoo', TMethodCallExpr(A.Expr).ObjectName);
+end;
+
+procedure TStaticMembersSemTests.AssertStaticCallStmt(ABody: TBlock; const AWhat: string);
+var
+  S: TASTStmt;
+begin
+  S := TASTStmt(ABody.Stmts.Items[0]);
+  if (S is TProcCall) and (TProcCall(S).LoweredCall <> nil) then
+    S := TProcCall(S).LoweredCall;
+  AssertTrue(AWhat + ': a method call statement (got ' + S.ClassName + ')',
+    S is TMethodCallStmt);
+  AssertTrue(AWhat + ': a static call', TMethodCallStmt(S).IsStaticCall);
+  AssertEquals(AWhat + ': on TFoo', 'TFoo', TMethodCallStmt(S).ObjectName);
+end;
+
+procedure TStaticMembersSemTests.TestSem_BareStaticCall_InInstanceMethod_IsStaticCall;
+var
+  P: TProgram;
+begin
+  P := AnalyseSrc(SrcBareStatic);
+  try
+    AssertStaticCallExpr(MethodBody(P, 'Unqualified'), 'Echo(..) in an instance method');
+    AssertStaticCallStmt(MethodBody(P, 'Stmt'), 'Note(..) in an instance method');
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticMembersSemTests.TestSem_BareStaticCall_InStaticMethod_IsStaticCall;
+var
+  P: TProgram;
+begin
+  P := AnalyseSrc(SrcBareStatic);
+  try
+    AssertStaticCallExpr(MethodBody(P, 'FromStatic'), 'Echo(..) in a static method');
+    AssertStaticCallStmt(MethodBody(P, 'StmtFromStatic'), 'Note(..) in a static method');
+  finally
+    P.Free();
+  end;
+end;
+
+{ The string argument is the FIRST argument register: the instance is not
+  passed ahead of it.  Echo('hello') in TFoo.Unqualified loaded Self into the
+  first register and the string into the second. }
+procedure TStaticMembersSemTests.TestCodegen_BareStaticCall_NoSelfArgument;
+const
+  Src = '''
+    program P;
+    type
+      TFoo = class
+      public
+        static function Echo(const S: string): string;
+        function Unqualified(): string;
+      end;
+    static function TFoo.Echo(const S: string): string;
+    begin
+      Result := S;
+    end;
+    function TFoo.Unqualified(): string;
+    begin
+      Result := Echo('hello');
+    end;
+    begin
+    end.
+    ''';
+var
+  X86, Arm: string;
+  Body: string;
+  I, J: Int;
+begin
+  { x86-64: the call's argument setup fills rdi only; arm64: x0 only.  The
+    function body between its label and the call must not load a SECOND
+    argument register. }
+  X86 := GenAsm(Src, TargetX86_64);
+  I := Pos('TFoo_Unqualified:', X86);
+  AssertTrue('x86-64: Unqualified emitted', I >= 0);
+  J := PosEx('callq TFoo_Echo', X86, I);
+  AssertTrue('x86-64: Echo called', J > I);
+  Body := Copy(X86, I, J - I);
+  AssertTrue('x86-64: no second argument (rsi) before the call: ' + Body,
+    Pos('%rsi', Body) < 0);
+  Arm := GenAsm(Src, TargetArm64);
+  I := Pos('TFoo_Unqualified:', Arm);
+  AssertTrue('arm64: Unqualified emitted', I >= 0);
+  J := PosEx('bl TFoo_Echo', Arm, I);
+  if J < 0 then
+    J := PosEx('bl _TFoo_Echo', Arm, I);
+  AssertTrue('arm64: Echo called', J > I);
+  Body := Copy(Arm, I, J - I);
+  AssertTrue('arm64: no second argument (x1) before the call: ' + Body,
+    Pos('x1,', Body) < 0);
+end;
+
+procedure TStaticMembersSemTests.TestSem_BareInstanceCall_InStaticMethod_Rejected;
+begin
+  AnalyseExpectErrorMsg('''
+    program P;
+    type
+      TFoo = class
+      public
+        function Inst(): Int;
+        static function S(): Int;
+      end;
+    function TFoo.Inst(): Int; begin Result := 1; end;
+    static function TFoo.S(): Int;
+    begin
+      Result := Inst();
+    end;
+    begin
+    end.
+    ''', 'static method');
 end;
 
 procedure TStaticMembersSemTests.TestCodegen_StaticFloatPropRead_X86Compiles;
