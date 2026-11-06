@@ -73,6 +73,9 @@ type
     procedure TestRun_Arrow_OverloadByParamType_BodyPicks;
     { ...and for METHOD overloads, with a body that reads a captured local }
     procedure TestRun_Arrow_MethodOverloadByParamType_BodyPicks;
+    { '->' lambdas into constructors (expression, statement, metaclass,
+      inherited), static and interface methods, and a call result's call }
+    procedure TestRun_Arrow_CtorStaticIntfIndirectArgs;
     procedure TestRun_Arrow_ArgPosition_ProcTypeCalls;
     procedure TestRun_GenericMethodOnGenericClass_Gate;
     procedure TestRun_CaptureLocal_ReadInClosure;
@@ -2595,6 +2598,75 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'i1' + #10 + 's1' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_CtorStaticIntfIndirectArgs;
+const
+  Src =
+    '''
+    program P;
+    type
+      TR = reference to function(): string;
+      TRProc = reference to procedure(F: TR);
+      IUse = interface
+        procedure Use(F: TR);
+        function Get(F: TR): string;
+      end;
+      TC = class(TObject, IUse)
+        S: string;
+        constructor Create(F: TR; const X: string); overload;
+        constructor Create(); overload;
+        procedure Use(F: TR);
+        function Get(F: TR): string; virtual;
+        static function SGet(F: TR): string;
+      end;
+      TCClass = class of TC;
+      TD = class(TC)
+        constructor Create(F: TR; const X: string);
+        function Get(F: TR): string; override;
+      end;
+    constructor TC.Create(F: TR; const X: string); begin S := F() + X; end;
+    constructor TC.Create(); begin S := ''; end;
+    procedure TC.Use(F: TR); begin S := F(); end;
+    function TC.Get(F: TR): string; begin Result := F(); end;
+    static function TC.SGet(F: TR): string; begin Result := F(); end;
+    constructor TD.Create(F: TR; const X: string);
+    begin
+      inherited Create(() -> 'inh:' + F(), X);
+    end;
+    function TD.Get(F: TR): string;
+    begin
+      Result := inherited Get(() -> 'iget:' + F());
+    end;
+    function GetP(): TRProc;
+    begin
+      Result := procedure(F: TR) begin WriteLn('ind:', F()) end;
+    end;
+    var C: TC; D: TD; K: TCClass; I: IUse; L: string;
+    begin
+      L := 'loc';
+      C := TC.Create(() -> L, '/x');
+      WriteLn('ctor:', C.S);
+      C.Free();
+      TC.Create(() -> L, '/y').Free();
+      K := TC;
+      C := K.Create(() -> 'meta', '/z');
+      WriteLn('meta:', C.S);
+      C.Free();
+      D := TD.Create(() -> L, '/w');
+      WriteLn(D.S, ' ', D.Get(() -> L));
+      D.Free();
+      WriteLn('static:', TC.SGet(() -> L));
+      I := TC.Create();
+      I.Use(() -> 'intf');
+      WriteLn('intf:', I.Get(() -> L));
+      GetP()(() -> L);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'ctor:loc/x' + #10 + 'meta:meta/z' + #10 + 'inh:loc/w iget:loc' + #10 + 'static:loc' + #10 + 'intf:loc' + #10 + 'ind:loc' + #10, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_Arrow_ArgPosition_ProcTypeCalls;

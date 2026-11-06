@@ -133,6 +133,12 @@ type
       that fits both stays ambiguous. }
     procedure TestSemantic_Arrow_OverloadByParamType_BodyDisambiguates;
     procedure TestSemantic_Arrow_OverloadByParamType_UnusedParamAmbiguous;
+    { A '->' lambda passed to a constructor (expression, statement, through a
+      metaclass, via inherited), a static method, an interface method or a
+      call result was "Cannot infer the type of a '->' lambda here": those
+      argument loops analysed every argument eagerly instead of deferring the
+      arrow until the callee's parameter type was known. }
+    procedure TestSemantic_Arrow_CtorStaticIntfIndirectArgs_Inferred;
     procedure TestCodegen_CapturedWeakLocal_ClosureBodyRegistersSlot;
     { every method-pointer / closure source into every consumer: a field
       filled from another field, an element or a procedural-field call, and
@@ -1114,6 +1120,73 @@ var
 begin
   Msg := SemanticError(Format(SrcOverloadByParamType, ['False']));
   AssertTrue('ambiguous: ' + Msg, Pos('Ambiguous overload of ''Pick''', Msg) >= 0);
+end;
+
+const
+  SrcArrowCtorStaticIntfIndirect = '''
+    program Prg;
+    type
+      TR = reference to function(): string;
+      TRProc = reference to procedure(F: TR);
+      IUse = interface
+        procedure Use(F: TR);
+        function Get(F: TR): string;
+      end;
+      TC = class(TObject, IUse)
+        S: string;
+        constructor Create(F: TR; const X: string); overload;
+        constructor Create(); overload;
+        procedure Use(F: TR);
+        function Get(F: TR): string; virtual;
+        static function SGet(F: TR): string;
+      end;
+      TCClass = class of TC;
+      TD = class(TC)
+        constructor Create(F: TR; const X: string);
+        function Get(F: TR): string; override;
+      end;
+    constructor TC.Create(F: TR; const X: string); begin S := F() + X; end;
+    constructor TC.Create(); begin S := ''; end;
+    procedure TC.Use(F: TR); begin S := F(); end;
+    function TC.Get(F: TR): string; begin Result := F(); end;
+    static function TC.SGet(F: TR): string; begin Result := F(); end;
+    constructor TD.Create(F: TR; const X: string);
+    begin
+      inherited Create(() -> 'inh:' + F(), X);
+    end;
+    function TD.Get(F: TR): string;
+    begin
+      Result := inherited Get(() -> 'iget:' + F());
+    end;
+    function GetP(): TRProc;
+    begin
+      Result := procedure(F: TR) begin WriteLn('ind:', F()) end;
+    end;
+    var C: TC; D: TD; K: TCClass; I: IUse; L: string;
+    begin
+      L := 'loc';
+      C := TC.Create(() -> L, '/x');
+      WriteLn('ctor:', C.S);
+      C.Free();
+      TC.Create(() -> L, '/y').Free();
+      K := TC;
+      C := K.Create(() -> 'meta', '/z');
+      WriteLn('meta:', C.S);
+      C.Free();
+      D := TD.Create(() -> L, '/w');
+      WriteLn(D.S, ' ', D.Get(() -> L));
+      D.Free();
+      WriteLn('static:', TC.SGet(() -> L));
+      I := TC.Create();
+      I.Use(() -> 'intf');
+      WriteLn('intf:', I.Get(() -> L));
+      GetP()(() -> L);
+    end.
+    ''';
+
+procedure TAnonMethodTests.TestSemantic_Arrow_CtorStaticIntfIndirectArgs_Inferred;
+begin
+  AssertEquals('', SemanticError(SrcArrowCtorStaticIntfIndirect));
 end;
 
 procedure TAnonMethodTests.TestSemantic_CallThroughCapturedClosureParam_Accepted;

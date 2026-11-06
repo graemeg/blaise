@@ -934,6 +934,10 @@ type
       when the argument was a lowered overloaded operator. }
     procedure AnalyseArgSlot(AList: TObjectList; AIdx: Int);
     procedure ResolveDeferredArrowArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
+    { ResolveDeferredArrowArgs, then analyse any '->' argument still pending
+      (no callee, or more args than params) so it fails with the ordinary
+      "Cannot infer" diagnostic instead of reaching codegen untyped. }
+    procedure FinishArrowArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
     function  AnalyseAnonMethodExpr(AExpr: TAnonMethodExpr): TTypeDesc;
     procedure InheritEnclosingConsts(ADecl: TMethodDecl);
     procedure AnalyseVarDeclStmt(AStmt: TVarDeclStmt);
@@ -7995,11 +7999,12 @@ begin
   RT := TRecordTypeDesc(TMetaClassTypeDesc(AMeta).BaseClass);
   HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
   for I := 0 to AExpr.Args.Count - 1 do
-    Self.AnalyseListSlot(AExpr.Args, I);
+    Self.AnalyseArgSlot(AExpr.Args, I);
   MDecl := ResolveMethodOverload(RT.Name, AExpr.Name,
     AExpr.Args, AExpr.Line, AExpr.Col);
   if MDecl = nil then
     MDecl := FindMethodDecl(RT.Name, AExpr.Name);
+  FinishArrowArgs(AExpr.Args, MDecl);
   if MDecl <> nil then
   begin
     RetypeSetLiteralArgs(AExpr.Args, MDecl);
@@ -8081,9 +8086,10 @@ var
   I: Int;
 begin
   for I := 0 to AExpr.Args.Count - 1 do
-    Self.AnalyseListSlot(AExpr.Args, I);
+    Self.AnalyseArgSlot(AExpr.Args, I);
   MDecl := Self.MetaclassStaticDecl(AMeta, AExpr.Name, AExpr.Args,
     AExpr.Line, AExpr.Col);
+  FinishArrowArgs(AExpr.Args, MDecl);
   AExpr.ResolvedClassType := TMetaClassTypeDesc(AMeta).BaseClass;
   AExpr.ResolvedMethod := MDecl;
   AExpr.IsStaticCall := True;
@@ -15005,7 +15011,7 @@ begin
             [ObjType.Name, ACall.Name]),
           ACall.Line, ACall.Col);
       for I := 0 to ACall.Args.Count - 1 do
-        Self.AnalyseListSlot(ACall.Args, I);
+        Self.AnalyseArgSlot(ACall.Args, I);
       ValidateIntfMethodVarArgs(ACall.Args, TInterfaceTypeDesc(ObjType),
         ACall.Name, ACall.Line, ACall.Col);
       ACall.ResolvedClassType := ObjType;
@@ -15163,7 +15169,7 @@ begin
               [ACall.ImplicitBaseInfo.TypeDesc.Name, ACall.Name]),
             ACall.Line, ACall.Col);
         for I := 0 to ACall.Args.Count - 1 do
-          Self.AnalyseListSlot(ACall.Args, I);
+          Self.AnalyseArgSlot(ACall.Args, I);
         ValidateIntfMethodVarArgs(ACall.Args,
           TInterfaceTypeDesc(ACall.ImplicitBaseInfo.TypeDesc),
           ACall.Name, ACall.Line, ACall.Col);
@@ -15289,7 +15295,7 @@ begin
       EmitAddrOfExpr crashes on a nil ResolvedType when emitting the
       argument. }
     for I := 0 to ACall.Args.Count - 1 do
-      Self.AnalyseListSlot(ACall.Args, I);
+      Self.AnalyseArgSlot(ACall.Args, I);
     ValidateIntfMethodVarArgs(ACall.Args, TInterfaceTypeDesc(ObjSym.TypeDesc),
       ACall.Name, ACall.Line, ACall.Col);
     ACall.ResolvedClassType := ObjSym.TypeDesc;
@@ -15710,6 +15716,7 @@ begin
         TSetTypeDesc(Par.ResolvedType))
     else
     begin
+      InferArrowFromTarget(TASTExpr(ACall.Args.Items[I]), Par.ResolvedType);
       ArgType := Self.AnalyseListSlot(ACall.Args, I);
       { [] and constant-integer literals take the formal's open-array type }
       RetypeBracketLiteralArg(TASTExpr(ACall.Args.Items[I]), Par.ResolvedType);
@@ -16043,6 +16050,28 @@ var
   Slot: TASTExpr;
   ParT: TTypeDesc;
 begin
+  { A '->' lambda argument was deferred (AnalyseArgSlot): type it from the
+    declared parameter -- the one place an interface call knows them -- or
+    let it fail with the ordinary "Cannot infer" diagnostic. }
+  if AIntf <> nil then
+  begin
+    MIdx := AIntf.MethodIndex(AName);
+    Params := nil;
+    if (MIdx >= 0) and (AIntf.MethodNameCount(AName) = 1) then
+      Params := AIntf.MethodParams(MIdx);
+    for I := 0 to AArgs.Count - 1 do
+      if IsPendingArrow(TASTExpr(AArgs.Items[I])) then
+      begin
+        if (Params <> nil) and (I < Params.Count) then
+          InferArrowFromTarget(TASTExpr(AArgs.Items[I]),
+            Self.ResolveIntfParam(TIntfParamInfo(Params.Items[I])));
+        AnalyseExpr(TASTExpr(AArgs.Items[I]));
+      end;
+  end
+  else
+    for I := 0 to AArgs.Count - 1 do
+      if IsPendingArrow(TASTExpr(AArgs.Items[I])) then
+        AnalyseExpr(TASTExpr(AArgs.Items[I]));
   if AIntf = nil then
     Exit;
   MIdx := AIntf.MethodIndex(AName);
@@ -16163,6 +16192,7 @@ begin
         TSetTypeDesc(Par.ResolvedType))
     else
     begin
+      InferArrowFromTarget(TASTExpr(ACall.Args.Items[I]), Par.ResolvedType);
       ArgType := Self.AnalyseListSlot(ACall.Args, I);
       { [] and constant-integer literals take the formal's open-array type }
       RetypeBracketLiteralArg(TASTExpr(ACall.Args.Items[I]), Par.ResolvedType);
@@ -20392,7 +20422,7 @@ begin
             [ObjType.Name, AExpr.Name]),
           AExpr.Line, AExpr.Col);
       for I := 0 to AExpr.Args.Count - 1 do
-        Self.AnalyseListSlot(AExpr.Args, I);
+        Self.AnalyseArgSlot(AExpr.Args, I);
       ValidateIntfMethodVarArgs(AExpr.Args, IntfDesc,
         AExpr.Name, AExpr.Line, AExpr.Col);
       AExpr.ResolvedClassType := ObjType;
@@ -20575,7 +20605,7 @@ begin
               [ObjType.Name, AExpr.Name]),
             AExpr.Line, AExpr.Col);
         for I := 0 to AExpr.Args.Count - 1 do
-          Self.AnalyseListSlot(AExpr.Args, I);
+          Self.AnalyseArgSlot(AExpr.Args, I);
         ValidateIntfMethodVarArgs(AExpr.Args, IntfDesc,
           AExpr.Name, AExpr.Line, AExpr.Col);
         AExpr.ResolvedClassType := ObjType;
@@ -20620,10 +20650,11 @@ begin
       { Analyse args first so overload resolution can score by type. }
       HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
       for I := 0 to AExpr.Args.Count - 1 do
-        Self.AnalyseListSlot(AExpr.Args, I);
+        Self.AnalyseArgSlot(AExpr.Args, I);
       FMethodOwnerHint := RT.OwningUnit;
         MDecl := ResolveMethodOverload(RT.Name, AExpr.Name, AExpr.Args,
           AExpr.Line, AExpr.Col);
+      FinishArrowArgs(AExpr.Args, MDecl);
       if MDecl = nil then
       begin
         SemanticError(
@@ -20682,11 +20713,12 @@ begin
      not Self.CallsConstructor(ObjSym.TypeDesc, AExpr.Name) then
   begin
     for I := 0 to AExpr.Args.Count - 1 do
-      Self.AnalyseListSlot(AExpr.Args, I);
+      Self.AnalyseArgSlot(AExpr.Args, I);
     MDecl := ResolveMethodOverload(ObjSym.Name, AExpr.Name, AExpr.Args,
       AExpr.Line, AExpr.Col);
     if MDecl = nil then
       MDecl := FindMethodDecl(ObjSym.Name, AExpr.Name);
+    FinishArrowArgs(AExpr.Args, MDecl);
     if MDecl = nil then
       SemanticError(
         Format('Type ''%s'' has no method ''%s''', [ObjSym.Name, AExpr.Name]),
@@ -20726,7 +20758,7 @@ begin
     HintBareEnumMethodArgs(TRecordTypeDesc(ObjSym.TypeDesc).Name,
       AExpr.Name, AExpr.Args);
     for I := 0 to AExpr.Args.Count - 1 do
-      Self.AnalyseListSlot(AExpr.Args, I);
+      Self.AnalyseArgSlot(AExpr.Args, I);
     { Try to find a user-defined constructor method for type checking.
       Use overload resolution so the correct variant is chosen when multiple
       constructors with the same name (e.g. Create) are declared.  Look up
@@ -20780,6 +20812,7 @@ begin
         Format('No constructor ''%s'' declared on ''%s'' — its arguments ' +
                'would be silently discarded', [AExpr.Name, ObjSym.Name]),
         AExpr.Line, AExpr.Col);
+    FinishArrowArgs(AExpr.Args, MDecl);
     if MDecl <> nil then
     begin
       { Re-type a bracket-literal argument bound to a `set of` parameter to that
@@ -20853,7 +20886,7 @@ begin
           [ObjSym.TypeDesc.Name, AExpr.Name]),
         AExpr.Line, AExpr.Col);
     for I := 0 to AExpr.Args.Count - 1 do
-      Self.AnalyseListSlot(AExpr.Args, I);
+      Self.AnalyseArgSlot(AExpr.Args, I);
     ValidateIntfMethodVarArgs(AExpr.Args, IntfDesc,
       AExpr.Name, AExpr.Line, AExpr.Col);
     AExpr.ResolvedClassType := ObjSym.TypeDesc;
@@ -20999,7 +21032,10 @@ begin
         TArrayLiteralExpr(AExpr.Args.Items[I]),
         TSetTypeDesc(Par.ResolvedType))
     else
+    begin
+      InferArrowFromTarget(TASTExpr(AExpr.Args.Items[I]), Par.ResolvedType);
       ArgType := Self.AnalyseListSlot(AExpr.Args, I);
+    end;
     CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
       Format('argument %d of ''%s''', [I + 1, AExpr.Name]),
       AExpr.Line, AExpr.Col);
@@ -23476,6 +23512,17 @@ begin
     end;
 end;
 
+procedure TSemanticAnalyser.FinishArrowArgs(AArgs: TObjectList;
+  AMDecl: TMethodDecl);
+var
+  I: Int;
+begin
+  ResolveDeferredArrowArgs(AArgs, AMDecl);
+  for I := 0 to AArgs.Count - 1 do
+    if IsPendingArrow(TASTExpr(AArgs.Items[I])) then
+      AnalyseExpr(TASTExpr(AArgs.Items[I]));
+end;
+
 procedure TSemanticAnalyser.InferArrowFromTarget(AExpr: TASTExpr;
   ATarget: TTypeDesc);
 var
@@ -25267,8 +25314,10 @@ begin
   end;
   ProcDesc := TProceduralTypeDesc(CalleeType);
   AExpr.ResolvedProcType := ProcDesc;
-  for I := 0 to AExpr.Args.Count - 1 do
-    Self.AnalyseListSlot(AExpr.Args, I);
+  { checked against the signature like a call through a procedural variable
+    -- which also types a '->' lambda argument from its parameter }
+  Self.AnalyseProcTypeCallArgs(AExpr.Args, ProcDesc, 'expression',
+    AExpr.Line, AExpr.Col);
   if ProcDesc.ReturnType <> nil then
     Result := ProcDesc.ReturnType
   else
