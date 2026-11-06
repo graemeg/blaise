@@ -1494,6 +1494,36 @@ type
     PinSyms:    TObjectList;   { owns the pinned TSymbols }
   end;
 
+{ Split the argument list of a generic instance name -- the text between
+  its outer angle brackets -- into its type arguments, trimmed, appended to
+  AList.  Only a comma at bracket depth zero separates two arguments: an
+  argument that is itself an instance with several arguments
+  (TDictionary<string, TDictionary<string, Int>>), or an inline procedural
+  type with several parameters, keeps its own commas. }
+procedure SplitGenericArgs(const AArgs: string; AList: TStringList);
+var
+  I, Depth, Start, Ch: Int;
+begin
+  if Trim(AArgs) = '' then
+    Exit;
+  Depth := 0;
+  Start := 0;
+  for I := 0 to Length(AArgs) - 1 do
+  begin
+    Ch := StrAt(AArgs, I);
+    if (Ch = Ord('<')) or (Ch = Ord('(')) or (Ch = Ord('[')) then
+      Depth := Depth + 1
+    else if (Ch = Ord('>')) or (Ch = Ord(')')) or (Ch = Ord(']')) then
+      Depth := Depth - 1
+    else if (Ch = Ord(',')) and (Depth = 0) then
+    begin
+      AList.Add(Trim(StrCopyFrom(AArgs, Start, I - Start)));
+      Start := I + 1;
+    end;
+  end;
+  AList.Add(Trim(StrCopyTail(AArgs, Start)));
+end;
+
 { An integer type narrower than 64 bits (enums excluded): the operands that
   arithmetic promotes to Int64.  See "Integer expression width". }
 function IsNarrowInt(AType: TTypeDesc): Boolean;
@@ -4357,20 +4387,7 @@ begin
     ArgsPart := StrCopyFrom(AInstName, BrOpen + 1, Length(AInstName) - BrOpen - 2);
     Args := TStringList.Create();
     try
-      while ArgsPart <> '' do
-      begin
-        I := StrPos(',', ArgsPart);
-        if I >= 0 then
-        begin
-          Args.Add(Trim(StrHead(ArgsPart, I)));
-          ArgsPart := Trim(StrCopyTail(ArgsPart, I + 1));
-        end
-        else
-        begin
-          Args.Add(Trim(ArgsPart));
-          ArgsPart := '';
-        end;
-      end;
+      SplitGenericArgs(ArgsPart, Args);
       if not AStrict then
         FTable.SuppressVisibility := FTable.SuppressVisibility + 1;
       try
@@ -5105,20 +5122,7 @@ begin
             Length(GRI.TypeName) - StrPos('<', GRI.TypeName) - 2);
           Args := TStringList.Create();
           try
-            while ArgsStr <> '' do
-            begin
-              BracPos := StrPos(',', ArgsStr);
-              if BracPos >= 0 then
-              begin
-                Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-                ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-              end
-              else
-              begin
-                Args.Add(Trim(ArgsStr));
-                ArgsStr := '';
-              end;
-            end;
+            SplitGenericArgs(ArgsStr, Args);
             ParamNames := TGenericRecordDef(FTable.FindGeneric(BaseName)).ParamNames;
             RT := TRecordTypeDesc(GRI.TypeDesc);
             Viewed := EnterGenericView(GRI.DefUnitName, GRI.TypeName, False,
@@ -5195,20 +5199,7 @@ begin
             Length(GI.TypeName) - StrPos('<', GI.TypeName) - 2);
           Args := TStringList.Create();
           try
-            while ArgsStr <> '' do
-            begin
-              BracPos := StrPos(',', ArgsStr);
-              if BracPos >= 0 then
-              begin
-                Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-                ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-              end
-              else
-              begin
-                Args.Add(Trim(ArgsStr));
-                ArgsStr := '';
-              end;
-            end;
+            SplitGenericArgs(ArgsStr, Args);
             ParamNames := TGenericTypeDef(FTable.FindGeneric(BaseName)).ParamNames;
             RT := TRecordTypeDesc(GI.TypeDesc);
             Viewed := EnterGenericView(GI.DefUnitName, GI.TypeName, False,
@@ -5376,20 +5367,7 @@ begin
   ArgsPart := StrCopyFrom(ATypeName, BrOpen + 1, BrClose - BrOpen - 2);
   ArgList  := TStringList.Create();
   try
-    while ArgsPart <> '' do
-    begin
-      I := StrPos(',', ArgsPart);
-      if I >= 0 then
-      begin
-        ArgList.Add(Trim(StrHead(ArgsPart, I)));
-        ArgsPart := Trim(StrCopyTail(ArgsPart, I + 1));
-      end
-      else
-      begin
-        ArgList.Add(Trim(ArgsPart));
-        ArgsPart := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsPart, ArgList);
     OutArgs := '';
     for I := 0 to ArgList.Count - 1 do
     begin
@@ -5425,20 +5403,7 @@ begin
   ArgsPart := StrCopyFrom(ATypeName, BrOpen + 1, BrClose - BrOpen - 2);
   ArgList  := TStringList.Create();
   try
-    while ArgsPart <> '' do
-    begin
-      I := StrPos(',', ArgsPart);
-      if I >= 0 then
-      begin
-        ArgList.Add(Trim(StrHead(ArgsPart, I)));
-        ArgsPart := Trim(StrCopyTail(ArgsPart, I + 1));
-      end
-      else
-      begin
-        ArgList.Add(Trim(ArgsPart));
-        ArgsPart := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsPart, ArgList);
     OutArgs := '';
     for I := 0 to ArgList.Count - 1 do
     begin
@@ -6199,20 +6164,7 @@ begin
     ArgsPart := StrCopyFrom(Result, BrOpen + 1, BrClose - BrOpen - 2);
     ArgList  := TStringList.Create();
     try
-      while ArgsPart <> '' do
-      begin
-        I := StrPos(',', ArgsPart);
-        if I >= 0 then
-        begin
-          ArgList.Add(Trim(StrHead(ArgsPart, I)));
-          ArgsPart := Trim(StrCopyTail(ArgsPart, I + 1));
-        end
-        else
-        begin
-          ArgList.Add(Trim(ArgsPart));
-          ArgsPart := '';
-        end;
-      end;
+      SplitGenericArgs(ArgsPart, ArgList);
       OutArgs := '';
       for I := 0 to ArgList.Count - 1 do
       begin
@@ -6400,20 +6352,7 @@ begin
 
   Args := TStringList.Create();
   try
-    while ArgsStr <> '' do
-    begin
-      BracPos := StrPos(',', ArgsStr);
-      if BracPos >= 0 then
-      begin
-        Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-        ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-      end
-      else
-      begin
-        Args.Add(Trim(ArgsStr));
-        ArgsStr := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsStr, Args);
 
     { Bail if the template exists but is a generic interface, not a class }
     if not (FTable.FindGeneric(BaseName) is TGenericTypeDef) then Exit;
@@ -6895,20 +6834,7 @@ begin
 
   Args := TStringList.Create();
   try
-    while ArgsStr <> '' do
-    begin
-      BracPos := StrPos(',', ArgsStr);
-      if BracPos >= 0 then
-      begin
-        Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-        ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-      end
-      else
-      begin
-        Args.Add(Trim(ArgsStr));
-        ArgsStr := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsStr, Args);
 
     if not (FTable.FindGeneric(BaseName) is TGenericRecordDef) then Exit;
     Self.NoteGenericSourceUnit(BaseName);
@@ -7151,20 +7077,7 @@ begin
 
   Args := TStringList.Create();
   try
-    while ArgsStr <> '' do
-    begin
-      BracPos := StrPos(',', ArgsStr);
-      if BracPos >= 0 then
-      begin
-        Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-        ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-      end
-      else
-      begin
-        Args.Add(Trim(ArgsStr));
-        ArgsStr := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsStr, Args);
 
     TemplObj := FTable.FindGeneric(BaseName);
     if (TemplObj = nil) or not (TemplObj is TGenericInterfaceDef) then Exit;
@@ -7286,20 +7199,7 @@ begin
 
   Args := TStringList.Create();
   try
-    while ArgsStr <> '' do
-    begin
-      BracPos := StrPos(',', ArgsStr);
-      if BracPos >= 0 then
-      begin
-        Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-        ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-      end
-      else
-      begin
-        Args.Add(Trim(ArgsStr));
-        ArgsStr := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsStr, Args);
     if Args.Count <> Templ.ParamNames.Count then Exit;
 
     for K := 0 to Args.Count - 1 do
@@ -7406,20 +7306,7 @@ begin
 
   Args := TStringList.Create();
   try
-    while Length(ArgsStr) > 0 do
-    begin
-      BracPos := StrPos(',', ArgsStr);
-      if BracPos >= 0 then
-      begin
-        Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-        ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-      end
-      else
-      begin
-        Args.Add(Trim(ArgsStr));
-        ArgsStr := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsStr, Args);
 
     if Args.Count <> Templ.TypeParams.Count then
       SemanticError(
@@ -7607,20 +7494,7 @@ begin
 
   Args := TStringList.Create();
   try
-    while Length(ArgsStr) > 0 do
-    begin
-      BracPos := StrPos(',', ArgsStr);
-      if BracPos >= 0 then
-      begin
-        Args.Add(Trim(StrHead(ArgsStr, BracPos)));
-        ArgsStr := Trim(StrCopyTail(ArgsStr, BracPos + 1));
-      end
-      else
-      begin
-        Args.Add(Trim(ArgsStr));
-        ArgsStr := '';
-      end;
-    end;
+    SplitGenericArgs(ArgsStr, Args);
 
     if Args.Count <> Templ.TypeParams.Count then
       SemanticError(

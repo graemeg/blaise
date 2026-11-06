@@ -118,6 +118,10 @@ type
       indexed property: arm64 called the getter under the unit's prefix, which
       the instance's methods do not carry, and the link failed. }
     procedure TestRun_GenericInstanceAlias_InUnit;
+    { A dictionary whose values are dictionaries, and a list of them: the
+      inner instance's comma split the outer argument list, and the
+      declaration failed with 'Unknown type' }
+    procedure TestRun_DictionaryOfDictionaries;
   end;
 
 implementation
@@ -1520,6 +1524,41 @@ begin
     CompileAndRunWithUnit('galias', UnitSrc, Src, Output, ExitCode));
   AssertEquals('exit code', 0, ExitCode);
   AssertEquals('stdout', '1 7 7' + LineEnding, Output);
+end;
+procedure TE2EGenericsTests.TestRun_DictionaryOfDictionaries;
+const
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    type
+      TInner = TDictionary<string, string>;
+    var
+      Outer: TDictionary<string, TInner>;
+      Direct: TDictionary<Int, TDictionary<string, Int>>;
+      L: TList<TDictionary<string, Int>>;
+      D: TDictionary<string, Int>;
+      I: TInner;
+    begin
+      Outer := TDictionary<string, TInner>.Create();
+      I := TInner.Create();
+      I.Add('k', 'v');
+      Outer.Add('a', I);
+      WriteLn(Outer['a']['k'], ' ', Outer.Count);
+      Direct := TDictionary<Int, TDictionary<string, Int>>.Create();
+      D := TDictionary<string, Int>.Create();
+      D.Add('x', 7);
+      Direct.Add(3, D);
+      L := TList<TDictionary<string, Int>>.Create();
+      L.Add(D);
+      WriteLn(Direct[3]['x'] + L[0]['x'], ' ', L.Count);
+      Outer.Free();
+      Direct.Free();
+      L.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'v 1' + LE + '14 1' + LE, 0);
 end;
 
 initialization

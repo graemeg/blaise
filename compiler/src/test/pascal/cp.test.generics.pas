@@ -130,6 +130,11 @@ type
     { an override of one overload spelt without `overload` matched no slot,
       and was dropped silently }
     procedure TestSem_InstanceOverrideOfOverload_NeedsOverload;
+    { A type argument that is itself a generic instance with several
+      arguments (TBox<TPair<Int, string>>): its inner comma was taken as a
+      separator between the OUTER arguments, so the instance was never built
+      and the declaration failed with 'Unknown type' }
+    procedure TestSem_MultiArgInstanceAsTypeArg;
   end;
 
 implementation
@@ -1542,6 +1547,57 @@ begin
     Pos('marked override but no matching virtual base method', Err) >= 0);
   AssertEquals('accepted with overload', '',
     SemanticError(Format(Base, ['overload; override;'])));
+end;
+
+procedure TGenericsTests.TestSem_MultiArgInstanceAsTypeArg;
+const
+  Src = '''
+    program P;
+    type
+      TPair<A, B> = class
+        FA: A;
+        FB: B;
+      end;
+      TBox<T> = class
+        FItem: T;
+        function Get(): T;
+      end;
+      TRec<A, B> = record
+        RA: A;
+        RB: B;
+      end;
+      IHolder<A, B> = interface
+        function First(): A;
+      end;
+      TMaker<A, B> = function(X: A): B;
+      TInner = TPair<string, Int>;
+    function TBox<T>.Get(): T;
+    begin
+      Result := FItem
+    end;
+    function Ident<T>(X: T): T;
+    begin
+      Result := X
+    end;
+    var
+      A1: TBox<TPair<Int, string>>;
+      A2: TPair<string, TPair<string, Int>>;
+      A3: TPair<string, TInner>;
+      A4: TPair<TPair<Int, Int>, TPair<string, TRec<Int, Int>>>;
+      A5: TBox<TBox<TPair<Int, Int>>>;
+      A6: TRec<string, TRec<Int, string>>;
+      A7: TPair<string, IHolder<Int, string>>;
+      A8: TPair<string, TMaker<Int, string>>;
+      Q: TPair<Int, string>;
+    begin
+      A1 := TBox<TPair<Int, string>>.Create();
+      Q := A1.Get();
+      Q := Ident<TPair<Int, string>>(Q)
+    end.
+    ''';
+begin
+  AssertEquals('nested multi-argument instances resolve', '',
+    SemanticError(Src));
 end;
 
 initialization
