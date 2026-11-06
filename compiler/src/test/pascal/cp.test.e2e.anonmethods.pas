@@ -64,6 +64,15 @@ type
     procedure TestRun_Arrow_ArgPosition_Standalone;
     procedure TestRun_Arrow_ArgPosition_MethodWithCapture;
     procedure TestRun_Arrow_ArgPosition_OverloadByShape;
+    { BUG-20261106-lambda-in-generic-body: '->' lambdas inside methods of a
+      generic class, with an unused parameter, a used one, and one typed by
+      the class's own T, at two instantiations. }
+    procedure TestRun_Arrow_InGenericMethodBody;
+    { overloads differing only in the lambda's parameter type: the body
+      picks the one it type-checks against }
+    procedure TestRun_Arrow_OverloadByParamType_BodyPicks;
+    { ...and for METHOD overloads, with a body that reads a captured local }
+    procedure TestRun_Arrow_MethodOverloadByParamType_BodyPicks;
     procedure TestRun_Arrow_ArgPosition_ProcTypeCalls;
     procedure TestRun_GenericMethodOnGenericClass_Gate;
     procedure TestRun_CaptureLocal_ReadInClosure;
@@ -2481,6 +2490,111 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'int:7' + #10 + 'fn:42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_InGenericMethodBody;
+const
+  Src =
+    '''
+    program P;
+    type
+      TPred = reference to function(A: string): Boolean;
+      TPredOf<T> = reference to function(A: T): Boolean;
+      TBox<T> = class
+        V: T;
+        function Unused(): Boolean;
+        function Used(): Boolean;
+        function OfT(): Boolean;
+      end;
+    function Test(F: TPred): Boolean;
+    begin
+      Result := F('x')
+    end;
+    function TBox<T>.Unused(): Boolean;
+    begin
+      Result := Test((P) -> False)
+    end;
+    function TBox<T>.Used(): Boolean;
+    begin
+      Result := Test((P) -> Length(P) = 1)
+    end;
+    function TBox<T>.OfT(): Boolean;
+    var F: TPredOf<T>;
+    begin
+      F := (X) -> X = V;
+      Result := F(V)
+    end;
+    var B: TBox<string>; C: TBox<Int>;
+    begin
+      B := TBox<string>.Create();
+      B.V := 'q';
+      C := TBox<Int>.Create();
+      C.V := 7;
+      WriteLn(B.Unused(), ' ', B.Used(), ' ', B.OfT(), ' ', C.OfT(), ' ', C.Unused());
+      B.Free();
+      C.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'False True True True False' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_OverloadByParamType_BodyPicks;
+const
+  Src =
+    '''
+    program P;
+    type
+      TPS = reference to function(S: string): Boolean;
+      TPI = reference to function(N: Int): Boolean;
+    function Pick(F: TPS): string; overload;
+    begin
+      if F('ab') then Result := 'str:yes' else Result := 'str:no'
+    end;
+    function Pick(F: TPI): string; overload;
+    begin
+      if F(5) then Result := 'int:yes' else Result := 'int:no'
+    end;
+    begin
+      WriteLn(Pick((P) -> Length(P) = 2));
+      WriteLn(Pick((P) -> P * 2 > 3));
+      WriteLn(Pick((P) -> P + 'x' = 'abx'))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'str:yes' + #10 + 'int:yes' + #10 + 'str:yes' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_MethodOverloadByParamType_BodyPicks;
+const
+  Src =
+    '''
+    program Mo;
+    type
+      TPS = reference to function(S: string): Boolean;
+      TPI = reference to function(N: Int): Boolean;
+      TC = class
+        function Pick(F: TPS): string; overload;
+        function Pick(F: TPI): string; overload;
+        procedure Go();
+      end;
+    function TC.Pick(F: TPS): string; begin if F('ab') then Result := 's1' else Result := 's0' end;
+    function TC.Pick(F: TPI): string; begin if F(5) then Result := 'i1' else Result := 'i0' end;
+    procedure TC.Go();
+    var K: Int;
+    begin
+      K := 4;
+      WriteLn(Pick((P) -> P > K));
+      WriteLn(Self.Pick((P) -> Length(P) = 2));
+    end;
+    var C: TC;
+    begin C := TC.Create(); C.Go(); C.Free() end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'i1' + #10 + 's1' + #10, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_Arrow_ArgPosition_ProcTypeCalls;

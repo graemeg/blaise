@@ -120,6 +120,19 @@ type
     { ... and through a procedural-typed VARIABLE or FIELD (implicit-Self and
       qualified), whose single signature types the lambda. }
     procedure TestSemantic_Arrow_ArgPosition_ProcTypeCalls_Inferred;
+    { BUG-20261106-lambda-in-generic-body: an untyped '->' lambda written
+      inside a method of a generic class reported "Unknown type '' for
+      parameter": CloneExpr copied the literal's Decl but not IsArrow or
+      ArrowExpr, so each instantiation got a bare literal with untyped
+      params and no body. }
+    procedure TestSemantic_Arrow_InGenericMethodBody_Inferred;
+    { Two overloads that differ only in the lambda's PARAMETER type tied on
+      shape and were reported ambiguous even when the body decides
+      ((P) -> Length(P) > 0 only types for a string).  The tie is now broken
+      by type-checking the arrow body against each tied candidate; a body
+      that fits both stays ambiguous. }
+    procedure TestSemantic_Arrow_OverloadByParamType_BodyDisambiguates;
+    procedure TestSemantic_Arrow_OverloadByParamType_UnusedParamAmbiguous;
     procedure TestCodegen_CapturedWeakLocal_ClosureBodyRegistersSlot;
     { every method-pointer / closure source into every consumer: a field
       filled from another field, an element or a procedural-field call, and
@@ -1025,6 +1038,82 @@ begin
     never inferred a pending lambda from the 'reference to' param.  They now
     share AnalyseProcTypeCallArgs with the qualified arms. }
   AnalyseSrc(SrcArrowProcTypeCalls).Free()
+end;
+
+procedure TAnonMethodTests.TestSemantic_Arrow_InGenericMethodBody_Inferred;
+const
+  Src = '''
+    program Prg;
+    type
+      TPred = reference to function(A: string): Boolean;
+      TPredOf<T> = reference to function(A: T): Boolean;
+      TBox<T> = class
+        V: T;
+        function Unused(): Boolean;
+        function Used(): Boolean;
+        function OfT(): Boolean;
+      end;
+    function Test(F: TPred): Boolean;
+    begin
+      Result := F('x')
+    end;
+    function TBox<T>.Unused(): Boolean;
+    begin
+      Result := Test((P) -> False)
+    end;
+    function TBox<T>.Used(): Boolean;
+    begin
+      Result := Test((P) -> Length(P) > 0)
+    end;
+    function TBox<T>.OfT(): Boolean;
+    var F: TPredOf<T>;
+    begin
+      F := (X) -> True;
+      Result := F(V)
+    end;
+    var B: TBox<string>; C: TBox<Int>;
+    begin
+      B := TBox<string>.Create();
+      C := TBox<Int>.Create();
+      WriteLn(B.Unused(), B.Used(), B.OfT(), C.OfT())
+    end.
+    ''';
+begin
+  AssertEquals('', SemanticError(Src));
+end;
+
+const
+  SrcOverloadByParamType = '''
+    program Prg;
+    type
+      TPS = reference to function(S: string): Boolean;
+      TPI = reference to function(N: Int): Boolean;
+    function Pick(F: TPS): string; overload;
+    begin
+      Result := 'str'
+    end;
+    function Pick(F: TPI): string; overload;
+    begin
+      Result := 'int'
+    end;
+    begin
+      WriteLn(Pick((P) -> Length(P) > 0));
+      WriteLn(Pick((P) -> P * 2 > 3));
+      WriteLn(Pick((P) -> %s))
+    end.
+    ''';
+
+procedure TAnonMethodTests.TestSemantic_Arrow_OverloadByParamType_BodyDisambiguates;
+begin
+  AssertEquals('', SemanticError(Format(SrcOverloadByParamType, ['P + ''x'' = ''ax'''])));
+end;
+
+procedure TAnonMethodTests.TestSemantic_Arrow_OverloadByParamType_UnusedParamAmbiguous;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(Format(SrcOverloadByParamType, ['False']));
+  AssertTrue('ambiguous: ' + Msg, Pos('Ambiguous overload of ''Pick''', Msg) >= 0);
 end;
 
 procedure TAnonMethodTests.TestSemantic_CallThroughCapturedClosureParam_Accepted;

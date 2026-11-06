@@ -125,6 +125,8 @@ type
                                             synthetic '__env_<n>' records }
     FAnonMethodCount:     Int;       { per-compilation counter for
                                            '__closure_<n>' thunk names }
+    FArrowTrialDepth:     Int;       { > 0 while ArrowBodyFits type-checks
+                                           a '->' body against one overload }
     FGenericMethodTemplates: TStringList; { 'OwnerType.Method' → TMethodDecl template (not owned) — generic methods with method-level <T> }
     FLoopDepth:            Int;      { depth of enclosing while/for — Break only legal if > 0 }
     FScopeDepth:           Int;      { mirrors FTable scope depth; used to detect main-level globals }
@@ -916,6 +918,17 @@ type
       typed bottom-up), scored by SHAPE during overload resolution, and
       analysed after the winning candidate's parameter types are known. }
     function  IsPendingArrow(AExpr: TASTExpr): Boolean;
+    { Does a pending '->' lambda's expression body type-check with its
+      parameters typed by ATarget (a 'reference to' type)?  1 = yes, 0 = no,
+      -1 = cannot tell (a begin..end body, or a nested literal, which would
+      need lifting).  Analyses a CLONE of the body in a throwaway scope and
+      rolls back any warnings, so the real lambda is untouched. }
+    function  ArrowBodyFits(AME: TAnonMethodExpr; ATarget: TTypeDesc): Int;
+    { Overloads that tie on shape alone -- 'reference to' parameters of the
+      same arity, differing only in parameter types -- are told apart by the
+      lambda bodies: the single candidate every pending '->' argument fits,
+      or nil when none or several do (the caller then reports ambiguity). }
+    function  BreakArrowTie(ACands, AArgs: TObjectList): TMethodDecl;
     procedure AnalyseArgOrDeferArrow(AExpr: TASTExpr);
     { AnalyseArgOrDeferArrow for an owned argument-list slot: rebinds the slot
       when the argument was a lowered overloaded operator. }
@@ -1487,6 +1500,10 @@ uses
   blaise.codegen;
 
 type
+  { Raised inside an ArrowBodyFits trial when the body cannot be checked
+    without side effects; never escapes ArrowBodyFits. }
+  EArrowTrialAbort = class(Exception);
+
   { One open generic view: the analyser state EnterGenericView replaced. }
   TGenericViewFrame = class
   public
@@ -11485,6 +11502,12 @@ begin
       Self.RejectCallArgs(ArityMatch, AArgs, ATypeName + '.' + AMethodName,
         ALine, ACol);
     if Ambiguous then
+    begin
+      { only an ambiguity error follows when no lambda body decides it }
+      Best := Self.BreakArrowTie(ArityMatch, AArgs);
+      Ambiguous := Best = nil;
+    end;
+    if Ambiguous then
       SemanticError(
         Format('Ambiguous overload of ''%s.%s'' — multiple candidates match equally',
           [ATypeName, AMethodName]),
@@ -18234,6 +18257,12 @@ begin
     if BestScore < 0 then
       Self.RejectCallArgs(ArityMatch, AArgs, AName, ALine, ACol);
     if BestCount > 1 then
+    begin
+      Best := Self.BreakArrowTie(ArityMatch, AArgs);
+      if Best <> nil then
+        BestCount := 1;
+    end;
+    if BestCount > 1 then
       SemanticError(
         Format('Ambiguous overload of ''%s'' — multiple candidates match equally',
           [AName]),
@@ -23276,6 +23305,131 @@ begin
             (AExpr.ResolvedType = nil);
 end;
 
+function TSemanticAnalyser.ArrowBodyFits(AME: TAnonMethodExpr;
+  ATarget: TTypeDesc): Int;
+var
+  PT:        TProceduralTypeDesc;
+  Par:       TMethodParam;
+  PInfo:     TProcParamInfo;
+  Declared:  TTypeDesc;
+  Body:      TASTExpr;
+  BodyType:  TTypeDesc;
+  Sym:       TSymbol;
+  WarnCount: Int;
+  I:         Int;
+begin
+  Result := 0;
+  if not IsRefProcType(ATarget) then Exit;
+  PT := TProceduralTypeDesc(ATarget);
+  if AME.Decl.Params.Count <> PT.Params.Count then Exit;
+  { An explicitly typed lambda parameter must name the target's type. }
+  for I := 0 to AME.Decl.Params.Count - 1 do
+  begin
+    Par := TMethodParam(AME.Decl.Params.Items[I]);
+    PInfo := TProcParamInfo(PT.Params.Items[I]);
+    if Par.TypeName <> '' then
+    begin
+      Declared := FindTypeOrInstantiate(Par.TypeName);
+      if (Declared = nil) or (PInfo.TypeDesc = nil) or
+         ((Declared <> PInfo.TypeDesc) and
+          not SameText(Declared.Name, PInfo.TypeDesc.Name)) then
+        Exit;
+    end;
+  end;
+  if AME.ArrowExpr = nil then Exit(-1);   { begin..end body: no cheap trial }
+
+  Body := CloneExpr(AME.ArrowExpr);
+  WarnCount := FWarnings.Count;
+  FTable.PushScope();
+  Inc(FArrowTrialDepth);
+  try
+    try
+      for I := 0 to AME.Decl.Params.Count - 1 do
+      begin
+        Par := TMethodParam(AME.Decl.Params.Items[I]);
+        PInfo := TProcParamInfo(PT.Params.Items[I]);
+        if PInfo.IsVarParam then
+          Sym := TSymbol.Create(Par.ParamName, skVarParameter, PInfo.TypeDesc)
+        else
+          Sym := TSymbol.Create(Par.ParamName, skParameter, PInfo.TypeDesc);
+        if not FTable.Define(Sym) then
+        begin
+          Sym.Free();
+          Exit(0);
+        end;
+      end;
+      BodyType := AnalyseExpr(Body);
+      if PT.ReturnType <> nil then
+        CheckTypesMatch(PT.ReturnType, BodyType, '', 0, 0);
+      Result := 1;
+    except
+      on E: EArrowTrialAbort do
+        Result := -1;
+      on E: ESemanticError do
+        Result := 0;
+    end;
+  finally
+    Dec(FArrowTrialDepth);
+    FTable.PopScope();
+    Body.Free();
+    while FWarnings.Count > WarnCount do
+      FWarnings.Delete(FWarnings.Count - 1);
+  end;
+end;
+
+function TSemanticAnalyser.BreakArrowTie(ACands, AArgs: TObjectList): TMethodDecl;
+var
+  Cand:    TMethodDecl;
+  Arg:     TASTExpr;
+  Par:     TMethodParam;
+  I, J:    Int;
+  Fit:     Int;
+  Ok:      Boolean;
+  HasArrow: Boolean;
+  Hits:    Int;
+begin
+  Result := nil;
+  if AArgs = nil then Exit;
+  HasArrow := False;
+  for J := 0 to AArgs.Count - 1 do
+    if IsPendingArrow(TASTExpr(AArgs.Items[J])) then
+      HasArrow := True;
+  if not HasArrow then Exit;
+  Hits := 0;
+  for I := 0 to ACands.Count - 1 do
+  begin
+    Cand := TMethodDecl(ACands.Items[I]);
+    if Cand.Params.Count < AArgs.Count then Continue;
+    Ok := True;
+    for J := 0 to AArgs.Count - 1 do
+    begin
+      Arg := TASTExpr(AArgs.Items[J]);
+      Par := TMethodParam(Cand.Params.Items[J]);
+      if ArgMatchScore(Par.ResolvedType, Arg.ResolvedType, Arg) = 0 then
+      begin
+        Ok := False;
+        Break;
+      end;
+      if IsPendingArrow(Arg) then
+      begin
+        Fit := ArrowBodyFits(TAnonMethodExpr(Arg), Par.ResolvedType);
+        if Fit < 0 then Exit(nil);   { undecidable: leave it ambiguous }
+        if Fit = 0 then
+        begin
+          Ok := False;
+          Break;
+        end;
+      end;
+    end;
+    if Ok then
+    begin
+      Inc(Hits);
+      Result := Cand;
+    end;
+  end;
+  if Hits <> 1 then Result := nil;
+end;
+
 procedure TSemanticAnalyser.AnalyseArgSlot(AList: TObjectList; AIdx: Int);
 var
   Slot: TASTExpr;
@@ -23564,6 +23718,11 @@ var
   I:         Int;
 begin
   if AExpr.ResolvedType <> nil then Exit(AExpr.ResolvedType);  { idempotent }
+  { A literal nested in a '->' body under overload trial would be lifted
+    into the module from a clone that is about to be freed: give up on the
+    trial instead (ArrowBodyFits reports "cannot tell"). }
+  if FArrowTrialDepth > 0 then
+    raise EArrowTrialAbort.Create('nested literal in an arrow trial');
 
   { Phase 9a: an arrow lambda that reaches full analysis without a target
     (no assignment/field/var-init context supplied one) cannot be typed. }

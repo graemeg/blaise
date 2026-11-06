@@ -2796,6 +2796,13 @@ begin
       for I := 0 to TAnonMethodExpr(AExpr).WeakCaptures.Count - 1 do
         AME.WeakCaptures.Add(TAnonMethodExpr(AExpr).WeakCaptures.Strings[I]);
     end;
+    { A '->' lambda's arrow facts are parse products: without them a clone
+      (each generic instantiation of the body around it) is an ordinary
+      literal with untyped params and no body, and fails with "Unknown type
+      '' for parameter" (BUG-20261106-lambda-in-generic-body). }
+    AME.IsArrow := TAnonMethodExpr(AExpr).IsArrow;
+    if TAnonMethodExpr(AExpr).ArrowExpr <> nil then
+      AME.ArrowExpr := CloneExpr(TAnonMethodExpr(AExpr).ArrowExpr);
     { LiftedName/LiftedDecl are semantic products — NOT copied. }
     Result := AME;
   end
