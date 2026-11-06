@@ -122,8 +122,9 @@ type
     { Pass False to start the thread immediately, or True to defer
       execution until Start is called. }
     constructor Create(ACreateSuspended: Boolean);
-    { Joins the OS thread (if still running) then frees the object.
-      Called automatically by ARC when the last reference is released. }
+    { Sets Terminated and joins the OS thread (if still running), then
+      frees the object.  Called automatically by ARC when the last
+      reference is released. }
     destructor Destroy; override;
     { Spawns the OS thread. Called automatically by Create(False).
       Has no effect if the thread is already running. }
@@ -1206,8 +1207,14 @@ end;
 
 destructor TThread.Destroy;
 begin
+  { As Delphi's TThread: ask a still-running worker to stop before joining
+    it.  Without the Terminate, releasing the last reference to a thread
+    that loops until Terminated waited for it forever. }
   if (Self.FHandle <> 0) and (not Self.FFinished) then
+  begin
+    Self.Terminate();
     Self.WaitFor()
+  end
 end;
 
 procedure TThread.Execute;

@@ -32,6 +32,7 @@ type
     procedure TestRun_Thread_MultipleThreads;
     procedure TestRun_CriticalSection_MutexProtectsCounter;
     procedure TestRun_Thread_InheritedDestroy_CleanExit;
+    procedure TestRun_Thread_ReleaseTerminatesRunningThread;
     procedure TestRun_ThreadVar_MainThread_ReadWrite;
     procedure TestRun_ThreadVar_MixedWithGlobalVar;
     procedure TestRun_ThreadVar_RecordField_PerThreadIsolation;
@@ -368,6 +369,39 @@ const
     end.
     ''';
 
+  SrcReleaseTerminates =
+    '''
+    program P;
+    uses Classes;
+    type
+      TLoopThread = class(TThread)
+      protected
+        procedure Execute; override;
+      end;
+    procedure TLoopThread.Execute;
+    var I: Int;
+    begin
+      { Runs until asked to stop; the cap only keeps a missing Terminate
+        from hanging the test (it then prints False). }
+      I := 0;
+      while not Self.Terminated do
+      begin
+        I := I + 1;
+        if I > 2000000000 then
+          break
+      end;
+      WriteLn(Self.Terminated)
+    end;
+    var T: TLoopThread;
+    begin
+      T := TLoopThread.Create(False);
+      { Releasing the last reference destroys the thread, which must ask it
+        to terminate before waiting for it (as Delphi's TThread does). }
+      T := nil;
+      WriteLn('released')
+    end.
+    ''';
+
 { ------------------------------------------------------------------ }
 { Tests                                                                }
 { ------------------------------------------------------------------ }
@@ -424,6 +458,15 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcCriticalSection, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('stdout', '2000' + LE, Output)
+end;
+
+procedure TE2EThreadingTests.TestRun_Thread_ReleaseTerminatesRunningThread;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(SrcReleaseTerminates, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', 'True' + LE + 'released' + LE, Output)
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_InheritedDestroy_CleanExit;
