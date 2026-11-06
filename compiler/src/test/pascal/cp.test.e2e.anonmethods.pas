@@ -307,6 +307,13 @@ type
       failed to compile ("neither a frame slot nor a global") and x86-64
       crashed. }
     procedure TestRun_ClosureCapturesRecordMethodReceiver;
+    { Getter- and setter-backed properties (plain, indexed, default) and a
+      field-array store on a local a closure captures, both inside the
+      closure and in the declaring routine.  arm64 loaded the receiver by
+      name: "neither a frame slot nor a global" inside the closure, a
+      garbage Self and a segfault outside it
+      (BUG-20261106-captured-property-getter). }
+    procedure TestRun_PropertyOnCapturedLocal;
   end;
 
 implementation
@@ -4206,6 +4213,74 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'True 7 8' + LineEnding + 'show 7' + LineEnding +
     '8 7' + LineEnding + '6 8 6' + LineEnding + '14' + LineEnding);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_PropertyOnCapturedLocal;
+const
+  Src = '''
+    program c9;
+    type
+      TProc0 = reference to procedure;
+      TFoo = class
+      private
+        FBase: Int;
+        FArr: array[0..3] of Int;
+        function GetItem(AIndex: Int): Int;
+        procedure SetItem(AIndex: Int; AValue: Int);
+        function GetCount: Int;
+        procedure SetCount(AValue: Int);
+      public
+        property Items[AIndex: Int]: Int read GetItem write SetItem; default;
+        property Count: Int read GetCount write SetCount;
+      end;
+    function TFoo.GetItem(AIndex: Int): Int;
+    begin
+      Result := Self.FBase + AIndex;
+    end;
+    procedure TFoo.SetItem(AIndex: Int; AValue: Int);
+    begin
+      Self.FBase := AValue - AIndex;
+    end;
+    function TFoo.GetCount: Int;
+    begin
+      Result := Self.FBase;
+    end;
+    procedure TFoo.SetCount(AValue: Int);
+    begin
+      Self.FBase := AValue;
+    end;
+    procedure Run(AProc: TProc0);
+    begin
+      AProc();
+    end;
+    procedure Test;
+    var
+      Z: TFoo;
+    begin
+      Z := TFoo.Create();
+      Z.Count := 10;
+      Z.FArr[1] := 7;
+      WriteLn('a ', Z.Count, ' ', Z[1], ' ', Z.FArr[1]);
+      Run(procedure
+        begin
+          Z.Count := 20;
+          Z.FArr[2] := 8;
+          WriteLn('b ', Z.Count, ' ', Z[1], ' ', Z.Items[2], ' ', Z.FArr[2]);
+          Z[3] := 33;
+          Z.Items[3] := 34;
+          WriteLn('c ', Z.Count);
+        end);
+      Z[1] := 51;
+      WriteLn('d ', Z.Count, ' ', Z.FArr[2]);
+    end;
+    begin
+      Test();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'a 10 11 7' + LineEnding + 'b 20 21 22 8' +
+    LineEnding + 'c 31' + LineEnding + 'd 50 8' + LineEnding);
 end;
 
 initialization

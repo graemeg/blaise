@@ -37,6 +37,12 @@ type
       takes the record's address from its '_cap_' slot (it emitted
       `leaq V(%rip)`, an undefined global) }
     procedure TestCodegen_X86_RecordMethodOnCapturedRecord_UsesCapSlot;
+    { BUG-20261106-captured-property-getter: a getter / setter property on a
+      captured local reaches the receiver through its '_cap_' slot, in the
+      declaring routine and in the closure.  arm64 loaded it by name: an
+      internal error inside the closure, and the idle frame slot (garbage
+      Self) outside it. }
+    procedure TestCodegen_PropertyOnCapturedLocal_UsesCapSlot;
     { Parser }
     procedure TestParse_ReferenceToProcedure_TypeDecl;
     procedure TestParse_ReferenceToFunction_ReturnType;
@@ -1934,6 +1940,40 @@ begin
   Code := GenAsm(Src, TargetX86_64);
   AssertTrue('the receiver is not addressed as a global V',
     Pos('V(%rip)', Code) < 0);
+end;
+
+procedure TAnonMethodTests.TestCodegen_PropertyOnCapturedLocal_UsesCapSlot;
+const
+  Src = '''
+    program P;
+    type
+      TProc0 = reference to procedure;
+      TFoo = class
+        FN: Int;
+        function GetCount: Int;
+        procedure SetCount(AV: Int);
+        property Count: Int read GetCount write SetCount;
+      end;
+    function TFoo.GetCount: Int; begin Result := FN; end;
+    procedure TFoo.SetCount(AV: Int); begin FN := AV; end;
+    procedure Test;
+    var
+      Z: TFoo;
+      P: TProc0;
+    begin
+      Z := TFoo.Create();
+      WriteLn(Z.Count);
+      P := procedure begin Z.Count := Z.Count + 1; end;
+    end;
+    begin
+      Test();
+    end.
+    ''';
+begin
+  AssertEquals('the getter receiver is the value behind the _cap_ slot', '',
+    AsmMissing(Src,
+      #9'movq (%rdi), %rdi'#10#9'callq TFoo_GetCount',
+      #9'ldr x0, [x0]'#10#9'bl _TFoo_GetCount'));
 end;
 
 initialization

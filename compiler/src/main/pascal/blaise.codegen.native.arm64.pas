@@ -3001,6 +3001,9 @@ begin
     Self.EmitExprToX0(AStmt.ObjExpr);
     Exit;
   end;
+  { a captured receiver is reached through its '_cap_' slot }
+  if EmitCapturedBase('x0', AStmt.RecordName, True, AStmt.IsVarParam) then
+    Exit;
   EmitLoadSlot('x0', AStmt.RecordName);
   if AStmt.IsVarParam then
     Self.Emit(#9'ldr x0, [x0]');
@@ -5332,9 +5335,14 @@ begin
   end
   else if AStmt.IsClassAccess then
   begin
-    EmitLoadSlot('x0', AStmt.RecordName);      { class inst: slot holds pointer }
-    if AStmt.IsVarParam then
-      Self.Emit(#9'ldr x0, [x0]');             { var param: slot holds &inst }
+    { class inst: slot holds pointer (captured -> through '_cap_') }
+    if not EmitCapturedBase('x0', AStmt.RecordName, True,
+      AStmt.IsVarParam) then
+    begin
+      EmitLoadSlot('x0', AStmt.RecordName);
+      if AStmt.IsVarParam then
+        Self.Emit(#9'ldr x0, [x0]');           { var param: slot holds &inst }
+    end;
   end
   else
     { record base: a TRUE var/out param derefs the slot to the caller's record;
@@ -9222,8 +9230,12 @@ begin
   end
   else if AFld.IsImplicitSelf then
     EmitLoadSlot('x0', 'Self')
-  else
+  else if not EmitCapturedBase('x0', AFld.RecordName, True,
+    AFld.IsVarParam) then
   begin
+    { (a CAPTURED receiver lives in the closure env and is reached through
+      its '_cap_' slot -- EmitCapturedBase above, in the declaring routine
+      and in the closure alike: BUG-20261106-captured-property-getter) }
     EmitLoadSlot('x0', AFld.RecordName);
     { a TRUE var/out record slot holds the caller's ADDRESS — deref to the
       record before stepping into its field. }

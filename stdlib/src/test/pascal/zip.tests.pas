@@ -240,21 +240,15 @@ end;
 
 procedure TZipReaderTests.TestRead_EncryptedRefused;
 var
-  Z, R: TZipReader;
-  E: TZipEntry;
+  Z: TZipReader;
 begin
   Z := TZipReader.CreateFromBytes(ENCRYPTED_ZIP);
   try
-    { The closure captures R and E, never Z: a getter-backed property
-      (Entries, IsEncrypted) on a captured local is miscompiled (compiler
-      bug), even outside the closure. }
-    E := Z.Entries[0];
-    R := Z;
     AssertTrue('flagged', Z.Entries[0].IsEncrypted);
     AssertRaises('EZipUnsupported',
       procedure
       begin
-        R.ReadBytes(E);
+        Z.ReadBytes(Z.Entries[0]);
       end);
   finally
     Z.Free();
@@ -263,21 +257,15 @@ end;
 
 procedure TZipReaderTests.TestRead_UnsupportedMethodRefused;
 var
-  Z, R: TZipReader;
-  E: TZipEntry;
+  Z: TZipReader;
 begin
   Z := TZipReader.CreateFromBytes(LZMA_ZIP);
   try
-    { The closure captures R and E, never Z: a getter-backed property
-      (Entries) on a captured local is miscompiled (compiler bug), even
-      outside the closure. }
-    E := Z.Entries[0];
-    R := Z;
     AssertEquals('method', 14, Z.Entries[0].Method);
     AssertRaises('EZipUnsupported',
       procedure
       begin
-        R.ReadBytes(E);
+        Z.ReadBytes(Z.Entries[0]);
       end);
   finally
     Z.Free();
@@ -378,18 +366,15 @@ end;
 
 procedure TZipReaderTests.TestExtractAll_TraversalRefused;
 var
-  Z, R: TZipReader;
+  Z: TZipReader;
 begin
   Z := TZipReader.CreateFromBytes(TRAVERSAL_ZIP);
   try
-    { The closure captures R, not Z: a getter-backed property (Entries) on a
-      captured local is miscompiled (compiler bug), even outside the closure. }
-    R := Z;
     AssertEquals('name', '../evil.txt', Z.Entries[0].Name);
     AssertRaises('EZipError',
       procedure
       begin
-        R.ExtractAll(FDir + '/x');
+        Z.ExtractAll(FDir + '/x');
       end);
   finally
     Z.Free();
