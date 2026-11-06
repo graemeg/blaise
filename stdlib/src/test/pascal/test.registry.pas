@@ -31,6 +31,7 @@ uses
   Contnrs.Tests,
   Base64.Tests,
   Crypto.Tests,
+  Compression.Tests,
   Sockets.Tests,
   WebSockets.Tests,
   HttpServer.Tests,
