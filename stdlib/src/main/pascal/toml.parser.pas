@@ -204,16 +204,12 @@ end;
 function TPStripUnderscores(const S: string): string;
 var
   SB: TStringBuilder;
-  I: Int;
+  C: Byte;
 begin
   SB := TStringBuilder.Create();
-  I := 0;
-  while I < Length(S) do
-  begin
-    if Byte(S[I]) <> Ord('_') then
-      SB.AppendByte(Byte(S[I]));
-    I := I + 1;
-  end;
+  for C in S do
+    if C <> Ord('_') then
+      SB.AppendByte(C);
   Result := SB.ToString();
   SB.Free();
 end;

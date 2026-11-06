@@ -123,17 +123,13 @@ implementation
 function TOMLEscape(const S: string): string;
 var
   SB: TStringBuilder;
-  I, N: Int;
   B: Byte;
 const
   Hex = '0123456789ABCDEF';
 begin
   SB := TStringBuilder.Create();
-  N := Length(S);
-  I := 0;
-  while I < N do
+  for B in S do
   begin
-    B := Byte(S[I]);
     if B = 34 then SB.Append('\"')
     else if B = 92 then SB.Append('\\')
     else if B = 8  then SB.Append('\b')
@@ -149,7 +145,6 @@ begin
     end
     else
       SB.AppendByte(B);
-    I := I + 1;
   end;
   Result := SB.ToString();
   SB.Free();
@@ -162,20 +157,16 @@ end;
 
 function TOMLIsBareKey(const AName: string): Boolean;
 var
-  I: Int;
   B: Byte;
 begin
+  Result := False;
+  for B in AName do
+    if not (((B >= Ord('A')) and (B <= Ord('Z'))) or
+            ((B >= Ord('a')) and (B <= Ord('z'))) or
+            ((B >= Ord('0')) and (B <= Ord('9'))) or
+            (B = Ord('_')) or (B = Ord('-'))) then
+      Exit;
   Result := Length(AName) > 0;
-  I := 0;
-  while Result and (I < Length(AName)) do
-  begin
-    B := Byte(AName[I]);
-    Result := ((B >= Ord('A')) and (B <= Ord('Z'))) or
-      ((B >= Ord('a')) and (B <= Ord('z'))) or
-      ((B >= Ord('0')) and (B <= Ord('9'))) or
-      (B = Ord('_')) or (B = Ord('-'));
-    I := I + 1;
-  end;
 end;
 
 function TOMLFormatKey(const AName: string): string;
@@ -188,7 +179,6 @@ end;
 
 function TOMLFormatFloat(AValue: Float64): string;
 var
-  I: Int;
   B: Byte;
   NeedsPoint: Boolean;
 begin
@@ -210,14 +200,9 @@ begin
   Result := DoubleToStr(AValue);
   { A float lexeme needs a fraction or an exponent, or TOML reads an integer. }
   NeedsPoint := True;
-  I := 0;
-  while I < Length(Result) do
-  begin
-    B := Byte(Result[I]);
+  for B in Result do
     if (B = Ord('.')) or (B = Ord('e')) or (B = Ord('E')) then
       NeedsPoint := False;
-    I := I + 1;
-  end;
   if NeedsPoint then
     Result := Result + '.0';
 end;
