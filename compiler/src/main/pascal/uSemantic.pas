@@ -204,6 +204,10 @@ type
     { The scopes holding a unit's (or program's) own declarations; a name
       found in any other scope below the global one is a routine's local. }
     FXrefUnitScopes:       TList<TScope>;
+    { > 0 while a parameter's default value is analysed: it is analysed at
+      the first call that omits it, but its names are in the declaring
+      file, so none is recorded at the call. }
+    FXrefSuspended:        Int;
     FMethodOwnerHint:      string;       { receiver owning-unit hint for the NEXT
                                            ResolveMethodOverload call, consumed and
                                            cleared at its start.  Disambiguates a
@@ -3466,7 +3470,7 @@ var
   Key, Q, U, Base: string;
   N, Lt, Gt: Int;
 begin
-  if (FXref = nil) or (FXrefSource = '') or InGenericInstanceBody() then
+  if (FXref = nil) or (FXrefSource = '') or (FXrefSuspended > 0) or InGenericInstanceBody() then
     Exit;
   { A generic instance's member is its template's: TList<Int>.Add is
     TList.Add, in the unit declaring TList. }
@@ -3624,6 +3628,24 @@ begin
     T := FTable.FindType(M.OwnerTypeName);
     if T <> nil then
       U := T.OwningUnit;
+    { The owner's unit need not be in scope (O.Thing.Go with only O's unit
+      used): find it among the receiver type and its ancestors. }
+    if U = '' then
+    begin
+      Walk := AOwner;
+      while Walk <> nil do
+      begin
+        if SameText(Walk.Name, M.OwnerTypeName) then
+        begin
+          U := Walk.OwningUnit;
+          Break;
+        end;
+        if Walk is TRecordTypeDesc then
+          Walk := TRecordTypeDesc(Walk).Parent
+        else
+          Walk := nil;
+      end;
+    end;
     NoteXref(ALine, ACol, N, 'member', U, M.OwnerTypeName + '.' + M.Name);
     Exit;
   end;
@@ -17384,7 +17406,12 @@ begin
         Format('No default value for parameter ''%s'' of ''%s''',
           [Par.ParamName, AContext]),
         ALine, ACol);
-    AnalyseDefaultValueExpr(Par, AContext, ALine, ACol);
+    FXrefSuspended := FXrefSuspended + 1;
+    try
+      AnalyseDefaultValueExpr(Par, AContext, ALine, ACol);
+    finally
+      FXrefSuspended := FXrefSuspended - 1;
+    end;
     CloneEx := CloneDefaultExprNode(Par.DefaultValue);
     AArgs.Add(CloneEx);
   end;
@@ -20991,9 +21018,14 @@ begin
   begin
     FA := TFieldAccessExpr(AExpr);
     RT := XrefReceiverType(FA.Base, Recv);
-    { A field-backed property's read is rewritten to its field. }
-    if SameText(FA.FieldName, Member) or
-       ((RT is TRecordTypeDesc) and (TRecordTypeDesc(RT).FindProperty(Member) <> nil)) then
+    { A field-backed property's read is rewritten to its field.  Not so
+      when the access is the default property added under a member of the
+      same name (O.Items[I] to O.Items.Items[I]): the name written is the
+      inner one, below. }
+    if (SameText(FA.FieldName, Member) or
+        ((RT is TRecordTypeDesc) and (TRecordTypeDesc(RT).FindProperty(Member) <> nil))) and
+       not ((FA.Base is TFieldAccessExpr) and SameText(TFieldAccessExpr(FA.Base).FieldName, Member) and
+            (TFieldAccessExpr(FA.Base).MemberLine = 0) and (FA.MemberLine > 0)) then
     begin
       NoteMemberXref(FA.MemberLine, FA.MemberCol, Member, RT, FA.FieldInfo, FA.ResolvedMethod);
       if (FA.Base = nil) and (FA.MemberLine > 0) then

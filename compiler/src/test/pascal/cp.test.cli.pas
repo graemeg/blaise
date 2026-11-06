@@ -84,6 +84,13 @@ type
     procedure TestEmitXref_PlainNames;
     procedure TestEmitXref_InheritedPropertyAndExit;
     procedure TestEmitXref_Members;
+    { A member of a type from a unit the file does not use names that
+      unit; a default argument's names are not recorded at the call. }
+    procedure TestEmitXref_MemberOfIndirectUnit;
+    procedure TestEmitXref_DefaultArgumentNotAtCall;
+    { O.Items[I] with a field Items whose type's default property is also
+      Items: the name written is the field. }
+    procedure TestEmitXref_FieldNamedAsDefaultProperty;
     { --emit-tokens FILE: the lexer's tokens for the source, as the parser
       sees them (inactive conditional branches left out). }
     procedure TestEmitTokens;
@@ -792,6 +799,166 @@ begin
     Pos(#9'30'#9'18'#9'FSize'#9'member'#9'xm'#9'TBase.FSize', X) >= 0);
   AssertTrue('an enum value: ' + X,
     Pos(#9'31'#9'16'#9'cBlue'#9'enum'#9'xm'#9'TColour.cBlue', X) >= 0);
+end;
+
+procedure TCLIContractTests.TestEmitXref_MemberOfIndirectUnit;
+var
+  Base, Mid, Top, Out_, XrefPath, X: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Base := FScratch + 'xrefindbase.pas';
+  Mid := FScratch + 'xrefindmid.pas';
+  L := TStringList.Create();
+  try
+    L.Text :=
+      'unit xrefindbase;' + LineEnding +
+      'interface' + LineEnding +
+      'type' + LineEnding +
+      '  TThing = class' + LineEnding +
+      '    procedure Go();' + LineEnding +
+      '  end;' + LineEnding +
+      '  TRec = record' + LineEnding +
+      '    V: Int;' + LineEnding +
+      '    function Twice(): Int;' + LineEnding +
+      '  end;' + LineEnding +
+      'implementation' + LineEnding +
+      'procedure TThing.Go();' + LineEnding +
+      'begin' + LineEnding +
+      'end;' + LineEnding +
+      'function TRec.Twice(): Int;' + LineEnding +
+      'begin' + LineEnding +
+      '  Result := V * 2' + LineEnding +
+      'end;' + LineEnding +
+      'end.';
+    L.SaveToFile(Base);
+    L.Text :=
+      'unit xrefindmid;' + LineEnding +
+      'interface' + LineEnding +
+      'uses xrefindbase;' + LineEnding +
+      'type' + LineEnding +
+      '  TOwner = class' + LineEnding +
+      '    Thing: TThing;' + LineEnding +
+      '    R: TRec;' + LineEnding +
+      '  end;' + LineEnding +
+      'implementation' + LineEnding +
+      'end.';
+    L.SaveToFile(Mid);
+  finally
+    L.Free();
+  end;
+  Top := WriteScratchSource(
+    'program xi;' + LineEnding +                              { 1 }
+    'uses xrefindmid;' + LineEnding +                         { 2 }
+    'var' + LineEnding +                                      { 3 }
+    '  O: TOwner;' + LineEnding +                             { 4 }
+    'begin' + LineEnding +                                    { 5 }
+    '  O := TOwner.Create();' + LineEnding +                  { 6 }
+    '  O.Thing.Go();' + LineEnding +                          { 7 }
+    '  WriteLn(O.R.Twice())' + LineEnding +                   { 8 }
+    'end.');
+  XrefPath := Top + '.xref';
+  EC := RunCompiler(['--check', '--emit-xref', XrefPath, '--source', Top,
+    '--unit-path', FScratch, '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(XrefPath);
+    X := L.Text;
+  finally
+    L.Free();
+  end;
+  AssertTrue('a class method: ' + X,
+    Pos(#9'7'#9'11'#9'Go'#9'member'#9'xrefindbase'#9'TThing.Go', X) >= 0);
+  AssertTrue('a record method: ' + X,
+    Pos(#9'8'#9'15'#9'Twice'#9'member'#9'xrefindbase'#9'TRec.Twice', X) >= 0);
+end;
+
+procedure TCLIContractTests.TestEmitXref_DefaultArgumentNotAtCall;
+var
+  Dep, Top, Out_, XrefPath, X: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Dep := FScratch + 'xrefdefdep.pas';
+  L := TStringList.Create();
+  try
+    L.Text :=
+      'unit xrefdefdep;' + LineEnding +
+      'interface' + LineEnding +
+      'const DefaultName = ''x'';' + LineEnding +
+      'procedure Greet(const AName: string = DefaultName);' + LineEnding +
+      'implementation' + LineEnding +
+      'procedure Greet(const AName: string);' + LineEnding +
+      'begin' + LineEnding +
+      'end;' + LineEnding +
+      'end.';
+    L.SaveToFile(Dep);
+  finally
+    L.Free();
+  end;
+  Top := WriteScratchSource(
+    'program xd;' + LineEnding +                              { 1 }
+    'uses xrefdefdep;' + LineEnding +                         { 2 }
+    'begin' + LineEnding +                                    { 3 }
+    '  Greet()' + LineEnding +                                { 4 }
+    'end.');
+  XrefPath := Top + '.xref';
+  EC := RunCompiler(['--check', '--emit-xref', XrefPath, '--source', Top,
+    '--unit-path', FScratch, '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(XrefPath);
+    X := L.Text;
+  finally
+    L.Free();
+  end;
+  AssertTrue('the call: ' + X,
+    Pos(#9'4'#9'3'#9'Greet'#9'global'#9'xrefdefdep'#9'Greet', X) >= 0);
+  AssertTrue('no default argument at the call: ' + X,
+    Pos(#9'DefaultName'#9, X) < 0);
+end;
+
+procedure TCLIContractTests.TestEmitXref_FieldNamedAsDefaultProperty;
+var
+  Src, Out_, XrefPath, X: string;
+  EC: Int;
+  L: TStringList;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource(
+    'program xf;' + LineEnding +                              { 1 }
+    'uses Generics.Collections;' + LineEnding +               { 2 }
+    'type' + LineEnding +                                     { 3 }
+    '  TBox = class' + LineEnding +                           { 4 }
+    '    Items: TList<Int>;' + LineEnding +                   { 5 }
+    '  end;' + LineEnding +                                   { 6 }
+    'var' + LineEnding +                                      { 7 }
+    '  B: TBox;' + LineEnding +                               { 8 }
+    'begin' + LineEnding +                                    { 9 }
+    '  B := TBox.Create();' + LineEnding +                    { 10 }
+    '  B.Items := TList<Int>.Create();' + LineEnding +        { 11 }
+    '  B.Items.Add(1);' + LineEnding +                        { 12 }
+    '  WriteLn(B.Items[0])' + LineEnding +                    { 13 }
+    'end.');
+  XrefPath := Src + '.xref';
+  EC := RunCompiler(['--check', '--emit-xref', XrefPath, '--source', Src,
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  L := TStringList.Create();
+  try
+    L.LoadFromFile(XrefPath);
+    X := L.Text;
+  finally
+    L.Free();
+  end;
+  AssertTrue('assigned: ' + X,
+    Pos(#9'11'#9'5'#9'Items'#9'member'#9'xf'#9'TBox.Items', X) >= 0);
+  AssertTrue('indexed by the default property: ' + X,
+    Pos(#9'13'#9'13'#9'Items'#9'member'#9'xf'#9'TBox.Items', X) >= 0);
 end;
 
 procedure TCLIContractTests.TestNormalCompileStillWorks;
