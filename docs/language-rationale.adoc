@@ -2567,6 +2567,87 @@ required.
 
 ---
 
+== Directory Search: No FindFirst / FindNext / FindClose
+
+=== Decision
+
+Blaise does not provide the Turbo Pascal / Delphi `FindFirst`, `FindNext`
+and `FindClose` trio, nor a `TSearchRec`.  Searching for files whose names
+are not known in advance goes through three functions in the `IO.Files`
+stdlib unit, each of which returns a finished result:
+
+* `FindFiles(Root, Pattern)` and `FindFiles(Root, Predicate)` -- the regular
+  files under a directory tree whose name matches a glob, or whose path
+  satisfies a `TPredicate<string>`.
+* `ListDirectory(Dir)` -- one directory's entries as a `TList<TDirEntry>`,
+  each with its kind, size, modification time and permissions.
+* `MatchGlob(Name, Pattern)` -- the `*` / `?` matcher both of the above use,
+  for filtering a `ListDirectory` result.
+
+GitHub issue #146 asked for directory search; this is the answer to it.
+
+=== Rationale
+
+The trio is a C-era handle protocol rather than a Pascal abstraction:
+
+* *Status codes in both directions.*  `FindFirst` and `FindNext` return 0 on
+  success, so the loop condition reads `while FindNext(SR) = 0`, the
+  opposite of every Boolean API around it.  Issue #146 itself names this as
+  the part users look up every time.
+* *A handle the caller must remember to release.*  Every early `Exit` or
+  `Break` out of the loop needs a `FindClose`, normally inside a
+  `try`/`finally`.  Forgetting it leaks a directory descriptor, and the
+  compiler cannot tell.
+* *Attributes as a bit mask of DOS flags* (`faDirectory`, `faHidden`,
+  `faReadOnly`, `faArchive`, `faVolumeID`) that half describe a POSIX file
+  system.  There is no flag for a symbolic link; "hidden" is a naming
+  convention on Unix; "read-only" depends on who is asking.
+* *Recursion is left to the caller*, who has to skip `.` and `..` and
+  decide what to do with links to directories (a cycle hazard).
+
+Returning a list removes all four problems: nothing to close, no status
+code, typed fields (`TFileKind` names a symbolic link), and a recursive
+walk that already skips links to directories and orders its result
+deterministically.
+
+=== Alternatives considered
+
+* *Implement the trio for compatibility.*  Rejected: it would be the only
+  API in the stdlib that reports success as 0 and needs a manual release,
+  and code being ported from FPC or Delphi is mechanically rewritten with
+  one call to `FindFiles` or `ListDirectory`.
+* *A stateful iterator object* (`TFileSearch`, proposed in issue #146), whose
+  lifetime owns the directory handle and which works with `for ... in`.
+  This is the right shape when a directory is too large to hold as a list,
+  or when the walk should stop early without reading the rest.  It is not
+  adopted now because no caller needs streaming yet and a list is simpler to
+  use correctly.  If one does, it would be added to `IO.Files` alongside
+  `ListDirectory`, as an enumerator yielding `TDirEntry` -- never as a
+  status-code API.
+
+=== Porting
+
+[cols="1,2"]
+|===
+| FPC / Delphi | Blaise
+
+| `FindFirst('dir/*.pas', faAnyFile, SR)` loop
+| `for E in ListDirectory('dir') do if MatchGlob(E.Name, '*.pas') then ...`
+
+| `SR.Attr and faDirectory <> 0`
+| `E.Kind = fkDirectory`
+
+| `SR.Size`, `SR.Time`
+| `E.Size`, `E.ModifiedMillis` (Unix milliseconds)
+
+| recursive search written by hand
+| `FindFiles('dir', '*.pas')`
+
+| `FindClose(SR)`
+| nothing to release
+|===
+
+
 == Iteration
 
 === `for..in` Loop — Enumerators
