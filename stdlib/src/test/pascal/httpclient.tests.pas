@@ -21,6 +21,13 @@
     * TestClientRedirect   — a 302 is followed to the final body.
     * TestClientConcurrent — N client fibers hit the server concurrently and
                               each get the correct body.
+    * TestClientGetByName  — the URL names 'localhost', not an IP: the host is
+                              resolved, and an address that refuses (::1, when
+                              the server is IPv4-only) falls through to the next.
+    * TestClientReadTimeout — ReadTimeoutMs ends a request whose server never
+                              answers, from inside a fiber.
+
+  TcpDial.Tests covers the same client from a plain program (no scheduler).
 
   NATIVE BACKEND ONLY.  Self-registers via the initialization section. }
 
@@ -30,7 +37,7 @@ interface
 
 uses
   blaise.testing, SysUtils, StrUtils,
-  Net.Http.Server, Net.Http.Client, Net.Tcp, async.fibers;
+  Net.Http.Server, Net.Http.Client, Net.Tcp, Net.Sockets, async.fibers;
 
 type
   THttpClientTests = class(TTestCase)
@@ -41,6 +48,8 @@ type
     procedure TestClientKeepAlive;
     procedure TestClientRedirect;
     procedure TestClientConcurrent;
+    procedure TestClientGetByName;
+    procedure TestClientReadTimeout;
   end;
 
   { Echoes the request path in the body. }
@@ -513,6 +522,94 @@ begin
   ResetScheduler();
   GHcHttpServer.Free();
   GHcHandler := nil;
+end;
+
+{ --- GET by host name --- }
+
+procedure GetByNameClientFiber(AArg: Pointer);
+var
+  Cli: THttpClient;
+  Resp: THttpClientResponse;
+begin
+  FiberSleep(3);
+  Cli := THttpClient.Create();
+  Resp := Cli.Get('http://localhost:' + IntToStr(GPort) + '/named');
+  if Resp <> nil then
+  begin
+    GStatus := Resp.Status;
+    GResult := Resp.Body;
+    Resp.Free();
+  end;
+  Cli.Free();
+  GHcHttpServer.Stop();
+end;
+
+procedure THttpClientTests.TestClientGetByName;
+const
+  PORT = 29437;
+begin
+  GHcHttpServer := THttpFiberServer.Create(PORT);
+  AssertTrue('server start', GHcHttpServer.Start());
+  GHcHandler := THcPathHandler.Create();
+  GPort := PORT;
+  GResult := '';
+  GStatus := 0;
+
+  SpawnFiber(@HcHttpServerFiber, nil);
+  SpawnFiber(@GetByNameClientFiber, nil);
+  RunScheduler();
+
+  AssertEquals('GET status', 200, GStatus);
+  AssertEquals('GET body', 'path=/named', GResult);
+  ResetScheduler();
+  GHcHttpServer.Free();
+  GHcHandler := nil;
+end;
+
+{ --- read timeout --- }
+
+var
+  GTimeoutNil: Boolean;
+  GTimeoutMs: Int64;
+
+procedure ReadTimeoutClientFiber(AArg: Pointer);
+var
+  Cli: THttpClient;
+  Resp: THttpClientResponse;
+  T0: Int64;
+begin
+  Cli := THttpClient.Create();
+  Cli.ReadTimeoutMs := 300;
+  T0 := MonotonicNowNs();
+  Resp := Cli.Get('http://127.0.0.1:' + IntToStr(GPort) + '/');
+  GTimeoutMs := (MonotonicNowNs() - T0) div 1000000;
+  GTimeoutNil := Resp = nil;
+  if Resp <> nil then
+    Resp.Free();
+  Cli.Free();
+end;
+
+procedure THttpClientTests.TestClientReadTimeout;
+var
+  L: Int;
+  Port: UInt16;
+begin
+  { A listener nobody accepts on: the handshake completes from the backlog and
+    the request is buffered, but no answer ever comes. }
+  L := TcpListenEphemeral(INADDR_LOOPBACK, 4, Port);
+  AssertTrue('listen', L >= 0);
+  GPort := Port;
+  GTimeoutNil := False;
+  GTimeoutMs := 0;
+
+  SpawnFiber(@ReadTimeoutClientFiber, nil);
+  RunScheduler();
+
+  AssertTrue('no response from a silent server', GTimeoutNil);
+  AssertTrue('gave up after the timeout (' + IntToStr(GTimeoutMs) + ' ms)',
+    (GTimeoutMs >= 250) and (GTimeoutMs < 5000));
+  ResetScheduler();
+  Close(L);
 end;
 
 initialization

@@ -52,6 +52,7 @@ uses
   Pool.Tests,
   Uri.Tests,
   HttpClient.Tests,
+  TcpDial.Tests,
   WebSocketServer.Tests,
   WebSocketClient.Tests,
   Smtp.Tests,

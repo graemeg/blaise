@@ -57,7 +57,7 @@ type
   TOpenSSLHttpTlsDialer = class(THttpTlsDialer)
   public
     function Dial(const AHost: string; APort: UInt16; AVerify: Boolean;
-      const ACaFile: string): IHttpTlsStream; override;
+      const ACaFile: string; AConnectTimeoutMs, AIoTimeoutMs: Int64): IHttpTlsStream; override;
   end;
 
 { ---- THttpTlsStreamAdapter ------------------------------------------------ }
@@ -107,7 +107,8 @@ end;
 { ---- TOpenSSLHttpTlsDialer ------------------------------------------------ }
 
 function TOpenSSLHttpTlsDialer.Dial(const AHost: string; APort: UInt16;
-  AVerify: Boolean; const ACaFile: string): IHttpTlsStream;
+  AVerify: Boolean; const ACaFile: string;
+  AConnectTimeoutMs, AIoTimeoutMs: Int64): IHttpTlsStream;
 var
   Cli: TTlsClient;
   Stream: TTlsStream;
@@ -115,7 +116,8 @@ var
 begin
   Result := nil;
   Cli := TTlsClient.Create();
-  Stream := Cli.Connect(AHost, APort, AHost, AVerify, ACaFile);
+  Stream := Cli.Connect(AHost, APort, AHost, AVerify, ACaFile,
+    AConnectTimeoutMs, AIoTimeoutMs);
   Cli.Free();
   if Stream = nil then
     Exit;

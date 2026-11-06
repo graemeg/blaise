@@ -111,6 +111,14 @@ function _ONonBlock: Int32;      { O_NONBLOCK   = $0004 }
 function _SockNonBlock: Int32;   { SOCK_NONBLOCK = $20000000 (accept4) }
 function _SoNoSigPipe: Int32;    { unused — MSG_NOSIGNAL covers it — 0 }
 
+{ struct addrinfo (getaddrinfo, netdb.h). The four leading Int32 fields and
+  the ai_next pointer sit at the same offsets everywhere; the two middle
+  pointers swap places: the BSDs order it ai_addrlen, ai_canonname, ai_addr.
+  _AddrInfoAddrOffset is the byte offset of ai_addr; _AiAddrConfig is the
+  AI_ADDRCONFIG hint flag. }
+function _AddrInfoAddrOffset: Int32;   { 32 }
+function _AiAddrConfig: Int32;         { AI_ADDRCONFIG = $0400 }
+
 { Fill a 16-byte struct sockaddr_in at P for AF_INET.  APortN/AAddrN are
   ALREADY in network byte order.  FreeBSD layout: sin_len (u8, = 16),
   sin_family (u8, = AF_INET), sin_port (u16), sin_addr (u32), sin_zero[8].
@@ -282,6 +290,8 @@ function _MsgNoSignal: Int32;  begin Result := $20000;    end;
 function _ONonBlock: Int32;    begin Result := $0004;     end;
 function _SockNonBlock: Int32; begin Result := $20000000; end;
 function _SoNoSigPipe: Int32;  begin Result := 0;         end;
+function _AddrInfoAddrOffset: Int32; begin Result := 32; end;
+function _AiAddrConfig: Int32;       begin Result := $0400; end;
 
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 var

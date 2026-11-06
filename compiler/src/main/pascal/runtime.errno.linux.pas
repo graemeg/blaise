@@ -44,6 +44,12 @@ function Interrupted(N: Int64): Boolean;
   cannot succeed until an fd is freed. }
 function FdExhausted(N: Int64): Boolean;
 
+{ True when N is the return value of a non-blocking connect(2) that has not
+  failed but is still completing (EINPROGRESS), or was interrupted by a signal
+  (EINTR -- the connection then also completes asynchronously).  The caller
+  waits for the socket to become writable and reads SO_ERROR. }
+function ConnectPending(N: Int64): Boolean;
+
 { The current thread's errno value.  Returns 0 in the static profile (raw
   syscalls carry the errno in their negative return instead). }
 function GetOsErrno: Int;
@@ -52,6 +58,7 @@ implementation
 
 const
   EINTR = 4;
+  EINPROGRESS = 115;
   EAGAIN = 11;   { EWOULDBLOCK = EAGAIN on Linux }
   EMFILE = 24;   { per-process fd limit reached }
   ENFILE = 23;   { system-wide fd limit reached }
@@ -82,6 +89,12 @@ end;
 function Interrupted(N: Int64): Boolean;
 begin
   Result := (N = -1) and (GetOsErrno() = EINTR);
+end;
+
+function ConnectPending(N: Int64): Boolean;
+begin
+  Result := (N = -1) and
+    ((GetOsErrno() = EINPROGRESS) or (GetOsErrno() = EINTR));
 end;
 
 end.

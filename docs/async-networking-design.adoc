@@ -1321,11 +1321,14 @@ importance. Tackle them one at a time and tick each box when landed and verified
 
 === A. Usability gaps (highest — visible to every consumer)
 
-* [ ] *`Net.Dns` resolver.* Every client protocol currently requires a numeric
-  IPv4 literal — the biggest practical wall for the Indy-class story. Offload
-  `getaddrinfo` on the blocking pool first; an async UDP resolver
-  (`Net.Dns`) as a follow-up so the static/libc-free build has a non-blocking
-  path. (Design: <<l3-fiber-io>> DNS note.)
+* [ ] *`Net.Dns` resolver.* Host names resolve since
+  BUG-20261106-http-client-plain-connect: `Net.Sockets.ResolveHost` calls
+  `getaddrinfo` (IPv4 and IPv6, `AI_ADDRCONFIG`) and `TTcpClient.Connect` tries
+  each address in turn, so every client protocol accepts a name. The lookup is
+  still a *blocking call on the calling thread*: under a scheduler it pins the
+  worker for its duration. Remaining: offload it to the blocking pool, then an
+  async UDP resolver (`Net.Dns`) so the static/libc-free build has a
+  non-blocking path. (Design: <<l3-fiber-io>> DNS note.)
 * [ ] *`ws://` -> `wss://` (TLS WebSocket).* `TWebSocketClient.Connect` rejects
   `wss://` today (needs `Net.Tls`, forces the external linker). Dial a
   `TTlsStream` in place of the `TTcpConn` and reuse the existing framing.

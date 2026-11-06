@@ -28,6 +28,12 @@ function Interrupted(N: Int64): Boolean;
   (EMFILE) or the whole system (ENFILE) is out of file descriptors. }
 function FdExhausted(N: Int64): Boolean;
 
+{ True when N is the return value of a non-blocking connect(2) that has not
+  failed but is still completing (EINPROGRESS), or was interrupted by a signal
+  (EINTR -- the connection then also completes asynchronously).  The caller
+  waits for the socket to become writable and reads SO_ERROR. }
+function ConnectPending(N: Int64): Boolean;
+
 { No errno variable exists in this profile; always 0.  Present so shared code
   binding the symbol links in both profiles. }
 function GetOsErrno: Int;
@@ -36,6 +42,7 @@ implementation
 
 const
   EINTR = 4;
+  EINPROGRESS = 36;
   EAGAIN = 35;   { EWOULDBLOCK = EAGAIN on FreeBSD }
   EMFILE = 24;   { per-process fd limit reached }
   ENFILE = 23;   { system-wide fd limit reached }
@@ -58,6 +65,11 @@ end;
 function GetOsErrno: Int;
 begin
   Result := 0;
+end;
+
+function ConnectPending(N: Int64): Boolean;
+begin
+  Result := (N = -EINPROGRESS) or (N = -EINTR);
 end;
 
 end.

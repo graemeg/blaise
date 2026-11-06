@@ -63,18 +63,23 @@ type
   { Dials outbound TLS connections. }
   TTlsClient = class
   public
-    { Connect to AHostIp:APort over TCP, then complete a client-side TLS
+    { Connect to AHost:APort over TCP, then complete a client-side TLS
       handshake.  ASniHost is the name sent via SNI and matched against the
       certificate (typically the DNS name; for a numeric-IP dial pass the name
       you expect the cert to carry).  AVerify controls peer verification (the
       security default is True).  ACaFile, when non-empty, is a PEM file of extra
       trusted CA certificate(s) added to the trust store before the handshake —
       this lets verify=True succeed against a private/self-signed CA without
-      disabling verification.  Returns a connected TTlsStream (caller owns it)
-      or nil on TCP/handshake failure.  Raises ETlsError if no provider. }
-    function Connect(const AHostIp: string; APort: UInt16;
+      disabling verification.  AConnectTimeoutMs bounds each TCP connection
+      attempt and AIoTimeoutMs each wait on the socket during the handshake and
+      later reads and writes (both in milliseconds; 0 waits indefinitely).
+      Returns a connected TTlsStream (caller owns it) or nil on TCP/handshake
+      failure.  Raises ETlsError if no provider.  AHost may be a DNS name or a
+      numeric IPv4/IPv6 address (see TTcpClient.Connect). }
+    function Connect(const AHost: string; APort: UInt16;
       const ASniHost: string; AVerify: Boolean = True;
-      const ACaFile: string = ''): TTlsStream;
+      const ACaFile: string = ''; AConnectTimeoutMs: Int64 = 0;
+      AIoTimeoutMs: Int64 = 0): TTlsStream;
   end;
 
   { The application supplies this; the TLS server spawns one fiber per accepted
@@ -181,9 +186,10 @@ end;
   TTlsClient
   --------------------------------------------------------------------------- }
 
-function TTlsClient.Connect(const AHostIp: string; APort: UInt16;
+function TTlsClient.Connect(const AHost: string; APort: UInt16;
   const ASniHost: string; AVerify: Boolean = True;
-  const ACaFile: string = ''): TTlsStream;
+  const ACaFile: string = ''; AConnectTimeoutMs: Int64 = 0;
+  AIoTimeoutMs: Int64 = 0): TTlsStream;
 var
   Tcp: TTcpClient;
   Conn: TTcpConn;
@@ -195,7 +201,8 @@ begin
     raise ETlsError.Create('TLS requested but no GTlsProvider is installed ' +
       '(call InstallOpenSSLProvider or set GTlsProvider)');
   Tcp := TTcpClient.Create();
-  Conn := Tcp.Connect(AHostIp, APort);
+  Tcp.ConnectTimeoutMs := AConnectTimeoutMs;
+  Conn := Tcp.Connect(AHost, APort);
   Tcp.Free();
   if Conn = nil then
     Exit;                          { TCP connect failed }
@@ -214,6 +221,7 @@ begin
     Conn.Free();
     Exit;
   end;
+  Tls.IoTimeoutMs := AIoTimeoutMs;
   if not Tls.Handshake() then
   begin
     Tls.Free();

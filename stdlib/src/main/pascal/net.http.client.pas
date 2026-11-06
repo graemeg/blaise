@@ -27,8 +27,11 @@ unit Net.Http.Client;
 //     common browser behaviour) downgrade the follow-up to GET.
 //
 // FIBER-NATIVE: the Read/Write inherited from Net.Tcp/async.io park the calling
-// fiber under a running scheduler and fall back to blocking calls otherwise, so
-// the same client code works in a fiber and in a plain program.
+// fiber under a running scheduler and wait in poll(2) otherwise, so the same
+// client code works in a fiber and in a plain program.  The URL's host may be a
+// name: Net.Tcp resolves it (a blocking lookup -- see Net.Sockets.ResolveHost).
+// ConnectTimeoutMs and ReadTimeoutMs bound the waits; both default to 0, no
+// limit.
 //
 // https: an https URL dials TLS through an installable dialer hook
 // (GHttpTlsDialer) that yields an IHttpTlsStream (Read/Write/Close/Closed).  The
@@ -79,15 +82,18 @@ type
 
   { Installable TLS dialer.  Dial AHost:APort, completing a client TLS handshake
     (SNI = AHost).  AVerify enables peer verification (True by default); ACaFile,
-    when non-empty, pins extra trusted CA cert(s).  Returns a connected stream or
-    nil on failure.  Net.Http.Client.Tls installs a concrete subclass backed by
+    when non-empty, pins extra trusted CA cert(s).  AConnectTimeoutMs bounds
+    each TCP connection attempt and AIoTimeoutMs each wait on the socket, the
+    handshake included (milliseconds; 0 waits indefinitely).  Returns a
+    connected stream or nil on failure.  Net.Http.Client.Tls installs a concrete subclass backed by
     TTlsClient.  (A dialer OBJECT rather than a proc-var: the native backend
     supports method-call-returning-interface into a local, but not a
     proc-var-call-returning-interface — see the workaround note in TakeConn.) }
   THttpTlsDialer = class
   public
     function Dial(const AHost: string; APort: UInt16; AVerify: Boolean;
-      const ACaFile: string): IHttpTlsStream; virtual; abstract;
+      const ACaFile: string; AConnectTimeoutMs, AIoTimeoutMs: Int64): IHttpTlsStream;
+      virtual; abstract;
   end;
 
   { Transport abstraction for the client's read/write path.  A THttpConn owns
@@ -160,6 +166,8 @@ type
     FMaxRedirects: Int;
     FInsecureSkipVerify: Boolean;                  { loud opt-out of TLS verify }
     FTrustCaFile: string;                          { pinned private CA (PEM), or '' }
+    FConnectTimeoutMs: Int64;
+    FReadTimeoutMs: Int64;
     function PoolKey(AUri: TUri): string;
     function TakeConn(AUri: TUri): THttpConn;
     procedure ReturnConn(const AKey: string; AConn: THttpConn);
@@ -192,6 +200,20 @@ type
       set, verify=True can succeed against a private/self-signed CA without
       disabling verification. }
     property TrustCaFile: string read FTrustCaFile write FTrustCaFile;
+
+    { The longest one TCP connection attempt may take, in milliseconds; 0 (the
+      default) leaves it to the operating system, which gives up after a minute
+      or more.  A host name that resolves to several addresses is tried address
+      by address, each with this limit. }
+    property ConnectTimeoutMs: Int64 read FConnectTimeoutMs write FConnectTimeoutMs;
+
+    { The longest the client waits on the connection at any one time once it is
+      open, in milliseconds: for the next bytes of the response, for room to
+      send the request, and for each step of a TLS handshake.  It bounds each
+      wait, not the whole request, so a slow but steady download is not cut
+      off.  0 (the default) waits indefinitely.  When it passes, the request
+      returns nil. }
+    property ReadTimeoutMs: Int64 read FReadTimeoutMs write FReadTimeoutMs;
   end;
 
 { Parse a raw HTTP response (status line + headers + a Content-Length or
@@ -774,7 +796,8 @@ begin
     if GHttpTlsDialer = nil then
       Exit(nil);
     Verify := not FInsecureSkipVerify;
-    Tls := GHttpTlsDialer.Dial(AUri.Host, UInt16(AUri.Port), Verify, FTrustCaFile);
+    Tls := GHttpTlsDialer.Dial(AUri.Host, UInt16(AUri.Port), Verify, FTrustCaFile,
+      FConnectTimeoutMs, FReadTimeoutMs);
     if Tls = nil then
       Exit(nil);
     Result := THttpConn.CreateTls(Tls);
@@ -782,10 +805,13 @@ begin
   end;
 
   Cli := TTcpClient.Create();
+  Cli.ConnectTimeoutMs := FConnectTimeoutMs;
   Tcp := Cli.Connect(AUri.Host, UInt16(AUri.Port));
   Cli.Free();
   if Tcp = nil then
     Exit(nil);
+  Tcp.ReadTimeoutMs := FReadTimeoutMs;
+  Tcp.WriteTimeoutMs := FReadTimeoutMs;
   Result := THttpConn.CreateTcp(Tcp);
 end;
 

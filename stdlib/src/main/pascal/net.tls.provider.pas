@@ -57,6 +57,7 @@ type
     FFd: Int;          { transport socket fd, unretained }
     FClosed: Boolean;
     FServer: Boolean;
+    FIoTimeoutMs: Int64;
     { Drain wbio to the socket (FiberSend all pending ciphertext). }
     function FlushOut: Boolean;
     { Read one chunk of ciphertext from the socket into rbio.  Returns >0 on
@@ -91,6 +92,11 @@ type
 
     property Fd: Int read FFd;
     property Closed: Boolean read FClosed;
+
+    { The longest one wait on the transport may take, in milliseconds, during
+      Handshake, Read and Write; 0 (the default) waits indefinitely.  When it
+      passes, the operation fails as if the peer had closed. }
+    property IoTimeoutMs: Int64 read FIoTimeoutMs write FIoTimeoutMs;
   end;
 
   { A TLS context (wraps an SSL_CTX).  A client context verifies+SNIs by
@@ -316,7 +322,7 @@ begin
       Total := N;
       while Off < Total do
       begin
-        Sent := FiberSend(FFd, P + Off, Total - Off);
+        Sent := FiberSendT(FFd, P + Off, Total - Off, FIoTimeoutMs);
         if Sent <= 0 then
         begin
           Result := False;
@@ -338,7 +344,7 @@ var
 begin
   Buf := GetMem(PUMP_CHUNK);
   try
-    N := FiberRecv(FFd, Buf, PUMP_CHUNK);
+    N := FiberRecvT(FFd, Buf, PUMP_CHUNK, FIoTimeoutMs);
     if N > 0 then
     begin
       { Feed the ciphertext into rbio for OpenSSL to consume. }

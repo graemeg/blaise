@@ -13,16 +13,20 @@ unit Net.Tcp;
 // and exposes ordinary synchronous-looking Read/Write/ReadLine/Close; under a
 // running scheduler each call parks the fiber and resumes it on readiness (via
 // FiberRecv/FiberSend), so a handler written as straight-line blocking code
-// serves at high concurrency.  With NO scheduler running the L3 primitives fall
-// back to true blocking calls, so the same code works in a plain program.
+// serves at high concurrency.  With NO scheduler running the L3 primitives wait
+// in poll(2) instead, so the same code works in a plain program.
 //
-// TTcpClient.Connect dials a numeric IPv4 address (DNS is deferred — a getaddr-
-// info offload is a pinning hazard called out in the design).  TTcpServer runs
+// TTcpClient.Connect dials a host name or a numeric IPv4/IPv6 address.  Names
+// resolve through Net.Sockets.ResolveHost (getaddrinfo), which BLOCKS the
+// calling thread: under a scheduler that pins the worker for the lookup -- the
+// DNS hazard called out in the design, accepted until a non-blocking Net.Dns
+// exists (see ResolveHost).  TTcpServer runs
 // an accept loop that spawns ONE FIBER PER CONNECTION running a supplied
 // handler, the whole point of the C10k/C100k design.
 //
 // NATIVE BACKEND ONLY (async.io -> async.fibers pull in the inline-asm context
-// leaf; the QBE backend rejects it).  Linux epoll for now.
+// leaf; the QBE backend rejects it).  The reactor is epoll on Linux and kqueue
+// on macOS and FreeBSD.
 
 interface
 
@@ -38,6 +42,8 @@ type
     FFd: Int;
     FClosed: Boolean;
     FPending: string;      { bytes read past a line boundary in ReadLine }
+    FReadTimeoutMs: Int64;
+    FWriteTimeoutMs: Int64;
   public
     { Take ownership of an already-connected fd (set non-blocking here). }
     constructor Create(AFd: Int);
@@ -74,15 +80,37 @@ type
 
     property Fd: Int read FFd;
     property Closed: Boolean read FClosed;
+
+    { The longest one Read (or one wait for more bytes inside ReadFull /
+      ReadLine) may wait for data, in milliseconds; 0 (the default) waits
+      indefinitely.  When it passes, the read returns what it has ('' from
+      Read) and the connection counts as closed. }
+    property ReadTimeoutMs: Int64 read FReadTimeoutMs write FReadTimeoutMs;
+    { The longest Write may wait for room in the send buffer, in milliseconds;
+      0 (the default) waits indefinitely.  When it passes, Write returns False
+      and the connection counts as closed. }
+    property WriteTimeoutMs: Int64 read FWriteTimeoutMs write FWriteTimeoutMs;
   end;
 
   { Dials outbound TCP connections. }
   TTcpClient = class
+  private
+    FConnectTimeoutMs: Int64;
   public
-    { Connect to a numeric dotted-quad AHostIp (e.g. '127.0.0.1') on APort.
-      Returns a connected TTcpConn (caller owns it) or nil on failure.  DNS is
-      NOT performed — pass a literal IPv4 address. }
-    function Connect(const AHostIp: string; APort: UInt16): TTcpConn;
+    { Connect to AHost on APort.  AHost is a DNS name, 'localhost', or a
+      numeric IPv4 or IPv6 address (an IPv6 literal may keep its URL brackets).
+      A name is resolved with Net.Sockets.ResolveHost and every address it
+      yields is tried in order until one connects, so a host that offers both
+      IPv6 and IPv4 still connects when one family is unreachable.  Works with
+      or without a running fiber scheduler.  Returns a connected TTcpConn
+      (caller owns it) or nil when the name does not resolve or no address
+      accepts the connection. }
+    function Connect(const AHost: string; APort: UInt16): TTcpConn;
+
+    { The longest one connection attempt may take, in milliseconds; 0 (the
+      default) leaves it to the operating system, which gives up after a minute
+      or more.  The limit applies to each resolved address in turn. }
+    property ConnectTimeoutMs: Int64 read FConnectTimeoutMs write FConnectTimeoutMs;
   end;
 
   { The application supplies this; the server spawns one fiber per accepted
@@ -187,7 +215,7 @@ begin
   if FClosed then
     Exit;
   Buf := GetMem(AMaxBytes);
-  N := FiberRecv(FFd, Buf, AMaxBytes);
+  N := FiberRecvT(FFd, Buf, AMaxBytes, FReadTimeoutMs);
   if N > 0 then
     Result := BytesToString(Buf, Int32(N))
   else
@@ -229,7 +257,7 @@ begin
   P := PChar(AData);
   while Total > 0 do
   begin
-    N := FiberSend(FFd, P, Total);
+    N := FiberSendT(FFd, P, Total, FWriteTimeoutMs);
     if N <= 0 then
     begin
       FClosed := True;
@@ -311,28 +339,26 @@ end;
   TTcpClient
   --------------------------------------------------------------------------- }
 
-function TTcpClient.Connect(const AHostIp: string; APort: UInt16): TTcpConn;
+function TTcpClient.Connect(const AHost: string; APort: UInt16): TTcpConn;
 var
-  Fd, Rc: Int;
-  Ip: UInt32;
-  SA: TSockAddrIn;
+  Addrs: TResolvedAddrs;
+  I, Fd, Rc: Int;
 begin
   Result := nil;
-  if not ParseIPv4(AHostIp, Ip) then
-    Exit;
-  Fd := Socket(AF_INET, SOCK_STREAM, 0);
-  if Fd < 0 then
-    Exit;
-  SuppressSigPipe(Fd);
-  SetNonBlocking(Fd);
-  FillSockAddr(SA, Ip, APort);
-  Rc := FiberConnect(Fd, @SA, 16);
-  if Rc <> 0 then
+  Addrs := ResolveHost(AHost, APort);
+  for I := 0 to Length(Addrs) - 1 do
   begin
-    CloseSocket(Fd);
-    Exit;
+    Fd := Socket(Addrs[I].Family, Addrs[I].SockType, Addrs[I].Protocol);
+    if Fd < 0 then
+      Continue;
+    SuppressSigPipe(Fd);
+    SetNonBlocking(Fd);
+    Rc := FiberConnectT(Fd, PChar(Addrs[I].Addr), Length(Addrs[I].Addr),
+      FConnectTimeoutMs);
+    if Rc = 0 then
+      Exit(TTcpConn.Create(Fd));
+    CloseSocket(Fd);               { refused / unreachable / timed out: next }
   end;
-  Result := TTcpConn.Create(Fd);
 end;
 
 { ---------------------------------------------------------------------------

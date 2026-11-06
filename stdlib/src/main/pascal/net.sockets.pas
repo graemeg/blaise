@@ -20,7 +20,8 @@
       SendAll / RecvString (whole-buffer I/O as Blaise strings),
       MakeNonBlocking, and IgnoreSigPipe.
 
-  IPv4 only, no TLS — suitable for a localhost service or a plain TCP server.
+  The listen/connect helpers are IPv4 only (ResolveHost also returns IPv6
+  addresses, which Net.Tcp's TTcpClient dials); no TLS here.
   Strings are treated as raw bytes for I/O.
 
   --- Why this binds libc (and why that is the normal choice) ---
@@ -153,8 +154,8 @@ function GetSockName(AFd: Int32; AAddr: Pointer; AAddrLen: Pointer): Int32;
 function IPv4(A, B, C, D: Byte): UInt32;
 
 { Parse a dotted-quad string ("127.0.0.1") into a network-order IPv4 address.
-  Returns True on success.  Does not resolve host names (no DNS); pass a
-  literal IP, or use INADDR_ANY / INADDR_LOOPBACK. }
+  Returns True on success.  Does not resolve host names; ResolveHost below
+  does, for IPv4 and IPv6. }
 function ParseIPv4(const AText: string; out AAddr: UInt32): Boolean;
 
 { Fill AAddr for AF_INET with AIp (network order) and APort (HOST order) via
@@ -239,6 +240,42 @@ procedure SuppressSigPipe(AFd: Int);
   the process.  Call once at startup. }
 procedure IgnoreSigPipe;
 
+{ --- name resolution --- }
+
+type
+  { One address a host name resolved to, ready for socket(2) + connect(2):
+    Family/SockType/Protocol are the socket() arguments and Addr holds the raw
+    struct sockaddr bytes (sockaddr_in or sockaddr_in6) with the port set. }
+  TResolvedAddr = record
+    Family: Int32;
+    SockType: Int32;
+    Protocol: Int32;
+    Addr: string;
+  end;
+  TResolvedAddrs = array of TResolvedAddr;
+
+{ Resolve AHost (a DNS name, 'localhost', or a numeric IPv4/IPv6 literal; an
+  IPv6 literal may keep its URL brackets, '[::1]') to the TCP addresses to try
+  for APort, in the system's preferred order (RFC 6724: getaddrinfo sorts
+  them).  IPv6 addresses are returned only when the host has IPv6 configured
+  (AI_ADDRCONFIG).  Returns an empty array when the name does not resolve.
+
+  Uses the C library's getaddrinfo, so /etc/hosts, the system resolver and
+  (on macOS) per-domain resolver settings such as a VPN's all apply.  It is a
+  BLOCKING call: under a fiber scheduler it holds the worker thread for the
+  duration of the lookup, stalling the other fibers on that worker (the DNS
+  pinning hazard of docs/async-networking-design.adoc).  Lookups are normally
+  served from a cache in milliseconds; a cold lookup against a slow resolver
+  can take seconds.  A non-blocking resolver is the planned Net.Dns. }
+function ResolveHost(const AHost: string; APort: UInt16): TResolvedAddrs;
+
+{ Wait until AFd is readable (AForWrite = False) or writable (True), for at
+  most ATimeoutMs milliseconds (<= 0 waits indefinitely).  Uses poll(2) and
+  blocks the calling thread -- the scheduler-free counterpart of parking a
+  fiber.  Returns 1 when ready (a hang-up or error condition also counts:
+  the next call on AFd then reports it), 0 on timeout, negative on error. }
+function WaitFd(AFd: Int; AForWrite: Boolean; ATimeoutMs: Int64): Int;
+
 implementation
 
 uses
@@ -264,6 +301,48 @@ procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 { errno classification (runtime.errno.<profile>), chosen at link time. }
 function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
 function Interrupted(N: Int64): Boolean; external name 'Interrupted';
+
+{ getaddrinfo(3) / freeaddrinfo(3) and the struct addrinfo layout seam. }
+function c_getaddrinfo(ANode, AService: PChar; AHints: Pointer;
+  ARes: Pointer): Int32; external name 'getaddrinfo';
+procedure c_freeaddrinfo(AInfo: Pointer); external name 'freeaddrinfo';
+function _AddrInfoAddrOffset: Int32; external name '_AddrInfoAddrOffset';
+function _AiAddrConfig: Int32; external name '_AiAddrConfig';
+
+{ poll(2) over an array of struct pollfd (fd: Int32; events, revents: Int16). }
+function c_poll(AFds: Pointer; ANFds: Int64; ATimeout: Int32): Int32;
+  external name 'poll';
+
+const
+  AF_UNSPEC = 0;
+  POLLIN    = $0001;
+  POLLOUT   = $0004;
+
+  { struct addrinfo offsets shared by every target (see the layout seam for
+    the one that differs, ai_addr). }
+  AI_FAMILY_OFS   = 4;
+  AI_SOCKTYPE_OFS = 8;
+  AI_PROTOCOL_OFS = 12;
+  AI_ADDRLEN_OFS  = 16;
+  AI_NEXT_OFS     = 40;
+
+type
+  PInt32Val = ^Int32;
+  PPointerVal = ^Pointer;
+  { The getaddrinfo hints: a struct addrinfo whose first four Int32 fields are
+    the only ones set; the rest (to the struct's 48 bytes) must be zero. }
+  TAddrInfoHints = record
+    Flags: Int32;
+    Family: Int32;
+    SockType: Int32;
+    Protocol: Int32;
+    Rest: array[0..31] of Byte;
+  end;
+  TPollFd = record
+    Fd: Int32;
+    Events: Int16;
+    REvents: Int16;
+  end;
 
 function IPv4(A, B, C, D: Byte): UInt32;
 begin
@@ -600,6 +679,78 @@ end;
 procedure IgnoreSigPipe;
 begin
   c_signal(SIGPIPE, Pointer(SIG_IGN));
+end;
+
+
+function ResolveHost(const AHost: string; APort: UInt16): TResolvedAddrs;
+var
+  Host, Svc: string;
+  Hints: TAddrInfoHints;
+  Res, Info, AddrPtr: Pointer;
+  Rc, N, Len: Int;
+  P: PChar;
+begin
+  SetLength(Result, 0);
+  Host := AHost;
+  if (Length(Host) >= 2) and (Host[0] = '[') and (Host[Length(Host) - 1] = ']') then
+    Host := Copy(Host, 1, Length(Host) - 2);
+  if Host = '' then
+    Exit;
+  Svc := IntToStr(APort);
+  Hints.Flags := _AiAddrConfig();
+  Hints.Family := AF_UNSPEC;
+  Hints.SockType := SOCK_STREAM;
+  Res := nil;
+  Rc := c_getaddrinfo(PChar(Host), PChar(Svc), @Hints, @Res);
+  if (Rc <> 0) or (Res = nil) then
+    Exit;
+  N := 0;
+  Info := Res;
+  while Info <> nil do
+  begin
+    P := PChar(Info);
+    Len := PInt32Val(P + AI_ADDRLEN_OFS)^;
+    AddrPtr := PPointerVal(P + _AddrInfoAddrOffset())^;
+    if (AddrPtr <> nil) and (Len > 0) then
+    begin
+      SetLength(Result, N + 1);
+      Result[N].Family := PInt32Val(P + AI_FAMILY_OFS)^;
+      Result[N].SockType := PInt32Val(P + AI_SOCKTYPE_OFS)^;
+      Result[N].Protocol := PInt32Val(P + AI_PROTOCOL_OFS)^;
+      Result[N].Addr := BytesToString(AddrPtr, Len);
+      N := N + 1;
+    end;
+    Info := PPointerVal(P + AI_NEXT_OFS)^;
+  end;
+  c_freeaddrinfo(Res);
+end;
+
+function WaitFd(AFd: Int; AForWrite: Boolean; ATimeoutMs: Int64): Int;
+var
+  Pfd: TPollFd;
+  Tmo: Int32;
+begin
+  Pfd.Fd := AFd;
+  if AForWrite then
+    Pfd.Events := POLLOUT
+  else
+    Pfd.Events := POLLIN;
+  if ATimeoutMs <= 0 then
+    Tmo := -1
+  else if ATimeoutMs > High(Int32) then
+    Tmo := High(Int32)
+  else
+    Tmo := Int32(ATimeoutMs);
+  while True do
+  begin
+    Pfd.REvents := 0;
+    Result := c_poll(@Pfd, 1, Tmo);
+    if (Result < 0) and Interrupted(Result) then
+      Continue;                    { EINTR: wait again }
+    if Result > 0 then
+      Result := 1;
+    Exit;
+  end;
 end;
 
 end.

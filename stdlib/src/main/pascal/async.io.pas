@@ -12,8 +12,8 @@ unit async.io;
 // "blocking that isn't".  Each primitive tries the non-blocking socket op; on a
 // would-block result it registers interest with the reactor (token =
 // CurrentFiberTask), parks, and retries when the reactor resumes it — but if NO
-// scheduler is running (a plain program) it falls back to a true blocking call,
-// so the same source works in both worlds.  EINTR is retried transparently; a
+// scheduler is running (a plain program) it waits in poll(2) instead, so the
+// same source works in both worlds -- and a deadline is honoured in both.  EINTR is retried transparently; a
 // real error or EOF returns the RAW SIGNED count (0 = peer closed) so the caller
 // can disambiguate — unlike RecvString which collapses EOF and error to ''.
 //
@@ -53,9 +53,10 @@ function FiberSendT(AFd: Int; ABuf: Pointer; ALen: Int64; ADeadlineMs: Int64): I
 function FiberAccept(AListenFd: Int): Int;
 function FiberAcceptT(AListenFd: Int; ADeadlineMs: Int64): Int;
 
-{ Connect AFd (must be non-blocking) to AAddr (a TSockAddrIn pointer, ALen
-  bytes).  Returns 0 on success, a negative kernel error, or IO_ETIMEDOUT.
-  Parks on writability then checks SO_ERROR. }
+{ Connect AFd (must be non-blocking) to AAddr (a struct sockaddr pointer --
+  sockaddr_in or sockaddr_in6 -- AAddrLen bytes).  Returns 0 on success, a
+  negative kernel error, or IO_ETIMEDOUT.  Waits for writability (parking the
+  fiber, or in poll(2) with no scheduler) then checks SO_ERROR. }
 function FiberConnect(AFd: Int; AAddr: Pointer; AAddrLen: Int): Int;
 function FiberConnectT(AFd: Int; AAddr: Pointer; AAddrLen: Int; ADeadlineMs: Int64): Int;
 
@@ -75,6 +76,9 @@ function Interrupted(N: Int64): Boolean; external name 'Interrupted';
   Such a call cannot succeed until an fd is freed, so retrying it in a tight
   loop just burns a core — the accept path backs off instead (GH #189). }
 function FdExhausted(N: Int64): Boolean; external name 'FdExhausted';
+{ True when a non-blocking connect returned "still completing" (EINPROGRESS or
+  EINTR) rather than a real failure. }
+function ConnectPending(N: Int64): Boolean; external name 'ConnectPending';
 
 const
   { Back-off between accept retries when the process is out of file descriptors.
@@ -96,6 +100,8 @@ function c_accept(AFd: Int32; AAddr, AAddrLen: Pointer): Int32;
 {$ENDIF}
 function c_getsockopt(AFd, ALevel, AOptName: Int32; AOptVal, AOptLen: Pointer): Int32;
   external name 'getsockopt';
+function c_getpeername(AFd: Int32; AAddr, AAddrLen: Pointer): Int32;
+  external name 'getpeername';
 
 const
   F_GETFL     = 3;
@@ -220,6 +226,18 @@ begin
     Result := True;
 end;
 
+{ Wait for AInterest on AFd, honouring an optional deadline: park the fiber
+  under a running scheduler, otherwise block the thread in poll(2).  Returns
+  True when the fd is ready, False when the deadline passed.  ADeadlineMs <= 0
+  means no deadline.  The fd stays non-blocking either way, so the same socket
+  can later be used under a scheduler. }
+function WaitForIo(AFd: Int; AInterest: TIoInterests; ADeadlineMs: Int64): Boolean;
+begin
+  if CurrentFiberTask() <> nil then
+    Exit(ParkForIo(AFd, AInterest, ADeadlineMs));
+  Result := WaitFd(AFd, ioWrite in AInterest, ADeadlineMs) <> 0;
+end;
+
 { ---------------------------------------------------------------------------
   Primitives
   --------------------------------------------------------------------------- }
@@ -239,16 +257,9 @@ begin
       Continue;                      { EINTR: retry }
     if WouldBlock(N) then
     begin
-      if CurrentFiberTask() <> nil then
-      begin
-        if not ParkForIo(AFd, RdOnly, ADeadlineMs) then
-          Exit(IO_ETIMEDOUT);
-        Continue;                    { woken: retry the recv }
-      end;
-      { No scheduler: true blocking fallback via a blocking read.  Clear
-        O_NONBLOCK so the kernel blocks us. }
-      c_fcntl3(AFd, F_SETFL, c_fcntl3(AFd, F_GETFL, 0) and (not O_NONBLOCK()));
-      Continue;
+      if not WaitForIo(AFd, RdOnly, ADeadlineMs) then
+        Exit(IO_ETIMEDOUT);
+      Continue;                      { ready: retry the recv }
     end;
     Exit(N);                         { real error }
   end;
@@ -274,13 +285,8 @@ begin
       Continue;
     if WouldBlock(N) then
     begin
-      if CurrentFiberTask() <> nil then
-      begin
-        if not ParkForIo(AFd, WrOnly, ADeadlineMs) then
-          Exit(IO_ETIMEDOUT);
-        Continue;
-      end;
-      c_fcntl3(AFd, F_SETFL, c_fcntl3(AFd, F_GETFL, 0) and (not O_NONBLOCK()));
+      if not WaitForIo(AFd, WrOnly, ADeadlineMs) then
+        Exit(IO_ETIMEDOUT);
       Continue;
     end;
     Exit(N);
@@ -307,14 +313,8 @@ begin
       Continue;
     if WouldBlock(Int64(Fd)) then
     begin
-      if CurrentFiberTask() <> nil then
-      begin
-        if not ParkForIo(AListenFd, RdOnly, ADeadlineMs) then
-          Exit(IO_ETIMEDOUT);
-        Continue;
-      end;
-      c_fcntl3(AListenFd, F_SETFL,
-        c_fcntl3(AListenFd, F_GETFL, 0) and (not O_NONBLOCK()));
+      if not WaitForIo(AListenFd, RdOnly, ADeadlineMs) then
+        Exit(IO_ETIMEDOUT);
       Continue;
     end;
     if FdExhausted(Int64(Fd)) then
@@ -345,30 +345,36 @@ function FiberConnectT(AFd: Int; AAddr: Pointer; AAddrLen: Int; ADeadlineMs: Int
 var
   Rc, SoErr, OptLen: Int;
   WrOnly: TIoInterests;
+  Peer: array[0..127] of Byte;
+  PeerLen: Int32;
 begin
   Rc := Connect(AFd, AAddr, AAddrLen);
   if Rc = 0 then
-    Exit(0);                         { connected immediately (loopback) }
-  { EINPROGRESS surfaces as would-block on a non-blocking connect. }
-  if WouldBlock(Int64(Rc)) or (Rc < 0) then
-  begin
-    if CurrentFiberTask() <> nil then
-    begin
-      WrOnly := [ioWrite];
-      if not ParkForIo(AFd, WrOnly, ADeadlineMs) then
-        Exit(IO_ETIMEDOUT);
-      { Writable: check SO_ERROR to learn if the connect succeeded. }
-      SoErr := 0;
-      OptLen := 4;
-      if c_getsockopt(AFd, SOL_SOCKET_(), SO_ERROR_(), @SoErr, @OptLen) <> 0 then
-        Exit(-1);
-      if SoErr = 0 then
-        Exit(0);
-      Exit(-SoErr);
-    end;
+    Exit(0);                         { connected immediately (often loopback) }
+  { Only a connect that is still completing is worth waiting for.  A real
+    failure (ECONNREFUSED, ENETUNREACH, ...) is final: waiting on its socket
+    could report it writable with SO_ERROR already cleared, and the dial would
+    pass for a success. }
+  if not ConnectPending(Int64(Rc)) then
     Exit(Rc);
-  end;
-  Result := Rc;
+  { Writable means the handshake finished, one way or the other.  Off a
+    scheduler this waits in poll(2) -- before, a plain program gave up here on
+    EINPROGRESS (BUG-20261106-http-client-plain-connect). }
+  WrOnly := [ioWrite];
+  if not WaitForIo(AFd, WrOnly, ADeadlineMs) then
+    Exit(IO_ETIMEDOUT);
+  SoErr := 0;
+  OptLen := 4;
+  if c_getsockopt(AFd, SOL_SOCKET_(), SO_ERROR_(), @SoErr, @OptLen) <> 0 then
+    Exit(-1);
+  if SoErr <> 0 then
+    Exit(-SoErr);
+  { SO_ERROR is 0 for a socket that connected, but also once a failure has
+    been collected.  Having a peer address is the proof of a connection. }
+  PeerLen := SizeOf(Peer);
+  if c_getpeername(AFd, @Peer, @PeerLen) <> 0 then
+    Exit(-1);
+  Result := 0;
 end;
 
 function FiberConnect(AFd: Int; AAddr: Pointer; AAddrLen: Int): Int;
