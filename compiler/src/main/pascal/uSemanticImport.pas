@@ -408,6 +408,18 @@ begin
     "undefined symbol: TDerived_Id" at load. }
   if ASig.ResolvedEmitName <> '' then
     ART.AddMethodSym(ASig.Name, ASig.ResolvedEmitName);
+  { Mark the destructor as the from-source path does (uSemantic.
+    AnalyseTypeDecls): a descendant's _FieldCleanup walks Parent for the
+    nearest class with HasDestroyMethod and calls it.  Unmarked, a class
+    imported from a cached interface looked destructor-less, so a
+    descendant without its own Destroy never ran the ancestor's. }
+  if SameText(ASig.Name, 'Destroy') then
+  begin
+    ART.HasDestroyMethod := True;
+    if ((ASig.Params = nil) or (ASig.Params.Count = 0)) and
+       (ART.DestroyResolvedEmitName = '') and (ASig.ResolvedEmitName <> '') then
+      ART.DestroyResolvedEmitName := ASig.ResolvedEmitName;
+  end;
   if ASig.VTableSlot < 0 then Exit;
   if ASig.ResolvedEmitName = '' then Exit;
   ImplName := '$' + ASig.ResolvedEmitName;

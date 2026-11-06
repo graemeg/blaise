@@ -245,6 +245,14 @@ type
       released one (blaise-canvas-ui: every freed popup released the widget
       focused before it opened, and the third freed a combo box in use). }
     procedure TestWarmRebuild_ImportedWeakAndUnretainedFieldsStayNonOwning;
+    { A class with no destructor of its own, whose ancestor (declared in
+      another unit) has one: releasing an instance runs the ancestor's
+      destructor whether that unit was compiled from source or loaded from
+      its cached interface.  The import never marked the ancestor as having
+      a Destroy, so a warm rebuild emitted an empty _FieldCleanup and the
+      destructor silently never ran (a TThread subclass then was never
+      joined). }
+    procedure TestWarmRebuild_InheritedDestructorOfImportedClassRuns;
     { Regression (reported by blaise-canvas-ui): under --no-incremental every
       module is appended to one assembly buffer, and the typeinfo of a generic
       INTERFACE instance (IMap<string, TFoo>, implemented by the dictionary)
@@ -3779,6 +3787,77 @@ begin
   Rc := RunBinary(Dir + '/weakapp2', Captured);
   AssertEquals('warm rebuild: the imported fields still take no reference',
     '1 1' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestWarmRebuild_InheritedDestructorOfImportedClassRuns;
+const
+  BaseSrc =
+    '''
+    unit ubased;
+    interface
+    type
+      TBase = class
+      public
+        constructor Create();
+        destructor Destroy; override;
+      end;
+    implementation
+    constructor TBase.Create();
+    begin
+    end;
+    destructor TBase.Destroy;
+    begin
+      WriteLn('base destroy')
+    end;
+    end.
+    ''';
+  AppSrc =
+    '''
+    program DtorApp;
+    uses ubased;
+    type
+      TSub = class(TBase)
+      end;
+    var
+      S: TSub;
+    begin
+      S := TSub.Create();
+      S := nil;
+      WriteLn('end')
+    end.
+    ''';
+var
+  Dir, CacheDir, AppPas, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir      := FScratch + '/imported_inherited_dtor';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  AppPas   := Dir + '/dtorapp.pas';
+  WriteFile(Dir + '/ubased.pas', BaseSrc);
+  WriteFile(AppPas, AppSrc);
+
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/dtorapp1',
+                   '--unit-cache', CacheDir, '--unit-path', Dir,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
+  AssertEquals('cold build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/dtorapp1', Captured);
+  AssertEquals('cold build', 'base destroy' + #10 + 'end' + #10, Captured);
+
+  { The program now compiles against ubased's cached interface. }
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/dtorapp2',
+                   '--unit-cache', CacheDir, '--unit-path', Dir,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
+  AssertEquals('warm rebuild exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/dtorapp2', Captured);
+  AssertEquals('warm rebuild: the inherited destructor still runs',
+    'base destroy' + #10 + 'end' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestNoIncremental_GenericIntfInstanceInTwoModules_Links;
