@@ -32,6 +32,7 @@ uses
   Base64.Tests,
   Crypto.Tests,
   Compression.Tests,
+  Gzip.Tests,
   Sockets.Tests,
   WebSockets.Tests,
   HttpServer.Tests,
