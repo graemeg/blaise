@@ -220,6 +220,14 @@ type
       with no external tools.  The binary cannot run on the Linux host, so this
       asserts the emitted ELF shape only. }
     procedure TestCompile_FreeBSDTarget_EmitsStaticFreeBSDExe;
+    { A DYNAMIC FreeBSD binary must not import stat, fstat, lstat,
+      getdirentries or kevent from libc.  The linker writes no symbol versions,
+      and rtld binds an unversioned reference to the FIRST version a library
+      defines -- FBSD_1.0, the FreeBSD 11 struct stat / dirent / kevent ABI --
+      while the RTL reads the ino64 layouts of FBSD_1.5.  File sizes then came
+      out as garbage (BUG-20261106-freebsd-dynamic-compat-abi).
+      runtime.start.freebsd defines the five itself over the raw syscalls. }
+    procedure TestCompile_FreeBSDDynamic_ImportsNoCompatAbiSymbols;
     procedure TestCompile_LinuxTarget_ExeHasSymbolTable;
   end;
 
@@ -2793,6 +2801,7 @@ begin
   FoundInterp := False;
   for J := 0 to PhCount - 1 do
   begin
+
     PType := OrdAt(Bytes, PhOff + J * PhEntSz) or
              (OrdAt(Bytes, PhOff + J * PhEntSz + 1) shl 8) or
              (OrdAt(Bytes, PhOff + J * PhEntSz + 2) shl 16) or
@@ -2800,6 +2809,83 @@ begin
     if PType = 3 then FoundInterp := True;
   end;
   AssertFalse('freestanding FreeBSD exe must have no PT_INTERP', FoundInterp);
+end;
+
+{ True when a linked image's .dynsym holds AName as an UNDEFINED symbol, i.e.
+  the binary imports it from a shared library. }
+function DynImports(const ABytes, AName: string): Boolean;
+var
+  ShOff, ShNum, J, E, K, StrOff, NameOff, Ent: Int;
+  SymOff, SymSize: Int64;
+begin
+  Result := False;
+  ShOff := Int32(LeAt(ABytes, 40, 8));
+  ShNum := Int32(LeAt(ABytes, 60, 2));
+  for J := 0 to ShNum - 1 do
+  begin
+    E := ShOff + J * 64;
+    if LeAt(ABytes, E + 4, 4) <> 11 then Continue;   { SHT_DYNSYM }
+    SymOff := LeAt(ABytes, E + 24, 8);
+    SymSize := LeAt(ABytes, E + 32, 8);
+    StrOff := Int32(LeAt(ABytes,
+      ShOff + Int32(LeAt(ABytes, E + 40, 4)) * 64 + 24, 8));
+    for K := 1 to Int32(SymSize div 24) - 1 do
+    begin
+      Ent := Int32(SymOff) + K * 24;
+      NameOff := StrOff + Int32(LeAt(ABytes, Ent, 4));
+      if (Copy(ABytes, NameOff, Length(AName)) = AName) and
+         (OrdAt(ABytes, NameOff + Length(AName)) = 0) and
+         (LeAt(ABytes, Ent + 6, 2) = 0) then
+        Exit(True);
+    end;
+  end;
+end;
+
+procedure TInternalLinkerE2ETests.TestCompile_FreeBSDDynamic_ImportsNoCompatAbiSymbols;
+var
+  SrcFile, OutFile, CompOut, Bytes: string;
+  Rc: Int;
+begin
+  if not Self.CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  FCounter := FCounter + 1;
+  SrcFile := FScratch + 'test_fbsd_dyn_' + IntToStr(FCounter) + '.pas';
+  OutFile := FScratch + 'test_fbsd_dyn_' + IntToStr(FCounter);
+  { FileAge reaches stat, ReadFile fstat, ListDir getdirentries, and the
+    fiber runtime's kqueue reactor kevent. }
+  WriteFile(SrcFile,
+    'program test_fbsd_dyn;' + LineEnding +
+    'uses async.fibers;' + LineEnding +
+    'begin' + LineEnding +
+    '  WriteLn(FileAge(''/etc/hosts''));' + LineEnding +
+    '  WriteLn(Length(ReadFile(''/etc/hosts'')));' + LineEnding +
+    '  WriteLn(Length(ListDir(''/etc'')));' + LineEnding +
+    '  WriteLn(DirectoryExists(''/etc''));' + LineEnding +
+    '  RunScheduler();' + LineEnding +
+    'end.');
+  Rc := Self.RunProc(FCompiler, [
+    '--source', SrcFile,
+    '--unit-path', FRTLPath,
+    '--unit-path', FStdlibPath,
+    '--output', OutFile,
+    '--backend', 'native',
+    '--target', 'freebsd-x86_64',
+    '--dynamic'
+  ], CompOut);
+  if Rc <> 0 then
+    Fail('dynamic freebsd-x86_64 compile failed (rc=' + IntToStr(Rc) + '): ' +
+         CompOut);
+  Bytes := ReadWholeFile(OutFile);
+  { The check below must be able to see imports at all. }
+  AssertTrue('imports __libc_start1 (sanity)', DynImports(Bytes, '__libc_start1'));
+  AssertFalse('stat not imported', DynImports(Bytes, 'stat'));
+  AssertFalse('fstat not imported', DynImports(Bytes, 'fstat'));
+  AssertFalse('lstat not imported', DynImports(Bytes, 'lstat'));
+  AssertFalse('getdirentries not imported', DynImports(Bytes, 'getdirentries'));
+  AssertFalse('kevent not imported', DynImports(Bytes, 'kevent'));
 end;
 
 procedure TInternalLinkerE2ETests.TestCompile_LinuxTarget_ExeHasSymbolTable;

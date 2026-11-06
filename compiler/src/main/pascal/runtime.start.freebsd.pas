@@ -78,10 +78,135 @@ var
 
 procedure _start;
 
+{ The libc calls whose ABI changed in FreeBSD 12 (ino64: struct stat and
+  struct dirent widened; struct kevent gained ext[4]), defined HERE so a
+  dynamic binary never imports them (BUG-20261106-freebsd-dynamic-compat-abi).
+
+  libc exports each twice: the FreeBSD 11 layout as stat@FBSD_1.0 and the
+  current one as stat@@FBSD_1.5.  The internal linker writes no symbol
+  versions, and for an unversioned reference rtld deliberately binds the
+  FIRST version a library defines (pre-versioning binaries must keep
+  working) -- FBSD_1.0, the old layouts.  The RTL reads the ino64 offsets
+  (rtl.platform.layout.freebsd), so sizes, modes and directory names came
+  out as garbage.  Defining the symbols in the executable resolves every
+  reference locally; each one makes the current-ABI syscall itself and
+  reports failure the libc way, -1 with errno set.  The freestanding profile
+  gets the same five from runtime.syscall.freebsd. }
+function stat(Path: PChar; Buf: Pointer): Int32;
+function lstat(Path: PChar; Buf: Pointer): Int32;
+function fstat(Fd: Int32; Buf: Pointer): Int32;
+function getdirentries(Fd: Int32; Buf: Pointer; NBytes: Int64;
+  Basep: Pointer): Int64;
+function kevent(Kq: Int32; ChangeList: Pointer; NChanges: Int32;
+  EventList: Pointer; NEvents: Int32; Timeout: Pointer): Int32;
+
 implementation
 
 type
   PInt64 = ^Int64;
+
+{ ---- current-ABI syscalls ---------------------------------------------------
+  Raw kernel entries: a failure comes back as -errno (the carry flag set by the
+  kernel is folded into the sign), the static profile's convention.  Liberr
+  turns that into libc's. }
+
+const
+  AT_FDCWD = -100;
+  AT_SYMLINK_NOFOLLOW = $200;
+
+function __error: Pointer; external name '__error';
+
+function SysFstatat(Fd: Int64; Path: PChar; Buf: Pointer; Flag: Int64): Int64;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $552, %rax          { SYS_fstatat (ino64) }
+    syscall
+    jae  .Lok_fstatat
+    negq %rax
+.Lok_fstatat:
+    ret
+end;
+
+function SysFstat(Fd: Int64; Buf: Pointer): Int64;
+  assembler; nostackframe;
+asm
+    movq $551, %rax          { SYS_fstat (ino64) }
+    syscall
+    jae  .Lok_fstat
+    negq %rax
+.Lok_fstat:
+    ret
+end;
+
+function SysGetdirentries(Fd: Int64; Buf: Pointer; NBytes: Int64;
+  Basep: Pointer): Int64;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $554, %rax          { SYS_getdirentries (ino64) }
+    syscall
+    jae  .Lok_getdirentries
+    negq %rax
+.Lok_getdirentries:
+    ret
+end;
+
+function SysKevent(Kq: Int64; ChangeList: Pointer; NChanges: Int64;
+  EventList: Pointer; NEvents: Int64; Timeout: Pointer): Int64;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $560, %rax          { SYS_kevent (FreeBSD 12+ struct kevent) }
+    syscall
+    jae  .Lok_kevent
+    negq %rax
+.Lok_kevent:
+    ret
+end;
+
+{ -errno -> -1 with errno set; anything else passes through. }
+function LibcResult(R: Int64): Int64;
+var
+  E: ^Int32;
+begin
+  if R < 0 then
+  begin
+    E := __error();
+    E^ := Int32(-R);
+    Result := -1;
+  end
+  else
+    Result := R;
+end;
+
+function stat(Path: PChar; Buf: Pointer): Int32;
+begin
+  Result := Int32(LibcResult(SysFstatat(AT_FDCWD, Path, Buf, 0)));
+end;
+
+function lstat(Path: PChar; Buf: Pointer): Int32;
+begin
+  Result := Int32(LibcResult(SysFstatat(AT_FDCWD, Path, Buf, AT_SYMLINK_NOFOLLOW)));
+end;
+
+function fstat(Fd: Int32; Buf: Pointer): Int32;
+begin
+  Result := Int32(LibcResult(SysFstat(Fd, Buf)));
+end;
+
+function getdirentries(Fd: Int32; Buf: Pointer; NBytes: Int64;
+  Basep: Pointer): Int64;
+begin
+  Result := LibcResult(SysGetdirentries(Fd, Buf, NBytes, Basep));
+end;
+
+function kevent(Kq: Int32; ChangeList: Pointer; NChanges: Int32;
+  EventList: Pointer; NEvents: Int32; Timeout: Pointer): Int32;
+begin
+  Result := Int32(LibcResult(SysKevent(Kq, ChangeList, NChanges, EventList,
+    NEvents, Timeout)));
+end;
 
 { Tail of the hand-off: place `main` in %r8 (the 5th argument) and enter libc.
   argc/argv/env/cleanup are already in %edi/%rsi/%rdx/%rcx, so nostackframe
