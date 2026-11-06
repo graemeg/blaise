@@ -33,6 +33,7 @@ uses
   Crypto.Tests,
   Compression.Tests,
   Gzip.Tests,
+  Zip.Tests,
   Sockets.Tests,
   WebSockets.Tests,
   HttpServer.Tests,
