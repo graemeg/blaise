@@ -84,6 +84,11 @@ type
     procedure TestRun_ExitFromFunction_ReturnsImmediately;
     procedure TestRun_ChainedRecordField_LoadsInner;
     procedure TestRun_RecordChainArrayAssign;
+    { Statements of three or more chained calls with arguments, after a
+      variable, a field, a plain call, Self and an implicit-Self call, and a
+      field / element store at the end of such a chain
+      (BUG-20261106-three-call-chain-stmt: the third link did not parse). }
+    procedure TestRun_ThreeCallChainStmt;
 
     { Constants }
     procedure TestRun_Const_IntegerConst;
@@ -1180,6 +1185,97 @@ begin
   AssertTrue(CompileAndRun(SrcChainedRecord, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('chained read of zero-initialised field', '0' + LE, Output);
+end;
+
+procedure TE2EMiscTests.TestRun_ThreeCallChainStmt;
+const
+  Src = '''
+    program ch2;
+    type
+      TNode = class
+        FTag: Int;
+        FArr: array[0..2] of Int;
+        FSelf: TNode;
+        function Next(const S: string): TNode;
+        procedure Say(const S: string);
+        procedure Run;
+      end;
+    function TNode.Next(const S: string): TNode;
+    begin
+      WriteLn('next ', S);
+      Result := Self;
+    end;
+    procedure TNode.Say(const S: string);
+    begin
+      WriteLn('say ', S, ' ', FTag, ' ', FArr[1]);
+    end;
+    procedure TNode.Run;
+    begin
+      Next('i1').Next('i2').Next('i3');
+      Self.Next('s1').Next('s2').Next('s3');
+      FSelf.Next('f1').Next('f2').Say('f3');
+    end;
+    function Make(const S: string): TNode;
+    begin
+      WriteLn('make ', S);
+      Result := TNode.Create();
+    end;
+    var
+      N: TNode;
+    begin
+      N := TNode.Create();
+      N.FSelf := TNode.Create();
+      N.Next('a').Next('b');
+      N.Next('a').Next('b').Next('c');
+      N.Next('a').Next('b').Next('c').Say('d');
+      N.Next('x').Next('y').FTag := 7;
+      N.Next('p').Next('q').FArr[1] := 9;
+      N.Next('x').Next('y').Next('z').Say('w');
+      N.FSelf.Next('m').Next('n').Next('o');
+      Make('k').Next('l').Next('m');
+      Make('k').Next('l').Next('m').Say('end');
+      N.Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src,
+    'next a' + LE +
+    'next b' + LE +
+    'next a' + LE +
+    'next b' + LE +
+    'next c' + LE +
+    'next a' + LE +
+    'next b' + LE +
+    'next c' + LE +
+    'say d 0 0' + LE +
+    'next x' + LE +
+    'next y' + LE +
+    'next p' + LE +
+    'next q' + LE +
+    'next x' + LE +
+    'next y' + LE +
+    'next z' + LE +
+    'say w 7 9' + LE +
+    'next m' + LE +
+    'next n' + LE +
+    'next o' + LE +
+    'make k' + LE +
+    'next l' + LE +
+    'next m' + LE +
+    'make k' + LE +
+    'next l' + LE +
+    'next m' + LE +
+    'say end 0 0' + LE +
+    'next i1' + LE +
+    'next i2' + LE +
+    'next i3' + LE +
+    'next s1' + LE +
+    'next s2' + LE +
+    'next s3' + LE +
+    'next f1' + LE +
+    'next f2' + LE +
+    'say f3 0 0' + LE);
 end;
 
 procedure TE2EMiscTests.TestRun_RecordChainArrayAssign;

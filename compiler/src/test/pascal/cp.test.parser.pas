@@ -87,6 +87,11 @@ type
     procedure TestNonUnitQualifier_StaysMethodCall;
     procedure TestUnitQualifierNoTrailingSymbol_StaysFieldWrite;
     procedure TestRecordChainArrayIndexAssign_ParsesAsFieldAssign;
+    { BUG-20261106-three-call-chain-stmt: three or more chained calls with
+      arguments as a statement, after a variable (N.A(x).B(y).C(z);) and
+      after a plain call (F(x).B(y).C(z);).  Two links parsed, the third
+      failed with "Expected 'end' but got '.'". }
+    procedure TestThreeCallChainStmt_ParsesAsMethodCall;
 
     { Statements }
     procedure TestEmptyBeginEnd;
@@ -349,6 +354,35 @@ begin
     Fld := TFieldAssignment(Prog.Block.Stmts.Items[0]);
     AssertEquals('record name kept', 'My', Fld.RecordName);
     AssertEquals('field name kept', 'Pkg', Fld.FieldName);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestThreeCallChainStmt_ParsesAsMethodCall;
+var
+  Prog: TProgram;
+  MC: TMethodCallStmt;
+  I: Int;
+begin
+  Prog := ParseSource(
+    'program P; var N: Int;'
+    + ' begin N.A(1).B(2).C(3); F(1).B(2).C(3).D(4); N.A(1).B(2).C(3).V := 5 end.');
+  try
+    for I := 0 to 1 do
+    begin
+      AssertTrue('a method-call statement',
+        Prog.Block.Stmts.Items[I] is TMethodCallStmt);
+      MC := TMethodCallStmt(Prog.Block.Stmts.Items[I]);
+      AssertTrue('the receiver is the call chain before it',
+        MC.ObjExpr is TMethodCallExpr);
+    end;
+    AssertEquals('last link of the first chain', 'C',
+      TMethodCallStmt(Prog.Block.Stmts.Items[0]).Name);
+    AssertEquals('last link of the second chain', 'D',
+      TMethodCallStmt(Prog.Block.Stmts.Items[1]).Name);
+    AssertTrue('a field assignment through the chain',
+      Prog.Block.Stmts.Items[2] is TFieldAssignment);
   finally
     Prog.Free();
   end;

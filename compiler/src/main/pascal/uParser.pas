@@ -208,6 +208,7 @@ type
     procedure ParseMethodCallArgList(ACall: TMethodCallStmt);
     function  ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Int): TASTStmt;
     function  CallChainStmt(AExpr: TASTExpr; ALine, ACol: Int): TASTStmt;
+    function  MethodCallStmtAsExpr(AMCall: TMethodCallStmt): TMethodCallExpr;
     function  ChainTailStmt(ABase: TASTExpr; const ARootName: string;
       ALine, ACol: Int): TASTStmt;
     function  FoldFieldSubscript(ASub: TStringSubscriptExpr): TASTExpr;
@@ -4097,6 +4098,25 @@ begin
     ACol);
 end;
 
+function TParser.MethodCallStmtAsExpr(AMCall: TMethodCallStmt): TMethodCallExpr;
+{ The expression form of a method call a statement arm has parsed, for when
+  the chain goes on past it (M(x).N(y);): the receiver and arguments move
+  across and AMCall is freed. }
+begin
+  Result := TMethodCallExpr.Create();
+  Result.Line := AMCall.Line;
+  Result.Col := AMCall.Col;
+  Result.ObjectName := AMCall.ObjectName;
+  Result.Name := AMCall.Name;
+  Result.MemberLine := AMCall.MemberLine;
+  Result.MemberCol := AMCall.MemberCol;
+  Result.ObjExpr := AMCall.ObjExpr;
+  AMCall.ObjExpr := nil;
+  while AMCall.Args.Count > 0 do
+    Result.Args.Add(AMCall.Args.Extract(AMCall.Args.Items[0]));
+  AMCall.Free();
+end;
+
 function TParser.CallChainStmt(AExpr: TASTExpr; ALine, ACol: Int): TASTStmt;
 { A statement made of a postfix chain (GetFn()(X); GetFn()(X).Run();): the
   last link must be a call -- a call through the value the chain yields, or
@@ -5122,75 +5142,16 @@ begin
           MCall := nil;
           Exit(Self.ChainTailStmt(MCallExpr, Name, Line, Col));
         end;
-        { Post-method chain: Name.Method(args).Field := value or .Method2(args) }
+        { Post-method chain: Name.Method(args).Field := value, or
+          .Method2(args) -- any number of links (.M2(x).M3(y);), so the rest
+          is the general postfix chain.  This arm used to fold one link and
+          stop: a third call failed with "Expected 'end' but got '.'"
+          (BUG-20261106-three-call-chain-stmt). }
         if Check(tkDot) then
         begin
-          MCallExpr            := TMethodCallExpr.Create();
-          MCallExpr.Line       := Line;
-          MCallExpr.Col        := Col;
-          MCallExpr.ObjectName := MCall.ObjectName;
-          MCallExpr.Name       := MCall.Name;
-          MCallExpr.MemberLine := MCall.MemberLine;
-          MCallExpr.MemberCol := MCall.MemberCol;
-          while MCall.Args.Count > 0 do
-            MCallExpr.Args.Add(MCall.Args.Extract(MCall.Args.Items[0]));
-          MCall.Free();
-          MCall   := nil;
-          CastRcv := MCallExpr;
-          while Check(tkDot) do
-          begin
-            Advance();
-            if not Check(tkIdent) then
-              raise EParseError.Create(Format(
-                'Expected identifier after ''.'' at line %d col %d in %s',
-                [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
-            SecondIdent := FCurrent.Value;
-            SecondLine := FCurrent.Line;
-            SecondCol := FCurrent.Col;
-            Advance();
-            if Check(tkLParen) then
-            begin
-              MCall            := TMethodCallStmt.Create();
-              MCall.Line       := Line;
-              MCall.Col        := Col;
-              MCall.ObjectName := '';
-              MCall.Name       := SecondIdent;
-              MCall.MemberLine := SecondLine;
-              MCall.MemberCol := SecondCol;
-              MCall.ObjExpr    := CastRcv;
-              Advance();
-              if not Check(tkRParen) then
-                ParseMethodCallArgList(MCall);
-              Expect(tkRParen);
-              Exit(MCall);
-            end;
-            FldNode           := TFieldAccessExpr.Create();
-            FldNode.Line      := Line;
-            FldNode.Col       := Col;
-            FldNode.Base      := CastRcv;
-            FldNode.FieldName := SecondIdent;
-            FldNode.MemberLine := SecondLine;
-            FldNode.MemberCol := SecondCol;
-            CastRcv := FldNode;
-          end;
-          if Check(tkAssign) and (CastRcv is TFieldAccessExpr) then
-          begin
-            Advance();
-            FldAssign           := TFieldAssignment.Create();
-            FldAssign.Line      := Line;
-            FldAssign.Col       := Col;
-            FldAssign.FieldName := TFieldAccessExpr(CastRcv).FieldName;
-            FldAssign.MemberLine := TFieldAccessExpr(CastRcv).MemberLine;
-            FldAssign.MemberCol := TFieldAccessExpr(CastRcv).MemberCol;
-            FldAssign.ObjExpr   := TFieldAccessExpr(CastRcv).Base;
-            TFieldAccessExpr(CastRcv).Base := nil;
-            CastRcv.Free();
-            FldAssign.Expr := ParseExpr();
-            Exit(FldAssign);
-          end;
-          raise EParseError.Create(Format(
-            'Expected method call or assignment after chain at line %d col %d in %s',
-            [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+          MCallExpr := Self.MethodCallStmtAsExpr(MCall);
+          MCall := nil;
+          Exit(Self.ChainTailStmt(MCallExpr, Name, Line, Col));
         end;
         Result := MCall;
       end;
@@ -5315,6 +5276,12 @@ begin
             if not Check(tkRParen) then
               ParseMethodCallArgList(MCall);
             Expect(tkRParen);
+            { F(x).M(y).N(z); / F(x).M(y)[I] := V: the chain goes on past
+              this call -- the rest is the general postfix chain
+              (BUG-20261106-three-call-chain-stmt) }
+            if Check(tkDot) or Check(tkLBracket) or Check(tkLParen) then
+              Exit(Self.ChainTailStmt(Self.MethodCallStmtAsExpr(MCall), Name,
+                Line, Col));
             Exit(MCall);
           end;
           FldNode            := TFieldAccessExpr.Create();
