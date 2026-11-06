@@ -54,6 +54,13 @@ type
       function or constructor result (released after the call), Self and a
       var parameter.  arm64 accepted only a plain variable. }
     procedure TestRun_BuiltinMethods_EveryReceiverForm;
+    { A ToString that HIDES the inherited virtual one, called on every
+      receiver form: a local, Self.F, an implicit-Self field and H.F.  The
+      member-access forms called the base vtable slot
+      (BUG-20261106-field-tostring-hiding).  The same object seen through a
+      base-typed field still dispatches virtually, and a class without a
+      ToString of its own still gets the built-in. }
+    procedure TestRun_HidingToString_EveryReceiverForm;
   end;
 
 implementation
@@ -760,6 +767,66 @@ begin
     'True' + LE + 'True B!' + LE + 'True B!' + LE + 'False' + LE +
     'True' + LE + 'True B!' + LE, 0);
   AssertLeakFreeOnAll(Src, 'B!');
+end;
+
+procedure TE2EInheritTests.TestRun_HidingToString_EveryReceiverForm;
+const
+  Src = '''
+    program rs;
+    type
+      TBase = class
+        function ToString: string; override;
+      end;
+      THider = class(TBase)
+        function ToString: string;
+      end;
+      TPlain = class
+      end;
+      THolder = class
+        FObj: THider;
+        FBase: TBase;
+        FPlain: TPlain;
+        function ViaSelf: string;
+        function ViaImplicit: string;
+      end;
+    function TBase.ToString: string;
+    begin
+      Result := 'base';
+    end;
+    function THider.ToString: string;
+    begin
+      Result := 'hider';
+    end;
+    function THolder.ViaSelf: string;
+    begin
+      Result := Self.FObj.ToString();
+    end;
+    function THolder.ViaImplicit: string;
+    begin
+      Result := FObj.ToString();
+    end;
+    var
+      H: THolder;
+      L: THider;
+    begin
+      H := THolder.Create();
+      H.FObj := THider.Create();
+      H.FBase := H.FObj;
+      H.FPlain := TPlain.Create();
+      L := H.FObj;
+      WriteLn('local: ', L.ToString());
+      WriteLn('Self.F: ', H.ViaSelf());
+      WriteLn('implicit: ', H.ViaImplicit());
+      WriteLn('H.FObj: ', H.FObj.ToString());
+      WriteLn('H.FBase: ', H.FBase.ToString());
+      WriteLn('H.FPlain: ', H.FPlain.ToString());
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'local: hider' + LE + 'Self.F: hider' + LE + 'implicit: hider' + LE +
+    'H.FObj: hider' + LE + 'H.FBase: base' + LE + 'H.FPlain: TPlain' + LE, 0);
 end;
 
 initialization

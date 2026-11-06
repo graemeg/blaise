@@ -630,14 +630,9 @@ begin
 end;
 
 function TBitWriter.Finish: string;
-var
-  SB: TStringBuilder;
 begin
   Self.AlignToByte();
-  { Through a local: Self.FOut.ToString() reaches TObject.ToString (a
-    compiler bug with a ToString that hides the inherited one). }
-  SB := Self.FOut;
-  Result := SB.ToString();
+  Result := Self.FOut.ToString();
 end;
 
 { Code lengths, at most ALimit bits, for the ACount symbols with frequencies

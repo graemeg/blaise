@@ -53,6 +53,11 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Inherit_MethodCallOnChild_Resolves;
     procedure TestSemantic_Inherit_UnknownMethod_RaisesError;
+    { BUG-20261106-field-tostring-hiding: a ToString declared on the
+      class -- here a plain method hiding the virtual -- is resolved as that
+      method on a member-access receiver (H.FObj.ToString()), not taken for
+      the built-in vtable-slot call. }
+    procedure TestSemantic_HidingToString_OnFieldReceiver_ResolvesMethod;
 
     { ------------------------------------------------------------------ }
     { 'inherited' keyword                                                  }
@@ -370,6 +375,36 @@ begin
           C.NoSuchMethod()
         end.
         ''');
+end;
+
+procedure TInheritTests.TestSemantic_HidingToString_OnFieldReceiver_ResolvesMethod;
+var
+  Prog: TProgram;
+  MC: TMethodCallExpr;
+begin
+  Prog := AnalyseSrc(
+    '''
+        program P;
+        type
+          THider = class
+            function ToString: string;
+          end;
+          THolder = class
+            FObj: THider;
+          end;
+        function THider.ToString: string; begin Result := 'hider'; end;
+        var H: THolder; S: string;
+        begin
+          S := H.FObj.ToString();
+        end.
+        ''');
+  try
+    MC := TMethodCallExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
+    AssertFalse('not the built-in ToString', MC.IsBuiltinToString);
+    AssertTrue('resolved to THider.ToString', MC.ResolvedMethod <> nil);
+  finally
+    Prog.Free();
+  end;
 end;
 
 { ------------------------------------------------------------------ }

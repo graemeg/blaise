@@ -20510,11 +20510,18 @@ begin
     HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
     for I := 0 to AExpr.Args.Count - 1 do
       Self.AnalyseArgSlot(AExpr.Args, I);
-    { Built-in TObject.ToString: virtual dispatch via vtable slot 1.
-      Only applies to class receivers — record methods named ToString are
-      resolved normally and dispatched statically. }
-    if SameText(AExpr.Name, 'ToString') and (AExpr.Args.Count = 0) and
-       (ObjType.Kind = tyClass) then
+    FMethodOwnerHint := RT.OwningUnit;
+      MDecl := ResolveMethodOverload(RT.Name, AExpr.Name, AExpr.Args,
+        AExpr.Line, AExpr.Col);
+    { Built-in TObject.ToString: virtual dispatch via vtable slot 1, when
+      the class declares no ToString of its own.  A declared one -- an
+      override, or a plain method HIDING the virtual -- resolves like any
+      method, as for a variable receiver: claiming the built-in first sent
+      a hiding ToString through the base slot
+      (BUG-20261106-field-tostring-hiding).  Class receivers only; a record
+      method named ToString is resolved normally. }
+    if (MDecl = nil) and SameText(AExpr.Name, 'ToString') and
+       (AExpr.Args.Count = 0) and (ObjType.Kind = tyClass) then
     begin
       AExpr.ResolvedClassType := RT;
       AExpr.ResolvedMethod    := nil;
@@ -20523,9 +20530,6 @@ begin
       AExpr.ResolvedType := Result;
       Exit;
     end;
-    FMethodOwnerHint := RT.OwningUnit;
-      MDecl := ResolveMethodOverload(RT.Name, AExpr.Name, AExpr.Args,
-        AExpr.Line, AExpr.Col);
     if MDecl = nil then
     begin
       SemanticError(
