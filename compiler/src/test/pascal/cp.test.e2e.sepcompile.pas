@@ -4078,12 +4078,16 @@ begin
   { ualib, whose interface exposes the instance, goes into the cache first }
   Rc := RunBlaise(['--source', Dir + '/alibapp.pas', '--output',
                    Dir + '/alibapp', '--unit-cache', CacheDir,
-                   '--unit-path', Dir], Captured);
+                   '--unit-path', Dir,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                   Captured);
   AssertEquals('library build exit code (out: ' + Captured + ')', 0, Rc);
   { then the alias and an unrelated user of the instance, from source }
   Rc := RunBlaise(['--source', Dir + '/aliasapp.pas', '--output',
                    Dir + '/aliasapp', '--unit-cache', CacheDir,
-                   '--unit-path', Dir], Captured);
+                   '--unit-path', Dir,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                   Captured);
   AssertEquals('the alias does not hide the instance''s methods (out: ' +
     Captured + ')', 0, Rc);
   Rc := RunBinary(Dir + '/aliasapp', Captured);
