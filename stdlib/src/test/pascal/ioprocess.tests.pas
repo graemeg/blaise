@@ -33,6 +33,12 @@ type
     procedure TestLargeOutputOnBothPipes;
     procedure TestReadTimesOut;
     procedure TestRunHelper;
+    { TSubprocess.Environment and the SysUtils environment listing }
+    procedure TestEnvironmentReplacesTheParents;
+    procedure TestEnvironmentStartsAsTheParents;
+    procedure TestEnvironmentPathFindsTheProgram;
+    procedure TestEnvironmentMissingProgramRaises;
+    procedure TestListEnvironment;
   end;
 
 implementation
@@ -165,6 +171,103 @@ begin
   AssertEquals('', Err);
   P.Terminate();
   P.WaitForExit();
+end;
+
+{ Environment, once used, is exactly what the child gets: cleared and
+  given one variable, env prints that one variable alone. }
+procedure TIOProcessTests.TestEnvironmentReplacesTheParents;
+var
+  P: TSubprocess;
+  Out_, Err: string;
+begin
+  P := TSubprocess.Create('/usr/bin/env');
+  P.Environment.Clear();
+  P.Environment['FACET_TEST'] := 'one two';
+  P.Start();
+  P.ReadToEnd(Out_, Err);
+  AssertEquals(0, P.WaitForExit());
+  AssertEquals('FACET_TEST=one two' + #10, Out_);
+end;
+
+{ Its first use copies the parent's environment in, so a child given one
+  extra variable still sees the parent's. }
+procedure TIOProcessTests.TestEnvironmentStartsAsTheParents;
+var
+  P: TSubprocess;
+  Out_, Err: string;
+begin
+  AssertEquals('copied PATH', GetEnvironmentVariable('PATH'),
+    TSubprocess.Create('x').Environment['PATH']);
+  P := Shell('echo "$HOME|$EXTRA"');
+  P.Environment['EXTRA'] := 'added';
+  P.Start();
+  P.ReadToEnd(Out_, Err);
+  AssertEquals(0, P.WaitForExit());
+  AssertEquals(GetEnvironmentVariable('HOME') + '|added' + #10, Out_);
+end;
+
+{ A bare program name is found on the PATH of the child's environment. }
+procedure TIOProcessTests.TestEnvironmentPathFindsTheProgram;
+var
+  P: TSubprocess;
+  Out_, Err: string;
+begin
+  P := TSubprocess.Create('sh');
+  P.Args.Add('-c');
+  P.Args.Add('echo "$X"');
+  P.Environment.Clear();
+  P.Environment['PATH'] := '/nonexistent:/bin:/usr/bin';
+  P.Environment['X'] := 'found';
+  P.Start();
+  P.ReadToEnd(Out_, Err);
+  AssertEquals(0, P.WaitForExit());
+  AssertEquals('found' + #10, Out_);
+end;
+
+{ A program not on that PATH cannot start, as without Environment. }
+procedure TIOProcessTests.TestEnvironmentMissingProgramRaises;
+var
+  P: TSubprocess;
+  Raised: Boolean;
+begin
+  P := TSubprocess.Create('sh');
+  P.Environment.Clear();
+  P.Environment['PATH'] := '/nonexistent';
+  Raised := False;
+  try
+    P.Start();
+  except
+    on E: EProcessStartError do
+      Raised := Pos('No such file', E.Message) >= 0;
+  end;
+  AssertTrue('EProcessStartError, no such file', Raised);
+end;
+
+{ SysUtils lists the start-up environment: every entry is NAME=VALUE and
+  agrees with GetEnvironmentVariable; past the end is ''. }
+procedure TIOProcessTests.TestListEnvironment;
+var
+  I, N, Eq: Int;
+  Entry: string;
+  SawPath: Boolean;
+begin
+  N := GetEnvironmentVariableCount();
+  AssertTrue('some variables', N > 0);
+  SawPath := False;
+  for I := 0 to N - 1 do
+  begin
+    Entry := GetEnvironmentString(I);
+    Eq := Pos('=', Entry);
+    AssertTrue('NAME=VALUE: ' + Entry, Eq > 0);
+    if Copy(Entry, 0, Eq) = 'PATH' then
+    begin
+      SawPath := True;
+      AssertEquals('PATH=' + GetEnvironmentVariable('PATH'), Entry);
+    end;
+  end;
+  AssertTrue('PATH listed', SawPath);
+  AssertEquals('', GetEnvironmentString(N));
+  AssertEquals('', GetEnvironmentString(-1));
 end;
 
 procedure TIOProcessTests.TestRunHelper;

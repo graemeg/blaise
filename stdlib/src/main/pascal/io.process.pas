@@ -33,9 +33,19 @@
     while P.Read(100, Out_, Err) do ...;   // False once both pipes close
     Code := P.WaitForExit();
 
-  The child inherits the parent's environment.  Between fork and exec the
-  child calls only async-signal-safe libc routines on data prepared before
-  the fork, so starting a process from a multi-threaded program is safe. }
+  The child inherits the parent's environment unless Environment is used:
+  its first use fills it with the parent's (start-up) environment, which
+  can then be changed, cleared or replaced, and the child gets exactly
+  what it holds.  A program named without a '/' is then looked up on the
+  PATH in that environment (/usr/bin:/bin when it has none), as
+  'env -i NAME=VALUE ... program' does.
+
+    P.Environment.Clear();
+    P.Environment['HOME'] := Home;
+
+  Between fork and exec the child calls only async-signal-safe libc
+  routines on data prepared before the fork, so starting a process from a
+  multi-threaded program is safe. }
 
 unit IO.Process;
 
@@ -52,11 +62,13 @@ type
     FExecutable: string;
     FArgs: TList<string>;
     FWorkingDirectory: string;
+    FEnvironment: TDictionary<string, string>;
     FPid: Int32;
     FIn, FOut, FErr: Int32;
     FExited: Boolean;
     FExitCode: Int32;
     procedure Reap(AStatus: Int32);
+    function GetEnvironment(): TDictionary<string, string>;
   public
     constructor Create(const AExecutable: string);
     destructor Destroy; override;
@@ -83,6 +95,10 @@ type
     property Executable: string read FExecutable;
     property Args: TList<string> read FArgs;
     property WorkingDirectory: string read FWorkingDirectory write FWorkingDirectory;
+    { The child's environment.  Untouched, the child inherits the parent's;
+      the first use copies the parent's start-up environment in, and from
+      then on the child gets exactly this (see the unit comment). }
+    property Environment: TDictionary<string, string> read GetEnvironment;
     property ExitCode: Int32 read FExitCode;
   end;
 
@@ -102,6 +118,9 @@ const
   SIGKILL = 9;
   SIGTERM = 15;
   SIGPIPE = 13;
+  ENOENT = 2;
+  EACCES = 13;
+  ENOTDIR = 20;
   F_SETFD = 2;
   FD_CLOEXEC = 1;
   POLLIN = 1;
@@ -122,6 +141,7 @@ type
 
 function c_fork(): Int32; external name 'fork';
 function c_execvp(AFile: Pointer; AArgv: Pointer): Int32; external name 'execvp';
+function c_execve(APath: Pointer; AArgv: Pointer; AEnvp: Pointer): Int32; external name 'execve';
 procedure c__exit(ACode: Int32); external name '_exit';
 function c_waitpid(APid: Int32; AStatus: Pointer; AOptions: Int32): Int32; external name 'waitpid';
 function c_pipe(AFds: Pointer): Int32; external name 'pipe';
@@ -208,10 +228,17 @@ begin
 end;
 
 { The child between fork and exec: async-signal-safe calls only, on data
-  prepared by the parent.  Never returns. }
-procedure ChildExec(AStdin, AStdout, AStderr, AStatus: Int32; ACwd, AFile, AArgv: Pointer);
+  prepared by the parent.  Never returns.  With AEnvp nil the child keeps
+  the parent's environment and execvp searches the parent's PATH; otherwise
+  AEnvp is its whole environment and APaths the nil-terminated candidate
+  paths, tried in turn as execvp would: a missing file goes on to the next,
+  a permission error is remembered, anything else stops the search. }
+procedure ChildExec(AStdin, AStdout, AStderr, AStatus: Int32;
+  ACwd, AFile, AArgv, AEnvp, APaths: Pointer);
 var
-  E, R: Int32;
+  E, R, Saved: Int32;
+  I: Int;
+  Cand: Pointer;
 begin
   c_dup2(AStdin, 0);
   c_dup2(AStdout, 1);
@@ -225,10 +252,95 @@ begin
     c_write(AStatus, @E, 4);
     c__exit(127);
   end;
-  R := c_execvp(AFile, AArgv);
-  E := FailureErrno(R);
+  if AEnvp = nil then
+  begin
+    R := c_execvp(AFile, AArgv);
+    E := FailureErrno(R);
+  end
+  else
+  begin
+    Saved := ENOENT;
+    I := 0;
+    while True do
+    begin
+      Cand := PPointer(UInt(APaths) + UInt(I * SizeOf(Pointer)))^;
+      if Cand = nil then
+        Break;
+      R := c_execve(Cand, AArgv, AEnvp);
+      E := FailureErrno(R);
+      if E = EACCES then
+        Saved := EACCES
+      else if (E <> ENOENT) and (E <> ENOTDIR) then
+      begin
+        Saved := E;
+        Break;
+      end;
+      I := I + 1;
+    end;
+    E := Saved;
+  end;
   c_write(AStatus, @E, 4);
   c__exit(127);
+end;
+
+{ A nil-terminated array of C strings, one per item. }
+function CStringArray(AItems: TList<string>): Pointer;
+var
+  I: Int;
+begin
+  Result := GetMem((AItems.Count + 1) * SizeOf(Pointer));
+  for I := 0 to AItems.Count - 1 do
+    PPointer(UInt(Result) + UInt(I * SizeOf(Pointer)))^ := CString(AItems[I]);
+  PPointer(UInt(Result) + UInt(AItems.Count * SizeOf(Pointer)))^ := nil;
+end;
+
+procedure FreeCStringArray(AArr: Pointer);
+var
+  I: Int;
+  P: Pointer;
+begin
+  if AArr = nil then
+    Exit;
+  I := 0;
+  while True do
+  begin
+    P := PPointer(UInt(AArr) + UInt(I * SizeOf(Pointer)))^;
+    if P = nil then
+      Break;
+    FreeMem(P);
+    I := I + 1;
+  end;
+  FreeMem(AArr);
+end;
+
+{ Where the child may find AExecutable under environment AEnv: AExecutable
+  itself when it holds a '/', else each directory of AEnv's PATH
+  (/usr/bin:/bin when it has none; an empty entry is the current
+  directory). }
+function ExecCandidates(const AExecutable: string;
+  AEnv: TDictionary<string, string>): TList<string>;
+var
+  PathVal, Dir: string;
+  Start, I: Int;
+begin
+  Result := TList<string>.Create();
+  if Pos('/', AExecutable) >= 0 then
+  begin
+    Result.Add(AExecutable);
+    Exit;
+  end;
+  if not AEnv.TryGetValue('PATH', PathVal) then
+    PathVal := '/usr/bin:/bin';
+  Start := 0;
+  for I := 0 to Length(PathVal) do
+    if (I = Length(PathVal)) or (PathVal[I] = Ord(':')) then
+    begin
+      Dir := Copy(PathVal, Start, I - Start);
+      if Dir = '' then
+        Dir := '.';
+      Result.Add(Dir + '/' + AExecutable);
+      Start := I + 1;
+    end;
 end;
 
 { ---------------------------------------------------------------------------
@@ -243,6 +355,26 @@ begin
   FIn := -1;
   FOut := -1;
   FErr := -1;
+end;
+
+function TSubprocess.GetEnvironment(): TDictionary<string, string>;
+var
+  I, Eq: Int;
+  Entry: string;
+begin
+  if FEnvironment = nil then
+  begin
+    FEnvironment := TDictionary<string, string>.Create();
+    for I := 0 to GetEnvironmentVariableCount() - 1 do
+    begin
+      Entry := GetEnvironmentString(I);
+      Eq := Pos('=', Entry);
+      if Eq > 0 then
+        FEnvironment.SetItem(Copy(Entry, 0, Eq),
+          Copy(Entry, Eq + 1, Length(Entry) - Eq - 1));
+    end;
+  end;
+  Result := FEnvironment;
 end;
 
 destructor TSubprocess.Destroy;
@@ -260,8 +392,10 @@ end;
 procedure TSubprocess.Start();
 var
   InR, InW, OutR, OutW, ErrR, ErrW, StR, StW: Int32;
-  Argv, FileP, CwdP: Pointer;
+  Argv, FileP, CwdP, Envp, Paths: Pointer;
   I: Int;
+  Items: TList<string>;
+  Key: string;
   Pid, E, Got: Int32;
   N: Int64;
   Reason: string;
@@ -295,10 +429,20 @@ begin
   CwdP := nil;
   if FWorkingDirectory <> '' then
     CwdP := CString(FWorkingDirectory);
+  Envp := nil;
+  Paths := nil;
+  if FEnvironment <> nil then
+  begin
+    Items := TList<string>.Create();
+    for Key in FEnvironment.Keys() do
+      Items.Add(Key + '=' + FEnvironment[Key]);
+    Envp := CStringArray(Items);
+    Paths := CStringArray(ExecCandidates(FExecutable, FEnvironment));
+  end;
 
   Pid := c_fork();
   if Pid = 0 then
-    ChildExec(InR, OutW, ErrW, StW, CwdP, FileP, Argv);
+    ChildExec(InR, OutW, ErrW, StW, CwdP, FileP, Argv, Envp, Paths);
 
   c_close(InR);
   c_close(OutW);
@@ -309,6 +453,8 @@ begin
   FreeMem(Argv);
   if CwdP <> nil then
     FreeMem(CwdP);
+  FreeCStringArray(Envp);
+  FreeCStringArray(Paths);
   if Pid < 0 then
   begin
     c_close(InW);

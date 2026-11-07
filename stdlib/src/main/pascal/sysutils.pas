@@ -119,7 +119,56 @@ function ExpandFileName(const APath: string): string;
   here under that guard. }
 function SameFileName(const S1, S2: string): Boolean;
 
+{ The environment the program was started with, one 'NAME=VALUE' string per
+  variable: GetEnvironmentString(0) .. GetEnvironmentString(Count - 1), and
+  '' for an index out of range.  FPC's names, 0-based as everything in
+  Blaise.  GetEnvironmentVariable reads one variable by name.  Blaise has no
+  setenv, so the start-up environment is the program's environment; a
+  change made through a C binding shows in GetEnvironmentVariable, not
+  here. }
+function GetEnvironmentVariableCount(): Int;
+function GetEnvironmentString(AIndex: Int): string;
+
 implementation
+
+function _EnvVector: Pointer; external name '_EnvVector';
+
+{ Slot AIndex of the environment vector, or nil past its end. }
+function EnvEntry(AIndex: Int): PChar;
+var
+  V: Pointer;
+  I: Int;
+  Slot: ^Pointer;
+begin
+  Result := nil;
+  V := _EnvVector();
+  if (V = nil) or (AIndex < 0) then Exit;
+  for I := 0 to AIndex do
+  begin
+    Slot := Pointer(UInt(V) + UInt(I * SizeOf(Pointer)));
+    if Slot^ = nil then Exit;
+  end;
+  Slot := Pointer(UInt(V) + UInt(AIndex * SizeOf(Pointer)));
+  Result := PChar(Slot^);
+end;
+
+function GetEnvironmentVariableCount(): Int;
+begin
+  Result := 0;
+  while EnvEntry(Result) <> nil do
+    Result := Result + 1;
+end;
+
+function GetEnvironmentString(AIndex: Int): string;
+var
+  P: PChar;
+begin
+  P := EnvEntry(AIndex);
+  if P = nil then
+    Result := ''
+  else
+    Result := string(P);
+end;
 
 constructor Exception.Create(AMessage: string);
 begin

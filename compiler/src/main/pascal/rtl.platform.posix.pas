@@ -239,6 +239,12 @@ function  libc_dup2(OldFd, NewFd: Int32): Int32;       external name 'dup2';
   so it stores directly into module globals rather than delegating. }
 procedure _SetArgs(Argc: Int32; Argv: Pointer);
 function  _ParamCount: Int32;
+{ The environment the program was started with: a nil-terminated array of
+  'NAME=VALUE' C strings.  The kernel lays it out directly after argv's
+  terminating nil on every POSIX target Blaise supports (Linux, FreeBSD,
+  macOS), so it is found from the argv _SetArgs keeps.  nil before
+  _SetArgs.  SysUtils.GetEnvironmentString reads it. }
+function _EnvVector: Pointer;
 function  _ParamStr(Index: Int32): Pointer;
 
 { File operations }
@@ -1365,6 +1371,13 @@ begin
   _BlaisePlatformInit();
   if GRtlPlatform = nil then
     GRtlPlatform := TRtlPlatformPosix.Create();
+end;
+
+function _EnvVector: Pointer;
+begin
+  if Pointer(GArgV) = nil then
+    Exit(nil);
+  Result := Pointer(UInt(Pointer(GArgV)) + UInt((GArgC + 1) * SizeOf(Pointer)));
 end;
 
 function _ParamCount: Int32;
