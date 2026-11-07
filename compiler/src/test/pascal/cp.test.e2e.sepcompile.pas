@@ -259,6 +259,13 @@ type
       every one was "no generic method" once the unit came from the cache
       (BUG-20261106-static-generic-method-call). }
     procedure TestWarmRebuild_GenericMethodsOfImportedTypes;
+    { A type alias of a generic instance (TEnvironment = TDictionary<string,
+      string>) declared in one unit, compiled while a cached unit exposes the
+      same instance: another unit's TryGetValue on the instance was "has no
+      method".  Defining the alias stamped its own unit onto the SHARED
+      instance descriptor, and method resolution then filtered out the
+      instance's methods, which belong to the unit that instantiated it. }
+    procedure TestWarmRebuild_AliasOfGenericInstanceKeepsItsMethods;
     { Regression (reported by blaise-canvas-ui): under --no-incremental every
       module is appended to one assembly buffer, and the typeinfo of a generic
       INTERFACE instance (IMap<string, TFoo>, implemented by the dictionary)
@@ -3972,6 +3979,115 @@ begin
                    '--unit-path', Dir], Captured);
   AssertTrue('a private generic method is rejected (out: ' + Captured + ')',
     (Rc <> 0) and (Pos('not accessible', Captured) >= 0))
+end;
+
+procedure TSepCompileTests.TestWarmRebuild_AliasOfGenericInstanceKeepsItsMethods;
+const
+  LibSrc =
+    '''
+    unit ualib;
+    interface
+    uses Generics.Collections;
+    type
+      TLib = class
+      public
+        Natives: TDictionary<string, string>;
+      end;
+    implementation
+    end.
+    ''';
+  EnvSrc =
+    '''
+    unit uaenv;
+    interface
+    uses Generics.Collections;
+    type
+      TEnvironment = TDictionary<string, string>;
+    implementation
+    end.
+    ''';
+  IconSrc =
+    '''
+    unit uaicon;
+    interface
+    uses Generics.Collections;
+    type
+      TIcons = class
+      private
+        FFiles: TDictionary<string, string>;
+      public
+        constructor Create();
+        function Find(const AKey: string): string;
+      end;
+    implementation
+    constructor TIcons.Create();
+    begin
+      FFiles := TDictionary<string, string>.Create();
+      FFiles.Add('x', 'icon');
+    end;
+    function TIcons.Find(const AKey: string): string;
+    var
+      FileName: string;
+    begin
+      if not FFiles.TryGetValue(AKey, FileName) then
+        Exit('?');
+      Result := FileName;
+    end;
+    end.
+    ''';
+  LibApp =
+    '''
+    program alibapp;
+    uses ualib;
+    begin
+    end.
+    ''';
+  App =
+    '''
+    program aliasapp;
+    uses ualib, uaenv, uaicon;
+    var
+      I: TIcons;
+      E: TEnvironment;
+    begin
+      I := TIcons.Create();
+      E := TEnvironment.Create();
+      E.Add('k', 'v');
+      WriteLn(I.Find('x'), ' ', E['k'])
+    end.
+    ''';
+var
+  Dir, CacheDir, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir      := FScratch + '/alias_generic_instance';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  WriteFile(Dir + '/ualib.pas', LibSrc);
+  WriteFile(Dir + '/uaenv.pas', EnvSrc);
+  WriteFile(Dir + '/uaicon.pas', IconSrc);
+  WriteFile(Dir + '/alibapp.pas', LibApp);
+  WriteFile(Dir + '/aliasapp.pas', App);
+
+  { ualib, whose interface exposes the instance, goes into the cache first }
+  Rc := RunBlaise(['--source', Dir + '/alibapp.pas', '--output',
+                   Dir + '/alibapp', '--unit-cache', CacheDir,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('library build exit code (out: ' + Captured + ')', 0, Rc);
+  { then the alias and an unrelated user of the instance, from source }
+  Rc := RunBlaise(['--source', Dir + '/aliasapp.pas', '--output',
+                   Dir + '/aliasapp', '--unit-cache', CacheDir,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('the alias does not hide the instance''s methods (out: ' +
+    Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/aliasapp', Captured);
+  AssertEquals('runs', 'icon v' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestNoIncremental_GenericIntfInstanceInTwoModules_Links;

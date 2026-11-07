@@ -2757,6 +2757,19 @@ begin
     FScopeStack.Delete(FScopeStack.Count - 1);
 end;
 
+{ True when type symbol ASymbol is an alias: its name is not the name of the
+  descriptor it points at (TEnvironment = TDictionary<string, string>).  The
+  descriptor belongs to the aliased type, and to the unit that declared or
+  instantiated it, never to the alias's unit.  Stamping the alias's unit
+  onto a shared generic instance hid that instance's methods from every
+  other unit: method resolution keeps only the candidates of the type's
+  owning unit ("has no method 'TryGetValue'"). }
+function IsAliasSymbol(ASymbol: TSymbol): Boolean;
+begin
+  Result := (ASymbol.TypeDesc.Name <> '') and
+    not SameText(ASymbol.TypeDesc.Name, ASymbol.Name);
+end;
+
 function TSymbolTable.Define(ASymbol: TSymbol): Boolean;
 var
   DOU: string;
@@ -2775,7 +2788,8 @@ begin
     type's storage symbols by the declaring unit even after a same-named type
     from another used unit wins the flat slot (cross-unit type last-wins). }
   if (ASymbol.Kind = skType) and (ASymbol.TypeDesc <> nil)
-     and (ASymbol.TypeDesc.OwningUnit = '') and (ASymbol.OwningUnit <> '') then
+     and (ASymbol.TypeDesc.OwningUnit = '') and (ASymbol.OwningUnit <> '')
+     and not IsAliasSymbol(ASymbol) then
     ASymbol.TypeDesc.OwningUnit := ASymbol.OwningUnit;
   Result := CurrentScope.Define(ASymbol);
 end;
