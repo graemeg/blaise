@@ -41,6 +41,12 @@ type
     procedure TestRun_Arc_ClassRecordOwnership;
     procedure TestRun_Arc_StringsParamsPointers;
     procedure TestRun_WeakAndUnretained_NonOwning;
+    { Weak references in bulk cost time in proportion to their number: many
+      slots on one target (a tree's children naming their parent) and many
+      targets.  Unregistering a slot scanned its target's whole slot list,
+      and every release walked a chain of a fixed 256-bucket table, so
+      releasing a large tree took seconds. }
+    procedure TestRun_WeakRefs_InBulk_ScaleLinearly;
     { an [Unretained] / [Weak] field written through a CAST receiver
       (TSub(L.Items[0]).F := V) takes no reference: x86-64 retained the new
       value and RELEASED THE OLD one, which the field never owned -- an
@@ -1485,6 +1491,100 @@ begin
     backend.  Native is the arm regression path: the pre-fix AddRef-pin left
     the transient graph unreleased here. }
   AssertLeakFreeOnAll(Src, '7');
+end;
+
+procedure TE2EArcTests.TestRun_WeakRefs_InBulk_ScaleLinearly;
+const
+  Src = '''
+    program WeakBulk;
+    uses SysUtils, Generics.Collections, async.fibers;
+    type
+      TNode = class
+      public
+        [Weak] Parent: TNode;
+      end;
+
+    { N children naming one parent, released before it (each slot
+      unregistered); then N chained, each the target of the next.  The time
+      taken, in nanoseconds. }
+    function Cost(N: Int): Int64;
+    var
+      Root, X, Prev: TNode;
+      L: TList<TNode>;
+      I: Int;
+      T0: Int64;
+    begin
+      T0 := MonotonicNowNs();
+      Root := TNode.Create();
+      L := TList<TNode>.Create();
+      for I := 1 to N do
+      begin
+        X := TNode.Create();
+        X.Parent := Root;
+        L.Add(X);
+      end;
+      X := nil;
+      L := nil;
+      Root := nil;
+      L := TList<TNode>.Create();
+      Prev := nil;
+      for I := 1 to N do
+      begin
+        X := TNode.Create();
+        X.Parent := Prev;
+        L.Add(X);
+        Prev := X;
+      end;
+      X := nil;
+      Prev := nil;
+      L := nil;
+      Result := MonotonicNowNs() - T0;
+    end;
+
+    { The parent released first: every child's slot reads nil. }
+    function Nilled(N: Int): Int;
+    var
+      Root, X: TNode;
+      L: TList<TNode>;
+      I: Int;
+    begin
+      Root := TNode.Create();
+      L := TList<TNode>.Create();
+      for I := 1 to N do
+      begin
+        X := TNode.Create();
+        X.Parent := Root;
+        L.Add(X);
+      end;
+      X := nil;
+      Root := nil;
+      Result := 0;
+      for I := 0 to N - 1 do
+        if L[I].Parent = nil then
+          Result := Result + 1;
+    end;
+
+    var
+      Small, Large: Int64;
+    begin
+      WriteLn('nilled ', Nilled(1000));
+      Cost(2000);
+      Small := Cost(10000);
+      Large := Cost(80000);
+      if Large < 24 * Small then
+        WriteLn('linear')
+      else
+        WriteLn('superlinear: ', Large div (Small + 1), 'x for 8x the references');
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(Src, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', 'nilled 1000' + LE + 'linear' + LE, Output)
 end;
 
 procedure TE2EArcTests.TestRun_WeakAndUnretained_NonOwning;

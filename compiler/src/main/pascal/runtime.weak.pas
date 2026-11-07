@@ -15,11 +15,15 @@
   be freed, every registered weak slot pointing at it is nil'd -- so a
   subsequent dereference sees nil rather than dangling memory.
 
-  Design: one global open-chained hash table, keyed on the user_ptr of
-  the backing object.  Each entry carries a linked list of slot
-  addresses (pointers-to-pointers) that reference it.  Inserts and
-  removals are O(bucket-chain + slot-list) -- acceptable because weak
-  references are rare relative to strong references.
+  Design: two open-chained hash tables that grow with their contents.
+  The entry table is keyed on the user_ptr of the backing object; each
+  entry carries a doubly linked list of the slots (pointers-to-pointers)
+  that reference it.  The slot table is keyed on the slot address, so a
+  slot is found, and unlinked from its entry, in constant time.  Every
+  operation is O(1) on average however many weak references there are,
+  and however many name one target (a tree's children naming their
+  parent): with a fixed table and a slot list scanned on every removal,
+  releasing a large tree took seconds.
 
   Thread safety: a single pthread mutex protects all table mutations.
   The lock is coarse-grained but sufficient because weak references
@@ -59,21 +63,30 @@ procedure _BlaiseInit;
 implementation
 
 const
+  { Initial bucket count of each table; a power of two. }
   WEAK_BUCKETS = 256;
 
 type
+  PWeakEntry = ^TWeakEntry;
   PWeakSlot = ^TWeakSlot;
+
   TWeakSlot = record
     Addr: Pointer;
+    Entry: PWeakEntry;
+    { In the entry's list. }
+    Prev: PWeakSlot;
     Next: PWeakSlot;
+    { In the slot table's chain. }
+    HNext: PWeakSlot;
   end;
+  PPWeakSlot = ^PWeakSlot;
 
-  PWeakEntry = ^TWeakEntry;
   TWeakEntry = record
     Target: Pointer;
     Slots: PWeakSlot;
     Next: PWeakEntry;
   end;
+  PPWeakEntry = ^PWeakEntry;
 
 function _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer); external name '_BlaiseFreeMem';
@@ -85,7 +98,13 @@ function pthread_mutex_unlock(Mutex: Pointer): Int32;
   external name 'pthread_mutex_unlock';
 
 var
-  WeakTable: array[0..255] of PWeakEntry;
+  { Buckets of entries (by target) and of slots (by address). }
+  WeakEntries: Pointer;
+  WeakEntryCap: Int;
+  WeakEntryCount: Int;
+  WeakSlots: Pointer;
+  WeakSlotCap: Int;
+  WeakSlotCount: Int;
   WeakMutex: array[0..7] of Int64;
   WeakMutexReady: Boolean;   { False until WeakMutex has been mutex_init'd }
 
@@ -114,86 +133,220 @@ begin
   EnsureWeakMutex();
 end;
 
-function WeakHash(Ptr: Pointer): Int;
+function WeakHash(Ptr: Pointer; ACap: Int): Int;
+var
+  U: UInt;
 begin
-  Result := Int32((UInt(Ptr) shr 4) and UInt(WEAK_BUCKETS - 1));
+  U := UInt(Ptr) shr 3;
+  U := U xor (U shr 13);
+  Result := Int(U and UInt(ACap - 1));
+end;
+
+{ Count zeroed pointers. }
+function NewBuckets(ACount: Int): Pointer;
+var
+  I: Int;
+  P: ^Pointer;
+begin
+  Result := _BlaiseGetMem(ACount * 8);
+  if Result = nil then
+    Exit;
+  for I := 0 to ACount - 1 do
+  begin
+    P := Result + I * 8;
+    P^ := nil;
+  end;
+end;
+
+function EntryBucket(H: Int): PPWeakEntry;
+begin
+  Result := PPWeakEntry(WeakEntries + H * 8);
+end;
+
+function SlotBucket(H: Int): PPWeakSlot;
+begin
+  Result := PPWeakSlot(WeakSlots + H * 8);
+end;
+
+{ The tables exist and have room for one more of each; False when memory
+  ran out. }
+function WeakReady(): Boolean;
+var
+  Old: Pointer;
+  OldCap, I, H: Int;
+  E, NE: PWeakEntry;
+  S, NS: PWeakSlot;
+  B: Pointer;
+begin
+  Result := False;
+  if WeakEntries = nil then
+  begin
+    WeakEntries := NewBuckets(WEAK_BUCKETS);
+    WeakSlots := NewBuckets(WEAK_BUCKETS);
+    if (WeakEntries = nil) or (WeakSlots = nil) then
+      Exit;
+    WeakEntryCap := WEAK_BUCKETS;
+    WeakSlotCap := WEAK_BUCKETS;
+  end;
+  if WeakEntryCount >= WeakEntryCap then
+  begin
+    B := NewBuckets(WeakEntryCap * 2);
+    if B = nil then
+      Exit;
+    Old := WeakEntries;
+    OldCap := WeakEntryCap;
+    WeakEntries := B;
+    WeakEntryCap := OldCap * 2;
+    for I := 0 to OldCap - 1 do
+    begin
+      E := PPWeakEntry(Old + I * 8)^;
+      while E <> nil do
+      begin
+        NE := E^.Next;
+        H := WeakHash(E^.Target, WeakEntryCap);
+        E^.Next := EntryBucket(H)^;
+        EntryBucket(H)^ := E;
+        E := NE;
+      end;
+    end;
+    _BlaiseFreeMem(Old);
+  end;
+  if WeakSlotCount >= WeakSlotCap then
+  begin
+    B := NewBuckets(WeakSlotCap * 2);
+    if B = nil then
+      Exit;
+    Old := WeakSlots;
+    OldCap := WeakSlotCap;
+    WeakSlots := B;
+    WeakSlotCap := OldCap * 2;
+    for I := 0 to OldCap - 1 do
+    begin
+      S := PPWeakSlot(Old + I * 8)^;
+      while S <> nil do
+      begin
+        NS := S^.HNext;
+        H := WeakHash(S^.Addr, WeakSlotCap);
+        S^.HNext := SlotBucket(H)^;
+        SlotBucket(H)^ := S;
+        S := NS;
+      end;
+    end;
+    _BlaiseFreeMem(Old);
+  end;
+  Result := True;
+end;
+
+function WeakFindEntry(ATarget: Pointer): PWeakEntry;
+begin
+  Result := nil;
+  if WeakEntries = nil then
+    Exit;
+  Result := EntryBucket(WeakHash(ATarget, WeakEntryCap))^;
+  while (Result <> nil) and (Result^.Target <> ATarget) do
+    Result := Result^.Next;
 end;
 
 function WeakFindOrCreate(ATarget: Pointer): PWeakEntry;
 var
   H: Int;
-  E: PWeakEntry;
 begin
-  H := WeakHash(ATarget);
-  E := WeakTable[H];
-  while E <> nil do
+  Result := WeakFindEntry(ATarget);
+  if Result <> nil then
+    Exit;
+  Result := PWeakEntry(_BlaiseGetMem(SizeOf(TWeakEntry)));
+  if Result = nil then
+    Exit;
+  H := WeakHash(ATarget, WeakEntryCap);
+  Result^.Target := ATarget;
+  Result^.Slots := nil;
+  Result^.Next := EntryBucket(H)^;
+  EntryBucket(H)^ := Result;
+  WeakEntryCount := WeakEntryCount + 1;
+end;
+
+{ Unlinks AEntry from its chain and frees it (its slots are gone). }
+procedure WeakDropEntry(AEntry: PWeakEntry);
+var
+  B: PPWeakEntry;
+  Prev, E: PWeakEntry;
+begin
+  B := EntryBucket(WeakHash(AEntry^.Target, WeakEntryCap));
+  Prev := nil;
+  E := B^;
+  while (E <> nil) and (E <> AEntry) do
   begin
-    if E^.Target = ATarget then
-    begin
-      Exit(E);
-    end;
+    Prev := E;
     E := E^.Next;
   end;
-  E := PWeakEntry(_BlaiseGetMem(24));
-  if E = nil then
+  if E = AEntry then
   begin
-    Exit(nil);
+    if Prev = nil then
+      B^ := AEntry^.Next
+    else
+      Prev^.Next := AEntry^.Next;
   end;
-  E^.Target := ATarget;
-  E^.Slots := nil;
-  E^.Next := WeakTable[H];
-  WeakTable[H] := E;
-  Result := E;
+  _BlaiseFreeMem(AEntry);
+  WeakEntryCount := WeakEntryCount - 1;
+end;
+
+{ Unlinks ASlot from the slot table's chain. }
+procedure WeakUnhashSlot(ASlot: PWeakSlot);
+var
+  B: PPWeakSlot;
+  Prev, S: PWeakSlot;
+begin
+  B := SlotBucket(WeakHash(ASlot^.Addr, WeakSlotCap));
+  Prev := nil;
+  S := B^;
+  while (S <> nil) and (S <> ASlot) do
+  begin
+    Prev := S;
+    S := S^.HNext;
+  end;
+  if S = ASlot then
+  begin
+    if Prev = nil then
+      B^ := ASlot^.HNext
+    else
+      Prev^.HNext := ASlot^.HNext;
+  end;
+  WeakSlotCount := WeakSlotCount - 1;
 end;
 
 procedure WeakUnregister(ASlot: Pointer);
 var
-  PP: ^Pointer;
-  CurTarget: Pointer;
-  H: Int;
+  S, P, N: PWeakSlot;
   E: PWeakEntry;
-  Prev: PWeakSlot;
-  Cur: PWeakSlot;
-  Dead: PWeakSlot;
 begin
-  PP := ASlot;
-  CurTarget := PP^;
-  if CurTarget = nil then
+  if WeakSlotCount = 0 then
     Exit;
-  H := WeakHash(CurTarget);
-  E := WeakTable[H];
-  while E <> nil do
-  begin
-    if E^.Target = CurTarget then
-    begin
-      Prev := nil;
-      Cur := E^.Slots;
-      while Cur <> nil do
-      begin
-        if Cur^.Addr = ASlot then
-        begin
-          Dead := Cur;
-          if Prev = nil then
-            E^.Slots := Dead^.Next
-          else
-            Prev^.Next := Dead^.Next;
-          _BlaiseFreeMem(Dead);
-          Exit;
-        end;
-        Prev := Cur;
-        Cur := Cur^.Next;
-      end;
-      Exit;
-    end;
-    E := E^.Next;
-  end;
+  S := SlotBucket(WeakHash(ASlot, WeakSlotCap))^;
+  while (S <> nil) and (S^.Addr <> ASlot) do
+    S := S^.HNext;
+  if S = nil then
+    Exit;
+  E := S^.Entry;
+  P := S^.Prev;
+  N := S^.Next;
+  if P = nil then
+    E^.Slots := N
+  else
+    P^.Next := N;
+  if N <> nil then
+    N^.Prev := P;
+  WeakUnhashSlot(S);
+  _BlaiseFreeMem(S);
+  if E^.Slots = nil then
+    WeakDropEntry(E);
 end;
 
 procedure _WeakAssign(Slot: Pointer; NewTarget: Pointer);
 var
   PP: ^Pointer;
   E: PWeakEntry;
-  S: PWeakSlot;
+  S, First: PWeakSlot;
+  H: Int;
 begin
   if Slot = nil then
     Exit;
@@ -201,23 +354,30 @@ begin
   WeakUnregister(Slot);
   PP := Slot;
   PP^ := NewTarget;
-  if NewTarget <> nil then
+  if (NewTarget <> nil) and WeakReady() then
   begin
     E := WeakFindOrCreate(NewTarget);
-    if E = nil then
+    if E <> nil then
     begin
-      pthread_mutex_unlock(@WeakMutex);
-      Exit;
+      S := PWeakSlot(_BlaiseGetMem(SizeOf(TWeakSlot)));
+      if S <> nil then
+      begin
+        S^.Addr := Slot;
+        S^.Entry := E;
+        S^.Prev := nil;
+        First := E^.Slots;
+        S^.Next := First;
+        if First <> nil then
+          First^.Prev := S;
+        E^.Slots := S;
+        H := WeakHash(Slot, WeakSlotCap);
+        S^.HNext := SlotBucket(H)^;
+        SlotBucket(H)^ := S;
+        WeakSlotCount := WeakSlotCount + 1;
+      end
+      else if E^.Slots = nil then
+        WeakDropEntry(E);
     end;
-    S := PWeakSlot(_BlaiseGetMem(16));
-    if S = nil then
-    begin
-      pthread_mutex_unlock(@WeakMutex);
-      Exit;
-    end;
-    S^.Addr := Slot;
-    S^.Next := E^.Slots;
-    E^.Slots := S;
   end;
   pthread_mutex_unlock(@WeakMutex);
 end;
@@ -237,44 +397,33 @@ end;
 
 procedure _WeakZeroSlots(Target: Pointer);
 var
-  H: Int;
-  Prev: PWeakEntry;
   E: PWeakEntry;
-  Dead: PWeakEntry;
-  S: PWeakSlot;
-  NS: PWeakSlot;
+  S, NS: PWeakSlot;
   PP: ^Pointer;
 begin
   if Target = nil then
     Exit;
   pthread_mutex_lock(@WeakMutex);
-  H := WeakHash(Target);
-  Prev := nil;
-  E := WeakTable[H];
-  while E <> nil do
+  if WeakEntryCount = 0 then
   begin
-    if E^.Target = Target then
+    pthread_mutex_unlock(@WeakMutex);
+    Exit;
+  end;
+  E := WeakFindEntry(Target);
+  if E <> nil then
+  begin
+    S := E^.Slots;
+    while S <> nil do
     begin
-      Dead := E;
-      S := Dead^.Slots;
-      while S <> nil do
-      begin
-        NS := S^.Next;
-        PP := S^.Addr;
-        PP^ := nil;
-        _BlaiseFreeMem(S);
-        S := NS;
-      end;
-      if Prev = nil then
-        WeakTable[H] := Dead^.Next
-      else
-        Prev^.Next := Dead^.Next;
-      _BlaiseFreeMem(Dead);
-      pthread_mutex_unlock(@WeakMutex);
-      Exit;
+      NS := S^.Next;
+      PP := S^.Addr;
+      PP^ := nil;
+      WeakUnhashSlot(S);
+      _BlaiseFreeMem(S);
+      S := NS;
     end;
-    Prev := E;
-    E := E^.Next;
+    E^.Slots := nil;
+    WeakDropEntry(E);
   end;
   pthread_mutex_unlock(@WeakMutex);
 end;
