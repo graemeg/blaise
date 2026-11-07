@@ -3895,10 +3895,12 @@ unambiguous to every reader.
 Every unit that has a `finalization` section and/or ARC-managed
 module-level variables (interface *or* implementation section) exports a
 per-unit teardown procedure, `<Unit>_fini`, emitted in the unit's own
-translation unit.  At program exit — after the program body but before the
-program's own global releases — the runtime startup code calls every
-registered `<Unit>_fini` in *reverse initialization order* (last
-initialised, first finalised).  Inside one unit's teardown the order is:
+translation unit.  At program exit the whole teardown runs in *reverse
+initialization order*: first the program's own globals are released (the
+program body runs after every unit's initialization, so it is the last
+thing initialised), then the startup code calls every registered
+`<Unit>_fini`, last initialised first.  Inside one unit's teardown the
+order is:
 
 1. The unit's user `finalization` statements — they may still read the
    unit's globals.
@@ -3906,8 +3908,7 @@ initialised, first finalised).  Inside one unit's teardown the order is:
    (thread-vars excluded — per-thread lifetime; `[Unretained]` excluded —
    non-owning; `[Weak]` slots are cleared, not released).
 
-The program's own globals are released only after every unit teardown has
-run.
+The program's own globals are released before any unit teardown runs.
 
 === Rationale
 
@@ -3922,10 +3923,20 @@ run.
 * *Finalization before release* — a `finalization` block exists precisely
   to run last-minute code against the unit's state; releasing the globals
   first would hand it dangling references.
-* *Program globals last* — a program-level variable may hold the sole
-  strong reference into an object graph that unit-level `[Unretained]`
-  back-references point into; unit teardown running first keeps those
-  reads valid, and the reference-counting balance is order-independent.
+* *Program globals first* — this is the reverse-initialization rule applied
+  to the program itself, and FPC does the same (checked with FPC 3.2.2: a
+  program-global interface's object is destroyed before the finalization
+  section of the unit it uses runs).  An object a
+  program global holds, such as an application object and the windows and
+  threads it owns, uses the program's units; releasing it first means its
+  destructor, and a thread it stops and joins, still find those units
+  alive.  The order was once the opposite ("program globals last"): a
+  program's `TApplication` was destroyed after the units it used had been
+  finalised, and a thread it owned kept running while a unit freed the
+  table that thread was reading.  The reason given for that order -- a
+  unit's `[Unretained]` reference into an object graph only the program
+  owns -- is a unit depending on its own dependent, which the units cannot
+  name and should not rely on.
 * *No empty teardown* — a unit with neither a `finalization` section nor
   managed globals exports no `<Unit>_fini` and costs no call; binaries do
   not grow.

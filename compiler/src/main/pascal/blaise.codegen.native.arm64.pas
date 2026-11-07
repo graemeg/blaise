@@ -19994,14 +19994,12 @@ begin
     exit, so its copies are released here -- first, as a worker's are while
     every unit is still alive (runtime.mem _ThreadVarsRelease) }
   EmitCallSym('_ThreadVarsRelease');
-  { unit finalization sections, REVERSE dependency order, before the
-    global releases (finalizers may still touch their unit's globals) }
-  for I := FUnitFinals.Count - 1 downto 0 do
-    Self.Emit(Format(#9'bl %s', [FUnitFinals.Strings[I]]));
-  { release string globals before returning (ARC parity with x86-64's
-    program-exit global release).  A unit-owned global is released by its
-    unit's final above, never here (FFiniReleased) -- in a whole-program
-    build the unit's globals share these lists with the program's. }
+  { Then the program's own globals, BEFORE any unit is finalised: teardown
+    is reverse initialisation order and the program body ran after every
+    unit's initialisation (x86-64 parity; language-rationale, "Unit
+    Teardown").  A unit-owned global is released by its unit's final below,
+    never here (FFiniReleased) -- in a whole-program build the unit's
+    globals share these lists with the program's. }
   for I := 0 to FStrGlobals.Count - 1 do
   begin
     if FFiniReleased.IndexOf(FStrGlobals.Strings[I]) >= 0 then Continue;
@@ -20044,6 +20042,10 @@ begin
     Self.Emit(#9'ldr x0, [x0, #8]');
     EmitCallSym('_ClassRelease');
   end;
+  { last, the unit teardowns in REVERSE initialisation order: each runs its
+    finalization section, then releases the unit's managed globals }
+  for I := FUnitFinals.Count - 1 downto 0 do
+    Self.Emit(Format(#9'bl %s', [FUnitFinals.Strings[I]]));
   Self.Emit(#9'movz w0, #0');
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');

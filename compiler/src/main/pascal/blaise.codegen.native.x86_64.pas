@@ -382,7 +382,7 @@ type
     { Names of dependency units that export a <Unit>_fini (user finalization
       section and/or managed globals to release), in AppendUnit /
       NoteDepFiniUnit order.  $main calls <Unit>_fini for each in REVERSE
-      order at main_exit, BEFORE the program's own EmitGlobalReleases —
+      order at main_exit, AFTER the program's own EmitGlobalReleases —
       mirrors FUnitInitNames. }
     FUnitFiniNames: TStringList;
     { Owner-prefixed global names already released by some unit's fini walk.
@@ -27843,19 +27843,21 @@ begin
     end. }
   Self.Emit(FExitLabel + ':');
   FExitLabel := '';
-  { Per-unit teardown first, in REVERSE init order (last initialised, first
-    finalised): each <Unit>_fini runs that unit's user finalization section
-    and releases its managed globals — including implementation-section
-    privates this translation unit cannot even name.  Then the program's own
-    globals are released (a program global may hold a back-reference into a
-    unit global's object graph, so the program-owned references go last). }
-  { The main thread's managed threadvars come first: it ends with exit(), not
-    a thread exit, so its copies are released here, as a worker's are while
-    every unit is still alive (runtime.mem _ThreadVarsRelease). }
+  { Teardown is REVERSE initialisation order (language-rationale, "Unit
+    Teardown").  The main thread's managed threadvars come first: it ends
+    with exit(), not a thread exit, so its copies are released here, as a
+    worker's are while every unit is still alive (runtime.mem
+    _ThreadVarsRelease).  Then the program's own globals: the program body
+    ran after every unit's initialisation, so it is torn down before them,
+    and an object a program global holds (an application, a thread it owns)
+    is destroyed while the units it uses are still alive.  Last, each
+    <Unit>_fini, last initialised first: that unit's finalization section,
+    then the release of its managed globals -- including
+    implementation-section privates this translation unit cannot name. }
   Self.Emit(#9'callq _ThreadVarsRelease');
+  Self.EmitGlobalReleases();
   for I := FUnitFiniNames.Count - 1 downto 0 do
     Self.Emit(#9'callq ' + FUnitFiniNames.Strings[I] + '_fini');
-  Self.EmitGlobalReleases();
   Self.Emit(#9'movl $0, %eax');
   Self.Emit(#9'leave');
   Self.Emit(#9'ret');

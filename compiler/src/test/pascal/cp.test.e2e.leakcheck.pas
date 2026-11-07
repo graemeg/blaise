@@ -364,6 +364,13 @@ type
     { A unit's user `finalization` block must run at exit — before the unit's
       globals are released, so it can still read them. }
     procedure TestDebug_FinalizationSection_RunsBeforeRelease;
+    { The program's own globals are released FIRST at exit, before any unit
+      is finalised: the program body runs after every unit's initialisation,
+      so it is torn down before them (reverse initialisation order, as in
+      FPC).  An object held by a program global -- an
+      application, and a thread it owns -- used to outlive the units it
+      uses, and its destructor read their already-released globals. }
+    procedure TestDebug_ProgramGlobals_ReleasedBeforeUnitFinalization;
     { BUG-20260720-sret-assign-old-fields-leak: repeatedly assigning a record-
       returning call into the SAME destination leaked the destination's OLD
       managed fields (one string per overwrite) on native, because the sret
@@ -3125,6 +3132,44 @@ const
     end.
     ''';
 
+  SrcUnitFiniProgFirstUnit = '''
+    unit UProgFirst;
+    interface
+    type
+      TApp = class
+      public
+        destructor Destroy; override;
+      end;
+    var
+      Table: string;
+    procedure Fill();
+    implementation
+    procedure Fill();
+    begin
+      Table := 'table-' + 'live';
+    end;
+    destructor TApp.Destroy;
+    begin
+      WriteLn('app down sees ', Table);
+      inherited Destroy();
+    end;
+    initialization
+      Fill();
+    finalization
+      WriteLn('unit final');
+    end.
+    ''';
+  SrcUnitFiniProgFirstProg = '''
+    program P;
+    uses UProgFirst;
+    var
+      App: TApp;
+    begin
+      App := TApp.Create();
+      WriteLn('run');
+    end.
+    ''';
+
   SrcUnitFiniFinalUnit = '''
     unit UFinF;
     interface
@@ -3232,6 +3277,23 @@ begin
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
   AssertTrue('finalization ran and saw the global (native), got: ' + Output,
     Pos('final sees fin-live', Output) >= 0);
+  AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ProgramGlobals_ReleasedBeforeUnitFinalization;
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  ExitCode := RunUnitFiniDebug('native', SrcUnitFiniProgFirstUnit, '',
+    SrcUnitFiniProgFirstProg, Output);
+  AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
+  AssertTrue('the program global object sees the unit still alive, got: ' +
+    Output, Pos('app down sees table-live', Output) >= 0);
+  AssertTrue('program global released before the unit is finalised, got: ' +
+    Output, (Pos('unit final', Output) >= 0) and
+    (Pos('app down', Output) < Pos('unit final', Output)));
   AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
 end;
 
