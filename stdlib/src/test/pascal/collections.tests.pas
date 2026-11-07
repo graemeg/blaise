@@ -157,6 +157,12 @@ type
     procedure TestDict_DoubleKeys_HashedLookup;
     procedure TestDict_SingleKeys;
     procedure TestSet_DoubleZeroSignsAreOneMember;
+
+    { --- a lookup never writes: past the hash threshold the index is
+      always live after a write, so concurrent readers are safe --- }
+    procedure TestDict_ReadsNeverRebuildTheIndex;
+    procedure TestOrdDict_ReadsNeverRebuildTheIndex;
+    procedure TestSet_ReadsNeverRebuildTheIndex;
   end;
 
 implementation
@@ -1497,6 +1503,85 @@ begin
   AssertEquals('twenty values and one zero', 21, S.Count);
   AssertTrue('the +0.0 probe finds the -0.0 member', S.Contains(0.0));
   AssertTrue('a hashed member', S.Contains(12.5));
+end;
+
+{ ------------------------------------------------------------------ }
+{ Reads never write: the hash index is kept by the writers            }
+{ ------------------------------------------------------------------ }
+
+{ After Add, Remove (and the compaction Remove may trigger), a collection
+  at or past the hash threshold has its index; a lookup neither builds nor
+  replaces it.  The index used to be dropped by a writer and rebuilt by
+  the next READ, so two threads only reading could race to rebuild it. }
+procedure TCollectionsTests.TestDict_ReadsNeverRebuildTheIndex;
+var
+  D: TDictionary<string, Int>;
+  I, J, V: Int;
+  Slots: Pointer;
+begin
+  D := TDictionary<string, Int>.Create();
+  for I := 0 to 199 do
+  begin
+    D.Add('k' + IntToStr(I), I);
+    if (I mod 7 = 3) and (I > 40) then
+      D.Remove('k' + IntToStr(I - 20));
+    if D.Count >= 16 then
+      AssertTrue('index live after a write at count ' + IntToStr(D.Count),
+        D.FHashCap > 0);
+    Slots := D.FHashSlots;
+    for J := 0 to I do
+      if D.TryGetValue('k' + IntToStr(J), V) then
+        AssertEquals('value of k' + IntToStr(J), J, V);
+    AssertTrue('a lookup changed nothing at count ' + IntToStr(D.Count),
+      D.FHashSlots = Slots);
+  end;
+end;
+
+procedure TCollectionsTests.TestOrdDict_ReadsNeverRebuildTheIndex;
+var
+  D: TOrderedDictionary<string, Int>;
+  I, J, V: Int;
+  Slots: Pointer;
+begin
+  D := TOrderedDictionary<string, Int>.Create();
+  for I := 0 to 199 do
+  begin
+    D.Add('k' + IntToStr(I), I);
+    if (I mod 7 = 3) and (I > 40) then
+      D.Remove('k' + IntToStr(I - 20));
+    if D.Count >= 16 then
+      AssertTrue('index live after a write at count ' + IntToStr(D.Count),
+        D.FHashCap > 0);
+    Slots := D.FHashSlots;
+    for J := 0 to I do
+      if D.TryGetValue('k' + IntToStr(J), V) then
+        AssertEquals('value of k' + IntToStr(J), J, V);
+    AssertTrue('a lookup changed nothing at count ' + IntToStr(D.Count),
+      D.FHashSlots = Slots);
+  end;
+end;
+
+procedure TCollectionsTests.TestSet_ReadsNeverRebuildTheIndex;
+var
+  S: TSet<Int>;
+  I, J: Int;
+  Slots: Pointer;
+begin
+  S := TSet<Int>.Create();
+  for I := 0 to 199 do
+  begin
+    S.Include(I);
+    if (I mod 7 = 3) and (I > 40) then
+      S.Exclude(I - 20);
+    if S.Count >= 16 then
+      AssertTrue('index live after a write at count ' + IntToStr(S.Count),
+        S.FHashCap > 0);
+    Slots := S.FHashSlots;
+    for J := 0 to I do
+      S.Contains(J);
+    AssertTrue('a lookup changed nothing at count ' + IntToStr(S.Count),
+      S.FHashSlots = Slots);
+  end;
 end;
 
 initialization

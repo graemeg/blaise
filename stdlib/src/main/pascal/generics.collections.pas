@@ -124,7 +124,7 @@ type
   end;
 
   { Generic unordered set backed by a dynamic array.  Membership tests use a
-    lazy hash index once the set is large enough (see GCHashOf); small sets
+    hash index once the set is large enough (see GCHashOf); small sets
     keep the linear scan.  Include adds an element only if not already
     present; Exclude removes it. }
   TSet<T> = class
@@ -182,11 +182,14 @@ type
   end;
 
   { Generic dictionary backed by two parallel arrays (insertion-ordered
-    storage).  Key lookup uses a lazy open-addressing hash index once the
+    storage).  Key lookup uses an open-addressing hash index once the
     dictionary is large enough; small dictionaries keep the linear scan.
     Key equality uses the '=' operator on the monomorphized type (content
     equality for string keys); hashing dispatches through the GCHashOf
-    overloads, so a key type needs a matching GCHashOf to instantiate. }
+    overloads, so a key type needs a matching GCHashOf to instantiate.
+    The writers maintain the index, so a lookup never writes: any number
+    of threads may read one concurrently while none writes to it (as
+    TOrderedDictionary and TSet). }
   TDictionary<K, V> = class(IMap<K, V>)
     FKeys:      ^K;
     FValues:    ^V;
@@ -1020,10 +1023,10 @@ var
   Slot:  Int;
   SlotP: ^Int;
 begin
-  if Self.FCount >= GCHashThreshold then
+  { A lookup only reads: the writers keep the index live past the
+    threshold.  Should it be missing, scan instead of building it here. }
+  if (Self.FCount >= GCHashThreshold) and (Self.FHashCap > 0) then
   begin
-    if Self.FHashCap = 0 then
-      Self.HashRebuild();
     Slot := GCHashOf(Value) and (Self.FHashCap - 1);
     while True do
     begin
@@ -1061,13 +1064,16 @@ begin
   Dest        := Self.FData + Self.FCount * SizeOf(T);
   Dest^       := Value;
   Self.FCount := Self.FCount + 1;
+  { The writer keeps the index (see TDictionary.Add). }
   if Self.FHashCap > 0 then
   begin
     if Self.FCount * 2 > Self.FHashCap then
-      Self.HashInvalidate()
+      Self.HashRebuild()
     else
       Self.HashInsertIdx(Self.FCount - 1);
-  end;
+  end
+  else if Self.FCount >= GCHashThreshold then
+    Self.HashRebuild();
 end;
 
 procedure TSet<T>.Exclude(Value: T);
@@ -1094,8 +1100,10 @@ begin
     element; clear it so its managed ref is released (see TList<T>.Delete). }
   Dst  := Self.FData + Self.FCount * SizeOf(T);
   Dst^ := Empty;
-  { Indexes shifted — rebuild lazily on the next lookup. }
-  Self.HashInvalidate()
+  { Indexes shifted: rebuild now, never in a lookup. }
+  Self.HashInvalidate();
+  if Self.FCount >= GCHashThreshold then
+    Self.HashRebuild()
 end;
 
 function TSet<T>.Contains(const Value: T): Boolean;
@@ -1190,7 +1198,7 @@ end;
 
 { Squeeze the tombstones out, keeping the live entries' order: each moves
   down as raw bytes (its references move with it; a tombstone holds none),
-  and the index is rebuilt on the next lookup. }
+  and the index is rebuilt here, by the writer. }
 procedure TDictionary<K, V>.Compact;
 var
   I, J: Int;
@@ -1221,6 +1229,8 @@ begin
   ZeroMem(Self.FDead, Self.FUsed);
   Self.FUsed := J;
   Self.HashInvalidate();
+  if Self.FCount >= GCHashThreshold then
+    Self.HashRebuild();
 end;
 procedure TDictionary<K, V>.HashInvalidate;
 begin
@@ -1330,10 +1340,10 @@ var
   Slot:  Int;
   SlotP: ^Int;
 begin
-  if Self.FCount >= GCHashThreshold then
+  { A lookup only reads: the writers keep the index live past the
+    threshold.  Should it be missing, scan instead of building it here. }
+  if (Self.FCount >= GCHashThreshold) and (Self.FHashCap > 0) then
   begin
-    if Self.FHashCap = 0 then
-      Self.HashRebuild();
     Slot := GCHashOf(Key) and (Self.FHashCap - 1);
     while True do
     begin
@@ -1406,15 +1416,19 @@ begin
     VPtr^ := Value;
     Self.FUsed := Self.FUsed + 1;
     Self.FCount := Self.FCount + 1;
-    { Keep the hash live across appends; past 50% load drop it and let the
-      next lookup rebuild at double size. }
+    { The writer keeps the index: past the threshold it is always live
+      after a write, so a lookup never has to build it (a read that wrote
+      let two threads only reading race to rebuild it).  Past 50% load it
+      is rebuilt at double size. }
     if Self.FHashCap > 0 then
     begin
       if Self.FCount * 2 > Self.FHashCap then
-        Self.HashInvalidate()
+        Self.HashRebuild()
       else
         Self.HashInsertIdx(Self.FUsed - 1);
-    end;
+    end
+    else if Self.FCount >= GCHashThreshold then
+      Self.HashRebuild();
   end
 end;
 
@@ -1680,10 +1694,10 @@ var
   Slot:  Int;
   SlotP: ^Int;
 begin
-  if Self.FCount >= GCHashThreshold then
+  { A lookup only reads: the writers keep the index live past the
+    threshold.  Should it be missing, scan instead of building it here. }
+  if (Self.FCount >= GCHashThreshold) and (Self.FHashCap > 0) then
   begin
-    if Self.FHashCap = 0 then
-      Self.HashRebuild();
     Slot := GCHashOf(Key) and (Self.FHashCap - 1);
     while True do
     begin
@@ -1744,13 +1758,16 @@ begin
     KPtr^ := Key;
     VPtr^ := Value;
     Self.FCount := Self.FCount + 1;
+    { The writer keeps the index (see TDictionary.Add). }
     if Self.FHashCap > 0 then
     begin
       if Self.FCount * 2 > Self.FHashCap then
-        Self.HashInvalidate()
+        Self.HashRebuild()
       else
         Self.HashInsertIdx(Self.FCount - 1);
-    end;
+    end
+    else if Self.FCount >= GCHashThreshold then
+      Self.HashRebuild();
   end
 end;
 
@@ -1812,8 +1829,10 @@ begin
     VDst  := Self.FValues + Self.FCount * SizeOf(V);
     KDst^ := EmptyKey;
     VDst^ := EmptyVal;
-    { Indexes shifted — rebuild lazily on the next lookup. }
-    Self.HashInvalidate()
+    { Indexes shifted: rebuild now, never in a lookup. }
+    Self.HashInvalidate();
+    if Self.FCount >= GCHashThreshold then
+      Self.HashRebuild()
   end
 end;
 
