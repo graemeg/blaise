@@ -641,6 +641,230 @@ the ABI differs throughout.
 
 *Effort.* Large.
 
+== Memory Management — ARC Costs and Memory Safety
+
+ARC gives Blaise deterministic destruction and freedom from use-after-free on
+managed types, without a tracing collector or a borrow checker.  It still has
+four known costs, and a few escape hatches remain where memory safety is not
+checked.  This section records the options for reducing each cost, the parts
+of Rust's compile-time safety model that can be adopted without making Blaise
+less Pascal-like, and a recommended order of implementation.
+
+=== Where things stand today
+
+* *Every refcount change is atomic.*  `runtime.arc.pas` retains and releases
+  strings, dynamic arrays, objects and interfaces with `lock xadd`
+  (`_AtomicAddInt32` / `_AtomicSubInt32`), single-threaded programs included.
+  There is no non-atomic fast path and no thread-escape analysis.
+* *Per-operation tax.*  `_StringRelease` is the hottest RTL function, at about
+  350 million calls per compiler self-compile.  ARC elision exists but is
+  narrow: `blaise.codegen.arcshapes.pas` classifies `const`-string arguments
+  (`camBorrowed` / `camConsume` / `camPin`), and `const` parameters and
+  `array of const` borrow.  Both backends lower directly from the AST, so
+  there is no mid-level IR in which retain/release pairs can be seen and
+  cancelled across statements.
+* *Reference cycles leak.*  `[Weak]` (zeroing) and `[Unretained]` (plain store,
+  may dangle) break cycles; `[Weak Self]` breaks closure cycles.  Weakness is
+  never inferred, so a closure that captures `Self` and is stored in a field of
+  `Self` leaks silently (see `language-rationale.adoc`, "Known limitation:
+  reference cycles").
+* *Cascade frees are synchronous and recursive.*  When `_ClassRelease` sees the
+  count reach zero it runs the field-cleanup procedure, which releases the
+  children, and so on, on the releasing thread.  Dropping the root of a large
+  graph frees every node at that moment, and a very deep chain can use a lot
+  of stack.
+* *The weak table has one global lock.*  `runtime.weak.pas` is a single hash
+  table behind one pthread mutex; heavy cross-thread use of `[Weak]` would
+  serialise on it.
+* *The allocator already bump-allocates.*  `runtime.mem.pas` serves small
+  blocks from per-thread 64 KB arenas, so the usual "tracing GCs allocate
+  faster" argument does not apply; the difference is only in reclamation.
+
+=== Runtime and compiler fixes (no language change)
+
+==== Biased reference counting
+
+*What.*  Record the owning thread in each object.  The owner changes the count
+with plain non-atomic `inc`/`dec`; other threads use an atomic second counter
+(Choi et al., "Biased Reference Counting", PACT 2018).  A cheaper variant is a
+single "shared" header bit that is set when an object becomes reachable from
+another thread (passed to `TThread`, a fiber or a channel, or stored in a
+global); ARC ops test the bit and choose atomic or plain.  The existing
+immortal `-1` count can be extended to "frozen" objects that are immutable and
+immortal once published.
+
+*Why it matters.*  It removes most `lock xadd`s, the largest single ARC cost,
+without any change to source code.
+
+*Notes.*  Fibers migrate between threads on the multicore scheduler, so either
+the owner must be the fiber or migration must mark the count as shared.  The
+allocator already solves the analogous problem with per-arena MPSC remote-free
+queues.  Header layout changes: a stage-2 rebuild is required.
+
+*Effort.*  Medium.
+
+==== Wider ARC elision, then an ownership-aware mid-level IR
+
+*What.*  In increasing order of cost:
+
+. Extend the `arcshapes` analysis from `const` strings to objects, interfaces
+  and dynamic arrays.
+. *Move on last use:* a local that is returned, or stored into a field, on its
+  last use is moved without a retain/release pair.  AST-level liveness covers
+  the common cases.
+. *Borrow (+0) by default* for value parameters of managed types, as Swift
+  adopted in 4.2.  This is an ABI change (bootstrap boundary) but not a source
+  change.
+. *A real MIR* with explicit retain/release instructions, pair cancellation
+  across statements, and Perceus-style reuse (a freed node's memory reused in
+  place for an allocation of the same size).  Prior art: Swift's OSSA/SIL,
+  Lobster's compile-time RC, Koka's Perceus.
+
+*Why it matters.*  It reduces the per-operation tax that limits throughput in
+hot paths.  The MIR also benefits other optimisations the native backend will
+eventually want.
+
+*Effort.*  Steps 1–2 small to medium; step 3 medium; step 4 large
+(multi-month).
+
+==== Finding and collecting cycles
+
+*What.*
+
+* *Compile-time type-graph check.*  Build the graph of strong class-typed
+  fields; if a class can reach itself through strong fields with no `[Weak]`
+  or `[Unretained]` on the path, emit a hint.  Catches the observer and
+  parent/child cases.  BlaiseGuard is a natural home, as is the compiler.
+* *Closure lint.*  Flag a closure that captures `Self` and is stored into a
+  field of `Self` without `[Weak Self]`.
+* *Leak tracker at exit (debug builds).*  Report leaked objects grouped by
+  strongly connected component: "these three objects keep each other alive".
+* *Optional cycle collector.*  Trial deletion (Bacon–Rajan, as in CPython and
+  PHP), skipping classes proven acyclic (no strong field can reach their own
+  type).  Run only on request (`CollectCycles`) or in debug, so destruction
+  stays deterministic by default.
+
+*Why it matters.*  Cycles are the one ARC cost that cannot be engineered away
+without a collector; early detection is cheap and catches most of them.
+
+*Effort.*  Lints small; leak-tracker SCC report small; collector medium.
+
+==== Iterative and bounded cascade frees
+
+*What.*
+
+* *Iterative cleanup:* release children through a thread-local worklist
+  instead of recursion.  Removes the stack-overflow risk on deep lists.
+* *Bounded deferral:* free up to N objects synchronously and queue the rest,
+  draining the queue at allocation or idle points.  Restrict it to objects
+  whose classes have no user destructor, so handle-owning objects still close
+  at the last release.
+* *Regions/arenas* for large transient graphs (an AST, a parse tree): allocate
+  into a region and drop the whole region at the end.  The compiler itself
+  would benefit.
+
+*Why it matters.*  It bounds the latency spike when a large graph is dropped.
+
+*Effort.*  Iterative cleanup small; deferral small to medium; regions medium.
+
+==== Side-table weak references and a safe `[Unowned]`
+
+*What.*  Replace the global mutex-protected weak table with Swift-style side
+tables: an object gets a side-table pointer in its header the first time a
+weak reference to it is taken, and weak reads and writes touch only that
+object.  Add a safe `[Unowned]` alongside `[Unretained]`: keep a strong count
+and an unowned count; destroy the object when the strong count reaches zero
+but keep its memory until the unowned count does, so access to a dead object
+traps instead of reading freed memory.
+
+*Why it matters.*  Removes the global lock and the hash lookup, and closes the
+dangling-pointer hole in `[Unretained]` for a few cycles per access.
+
+*Notes.*  Layout-changing (header field); stage-2 rebuild.  `[Unowned]` is a
+new attribute and needs `language-rationale.adoc` and `grammar.ebnf` updates
+if adopted.
+
+*Effort.*  Medium.
+
+=== Rust-style compile-time safety: what fits and what does not
+
+==== Why a full borrow checker does not fit
+
+Rust's model rests on single ownership, "shared references or one mutable
+reference, but not both", and lifetimes checked across function boundaries.
+Object Pascal's class model is built on shared mutable aliasing: `Owner` /
+`Parent` back-pointers in component trees, `TNotifyEvent` method pointers that
+hold `Self`, observer lists, and collections that hand out references callers
+then modify.  fpGUI, the LCL and VCL-style designs all depend on it; Rust GUI
+libraries spent years working around exactly this (`Rc<RefCell<>>`, ECS,
+immediate-mode UIs).  A borrow-checked class model would need lifetime
+annotations, `Option` in place of `nil`, and probably traits in place of
+inheritance plus `virtual` — a new language with Pascal syntax, and a redesign
+of every class library.
+
+ARC already gives Blaise the main thing the borrow checker buys Rust: no
+use-after-free on heap objects.  The remaining gaps are cycles, data races,
+aliasing bugs and the unsafe escape hatches, and each has a fix that keeps the
+class model.
+
+==== Pascal already has second-class references
+
+`var` and `const` parameters borrow for exactly the duration of a call and
+cannot be stored.  This is the core idea of Hylo (formerly Val), "mutable
+value semantics", which reaches Rust-level safety *without lifetime
+annotations*: references that cannot escape need nothing annotated.  Blaise
+records are already value types.  The Swift / Hylo line of design matches
+Blaise much better than Rust's does.
+
+==== Retrofits that keep Blaise Pascal-like
+
+. *Exclusivity checks on `var`* (Swift's "law of exclusivity").  Reject
+  passing the same variable to two `var` parameters, or a global the callee
+  also reaches.  Static where possible, a debug-mode dynamic check otherwise.
+  No new syntax.
+. *`unsafe` marking.*  Pointer arithmetic, `PChar` casts, `[Unretained]`,
+  `Move` and raw `@` become errors outside an `unsafe` block or a `{$unsafe}`
+  unit.  The compiler and RTL opt in; application code stays in an auditable
+  safe subset.  The cheapest large safety gain.
+. *Move-only records and `sink` parameters.*  A record marked e.g. `[NoCopy]`
+  (`TFile`, a mutex guard, a socket) plus a parameter mode that takes
+  ownership: RAII with zero ARC cost and checked single ownership.  Swift
+  added exactly this to an ARC language (`~Copyable`, `consuming`,
+  `borrowing`) without breaking existing code.  The closest Blaise can get to
+  Rust ownership while staying Pascal.
+. *Checking what crosses threads* (a `Send`/`Sync` analogue).  Mark classes
+  `[ThreadSafe]` or `[Immutable]` and check what is passed to `TThread`,
+  fibers and channels.  This also tells biased RC exactly where to set the
+  shared bit.  Swift 6 strict concurrency is the precedent and the warning:
+  correct, but painful to adopt.  Introduce it as warnings, opt in per unit,
+  and make it the default only later.
+. *Optional non-nil class references* (`TFoo` vs `TFoo?`).  Worthwhile, but
+  `nil` is so common in Pascal code and the RTL that it is the most disruptive
+  item here.  Deferred.
+
+Each adopted item is a language decision and must be recorded in
+`language-rationale.adoc` (and `grammar.ebnf` for any new syntax) when it is
+implemented.
+
+=== Recommended order of implementation
+
+. *Iterative cascade cleanup and side-table weak references* — small, and
+  invisible to user code.
+. *Biased or shared-bit reference counting* — the largest throughput win; also
+  invisible to user code.
+. *Cycle and closure lints* (compiler hints and/or BlaiseGuard rules), plus
+  the leak tracker's SCC report.
+. *`unsafe` marking and `var` exclusivity checks.*
+. *Move-only records with `sink` parameters.*
+. *The ownership-aware MIR with ARC optimisation* (preceded by the cheaper
+  `arcshapes` extension and last-use moves, which can land at any point).
+. *Checking what crosses threads* — the first item that adds a genuinely new
+  rule; opt-in, warnings first.
+
+Steps 1–6 do not make Blaise less Pascal-like.  Optional non-nil references
+and an opt-in cycle collector remain open, to be prioritised once the items
+above are in place.
+
 == Concurrency
 
 === Threading and modern concurrency models
