@@ -30,9 +30,12 @@
     Each gets its own mmap region with a 24-byte header.  Freed large
     blocks are cached on a LIFO freelist for O(1) reuse.  The cache
     holds up to LARGE_CACHE_MAX entries; excess blocks are munmap-ed
-    immediately.  Large reallocs allocate a new region, copy, and free
-    the old one.  All mmap sizes are rounded up to page granularity
-    (4 KB) for better cache hit rates.
+    immediately.  A large realloc that fits the existing mapping resizes
+    in place; one that must move allocates a new region with geometric
+    headroom (half again the old size), copies, and frees the old one,
+    so a run of small grows moves the block O(log n) times.  All mmap
+    sizes are rounded up to page granularity (4 KB) for better cache hit
+    rates.
 
   All returned pointers are 8-byte aligned.
 
@@ -1115,7 +1118,7 @@ var
   OldSize, CopySize: Int64;
   Hdr: PBlockHeader;
   LHdr: PLargeHeader;
-  OldMapped, NewMapped: Int64;
+  OldMapped, NewMapped, Reserve: Int64;
 begin
   if Ptr = nil then
   begin
@@ -1141,15 +1144,31 @@ begin
     LHdr := PLargeHeader(Pointer(UInt(Ptr) - LARGE_HEADER));
     OldMapped := LHdr^.TotalMapped;
     NewMapped := PageRound(Int64(LARGE_HEADER) + Int64(NewSize));
-    if NewMapped = OldMapped then
+    { Fits the mapping -- a grow into the headroom below, or a shrink that
+      keeps at least half of it: resize in place.  A deeper shrink falls
+      through and copies, so the surplus pages go back. }
+    if (NewMapped <= OldMapped) and (NewMapped * 2 >= OldMapped) then
     begin
       LHdr^.AllocSize := NewSize;
       Exit(Ptr);
     end;
     { Fall through to the alloc-copy-free path below. }
   end;
-  Result := _BlaiseGetMem(NewSize);
+  { A grow that must move reserves geometric headroom (half again the old
+    size) once the block is large, so repeated small grows -- an append
+    loop on a dynamic array -- move the block O(log n) times rather than
+    on every call.  AllocSize still records exactly NewSize. }
+  Reserve := NewSize;
+  if (NewSize > OldSize) and (NewSize > LARGE_THRESHOLD) and
+     (Reserve < OldSize + OldSize div 2) then
+    Reserve := OldSize + OldSize div 2;
+  Result := _BlaiseGetMem(Reserve);
   if Result = nil then Exit;
+  if Reserve <> NewSize then
+  begin
+    LHdr := PLargeHeader(Pointer(UInt(Result) - LARGE_HEADER));
+    LHdr^.AllocSize := NewSize;
+  end;
   if OldSize < NewSize then
     CopySize := OldSize
   else

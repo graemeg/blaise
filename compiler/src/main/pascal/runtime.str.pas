@@ -1520,6 +1520,41 @@ begin
     Exit(nil);
   end;
   DataSz  := DA_HDR_SIZE + NewLen * ElemSize;
+  { Uniquely owned: resize the block in place.  The allocator keeps
+    geometric headroom on a large block, so an append loop
+    (SetLength(A, Length(A) + N) then fill the tail) is amortised O(n) --
+    it used to allocate, zero and copy the whole array on every call,
+    which made such a loop quadratic.  Only the elements the shrink cuts
+    off are released, and only the grown tail is zeroed: realloc leaves
+    stale bytes there. }
+  if Ptr <> nil then
+  begin
+    RC := Ptr + DA_RC_OFS;
+    if RC^ = 1 then
+    begin
+      OldLen := _DynArrayLength(Ptr);
+      if (Hook <> nil) and (OldLen > NewLen) then
+      begin
+        H := TDynElemHook(Hook);
+        H(Ptr + NewLen * ElemSize, OldLen - NewLen, 0);
+      end;
+      NewBase := _BlaiseReallocMem(Ptr - DA_HDR_SIZE, DataSz);
+      NewData := PChar(NewBase) + DA_HDR_SIZE;
+      if Pointer(NewData) <> Ptr then
+      begin
+        _LeakTrackDynArray(Ptr, 0);
+        _LeakTrackDynArray(NewData, 1);
+      end;
+      HookSlot  := Pointer(NewData) + DA_HOOK_OFS;
+      HookSlot^ := Hook;
+      LenPtr    := Pointer(NewData) + DA_LEN_OFS;
+      LenPtr^   := NewLen;
+      if NewLen > OldLen then
+        _libc_memset(NewData + OldLen * ElemSize, 0,
+          (NewLen - OldLen) * ElemSize);
+      Exit(NewData);
+    end;
+  end;
   NewBase := _BlaiseGetMem(DataSz);
   NewData := PChar(NewBase) + DA_HDR_SIZE;
   HookSlot  := Pointer(NewData) + DA_HOOK_OFS;

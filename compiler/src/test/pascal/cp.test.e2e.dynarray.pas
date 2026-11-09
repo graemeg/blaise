@@ -129,6 +129,19 @@ type
       scope: a program's own Concat / Insert, and an implicit-Self Insert
       method, keep winning (FPC-compatibility units declare their own) }
     procedure TestRun_UserConcatAndInsert_Win;
+    { SetLength on a uniquely owned array grows it in place with geometric
+      headroom, so an append loop is amortised O(n): the data pointer moves
+      only a handful of times, not on every append (it used to move -- a
+      fresh mapping, zeroed and copied -- on every call, which made an
+      append loop quadratic; Schmitty2005/morse PR 2) }
+    procedure TestRun_SetLength_AppendLoop_GrowsInPlace;
+    { growing a SHARED array still copies: the other holder keeps its old
+      contents and length, the grown copy has the old elements and a zeroed
+      tail }
+    procedure TestRun_SetLength_SharedGrow_CopiesOnWrite;
+    { a shrink followed by a grow in place exposes zeroed elements, never the
+      stale values the shrink cut off -- unmanaged and managed elements }
+    procedure TestRun_SetLength_ShrinkThenGrow_TailIsZeroed;
   end;
 
 implementation
@@ -1726,6 +1739,113 @@ begin
     'user insert 7' + LE +
     'user xy' + LE +
     'method insert 6' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_SetLength_AppendLoop_GrowsInPlace;
+const
+  Src = '''
+    program Prg;
+    type
+      TSamples = array of Int16;
+    var
+      A, Chunk: TSamples;
+      I, J, OldLen, Moves: Int64;
+      Last: Pointer;
+      Sum: Int64;
+    begin
+      SetLength(Chunk, 1000);
+      for I := 0 to High(Chunk) do
+        Chunk[I] := Int16(I mod 7);
+      Moves := 0;
+      Last := nil;
+      for J := 1 to 4000 do
+      begin
+        OldLen := Length(A);
+        SetLength(A, OldLen + Length(Chunk));
+        if Pointer(@A[0]) <> Last then
+        begin
+          Inc(Moves);
+          Last := @A[0];
+        end;
+        for I := 0 to High(Chunk) do
+          A[OldLen + I] := Chunk[I];
+      end;
+      Sum := 0;
+      for I := 0 to High(A) do
+        Sum := Sum + A[I];
+      WriteLn(Length(A), ' ', Sum);
+      WriteLn('few moves ', Moves < 100);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { 4000 chunks of 0..6 repeating over 1000 elements: each chunk sums to
+    2997 (142 full 0..6 cycles = 2982, plus 0..5 = 15) }
+  AssertRunsOnAll(Src, '4000000 11988000' + LE + 'few moves True' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_SetLength_SharedGrow_CopiesOnWrite;
+const
+  Src = '''
+    program Prg;
+    type
+      TInts = array of Int32;
+    var
+      A, B: TInts;
+      I: Int32;
+    begin
+      SetLength(A, 3000);
+      for I := 0 to High(A) do
+        A[I] := I + 1;
+      B := A;
+      SetLength(A, 6000);
+      A[0] := -1;
+      WriteLn(Length(B), ' ', B[0], ' ', B[2999]);
+      WriteLn(Length(A), ' ', A[0], ' ', A[2999], ' ', A[3000], ' ', A[5999]);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '3000 1 3000' + LE +
+    '6000 -1 3000 0 0' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_SetLength_ShrinkThenGrow_TailIsZeroed;
+const
+  Src = '''
+    program Prg;
+    type
+      TInts = array of Int32;
+      TStrs = array of string;
+    var
+      A: TInts;
+      S: TStrs;
+      I: Int32;
+    begin
+      SetLength(A, 5000);
+      for I := 0 to High(A) do
+        A[I] := 7;
+      SetLength(A, 10);
+      SetLength(A, 5000);
+      WriteLn(A[9], ' ', A[10], ' ', A[4999]);
+      SetLength(A, 5);
+      SetLength(A, 9);
+      WriteLn(A[4], ' ', A[5], ' ', A[8]);
+      SetLength(S, 600);
+      for I := 0 to High(S) do
+        S[I] := 'v' + IntToStr(I);
+      SetLength(S, 2);
+      SetLength(S, 600);
+      WriteLn(S[1], ' [', S[2], '] [', S[599], ']');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '7 0 0' + LE +
+    '7 0 0' + LE +
+    'v1 [] []' + LE, 0);
 end;
 
 initialization

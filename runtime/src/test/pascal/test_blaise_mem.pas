@@ -356,6 +356,41 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
+{ Test: repeated small grows of a large block move it O(log n) times   }
+{ ------------------------------------------------------------------ }
+function Test_Realloc_LargeGrow_Amortised: string;
+var
+  P, Last: PChar;
+  Size: Int64;
+  I, Moves, Bad: Int;
+begin
+  Size := 8192;
+  P := PChar(_BlaiseGetMem(Size));
+  AssertNotNull('alloc 8192', Pointer(P));
+  FillPattern(P, Size, 5);
+  Last := P;
+  Moves := 0;
+  for I := 1 to 2000 do
+  begin
+    P := PChar(_BlaiseReallocMem(Pointer(P), Size + 4096));
+    AssertNotNull('grow', Pointer(P));
+    if P <> Last then
+    begin
+      Inc(Moves);
+      Last := P;
+    end;
+    Size := Size + 4096;
+  end;
+  { 8 KB -> ~8 MB by 4 KB steps: geometric headroom moves it ~17 times;
+    an exact-size realloc would move it on all 2000 grows }
+  AssertTrue('few moves', Moves < 40);
+  Bad := CheckPattern(P, 8192, 5);
+  AssertEquals('grow preserves bytes', -1, Bad);
+  _BlaiseFreeMem(Pointer(P));
+  Result := '';
+end;
+
+{ ------------------------------------------------------------------ }
 { Test: realloc shrink across classes preserves bytes                  }
 { ------------------------------------------------------------------ }
 function Test_Realloc_Shrink: string;
@@ -975,6 +1010,7 @@ begin
   AddTest('Alignment',              @Test_Alignment,              'blaise_mem');
   AddTest('SizeClass_Boundaries',   @Test_SizeClass_Boundaries,   'blaise_mem');
   AddTest('Realloc_SameClass',      @Test_Realloc_SameClass,      'blaise_mem');
+  AddTest('Realloc_LargeGrow_Amortised', @Test_Realloc_LargeGrow_Amortised, 'blaise_mem');
   AddTest('Realloc_Shrink',         @Test_Realloc_Shrink,         'blaise_mem');
   AddTest('Realloc_Grow_Steps',     @Test_Realloc_Grow_Steps,     'blaise_mem');
   AddTest('Realloc_SmallToLarge',   @Test_Realloc_SmallToLarge,   'blaise_mem');
