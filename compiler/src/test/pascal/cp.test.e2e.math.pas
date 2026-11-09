@@ -11,7 +11,7 @@ unit cp.test.e2e.math;
 { E2E tests for math compiler builtins and the Math RTL unit.
 
   Compiler builtins (no unit needed):
-    Sqrt, Ceil, Floor, Round, Trunc, Ln, Log2, Log10, Power,
+    Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Log2, Log10, Power,
     Sin, Cos, Tan, ArcTan, ArcTan2, ArcSin, ArcCos, Sinh, Cosh, Tanh,
     IsNaN, IsInfinite.
 
@@ -73,6 +73,22 @@ type
     procedure TestRun_Ln_E;
     procedure TestRun_Log2_PowerOfTwo;
     procedure TestRun_Log10_Hundred;
+
+    { Exp — the issue #252 family }
+    { basic values and the e^x · e^-x = 1 identity, all printed as
+      scaled-and-rounded integers so the assertion is exact yet stable
+      across every target's DoubleToStr mantissa }
+    procedure TestRun_Exp_One;
+    procedure TestRun_Exp_NegOne;
+    procedure TestRun_Exp_LnIsInverse;
+    { IEEE edge cases: overflow to +Inf, underflow to +0, NaN in NaN out }
+    procedure TestRun_Exp_OverflowsToInf;
+    procedure TestRun_Exp_UnderflowsToZero;
+    procedure TestRun_Exp_NaN_NaN;
+    { a Single argument stays Single and is correctly rounded }
+    procedure TestRun_Exp_SingleArg;
+    { the exact issue #252 repro }
+    procedure TestRun_Exp_Issue252_Repro;
 
     { Power }
     procedure TestRun_Power_Square;
@@ -515,6 +531,134 @@ begin
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('log10(100)', '2', Trim(Output));
+end;
+
+{ --- Exp (issue #252) --- }
+
+{ e^x is asserted through scaled-and-rounded integers everywhere it could
+  vary by an ulp between the port and any reader's reference exp(); the
+  scale keeps the mantissa noise (<= a few ulps) far from a rounding tie,
+  so one expectation is valid on every target. }
+
+procedure TE2EMathTests.TestRun_Exp_One;
+const
+  Src = '''
+    program P;
+    begin
+      WriteLn(DoubleToStr(Exp(0.0)));
+      WriteLn(IntToStr(Round(Exp(1.0) * 1000000000000.0)))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1' + LE +
+    '2718281828459' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Exp_NegOne;
+const
+  Src = '''
+    program P;
+    begin
+      WriteLn(IntToStr(Round(Exp(-1.0) * 1000000.0)))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '367879' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Exp_LnIsInverse;
+const
+  Src = '''
+    program P;
+    begin
+      WriteLn(IntToStr(Round(Exp(Ln(2.0)))))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Exp_OverflowsToInf;
+const
+  Src = '''
+    program P;
+    begin
+      if IsInfinite(Exp(710.0)) then WriteLn('inf') else WriteLn('not-inf')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'inf' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Exp_UnderflowsToZero;
+const
+  Src = '''
+    program P;
+    begin
+      WriteLn(DoubleToStr(Exp(-746.0)))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '0' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Exp_NaN_NaN;
+const
+  Src = '''
+    program P;
+    var X: Float64;
+    begin
+      X := 0.0 / 0.0;
+      if IsNaN(Exp(X)) then WriteLn('yes') else WriteLn('no')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'yes' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Exp_SingleArg;
+const
+  Src = '''
+    program P;
+    var S: Float32;
+    begin
+      S := 1.0;
+      WriteLn(IntToStr(Round(Exp(S) * 1000000.0)))
+    end.
+    ''';
+begin
+  { Exp(Float32) returns Float32 (rounded through the double kernel), so the
+    value is the correctly rounded single 2.71828183... }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2718282' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Exp_Issue252_Repro;
+const
+  { The exact program from issue #252, which reported "Semantic error:
+    Undeclared function 'Exp'" for `i := exp(33.3)` while Sqrt worked
+    without uses Math.  The Single rendering of exp(33.3) is 289738527342592
+    (the host's Single formatting), verified with WriteLn's Single float
+    writer, which is target-independent RTL. }
+  Src = '''
+    program P;
+    uses math, classicpascaltypes;
+    var i: single;
+    begin
+      i := exp(33.3);
+      writeln(i)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '289738527342592' + LE, 0);
 end;
 
 { ------------------------------------------------------------------ }

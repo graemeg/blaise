@@ -6042,12 +6042,12 @@ Integer-family values (`Int32`, `Int64`, `UInt32`, `UInt64`, `Int16`,
 
 * Assignment to a `Float32` or `Float64` variable (`d := i`).
 * Arguments to the float compiler builtins: `Sqrt`, `Ceil`, `Floor`,
-  `Round`, `Trunc`, `Ln`, `Log2`, `Log10`, `Power`, `Sin`, `Cos`, `Tan`,
-  `ArcTan`, `ArcTan2`, `ArcSin`, `ArcCos`, `Sinh`, `Cosh`, `Tanh`,
+  `Round`, `Trunc`, `Ln`, `Exp`, `Log2`, `Log10`, `Power`, `Sin`, `Cos`,
+  `Tan`, `ArcTan`, `ArcTan2`, `ArcSin`, `ArcCos`, `Sinh`, `Cosh`, `Tanh`,
   `IsNaN`, `IsInfinite`.  `Sin(12)` and `Tanh(I)` are valid; the result
-  type of the value-returning trig builtins is `Float64` for integer
-  arguments (for float arguments it continues to match the argument
-  type — `Float32`→`Float32`, `Float64`→`Float64`).
+  type of the value-returning trig builtins and `Exp` is `Float64` for
+  integer arguments (for float arguments it continues to match the
+  argument type — `Float32`→`Float32`, `Float64`→`Float64`).
 * Explicit float typecasts: `Float64(I)` and `Float32(I)` perform a real
   numeric conversion (never a bit reinterpretation).  Float-to-float
   casts likewise convert: `Float32(D)` narrows, `Float64(S)` widens.
@@ -6073,6 +6073,42 @@ matches the C math library signatures the builtins lower to.
   represents every `Int32` exactly; `Float32` does not (24-bit
   mantissa).  Precision should not silently depend on the argument's
   declared integer width.
+
+== `Exp` — a Builtin Backed by the Pure-Pascal Runtime
+
+=== Decision
+
+`Exp` is a compiler builtin like `Sqrt`, `Ln` and the trig functions:
+
+* available without `uses Math`, in the system namespace (Delphi's
+  `System.Exp` and FPC's intrinsic);
+* one argument of any float or integer type, widened by the same implicit
+  rule as every other float builtin (see the next section);
+* the result type matches the argument's float type (`Float32`→`Float32`,
+  `Float64`→`Float64`, integer→`Float64`), the same rule `Sqrt`, `Sin` and
+  `Sinh` follow;
+* it lowers to `_BlaiseExp` in `runtime.math`, on both backends.
+
+=== Rationale
+
+* *No libm.*  Blaise binaries are freestanding for everything Blaise uses
+  (issue #199): `runtime.math` is the whole of libm Blaise needs, in pure
+  Pascal.  `Exp` was ported there from the start (`_BlaiseExp`, musl
+  `exp.c`); issue #252 was only its missing front-end registration and
+  backend lowering.  Binding the host libm instead would have made
+  results depend on the host C library and broken `--static` builds.
+* *No hardware intrinsic.*  Neither x86-64 SSE2 nor arm64 has an `exp`
+  instruction (unlike `sqrt`); the x87 `f2xm1/f2scale` sequence Delphi's
+  32-bit codegen uses is out of scope — the backends compute in SSE/NEON
+  doubles.  The pure-Pascal port is therefore the lowering on every
+  target, which also makes results bit-identical across targets at a ~1
+  ulp accuracy contract, pinned by the glibc reference vectors in
+  `runtime/src/test/pascal/test_blaise_math.pas`.
+* *Result type follows the argument*, consistent with the `Float32
+  Evaluation Precision` rule: a `Float32` computation wants a `Float32`
+  result, and `Exp` narrows through the shared Single-narrowing path.
+  (`Ln`, `Log2`, `Log10` and `Power` predate that decision and still
+  return `Float64` unconditionally; unifying them is a follow-up.)
 
 == A Float Never Stands In for an Integer
 

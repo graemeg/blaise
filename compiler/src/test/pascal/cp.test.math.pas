@@ -11,7 +11,7 @@ unit cp.test.math;
 { IR-level tests for Math unit functions and math compiler builtins.
 
   Builtins (handled in uSemantic + the code generators, no RTL unit needed):
-    Abs, Sqrt, Ceil, Floor, Round, Trunc, Ln, Log2, Log10, Power,
+    Abs, Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Log2, Log10, Power,
     Sin, Cos, Tan, ArcTan, ArcTan2, IsNaN, IsInfinite.
 
   RTL unit (math.pas, resolved via TUnitLoader):
@@ -73,6 +73,23 @@ type
     procedure TestSemantic_Ln_ReturnsDouble;
     procedure TestSemantic_Log2_OK;
     procedure TestSemantic_Log10_OK;
+
+    { Exp → the argument's float type (issue #252: it was missing from the
+      front end while _BlaiseExp existed in runtime.math) }
+    procedure TestSemantic_Exp_OK;
+    procedure TestSemantic_Exp_ReturnsDouble;
+    procedure TestSemantic_Exp_Single_ReturnsSingle;
+    procedure TestSemantic_Exp_IntegerArg_Accepted;
+    procedure TestSemantic_Exp_IntegerArg_ReturnsDouble;
+    procedure TestSemantic_Exp_TwoArgs_Rejected;
+    procedure TestSemantic_Exp_ZeroArgs_Rejected;
+    procedure TestSemantic_Exp_StringArg_Rejected;
+    { Exp lowers to the pure-Pascal _BlaiseExp on both ISAs, from the float
+      emitter AND the rax-value context (float array element writes) }
+    procedure TestCodegen_Exp_CallSymbolBothISAs;
+    procedure TestCodegen_Exp_FloatElemStore_RaxContext;
+    { Exp(Single) widens, computes in double, narrows back to Single }
+    procedure TestCodegen_Exp_Single_RoundsThroughDouble;
 
     { Power → Double }
     procedure TestSemantic_Power_OK;
@@ -475,6 +492,171 @@ procedure TMathTests.TestSemantic_Log10_OK;
 begin
   SemanticOKBuiltin(
     'program P; var X, R: Float64; begin R := Log10(X) end.');
+end;
+
+procedure TMathTests.TestSemantic_Exp_OK;
+begin
+  SemanticOKBuiltin(
+    'program P; var X, R: Float64; begin R := Exp(X) end.');
+end;
+
+procedure TMathTests.TestSemantic_Exp_ReturnsDouble;
+var
+  Lexer:    TLexer;
+  Parser:   TParser;
+  Prog:     TProgram;
+  Semantic: TSemanticAnalyser;
+  Assign:   TAssignment;
+begin
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
+  try
+    Lexer    := TLexer.Create('program P; var X, R: Float64; begin R := Exp(X) end.');
+    Parser   := TParser.Create(Lexer);
+    Prog     := Parser.Parse();
+    Semantic := TSemanticAnalyser.Create();
+    Semantic.Analyse(Prog);
+    Assign := TAssignment(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('resolved type', Assign.Expr.ResolvedType);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
+  finally
+    Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
+  end;
+end;
+
+procedure TMathTests.TestSemantic_Exp_Single_ReturnsSingle;
+var
+  Lexer:    TLexer;
+  Parser:   TParser;
+  Prog:     TProgram;
+  Semantic: TSemanticAnalyser;
+  Assign:   TAssignment;
+begin
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
+  try
+    Lexer    := TLexer.Create('program P; var X, R: Float32; begin R := Exp(X) end.');
+    Parser   := TParser.Create(Lexer);
+    Prog     := Parser.Parse();
+    Semantic := TSemanticAnalyser.Create();
+    Semantic.Analyse(Prog);
+    Assign := TAssignment(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('resolved type', Assign.Expr.ResolvedType);
+    AssertEquals('return type', 'Float32', Assign.Expr.ResolvedType.Name);
+  finally
+    Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
+  end;
+end;
+
+procedure TMathTests.TestSemantic_Exp_IntegerArg_Accepted;
+begin
+  SemanticOKBuiltin(
+    'program P; var I: Int; R: Float64; begin R := Exp(I) end.');
+end;
+
+procedure TMathTests.TestSemantic_Exp_IntegerArg_ReturnsDouble;
+var
+  Lexer:    TLexer;
+  Parser:   TParser;
+  Prog:     TProgram;
+  Semantic: TSemanticAnalyser;
+  Assign:   TAssignment;
+begin
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
+  try
+    Lexer    := TLexer.Create('program P; var I: Int; R: Float64; begin R := Exp(I) end.');
+    Parser   := TParser.Create(Lexer);
+    Prog     := Parser.Parse();
+    Semantic := TSemanticAnalyser.Create();
+    Semantic.Analyse(Prog);
+    Assign := TAssignment(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('resolved type', Assign.Expr.ResolvedType);
+    { integer widens to Double, which the result continues as }
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
+  finally
+    Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
+  end;
+end;
+
+procedure TMathTests.TestSemantic_Exp_TwoArgs_Rejected;
+begin
+  SemanticError(
+    'program P; var X, Y, R: Float64; begin R := Exp(X, Y) end.');
+end;
+
+procedure TMathTests.TestSemantic_Exp_ZeroArgs_Rejected;
+begin
+  SemanticError(
+    'program P; var R: Float64; begin R := Exp() end.');
+end;
+
+procedure TMathTests.TestSemantic_Exp_StringArg_Rejected;
+begin
+  SemanticError(
+    'program P; var S: string; R: Float64; begin R := Exp(S) end.');
+end;
+
+procedure TMathTests.TestCodegen_Exp_CallSymbolBothISAs;
+const
+  Src = '''
+    program P;
+    var X, R: Float64;
+    begin
+      R := Exp(X)
+    end.
+    ''';
+begin
+  { both dispatch contexts call the same helper; a float-variable
+    assignment covers the float emitter }
+  AssertEquals('Exp', '',
+    AsmMissing(Src, #9'callq _BlaiseExp', #9'bl __BlaiseExp'));
+end;
+
+procedure TMathTests.TestCodegen_Exp_FloatElemStore_RaxContext;
+const
+  Src = '''
+    program P;
+    var X: Float64; A: array[0..1] of Float64;
+    begin
+      A[0] := Exp(X)
+    end.
+    ''';
+var
+  X86, Arm: string;
+begin
+  { a float ARRAY ELEMENT STORE evaluates the RHS through the rax-value
+    context: the float-math dispatch must APPROACH here too (it fell
+    through to the integer path once for Abs, issue #252's wiring plan);
+    the x86-64 result is spilled through %rax into %xmm0 }
+  X86 := GenAsm(Src, TargetX86_64);
+  Arm := GenAsm(Src, TargetArm64);
+  AssertTrue('x86-64: RTL exp call', Pos(#9'callq _BlaiseExp', X86) > 0);
+  AssertTrue('x86-64: float bit pattern spilled through rax',
+    Pos(#9'movq %xmm0, %rax', X86) > 0);
+  AssertTrue('arm64: RTL exp call', Pos(#9'bl __BlaiseExp', Arm) > 0);
+end;
+
+procedure TMathTests.TestCodegen_Exp_Single_RoundsThroughDouble;
+const
+  Src = '''
+    program P;
+    var X, R: Float32;
+    begin
+      R := Exp(X)
+    end.
+    ''';
+var
+  X86, Arm: string;
+begin
+  { widen, compute in double, narrow back: the value an enclosing Single
+    expression sees must be correctly rounded }
+  X86 := GenAsm(Src, TargetX86_64);
+  AssertTrue('x86-64: widen before the call',
+    Pos(#9'cvtss2sd %xmm0, %xmm0' + #10 + #9'callq _BlaiseExp', X86) > 0);
+  AssertTrue('x86-64: narrow after the call',
+    Pos(#9'callq _BlaiseExp' + #10 + #9'cvtsd2ss %xmm0, %xmm0', X86) > 0);
+  Arm := GenAsm(Src, TargetArm64);
+  AssertTrue('arm64: RTL exp call', Pos(#9'bl __BlaiseExp', Arm) > 0);
+  AssertTrue('arm64: result rounded to single after the call',
+    Pos(#9'bl __BlaiseExp' + #10 + #9'fcvt s0, d0', Arm) > 0);
 end;
 
 { ------------------------------------------------------------------ }

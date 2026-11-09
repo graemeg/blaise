@@ -19877,7 +19877,8 @@ begin
   end;
 
   { Math builtins — Sqrt, Ceil, Floor, Round, Trunc, Ln, Log2, Log10,
-    Power, Sin, Cos, Tan, ArcTan, ArcTan2, IsNaN, IsInfinite.
+    Power, Sin, Cos, Tan, ArcTan, ArcTan2, ArcSin, ArcCos, Sinh, Cosh,
+    Tanh, Exp, IsNaN, IsInfinite.
     These are implemented as compiler builtins rather than RTL functions
     so that the codegen can emit dtosi/stosi for the float→integer
     conversions (Ceil/Floor/Round/Trunc) and can dispatch to the *f
@@ -19941,13 +19942,14 @@ begin
      SameText(AExpr.Name, 'Tan') or SameText(AExpr.Name, 'ArcTan') or
      SameText(AExpr.Name, 'ArcSin') or SameText(AExpr.Name, 'ArcCos') or
      SameText(AExpr.Name, 'Sinh') or SameText(AExpr.Name, 'Cosh') or
-     SameText(AExpr.Name, 'Tanh') then
+     SameText(AExpr.Name, 'Tanh') or SameText(AExpr.Name, 'Exp') then
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError(AExpr.Name + ' requires exactly one argument', AExpr.Line, AExpr.Col);
     Result := Self.AnalyseListSlot(AExpr.Args, 0);
     { Return type matches argument type — Single→Single, Double→Double,
-      integer→Double. }
+      integer→Double.  Exp follows the same rule as the trig family,
+      unlike Ln/Log2/Log10/Power which always return Float64. }
     Result := FloatBuiltinArgType(AExpr.Name, Result, AExpr.Line, AExpr.Col);
     AExpr.ResolvedType := Result;
     Exit;

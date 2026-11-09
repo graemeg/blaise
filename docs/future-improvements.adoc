@@ -1682,3 +1682,36 @@ to distinguish this from simple enums so existing code is unaffected.
   is acceptable provided it is a new keyword.
 
 
+
+== Testing — Wire the punit Math Vectors into CI
+
+*What.* `runtime/src/test/pascal/test_blaise_math.pas` pins 194 glibc
+reference vectors for the `_Blaise*` pure-Pascal libm port at a 2-ulp
+tolerance (specials bit-exact), but it is built and run only by hand on the
+development host.  It is not in PasBuild or the CI matrix, so the runtime
+port is actually verified only on whatever OS the developer runs — not on
+Linux x86-64 and FreeBSD x86-64 (nor arm64), where ABI and codegen could
+differ.
+
+*Why it matters.* `runtime.math` is the entire libm of every freestanding
+Blaise binary; a regression on one target (a wrong codegen assumption, an
+unaligned table typed differently by another ABI) would otherwise surface
+only when a user's numbers go subtly wrong.
+
+*Implementation notes.* The program self-builds with today's stage-2
+compiler, so CI could run it like any other suite:
+
+----
+blaise --source runtime/src/test/pascal/test_blaise_math.pas \
+       --unit-path compiler/src/main/pascal \
+       --unit-path runtime/src/test/pascal \
+       --output test_math && ./test_math
+----
+
+Options: add it to the existing VM job lists (`scripts/linux-vm.sh`,
+`scripts/freebsd-vm.sh`), add it to PasBuild, or add a small e2e
+conformance test that embeds a handful of representative vectors.  Defer
+was deliberate (issue #252's plan): the macOS host already covers the
+algorithm, and this is CI plumbing, not compiler source.
+
+*Effort.* Small.

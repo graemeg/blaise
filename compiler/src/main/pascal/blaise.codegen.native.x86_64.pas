@@ -8945,6 +8945,8 @@ begin
     Sym := '_BlaiseArcCos'
   else if SameText(FC.Name, 'Ln') then
     Sym := '_BlaiseLn'
+  else if SameText(FC.Name, 'Exp') then
+    Sym := '_BlaiseExp'
   else if SameText(FC.Name, 'Log2') then
     Sym := '_BlaiseLog2'
   else if SameText(FC.Name, 'Log10') then
