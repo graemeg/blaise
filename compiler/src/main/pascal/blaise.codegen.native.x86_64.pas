@@ -1157,6 +1157,12 @@ type
     procedure EmitFloatConstToXmm0(const AText: string; ASingle: Boolean);
     procedure EmitExprToXmm0(AExpr: TASTExpr);
     function EmitFloatBuiltin(FC: TFuncCallExpr): Boolean;
+    { One- and two-argument float math builtins, result in %xmm0.  Both the
+      float emitter and the rax-value context dispatch through these, so a
+      builtin added here reaches both (a per-context arm is how float Abs
+      once fell through in one of them). }
+    function EmitUnaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
+    function EmitBinaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
     { Load a float (Double or Single) from AOperand into %xmm0. }
     procedure EmitLoadFloat(const AOperand: string; AType: TTypeDesc);
     { Store %xmm0 into AOperand at the float type's width. }
@@ -8896,9 +8902,120 @@ begin
     'native backend: unsupported float expression form ' + AExpr.ClassName);
 end;
 
-function TX86_64Backend.EmitFloatBuiltin(FC: TFuncCallExpr): Boolean;
+{ One-argument float math builtin: result left in %xmm0.  Sqrt is a
+  hardware instruction and Abs a runtime.math helper; every other function
+  is a runtime.math call.  A Single argument is widened to double, the
+  function runs in double, and the result is narrowed back to Single, so
+  the value an enclosing Single expression sees is correctly rounded. }
+function TX86_64Backend.EmitUnaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
 var
+  Arg: TASTExpr;
   IsS: Boolean;
+  Sym: string;
+begin
+  Result := False;
+  if FC.Args.Count <> 1 then
+    Exit;
+  Arg := TASTExpr(FC.Args.Items[0]);
+  IsS := (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tySingle);
+
+  if SameText(FC.Name, 'Sqrt') then
+  begin
+    Self.EmitExprToXmm0(Arg);
+    if IsS then
+      Self.Emit(#9'sqrtss %xmm0, %xmm0')
+    else
+      Self.Emit(#9'sqrtsd %xmm0, %xmm0');
+    Result := True;
+    Exit;
+  end;
+
+  Sym := '';
+  if SameText(FC.Name, 'Sin') then
+    Sym := '_BlaiseSin'
+  else if SameText(FC.Name, 'Cos') then
+    Sym := '_BlaiseCos'
+  else if SameText(FC.Name, 'Tan') then
+    Sym := '_BlaiseTan'
+  else if SameText(FC.Name, 'ArcTan') then
+    Sym := '_BlaiseArcTan'
+  else if SameText(FC.Name, 'ArcSin') then
+    Sym := '_BlaiseArcSin'
+  else if SameText(FC.Name, 'ArcCos') then
+    Sym := '_BlaiseArcCos'
+  else if SameText(FC.Name, 'Ln') then
+    Sym := '_BlaiseLn'
+  else if SameText(FC.Name, 'Log2') then
+    Sym := '_BlaiseLog2'
+  else if SameText(FC.Name, 'Log10') then
+    Sym := '_BlaiseLog10'
+  else if SameText(FC.Name, 'Sinh') then
+    Sym := '_BlaiseSinh'
+  else if SameText(FC.Name, 'Cosh') then
+    Sym := '_BlaiseCosh'
+  else if SameText(FC.Name, 'Tanh') then
+    Sym := '_BlaiseTanh'
+  else if SameText(FC.Name, 'Abs') and (Arg.ResolvedType <> nil) and
+          Arg.ResolvedType.IsFloat() then
+    Sym := '_BlaiseFabs';
+  if Sym = '' then
+    Exit;
+
+  Self.EmitExprToXmm0(Arg);
+  if IsS then
+  begin
+    Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
+    Self.Emit(#9'callq ' + Sym);
+    Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
+  end
+  else
+    Self.Emit(#9'callq ' + Sym);
+  Result := True;
+end;
+
+{ Two-argument float math builtin: result left in %xmm0.  Each argument is
+  widened to double by ITS OWN type (keying both on the first argument
+  mishandles mixed Single/Double pairs).  ArcTan2's result follows its
+  first argument; Power's is always double. }
+function TX86_64Backend.EmitBinaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
+var
+  A0, A1: TASTExpr;
+  IsS: Boolean;
+  Sym: string;
+begin
+  Result := False;
+  if FC.Args.Count <> 2 then
+    Exit;
+  Sym := '';
+  if SameText(FC.Name, 'ArcTan2') then
+    Sym := '_BlaiseArcTan2'
+  else if SameText(FC.Name, 'Power') then
+    Sym := '_BlaisePow';
+  if Sym = '' then
+    Exit;
+
+  A0 := TASTExpr(FC.Args.Items[0]);
+  A1 := TASTExpr(FC.Args.Items[1]);
+  IsS := (A0.ResolvedType <> nil) and (A0.ResolvedType.Kind = tySingle);
+  Self.EmitExprToXmm0(A0);
+  if IsS then
+    Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
+  Self.Emit(#9'subq $8, %rsp');
+  Self.Emit(#9'movsd %xmm0, (%rsp)');
+  Self.EmitExprToXmm0(A1);
+  if (A1.ResolvedType <> nil) and (A1.ResolvedType.Kind = tySingle) then
+    Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
+  Self.Emit(#9'movaps %xmm0, %xmm1');
+  Self.Emit(#9'movsd (%rsp), %xmm0');
+  Self.Emit(#9'addq $8, %rsp');
+  Self.Emit(#9'callq ' + Sym);
+  if SameText(FC.Name, 'ArcTan2') and IsS then
+    { result type follows the first argument }
+    Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
+  Result := True;
+end;
+
+function TX86_64Backend.EmitFloatBuiltin(FC: TFuncCallExpr): Boolean;
 begin
   Result := True;
   { StrToDouble(S): the RTL helper takes a string pointer in %rdi and returns
@@ -8910,250 +9027,10 @@ begin
     Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToDouble', True);
     Exit;
   end;
-  if SameText(FC.Name, 'Abs') and (FC.Args.Count = 1) and
-     (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-     TASTExpr(FC.Args.Items[0]).ResolvedType.IsFloat() then
-  begin
-    { float Abs: clear the sign bit via the runtime.math helper.  Without
-      this arm the float emitter fell through and the argument came back
-      UNCHANGED (Abs(-2.5) = -2.5) -- the integer Abs arm never applies
-      in a float context. }
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseFabs');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseFabs');
+  if Self.EmitUnaryFloatMathToXmm0(FC) then
     Exit;
-  end;
-  if SameText(FC.Name, 'Sqrt') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      Self.Emit(#9'sqrtss %xmm0, %xmm0')
-    else
-      Self.Emit(#9'sqrtsd %xmm0, %xmm0');
+  if Self.EmitBinaryFloatMathToXmm0(FC) then
     Exit;
-  end;
-  if SameText(FC.Name, 'Sin') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseSin');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseSin');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Cos') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseCos');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseCos');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Tan') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseTan');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseTan');
-    Exit;
-  end;
-  if SameText(FC.Name, 'ArcTan') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseArcTan');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseArcTan');
-    Exit;
-  end;
-  if SameText(FC.Name, 'ArcTan2') and (FC.Args.Count = 2) then
-  begin
-    { each argument is widened to double by ITS OWN type (the old code
-      keyed both on the first argument, mishandling mixed Single/Double
-      pairs); the runtime.math function is double-only }
-    IsS := (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-           (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle);
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if IsS then
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-    Self.Emit(#9'subq $8, %rsp');
-    Self.Emit(#9'movsd %xmm0, (%rsp)');
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[1]));
-    if (TASTExpr(FC.Args.Items[1]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[1]).ResolvedType.Kind = tySingle) then
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-    Self.Emit(#9'movaps %xmm0, %xmm1');
-    Self.Emit(#9'movsd (%rsp), %xmm0');
-    Self.Emit(#9'addq $8, %rsp');
-    Self.Emit(#9'callq _BlaiseArcTan2');
-    if IsS then
-      { result type follows the first argument }
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    Exit;
-  end;
-  if SameText(FC.Name, 'ArcSin') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseArcSin');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseArcSin');
-    Exit;
-  end;
-  if SameText(FC.Name, 'ArcCos') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseArcCos');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseArcCos');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Ln') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseLn');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseLn');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Log2') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseLog2');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseLog2');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Log10') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseLog10');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseLog10');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Power') and (FC.Args.Count = 2) then
-  begin
-    { each argument is widened to double by ITS OWN type (the old code
-      keyed both on the first argument, mishandling mixed Single/Double
-      pairs); the runtime.math function is double-only }
-    IsS := (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-           (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle);
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if IsS then
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-    Self.Emit(#9'subq $8, %rsp');
-    Self.Emit(#9'movsd %xmm0, (%rsp)');
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[1]));
-    if (TASTExpr(FC.Args.Items[1]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[1]).ResolvedType.Kind = tySingle) then
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-    Self.Emit(#9'movaps %xmm0, %xmm1');
-    Self.Emit(#9'movsd (%rsp), %xmm0');
-    Self.Emit(#9'addq $8, %rsp');
-    Self.Emit(#9'callq _BlaisePow');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Sinh') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseSinh');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseSinh');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Cosh') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseCosh');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseCosh');
-    Exit;
-  end;
-  if SameText(FC.Name, 'Tanh') and (FC.Args.Count = 1) then
-  begin
-    Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-    if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-    begin
-      Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'callq _BlaiseTanh');
-      Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-    end
-    else
-      Self.Emit(#9'callq _BlaiseTanh');
-    Exit;
-  end;
   Result := False;
 end;
 
@@ -9949,6 +9826,20 @@ begin
       end;
       Exit;
     end;
+    { Float math builtins share one dispatch with the float emitter, so a
+      builtin cannot be wired into one context and forgotten in the other
+      (the float-Abs bug).  The result arrives in %xmm0; this context takes
+      its bit pattern. }
+    if Self.EmitUnaryFloatMathToXmm0(FC) then
+    begin
+      Self.Emit(#9'movq %xmm0, %rax');
+      Exit;
+    end;
+    if Self.EmitBinaryFloatMathToXmm0(FC) then
+    begin
+      Self.Emit(#9'movq %xmm0, %rax');
+      Exit;
+    end;
     if SameText(FC.Name, 'DoubleToStr') and (FC.Args.Count = 1) then
     begin
       { The argument expression may resolve to Single (e.g. a bare Single
@@ -10002,34 +9893,6 @@ begin
         Self.Emit(#9'cvttss2si %xmm0, %rax')
       else
         Self.Emit(#9'cvttsd2si %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Abs') and (FC.Args.Count = 1) and
-       (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-       TASTExpr(FC.Args.Items[0]).ResolvedType.IsFloat() then
-    begin
-      { float Abs in the rax-value context -- see the float-emitter arm }
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseFabs');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseFabs');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Sqrt') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-        Self.Emit(#9'sqrtss %xmm0, %xmm0')
-      else
-        Self.Emit(#9'sqrtsd %xmm0, %xmm0');
-      Self.Emit(#9'movq %xmm0, %rax');
       Exit;
     end;
     if SameText(FC.Name, 'CompareStr') and (FC.Args.Count = 2) then
@@ -10400,235 +10263,6 @@ begin
         Self.Emit(#9'callq __isinff')
       else
         Self.Emit(#9'callq __isinf');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Sin') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseSin');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseSin');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Cos') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseCos');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseCos');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Tan') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseTan');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseTan');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'ArcTan') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseArcTan');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseArcTan');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'ArcTan2') and (FC.Args.Count = 2) then
-    begin
-      { each argument is widened to double by ITS OWN type (the old code
-        keyed both on the first argument, mishandling mixed Single/Double
-        pairs); the runtime.math function is double-only }
-      IsS := (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-             (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle);
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if IsS then
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'subq $8, %rsp');
-      Self.Emit(#9'movsd %xmm0, (%rsp)');
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[1]));
-      if (TASTExpr(FC.Args.Items[1]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[1]).ResolvedType.Kind = tySingle) then
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'movaps %xmm0, %xmm1');
-      Self.Emit(#9'movsd (%rsp), %xmm0');
-      Self.Emit(#9'addq $8, %rsp');
-      Self.Emit(#9'callq _BlaiseArcTan2');
-      if IsS then
-        { result type follows the first argument }
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'ArcSin') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseArcSin');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseArcSin');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'ArcCos') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseArcCos');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseArcCos');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Ln') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseLn');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseLn');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Log2') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseLog2');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseLog2');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Log10') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseLog10');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseLog10');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Power') and (FC.Args.Count = 2) then
-    begin
-      { each argument is widened to double by ITS OWN type (the old code
-        keyed both on the first argument, mishandling mixed Single/Double
-        pairs); the runtime.math function is double-only }
-      IsS := (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-             (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle);
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if IsS then
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'subq $8, %rsp');
-      Self.Emit(#9'movsd %xmm0, (%rsp)');
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[1]));
-      if (TASTExpr(FC.Args.Items[1]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[1]).ResolvedType.Kind = tySingle) then
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'movaps %xmm0, %xmm1');
-      Self.Emit(#9'movsd (%rsp), %xmm0');
-      Self.Emit(#9'addq $8, %rsp');
-      Self.Emit(#9'callq _BlaisePow');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Sinh') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseSinh');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseSinh');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Cosh') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseCosh');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseCosh');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
-    if SameText(FC.Name, 'Tanh') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseTanh');
-        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-      end
-      else
-        Self.Emit(#9'callq _BlaiseTanh');
-      Self.Emit(#9'movq %xmm0, %rax');
       Exit;
     end;
     { Unqualified call to a procedural-typed field of the current class

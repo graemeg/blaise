@@ -52,6 +52,11 @@ type
     { Round rounds half to EVEN (banker's), as Delphi and FPC do: one
       round-to-nearest conversion on each ISA, for Double and Single }
     procedure TestCodegen_Round_TiesToEvenConversion;
+    { Every float math builtin dispatches through one shared helper per
+      arity in the x86-64 backend, used by both the float emitter and the
+      rax-value context.  A builtin wired into only one context is how
+      float Abs once returned its argument unchanged. }
+    procedure TestCodegen_FloatMath_SingleDispatch;
     procedure TestSemantic_Trunc_OK;
     procedure TestSemantic_Trunc_ReturnsInt64;
     procedure TestSemantic_Ceil_IntegerArg_Accepted;
@@ -1184,6 +1189,66 @@ begin
     Pos('_BlaiseRoundD', GenAsm(Src, TargetX86_64)) < 0);
   AssertTrue('arm64: no half-away helper',
     Pos('_BlaiseRoundD', GenAsm(Src, TargetArm64)) < 0);
+end;
+
+procedure TMathTests.TestCodegen_FloatMath_SingleDispatch;
+const
+  Src = '''
+    program P;
+    var X, Y, R: Float64;
+    begin
+      R := Sin(X);
+      R := Cos(X);
+      R := Tan(X);
+      R := ArcTan(X);
+      R := ArcSin(X);
+      R := ArcCos(X);
+      R := Ln(X);
+      R := Log2(X);
+      R := Log10(X);
+      R := Sinh(X);
+      R := Cosh(X);
+      R := Tanh(X);
+      R := Abs(X);
+      R := Sqrt(X);
+      R := ArcTan2(X, Y);
+      R := Power(X, Y)
+    end.
+    ''';
+begin
+  AssertEquals('Sin', '',
+    AsmMissing(Src, #9'callq _BlaiseSin', #9'bl __BlaiseSin'));
+  AssertEquals('Cos', '',
+    AsmMissing(Src, #9'callq _BlaiseCos', #9'bl __BlaiseCos'));
+  AssertEquals('Tan', '',
+    AsmMissing(Src, #9'callq _BlaiseTan', #9'bl __BlaiseTan'));
+  AssertEquals('ArcTan', '',
+    AsmMissing(Src, #9'callq _BlaiseArcTan', #9'bl __BlaiseArcTan'));
+  AssertEquals('ArcSin', '',
+    AsmMissing(Src, #9'callq _BlaiseArcSin', #9'bl __BlaiseArcSin'));
+  AssertEquals('ArcCos', '',
+    AsmMissing(Src, #9'callq _BlaiseArcCos', #9'bl __BlaiseArcCos'));
+  AssertEquals('Ln', '',
+    AsmMissing(Src, #9'callq _BlaiseLn', #9'bl __BlaiseLn'));
+  AssertEquals('Log2', '',
+    AsmMissing(Src, #9'callq _BlaiseLog2', #9'bl __BlaiseLog2'));
+  AssertEquals('Log10', '',
+    AsmMissing(Src, #9'callq _BlaiseLog10', #9'bl __BlaiseLog10'));
+  AssertEquals('Sinh', '',
+    AsmMissing(Src, #9'callq _BlaiseSinh', #9'bl __BlaiseSinh'));
+  AssertEquals('Cosh', '',
+    AsmMissing(Src, #9'callq _BlaiseCosh', #9'bl __BlaiseCosh'));
+  AssertEquals('Tanh', '',
+    AsmMissing(Src, #9'callq _BlaiseTanh', #9'bl __BlaiseTanh'));
+  AssertEquals('Abs', '',
+    AsmMissing(Src, #9'callq _BlaiseFabs', #9'bl __BlaiseFabs'));
+  { Sqrt is the one hardware lowering on x86-64; arm64 calls the RTL. }
+  AssertEquals('Sqrt', '',
+    AsmMissing(Src, #9'sqrtsd %xmm0, %xmm0', #9'bl __BlaiseSqrtD'));
+  AssertEquals('ArcTan2', '',
+    AsmMissing(Src, #9'callq _BlaiseArcTan2', #9'bl __BlaiseArcTan2'));
+  AssertEquals('Power', '',
+    AsmMissing(Src, #9'callq _BlaisePow', #9'bl __BlaisePow'));
 end;
 
 initialization
