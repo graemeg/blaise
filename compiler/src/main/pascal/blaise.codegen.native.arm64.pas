@@ -8567,6 +8567,8 @@ begin
       RtlMathSym := '_BlaiseLn'
     else if SameText(TFuncCallExpr(AExpr).Name, 'Exp') then
       RtlMathSym := '_BlaiseExp'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Expm1') then
+      RtlMathSym := '_BlaiseExpm1'
     else if SameText(TFuncCallExpr(AExpr).Name, 'Log2') then
       RtlMathSym := '_BlaiseLog2'
     else if SameText(TFuncCallExpr(AExpr).Name, 'Log10') then

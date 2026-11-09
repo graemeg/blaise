@@ -15,8 +15,8 @@ unit Math;
 // The following are implemented as compiler builtins (in uSemantic.pas +
 // the native code generators) and therefore do NOT appear in this unit's
 // interface:
-//   Abs, Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Log2, Log10, Power,
-//   Sin, Cos, Tan, ArcTan, ArcTan2, IsNaN, IsInfinite.
+//   Abs, Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Expm1, Log2, Log10,
+//   Power, Sin, Cos, Tan, ArcTan, ArcTan2, IsNaN, IsInfinite.
 //
 // This unit provides only the functions that are implemented in pure
 // Blaise Pascal with no special codegen requirements:

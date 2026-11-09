@@ -10,8 +10,8 @@
   Blaise RTL -- transcendental and rounding math (pure Pascal, no libm)
 
   This unit is the runtime behind the float-math builtins (Sin, Cos, Tan,
-  ArcSin, ArcCos, ArcTan, ArcTan2, Exp, Ln, Log2, Log10, Power, Sinh, Cosh,
-  Tanh, Sqrt, Floor, Ceil, Round) so that Blaise binaries have NO libm
+  ArcSin, ArcCos, ArcTan, ArcTan2, Exp, Expm1, Ln, Log2, Log10, Power, Sinh,
+  Cosh, Tanh, Sqrt, Floor, Ceil, Round) so that Blaise binaries have NO libm
   dependency: the whole of libm that Blaise uses lives here, in Pascal.
 
   The implementations are ports of musl libc's math sources (MIT licence),

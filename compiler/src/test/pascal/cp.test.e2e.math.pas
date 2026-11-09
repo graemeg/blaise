@@ -11,7 +11,7 @@ unit cp.test.e2e.math;
 { E2E tests for math compiler builtins and the Math RTL unit.
 
   Compiler builtins (no unit needed):
-    Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Log2, Log10, Power,
+    Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Expm1, Log2, Log10, Power,
     Sin, Cos, Tan, ArcTan, ArcTan2, ArcSin, ArcCos, Sinh, Cosh, Tanh,
     IsNaN, IsInfinite.
 
@@ -89,6 +89,13 @@ type
     procedure TestRun_Exp_SingleArg;
     { the exact issue #252 repro }
     procedure TestRun_Exp_Issue252_Repro;
+
+    { Expm1 — exp(x) - 1 for small x without the cancellation }
+    { Expm1(tiny) keeps the x^2/2 term that Exp(x)-1 rounds away }
+    procedure TestRun_Expm1_Zero;
+    procedure TestRun_Expm1_LnIsInverse;
+    procedure TestRun_Expm1_SmallArgumentNoCancellation;
+    procedure TestRun_Expm1_SingleArg;
 
     { Power }
     procedure TestRun_Power_Square;
@@ -659,6 +666,78 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '289738527342592' + LE, 0);
+end;
+
+{ --- Expm1 --- }
+
+procedure TE2EMathTests.TestRun_Expm1_Zero;
+const
+  Src = '''
+    program P;
+    begin
+      WriteLn(DoubleToStr(Expm1(0.0)));
+      WriteLn(IntToStr(Round(Expm1(Ln(3.0)) * 1000000000.0)))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0' + LE +
+    '2000000000' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Expm1_LnIsInverse;
+const
+  Src = '''
+    program P;
+    begin
+      WriteLn(IntToStr(Round(Expm1(Ln(7.0)) * 1000000.0)))
+    end.
+    ''';
+begin
+  { expm1(ln 7) = 6 }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '6000000' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Expm1_SmallArgumentNoCancellation;
+const
+  Src = '''
+    program P;
+    var X, D, E: Float64;
+    begin
+      X := 0.000000000000000000000000000001;
+      D := Exp(X) - 1.0;
+      E := Expm1(X);
+      if (D = 0.0) and (E = X) then WriteLn('accurate')
+      else WriteLn('lost')
+    end.
+    ''';
+begin
+  { Exp(x) - 1 rounds away the x^2/2 term, and for tiny x the result is
+    exactly 1.0 — the naive expression is exactly 0 — while Expm1 keeps
+    the whole correction (x back out unchanged).  This is what
+    _BlaiseExpm1's small-x path is for. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'accurate' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_Expm1_SingleArg;
+const
+  Src = '''
+    program P;
+    var S, R: Float32;
+    begin
+      S := 0.5;
+      R := Expm1(S);
+      WriteLn(IntToStr(Round(R * 100000000.0)))
+    end.
+    ''';
+begin
+  { Expm1(Float32) returns Float32: the single-precision rendering of
+    exp(0.5) - 1 = 0.64872127... }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '64872128' + LE, 0);
 end;
 
 { ------------------------------------------------------------------ }

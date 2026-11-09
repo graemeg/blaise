@@ -11,8 +11,8 @@ unit cp.test.math;
 { IR-level tests for Math unit functions and math compiler builtins.
 
   Builtins (handled in uSemantic + the code generators, no RTL unit needed):
-    Abs, Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Log2, Log10, Power,
-    Sin, Cos, Tan, ArcTan, ArcTan2, IsNaN, IsInfinite.
+    Abs, Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Expm1, Log2, Log10,
+    Power, Sin, Cos, Tan, ArcTan, ArcTan2, IsNaN, IsInfinite.
 
   RTL unit (math.pas, resolved via TUnitLoader):
     Min, Max, Sign, DivMod, InRange, EnsureRange, Pi. }
@@ -90,6 +90,17 @@ type
     procedure TestCodegen_Exp_FloatElemStore_RaxContext;
     { Exp(Single) widens, computes in double, narrows back to Single }
     procedure TestCodegen_Exp_Single_RoundsThroughDouble;
+
+    { Expm1 — exp(x) - 1, wired with Exp (issue #252's optional extra) }
+    procedure TestSemantic_Expm1_OK;
+    procedure TestSemantic_Expm1_ReturnsDouble;
+    procedure TestSemantic_Expm1_Single_ReturnsSingle;
+    procedure TestSemantic_Expm1_IntegerArg_Accepted;
+    procedure TestSemantic_Expm1_IntegerArg_ReturnsDouble;
+    procedure TestSemantic_Expm1_TwoArgs_Rejected;
+    procedure TestSemantic_Expm1_ZeroArgs_Rejected;
+    procedure TestSemantic_Expm1_StringArg_Rejected;
+    procedure TestCodegen_Expm1_CallSymbolBothISAs;
 
     { Power → Double }
     procedure TestSemantic_Power_OK;
@@ -657,6 +668,123 @@ begin
   AssertTrue('arm64: RTL exp call', Pos(#9'bl __BlaiseExp', Arm) > 0);
   AssertTrue('arm64: result rounded to single after the call',
     Pos(#9'bl __BlaiseExp' + #10 + #9'fcvt s0, d0', Arm) > 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ Expm1                                                              }
+{ ------------------------------------------------------------------ }
+
+procedure TMathTests.TestSemantic_Expm1_OK;
+begin
+  SemanticOKBuiltin(
+    'program P; var X, R: Float64; begin R := Expm1(X) end.');
+end;
+
+procedure TMathTests.TestSemantic_Expm1_ReturnsDouble;
+var
+  Lexer:    TLexer;
+  Parser:   TParser;
+  Prog:     TProgram;
+  Semantic: TSemanticAnalyser;
+  Assign:   TAssignment;
+begin
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
+  try
+    Lexer    := TLexer.Create('program P; var X, R: Float64; begin R := Expm1(X) end.');
+    Parser   := TParser.Create(Lexer);
+    Prog     := Parser.Parse();
+    Semantic := TSemanticAnalyser.Create();
+    Semantic.Analyse(Prog);
+    Assign := TAssignment(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('resolved type', Assign.Expr.ResolvedType);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
+  finally
+    Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
+  end;
+end;
+
+procedure TMathTests.TestSemantic_Expm1_Single_ReturnsSingle;
+var
+  Lexer:    TLexer;
+  Parser:   TParser;
+  Prog:     TProgram;
+  Semantic: TSemanticAnalyser;
+  Assign:   TAssignment;
+begin
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
+  try
+    Lexer    := TLexer.Create('program P; var X, R: Float32; begin R := Expm1(X) end.');
+    Parser   := TParser.Create(Lexer);
+    Prog     := Parser.Parse();
+    Semantic := TSemanticAnalyser.Create();
+    Semantic.Analyse(Prog);
+    Assign := TAssignment(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('resolved type', Assign.Expr.ResolvedType);
+    AssertEquals('return type', 'Float32', Assign.Expr.ResolvedType.Name);
+  finally
+    Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
+  end;
+end;
+
+procedure TMathTests.TestSemantic_Expm1_IntegerArg_Accepted;
+begin
+  SemanticOKBuiltin(
+    'program P; var I: Int; R: Float64; begin R := Expm1(I) end.');
+end;
+
+procedure TMathTests.TestSemantic_Expm1_IntegerArg_ReturnsDouble;
+var
+  Lexer:    TLexer;
+  Parser:   TParser;
+  Prog:     TProgram;
+  Semantic: TSemanticAnalyser;
+  Assign:   TAssignment;
+begin
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
+  try
+    Lexer    := TLexer.Create('program P; var I: Int; R: Float64; begin R := Expm1(I) end.');
+    Parser   := TParser.Create(Lexer);
+    Prog     := Parser.Parse();
+    Semantic := TSemanticAnalyser.Create();
+    Semantic.Analyse(Prog);
+    Assign := TAssignment(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('resolved type', Assign.Expr.ResolvedType);
+    AssertEquals('return type', 'Float64', Assign.Expr.ResolvedType.Name);
+  finally
+    Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
+  end;
+end;
+
+procedure TMathTests.TestSemantic_Expm1_TwoArgs_Rejected;
+begin
+  SemanticError(
+    'program P; var X, Y, R: Float64; begin R := Expm1(X, Y) end.');
+end;
+
+procedure TMathTests.TestSemantic_Expm1_ZeroArgs_Rejected;
+begin
+  SemanticError(
+    'program P; var R: Float64; begin R := Expm1() end.');
+end;
+
+procedure TMathTests.TestSemantic_Expm1_StringArg_Rejected;
+begin
+  SemanticError(
+    'program P; var S: string; R: Float64; begin R := Expm1(S) end.');
+end;
+
+procedure TMathTests.TestCodegen_Expm1_CallSymbolBothISAs;
+const
+  Src = '''
+    program P;
+    var X, R: Float64;
+    begin
+      R := Expm1(X)
+    end.
+    ''';
+begin
+  AssertEquals('Expm1', '',
+    AsmMissing(Src, #9'callq _BlaiseExpm1', #9'bl __BlaiseExpm1'));
 end;
 
 { ------------------------------------------------------------------ }
