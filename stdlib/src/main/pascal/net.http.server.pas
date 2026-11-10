@@ -51,8 +51,17 @@ type
     Status:      Int;
     ContentType: string;
     Body:        string;
+    { Extra response headers, one 'Name: value' CRLF-terminated line each, in
+      the order added.  Written after the default headers (Content-Type,
+      Content-Length, Connection); use AddHeader rather than editing this. }
+    ExtraHeaders: string;
     constructor Create;
     procedure SetText(AStatus: Int; const AContentType, ABody: string);
+    { Append a response header, e.g. AddHeader('Cache-Control', 'no-cache').
+      Content-Type, Content-Length and Connection are managed by the server —
+      set the first through ContentType.  A name or value containing CR or LF
+      is dropped, so a caller cannot inject headers or split the response. }
+    procedure AddHeader(const AName, AValue: string);
   end;
 
   { The application implements this; the server calls Handle per request. }
@@ -245,6 +254,15 @@ begin
   Status := 200;
   ContentType := 'text/html; charset=utf-8';
   Body := '';
+  ExtraHeaders := '';
+end;
+
+procedure THttpResponse.AddHeader(const AName, AValue: string);
+begin
+  if (Pos(#13, AName) > 0) or (Pos(#10, AName) > 0) or
+     (Pos(#13, AValue) > 0) or (Pos(#10, AValue) > 0) then
+    Exit;
+  ExtraHeaders := ExtraHeaders + AName + ': ' + AValue + #13#10;
 end;
 
 procedure THttpResponse.SetText(AStatus: Int; const AContentType, ABody: string);
@@ -462,6 +480,7 @@ begin
           'Content-Type: ' + AResp.ContentType + #13#10 +
           'Content-Length: ' + IntToStr(Length(AResp.Body)) + #13#10 +
           'Connection: close' + #13#10 +
+          AResp.ExtraHeaders +
           #13#10;
   { A failed head means the peer is gone; sending the body would only fail
     again.  There is no one left to report to: ServeConn closes the fd next. }
@@ -631,6 +650,7 @@ begin
             'Content-Type: ' + AResp.ContentType + #13#10 +
             'Content-Length: ' + IntToStr(Length(AResp.Body)) + #13#10 +
             'Connection: ' + ConnHdr + #13#10 +
+            AResp.ExtraHeaders +
             #13#10;
 end;
 

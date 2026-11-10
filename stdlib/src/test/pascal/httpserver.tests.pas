@@ -29,6 +29,13 @@ type
     procedure TestWebSocketUpgradeAndBroadcast;
     procedure TestLargeBody_NonBlockingListener;
     procedure TestSlowClient_NonBlockingListener;
+    procedure TestAddHeader_SentWithResponse;
+    procedure TestAddHeader_RejectsLineBreaks;
+  end;
+
+  { Adds response headers on top of the defaults. }
+  THeaderHandler = class(IRequestHandler)
+    procedure Handle(ARequest: THttpRequest; AResponse: THttpResponse);
   end;
 
   { Serves a fixed body, whatever the request. }
@@ -66,6 +73,13 @@ procedure TEchoHandler.Handle(ARequest: THttpRequest; AResponse: THttpResponse);
 begin
   AResponse.SetText(200, 'text/plain',
     ARequest.Path + '|' + ARequest.QueryParam('q'));
+end;
+
+procedure THeaderHandler.Handle(ARequest: THttpRequest; AResponse: THttpResponse);
+begin
+  AResponse.SetText(200, 'text/plain', 'ok');
+  AResponse.AddHeader('Cache-Control', 'no-cache');
+  AResponse.AddHeader('X-Test', 'two');
 end;
 
 constructor TBodyHandler.Create(const ABody: string);
@@ -348,6 +362,48 @@ begin
   T := nil;
   Close(Cli);
   Srv.Free();
+end;
+
+procedure THttpServerTests.TestAddHeader_SentWithResponse;
+const
+  PORT = 28995;
+var
+  Srv: THttpServer;
+  H: IRequestHandler;
+  Cli: Int;
+  Resp: string;
+begin
+  Srv := THttpServer.Create(PORT);
+  AssertTrue('start', Srv.Start());
+  H := THeaderHandler.Create();
+
+  Cli := TcpConnectLocal(PORT);
+  AssertTrue('connect', Cli >= 0);
+  AssertTrue('send', SendAll(Cli, 'GET / HTTP/1.1'#13#10'Host: x'#13#10#13#10));
+
+  Srv.ServeOnce(H);
+  Resp := RecvUntilClosed(Cli);
+  AssertTrue('200', ContainsStr(Resp, '200 OK'));
+  AssertTrue('first header', ContainsStr(Resp, #13#10'Cache-Control: no-cache'#13#10));
+  AssertTrue('second header', ContainsStr(Resp, #13#10'X-Test: two'#13#10));
+  AssertTrue('body intact', ContainsStr(Resp, #13#10#13#10'ok'));
+
+  Close(Cli);
+  Srv.Free();
+end;
+
+{ A CR or LF in a name or value would let a caller smuggle a second header or
+  a response split; AddHeader refuses such a header outright. }
+procedure THttpServerTests.TestAddHeader_RejectsLineBreaks;
+var
+  R: THttpResponse;
+begin
+  R := THttpResponse.Create();
+  R.AddHeader('X-Ok', 'fine');
+  R.AddHeader('X-Bad', 'a'#13#10'Set-Cookie: x=1');
+  R.AddHeader('X-Bad'#10'Y', 'v');
+  AssertEquals('only the clean header kept', 'X-Ok: fine'#13#10, R.ExtraHeaders);
+  R.Free();
 end;
 
 initialization
