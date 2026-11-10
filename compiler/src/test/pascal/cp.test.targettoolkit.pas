@@ -23,7 +23,8 @@ interface
 uses
   blaise.testing,
   blaise.codegen.target, blaise.codegen.toolkit,
-  blaise.codegen.native.backend, blaise.linker.elf;
+  blaise.codegen.native.backend, blaise.linker.elf,
+  blaise.codegen.native.x86_64, blaise.codegen.native.x86_64.abi;
 
 type
   TTargetToolkitTests = class(TTestCase)
@@ -52,6 +53,12 @@ type
       D2: ELF relocatable objects, PE image). }
     procedure TestObjectIsElf_PerTarget;
     procedure TestImageIsElf_PerTarget;
+    { The x86-64 toolkits supply the backend's strategy objects: System V at
+      the foreign boundary, ELF local-exec for threadvars. }
+    procedure TestLinuxToolkit_Backend_HasSysVAndElfTls;
+    procedure TestFreeBSDToolkit_Backend_HasSysVAndElfTls;
+    procedure TestSysVBoundaryAbi_NoProbeNoTranslation;
+    procedure TestElfLocalExecTls_OperandAndAddress;
   end;
 
 implementation
@@ -208,6 +215,84 @@ begin
   AssertFalse('windows image is PE', TargetImageIsElf(T));
   MakeTarget(osMacOS, cpuArm64, T);
   AssertFalse('macos image is Mach-O', TargetImageIsElf(T));
+end;
+
+procedure CheckSysVElfBackend(ATest: TTargetToolkitTests;
+  const ATarget: TTargetDesc);
+var
+  B: TNativeBackend;
+begin
+  B := ResolveToolkit(ATarget).MakeBackend();
+  try
+    ATest.AssertTrue('an x86-64 backend', B is TX86_64Backend);
+    ATest.AssertTrue('System V boundary ABI',
+      TX86_64Backend(B).BoundaryAbi is TSysVBoundaryAbi);
+    ATest.AssertTrue('ELF local-exec TLS model',
+      TX86_64Backend(B).TlsModel is TElfLocalExecTls);
+  finally
+    B.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestLinuxToolkit_Backend_HasSysVAndElfTls;
+begin
+  CheckSysVElfBackend(Self, Self.LinuxTarget());
+end;
+
+procedure TTargetToolkitTests.TestFreeBSDToolkit_Backend_HasSysVAndElfTls;
+begin
+  CheckSysVElfBackend(Self, Self.FreeBSDTarget());
+end;
+
+procedure TTargetToolkitTests.TestSysVBoundaryAbi_NoProbeNoTranslation;
+var
+  A: TX86BoundaryAbi;
+begin
+  A := TSysVBoundaryAbi.Create();
+  try
+    AssertFalse('no stack probe', A.NeedsStackProbe());
+    AssertFalse('C convention = internal', A.ForeignDiffers());
+  finally
+    A.Free();
+  end;
+end;
+
+type
+  { Collects emitted lines for the TLS-model test. }
+  TLineSink = class
+  public
+    Lines: string;
+    procedure Add(const ALine: string);
+  end;
+
+procedure TLineSink.Add(const ALine: string);
+begin
+  Lines := Lines + ALine + '|';
+end;
+
+procedure TTargetToolkitTests.TestElfLocalExecTls_OperandAndAddress;
+var
+  M: TX86TlsModel;
+  Sink: TLineSink;
+begin
+  M := TElfLocalExecTls.Create();
+  Sink := TLineSink.Create();
+  try
+    AssertEquals('%fs:U_X@tpoff', M.DirectOperand('U_X'));
+    M.EmitAddress('U_X', '%rax', @Sink.Add);
+    AssertEquals(#9'movq %fs:0, %rax|'#9'leaq U_X@tpoff(%rax), %rax|',
+      Sink.Lines);
+    Sink.Lines := '';
+    AssertTrue('leaq of the operand is rewritten',
+      M.RewriteAddressOf(#9'leaq %fs:U_X@tpoff, %rcx', @Sink.Add));
+    AssertEquals(#9'movq %fs:0, %rcx|'#9'leaq U_X@tpoff(%rcx), %rcx|',
+      Sink.Lines);
+    AssertFalse('other lines pass through',
+      M.RewriteAddressOf(#9'leaq U_X(%rip), %rcx', @Sink.Add));
+  finally
+    Sink.Free();
+    M.Free();
+  end;
 end;
 
 initialization

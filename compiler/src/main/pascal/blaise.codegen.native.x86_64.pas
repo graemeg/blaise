@@ -28,7 +28,8 @@ interface
 uses
   SysUtils, Classes, contnrs, Generics.Collections, uAST, uSymbolTable, uStrCompat,
   blaise.codegen, blaise.codegen.arcshapes, uDebugFacts, strutils,
-  blaise.codegen.native.backend, blaise.codegen.target, uUnwindFacts;
+  blaise.codegen.native.backend, blaise.codegen.target, uUnwindFacts,
+  blaise.codegen.native.x86_64.abi;
 
 const
   { Per-argument hoist kinds recorded by EmitArgHoist, parallel to the
@@ -72,6 +73,10 @@ type
 
   TX86_64Backend = class(TNativeBackend)
   protected
+    { Per-target strategies, supplied by the target toolkit and owned here
+      (AdoptStrategies).  The backend asks these instead of testing the OS. }
+    FBoundaryAbi: TX86BoundaryAbi;
+    FTlsModel: TX86TlsModel;
     FLabelCount: Int;       { monotonic source of unique local labels }
     { Tracked stack depth of the emitted instruction stream, in bytes below
       the 16-byte-aligned post-prologue %rsp (0 right after
@@ -1559,9 +1564,18 @@ type
       Builds a temporary args array on the stack: each slot is 16 bytes
       (type tag at [0], value at [8]), matching the QBE backend's layout. }
     procedure EmitFormatCall(AArgs: TObjectList);
+    { The TLS model; raises when the backend was built outside the toolkit. }
+    function Tls: TX86TlsModel;
   public
     constructor Create(const ATarget: TTargetDesc); override;
     destructor Destroy; override;
+    { Take ownership of the target's strategy objects.  The target toolkit
+      calls this straight after Create; a backend without them cannot emit
+      threadvar access. }
+    procedure AdoptStrategies(ABoundaryAbi: TX86BoundaryAbi;
+      ATlsModel: TX86TlsModel);
+    property BoundaryAbi: TX86BoundaryAbi read FBoundaryAbi;
+    property TlsModel: TX86TlsModel read FTlsModel;
   end;
 
 implementation
@@ -1887,8 +1901,27 @@ begin
   FConstArgUnsafe.Duplicates := dupIgnore;
 end;
 
+procedure TX86_64Backend.AdoptStrategies(ABoundaryAbi: TX86BoundaryAbi;
+  ATlsModel: TX86TlsModel);
+begin
+  FBoundaryAbi.Free();
+  FTlsModel.Free();
+  FBoundaryAbi := ABoundaryAbi;
+  FTlsModel := ATlsModel;
+end;
+
+function TX86_64Backend.Tls: TX86TlsModel;
+begin
+  if FTlsModel = nil then
+    raise Exception.Create('internal: x86-64 backend has no TLS model; ' +
+      'construct it through the target toolkit (MakeBackend)');
+  Result := FTlsModel;
+end;
+
 destructor TX86_64Backend.Destroy;
 begin
+  FBoundaryAbi.Free();
+  FTlsModel.Free();
   FUnw.Free();
   FUnwAggTypes.Free();
   FUnwAggLbls.Free();
@@ -2643,8 +2676,7 @@ begin
   Self.Emit(#9'movq %rsp, %rbp');
   Self.Emit(#9'pushq %rbx');
   Self.Emit(#9'subq $8, %rsp');
-  Self.Emit(#9'movq %fs:0, %rbx');
-  Self.Emit(#9'leaq ' + Lbl + '@tpoff(%rbx), %rbx');
+  Self.Tls().EmitAddress(Lbl, '%rbx', @Self.Emit);
   case ArcScopeExitReleaseKind(Ty) of
     arkString, arkDynArray, arkClass:
       if Self.IsWeakGlobal(AName) then
@@ -6074,7 +6106,7 @@ begin
       if Self.IsThreadVarGlobal(AName) then
       begin
         Self.NoteThreadVarTouch(AName);
-        Exit('%fs:' + Self.GlobalSymName(AName) + '@tpoff');
+        Exit(Self.Tls().DirectOperand(Self.GlobalSymName(AName)));
       end;
       Exit(Self.GlobalSymName(AName) + '(%rip)');
     end;
@@ -6098,7 +6130,7 @@ begin
       otherwise collide); the .tbss definition and this %fs:...@tpoff reference
       both apply GlobalSymName so they agree. }
     Self.NoteThreadVarTouch(AName);
-    Result := '%fs:' + Self.GlobalSymName(AName) + '@tpoff'
+    Result := Self.Tls().DirectOperand(Self.GlobalSymName(AName))
   end
   else
     { Module global: reference the owner-prefixed symbol so it binds to the
@@ -6111,9 +6143,7 @@ begin
   if Self.IsThreadVarGlobal(AName) then
   begin
     Self.NoteThreadVarTouch(AName);
-    Self.Emit(Format(#9'movq %%fs:0, %s', [ADstReg]));
-    Self.Emit(Format(#9'leaq %s@tpoff(%s), %s',
-      [Self.GlobalSymName(AName), ADstReg, ADstReg]));
+    Self.Tls().EmitAddress(Self.GlobalSymName(AName), ADstReg, @Self.Emit);
   end
   else
     Self.Emit(Format(#9'leaq %s(%%rip), %s',
@@ -6161,7 +6191,7 @@ begin
   else if Self.IsThreadVarGlobal(AName) then
   begin
     Self.NoteThreadVarTouch(AName);
-    Result := '%fs:' + Self.GlobalSymName(AName) + '_obj@tpoff'
+    Result := Self.Tls().DirectOperand(Self.GlobalSymName(AName) + '_obj')
   end
   else
     { Owner-prefixed label matching EmitDataSection's <Name>_obj definition. }
@@ -6176,9 +6206,8 @@ begin
   if Self.IsThreadVarGlobal(AName) then
   begin
     Self.NoteThreadVarTouch(AName);
-    Self.Emit(Format(#9'movq %%fs:0, %s', [ADstReg]));
-    Self.Emit(Format(#9'leaq %s_obj@tpoff(%s), %s',
-      [Self.GlobalSymName(AName), ADstReg, ADstReg]));
+    Self.Tls().EmitAddress(Self.GlobalSymName(AName) + '_obj', ADstReg,
+      @Self.Emit);
   end
   else
     Self.Emit(Format(#9'leaq %s_obj(%%rip), %s',
@@ -6201,7 +6230,7 @@ begin
   else if Self.IsThreadVarGlobal(AName) then
   begin
     Self.NoteThreadVarTouch(AName);
-    Result := '%fs:' + Self.GlobalSymName(AName) + '_itab@tpoff'
+    Result := Self.Tls().DirectOperand(Self.GlobalSymName(AName) + '_itab')
   end
   else
     Result := Self.GlobalSymName(AName) + '_itab(%rip)';
@@ -22029,27 +22058,13 @@ begin
 end;
 
 procedure TX86_64Backend.Emit(const ALine: string);
-var
-  P, Q: Int;
-  Dst: string;
 begin
-  { `leaq %fs:X@tpoff, %reg` is never what a caller means: lea ignores the
-    segment override, so it yields the bare TLS offset instead of the
-    threadvar's address.  It arises wherever an address-of path formats a
-    threadvar's VarOperand, so it is rewritten here, once, to the real
-    per-thread address: thread pointer plus offset. }
-  if Copy(ALine, 0, 10) = #9'leaq %fs:' then
-  begin
-    P := Pos('@tpoff', ALine);
-    Q := Pos(', ', ALine);
-    if (P > 10) and (Q > P) then
-    begin
-      Dst := Copy(ALine, Q + 2, Length(ALine) - Q - 2);
-      Self.Emit(#9'movq %fs:0, ' + Dst);
-      Self.Emit(#9'leaq ' + Copy(ALine, 10, Q - 10) + '(' + Dst + '), ' + Dst);
-      Exit;
-    end;
-  end;
+  { An address-of path that formats a threadvar's operand (`leaq <operand>,
+    %reg`) does not yield the per-thread address; the TLS model rewrites it
+    here, once.  FTlsModel is nil only on a backend built outside the
+    toolkit, which emits no threadvar access. }
+  if (FTlsModel <> nil) and FTlsModel.RewriteAddressOf(ALine, @Self.Emit) then
+    Exit;
   if FPromoActive then
     Self.EmitTracked(Self.PromoRewrite(ALine))
   else

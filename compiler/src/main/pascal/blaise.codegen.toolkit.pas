@@ -106,7 +106,19 @@ function RegisteredHasNativeBackend(const ATarget: TTargetDesc): Boolean;
 implementation
 
 uses
-  blaise.codegen.native.x86_64, blaise.codegen.native.arm64;
+  blaise.codegen.native.x86_64, blaise.codegen.native.x86_64.abi,
+  blaise.codegen.native.arm64;
+
+{ An x86-64 backend for a System V / ELF target: the boundary convention is
+  the internal one and threadvars use the ELF local-exec model. }
+function MakeSysVElfX86Backend(const ATarget: TTargetDesc): TNativeBackend;
+var
+  B: TX86_64Backend;
+begin
+  B := TX86_64Backend.Create(ATarget);
+  B.AdoptStrategies(TSysVBoundaryAbi.Create(), TElfLocalExecTls.Create());
+  Result := B;
+end;
 
 { ---- TLinuxX86_64Toolkit --------------------------------------------- }
 
@@ -120,7 +132,7 @@ var
   T: TTargetDesc;
 begin
   MakeTarget(osLinux, cpuX86_64, T);
-  Result := TX86_64Backend.Create(T);
+  Result := MakeSysVElfX86Backend(T);
 end;
 
 function TLinuxX86_64Toolkit.MakeLinkTarget: TLinkTarget;
@@ -140,7 +152,7 @@ var
   T: TTargetDesc;
 begin
   MakeTarget(osFreeBSD, cpuX86_64, T);
-  Result := TX86_64Backend.Create(T);
+  Result := MakeSysVElfX86Backend(T);
 end;
 
 function TFreeBSDX86_64Toolkit.MakeLinkTarget: TLinkTarget;
