@@ -1,0 +1,1384 @@
+= Windows x86_64 Target — Design
+:author: Graeme Geldenhuys
+:revdate: 2026-11-10
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+:icons: font
+:sectanchors:
+:sectnums:
+
+== Context
+
+Blaise produces native executables for `linux-x86_64`, `freebsd-x86_64` and
+`macos-arm64` with its own code generator, assembler and linker.  This
+document specifies the addition of `windows-x86_64`.
+
+FreeBSD was a cheap second target because it shares the ELF container and the
+System V AMD64 ABI with Linux.  Windows shares neither.  It differs on four
+axes at once:
+
+[cols="2,3,3",options="header"]
+|===
+| Axis | Linux / FreeBSD x86_64 | Windows x86_64
+
+| Image container
+| ELF
+| PE32+ (import tables, base relocations, TLS directory)
+
+| C calling convention
+| System V AMD64
+| Microsoft x64 ("Win64")
+
+| Thread-local storage
+| `%fs`-relative, local-exec
+| `%gs:0x58` TLS array indexed by `_tls_index`
+
+| Kernel surface
+| Stable syscalls (Linux), libc (FreeBSD dynamic)
+| `kernel32.dll` and friends; syscall numbers are not stable
+|===
+
+The design goal is to add the target while changing as little existing code as
+possible, and to do so entirely through the ports-and-adapters seams described
+in `native-target-architecture.adoc`.
+
+=== Scope
+
+In scope:
+
+* cross-compiling console and GUI-subsystem executables for Windows from any
+  supported host;
+* the always-linked runtime and the `TRtlPlatform` adapter for Windows;
+* calling Windows DLLs, and being called back by them;
+* self-hosting: a `blaise.exe` that rebuilds itself on Windows;
+* the test infrastructure needed to verify all of the above from a macOS
+  arm64 development host.
+
+Out of scope for this document:
+
+* Windows on arm64;
+* producing DLLs (`library` modules) — executables only at first;
+* linking third-party COFF `.obj` / `.lib` files;
+* PDB / CodeView debug information;
+* structured exception handling (SEH) interoperability;
+* a GUI toolkit binding;
+* the debugger itself.  Appendix A records only what the *compiler* must emit
+  so that a later pdr port has what it needs.
+
+=== Minimum Windows version
+
+Windows 10 version 1809.  This guarantees `WaitOnAddress`, slim reader/writer
+locks, `GetSystemTimePreciseAsFileTime`, and a console that honours the UTF-8
+code page.
+
+[#rule-no-ifdef]
+== Governing rule: no conditional-compilation sprawl
+
+Blaise does not express target differences with `{$IFDEF}` blocks woven
+through shared units, and it has no include files.  The FPC model — hundreds
+of conditionals and thousands of `.inc` files — is the explicit non-goal.
+Target divergence lives in *which object is instantiated* or *which unit is
+linked*, decided once.
+
+Every Windows difference in this design is assigned one of those mechanisms:
+
+[cols="2,4",options="header"]
+|===
+| Divergence | Mechanism
+
+| Calling convention at the foreign-code boundary
+| `TX86BoundaryAbi` strategy object, supplied by the target toolkit
+
+| TLS access sequence
+| `TX86TlsModel` strategy object, supplied by the target toolkit
+
+| Image container
+| A separate linker unit (`blaise.linker.pe`), selected by the toolkit
+
+| Kernel surface
+| Whole-unit substitution by name suffix in `BuildRTLUnitList`
+  (`runtime.*.windows`)
+
+| High-level OS operations
+| `TRtlPlatformWindows`, an adapter behind the existing `TRtlPlatform` port
+
+| Library-name mapping and library search directories
+| Per-target methods on the toolkit, not `if Target.OS = …` chains in the
+  driver
+|===
+
+The permitted uses of conditional compilation are the ones that exist today,
+and no others are added:
+
+* `HostTarget` in `blaise.codegen.target.pas`, which detects the OS the
+  compiler binary itself was built for (the `WINDOWS` arm is already present);
+* the CPU-keyed bodies in `runtime.atomic`, `runtime.setjmp` and
+  `runtime.utf8`.
+
+Two places invite a shortcut and must not take it:
+
+* *The x86_64 backend.*  `blaise.codegen.native.x86_64.pas` contains no OS
+  branch at all today.  It stays that way: it consults strategy objects.
+* *The native driver.*  `blaise.codegen.native.driver.pas` already has
+  `if ATarget.OS = osFreeBSD` chains (`LinkLibSoname`, `BuildLibSearchDirs`).
+  These gain no third arm; they move behind the toolkit first (milestone M0).
+
+Each milestone's review checklist includes: _search the diff for a new
+`{$IFDEF WINDOWS}` or `osWindows` comparison outside the toolkit, the target
+unit and the RTL unit-list builder; any hit needs a written justification._
+
+== Current state
+
+=== What already generalises
+
+[cols="2,4",options="header"]
+|===
+| Component | State
+
+| Target model (`blaise.codegen.target.pas`)
+| `osWindows` exists; `ParseTargetName` accepts `windows-x86_64`;
+  `ExecutableExtension`, `TargetDirectorySeparator`, `TargetPathSeparator`
+  and `TargetLineEnding` already return `.exe`, `\`, `;` and CRLF.
+
+| Conditional symbols (`Blaise.pas`)
+| A Windows target defines `WINDOWS` and withholds `UNIX`.
+
+| Toolkit and registry (`blaise.codegen.toolkit.pas`)
+| A toolkit whose `MakeLinkTarget` returns `nil` is already understood by
+  `LinkViaInternalLinker` as "not an ELF image" and is routed to a different
+  linker.  macOS uses this; Windows slots in the same way.
+
+| Internal x86_64 assembler (`blaise.assembler.x86_64.pas`)
+| Emits ELF relocatable objects.  Under decision D2 this is reused unchanged.
+
+| RTL unit selection (`BuildRTLUnitList` in `blaise.codegen.driver.pas`)
+| OS-specific leaves are selected by name suffix (`RTLOSSuffix`).
+
+| Freestanding runtime profile
+| The Linux `--static` profile already shows how the core runtime runs with
+  no libc: a small leaf set defines the POSIX-named symbols the core units
+  bind.  Windows follows the same pattern.
+
+| String encoding at the OS boundary
+| Already ruled in `language-rationale.adoc` (_Windows Win32 / GDI_): UTF-8
+  internally, conversion to UTF-16 inside RTL wrappers, `W` APIs only.
+|===
+
+=== What does not
+
+[cols="2,4",options="header"]
+|===
+| Component | Gap
+
+| `TargetUsesElf`
+| Conflates "objects are ELF" with "the image is ELF".  For Windows the first
+  is true and the second false, so the predicate must be split.
+
+| Calling convention
+| The System V register assignment appears at roughly 750 sites in 91
+  procedures of the x86_64 backend, mostly hand-written sequences such as
+  `movq …, %rdi` / `callq _StringRelease`.  The tables `SysVArgRegs*` and
+  `SysVXmmArgRegs` cover only part of it.
+
+| `TMethodDecl.CallingConv`
+| Parsed and serialised to `.bif`, but read by neither the semantic pass nor
+  the code generator.  The parser accepts `cdecl`, `stdcall`, `register`,
+  `pascal` and `safecall` (`uParser.pas`, two sites) and treats them all as
+  noise.  <<d5>> reduces the set to `cdecl`.
+
+| TLS
+| Every threadvar access is formatted as `%fs:sym@tpoff`, either as a direct
+  memory operand or via `movq %fs:0` + `leaq sym@tpoff(...)`.  The assembler's
+  `opTLS` operand kind knows only `%fs`.
+
+| Stack growth
+| No stack probing is emitted.  Windows commits stack pages through a guard
+  page; a frame that skips the guard page faults.
+
+| Import binding
+| ELF dynamic linking needs only a list of libraries.  A PE import table
+  needs the DLL *per symbol*.  `ExternalLib` is recorded per declaration in
+  the AST but does not reach the linker.
+
+| Runtime OS surface
+| `rtl.platform.posix.pas` is the only `TRtlPlatform` adapter.  Its
+  primitives (`fork`, `execvp`, `waitpid`, `pipe`, `stat`) have no direct
+  Windows equivalent.
+
+| Fault handling
+| The runtime installs no signal handlers today, so there is nothing to port,
+  but an unhandled access violation on Windows raises an error dialog unless
+  the process deals with it.
+|===
+
+== Decision record
+
+[#d1]
+=== D1 — System V ABI internally, Win64 ABI at the boundary
+
+*Decision.*  Blaise code compiled for Windows keeps the System V AMD64 calling
+convention for every call between Blaise routines and from Blaise code into
+the runtime.  The Microsoft x64 convention is used only where control crosses
+into or out of foreign code.
+
+*Alternative rejected: Win64 everywhere* (the FPC and Delphi approach).  It
+would let any procedure pointer be handed to Windows unannotated.  It was
+rejected because it requires re-plumbing argument assignment, shadow space,
+aggregate passing and the callee-saved set through the whole 28,000-line
+backend and providing Win64 variants of every inline-assembler routine in the
+runtime — a second backend in all but name, and exactly the per-target
+duplication the governing rule exists to prevent.
+
+*Precedent.*  Go uses its own internal ABI on every OS and translates at the
+C boundary.
+
+*Cost accepted.*  A routine that Windows calls must be declared `cdecl`.  See
+<<d5>>, <<d6>> and <<abi-language-rule>>.
+
+[#d2]
+=== D2 — ELF relocatable objects, PE linker
+
+*Decision.*  ELF `ET_REL` remains the internal object format for
+`windows-x86_64`.  A new linker consumes those objects and writes a PE32+
+image.
+
+*Rationale.*  Every object in a Blaise link is produced by Blaise (the RTL is
+compiled from source), so the object format is a private matter.  Keeping ELF
+reuses, unchanged: `AssembleToObject`, the per-unit object cache, `.bif`
+embedding through `uElfObject`, `ReadElfObjectFile`, and
+`CollectDefinedSymbols`.
+
+*Alternative rejected: COFF objects.*  This needs a COFF writer and reader,
+plus COFF variants of the cache, the interface embedding and the symbol scan,
+for one benefit — linking foreign `.obj`/`.lib` files — that no current target
+relies on.  A COFF *reader* can be added later without disturbing this design.
+
+*Precedent.*  UEFI toolchains build ELF and convert to PE.
+
+*Consequences.*
+
+* `--assembler external` and `--linker external` are rejected for Windows
+  targets with a clear message.  The emitted `.s` uses ELF directives that a
+  COFF assembler does not accept.
+* `uIfaceObject`'s stubbed PE section name (`.bliface`) stays unused.
+
+[#d3]
+=== D3 — Test on Windows 11 ARM64 under QEMU; real x64 in CI
+
+*Decision.*  The local automated lane is a Windows 11 ARM64 guest under
+`qemu-system-aarch64` with HVF acceleration.  It runs x64 executables through
+Windows' built-in x64 emulation, with the real loader and the real
+`kernel32`.  Coverage on genuine x64 hardware comes from a GitHub Actions
+`windows-latest` job.
+
+*Alternatives rejected.*
+
+* _Converting an existing x64 VirtualBox disk._  On Apple Silicon an x64 guest
+  runs under full TCG emulation; boots take minutes and test runs are
+  impractically slow.
+* _Wine only._  Wine's loader is more forgiving than Windows', so a malformed
+  PE header can pass there and fail on Windows.  It also depends on Rosetta 2,
+  which is not installed on the development host and has a limited future.
+
+Details in <<testing>>.
+
+[#d4]
+=== D4 — `WriteLn` emits CRLF
+
+*Decision.*  On a Windows target `WriteLn` writes `LineEnding`, which
+`language-rationale.adoc` already fixes as `#13#10`.
+
+*Alternative rejected: LF on every target.*  It would make test output
+identical across platforms but leave `WriteLn` disagreeing with the documented
+constant, and differ from Delphi and FPC behaviour.
+
+*Consequence.*  The e2e harness normalises CRLF to LF before comparing
+expected output.
+
+[#d5]
+=== D5 — `cdecl` is the only calling-convention directive
+
+*Decision.*  `cdecl` means "the platform C calling convention" and is the only
+calling-convention directive in the language.  `stdcall`, `pascal`, `register`
+and `safecall` become compile errors whose message points to `cdecl`.
+`winapi` is not added.  `varargs` remains and is valid only on a `cdecl`
+routine.
+
+*Reasoning.*  The distinctions between these directives exist only on 32-bit
+x86, which Blaise does not target.  On every 64-bit target FPC and Delphi
+accept them and ignore them, because their default convention already is the
+platform C convention.  Keeping them would preserve legacy syntax with no
+meaning, contrary to the language's design goal.  The concept itself is not
+legacy: under <<d1>> the default Blaise convention on Windows differs from the
+C convention, so exactly one marker is required.
+
+*Alternative rejected: `cdecl`, `stdcall` and `winapi` as synonyms.*  Familiar
+to FPC and Delphi users, but three spellings of one meaning, two of them named
+after a distinction that no longer exists.
+
+*Consequence.*  This is a target-independent language change.  It needs
+entries in `docs/language-rationale.adoc` and `docs/grammar.ebnf`, a
+migration-analyser rule, and a mechanical rename in Blaise Canvas UI (55 uses
+of `stdcall`, including in its Cocoa units).  The compiler, the runtime and
+the standard library contain no use of the removed directives; the bindgen
+tool already emits `cdecl`.
+
+[#d6]
+=== D6 — A named library implies `cdecl`; a library-less `external` does not
+
+*Decision.*
+
+* `external '<lib>'`, with or without `name`, declares a routine in a foreign
+  library and has the C convention implicitly.
+* `external name '<symbol>'` with no library keeps the Blaise convention
+  unless `cdecl` is written.
+
+*Reasoning.*  The convention of a call must be knowable from the declaration
+alone; the code generator cannot wait for the linker to discover where a
+symbol is defined.  Library-less externals are how the compiler and the
+standard library reach runtime routines that are themselves written in Blaise
+(`external name '_StrToDouble'`, `external name '_SolSocket'`), and how the
+core runtime reaches its POSIX-named leaves (`write`, `mmap`).  All of those
+are Blaise code and use the internal convention.  A routine in a named library
+is by definition not in the Blaise image.
+
+*Alternative rejected: `external` never implies a convention* (the FPC and
+Delphi rule).  Every library binding would have to write `cdecl`, and
+forgetting it would be a silent ABI defect on Windows only.
+
+*Consequences.*
+
+* A Windows DLL import always names its library, so it is always a C-convention
+  call.  This matches the PE requirement that an import names its DLL.
+* A Blaise routine that *defines* a symbol which other units bind through a
+  named library must itself be declared `cdecl`.  The one known case is the
+  `pthread_*` set: `runtime.thread` binds `external 'pthread'`, and
+  `runtime.thread.windows` supplies the definitions.  See
+  <<runtime-thread-windows>>.
+
+[#d7]
+=== D7 — A fatal fault exits with its NTSTATUS code
+
+*Decision.*  When a hardware fault terminates a Blaise program on Windows, the
+process exit code is the Windows exception code itself: `0xC0000005` for an
+access violation, `0xC00000FD` for a stack overflow, `0xC0000094` for an
+integer division by zero, `0xC000001D` for an illegal instruction.
+
+*Reasoning.*  This is the direct analogue of exit code 139 on POSIX targets,
+which is not a Blaise convention but the shell's encoding of "terminated by
+`SIGSEGV`".  The NTSTATUS value is the operating system's own statement of how
+the process died; it keeps the kind of fault distinguishable, and CI runners,
+PowerShell and debuggers recognise it.  It is also what a C, C++ or Rust
+program produces by default.
+
+*Alternatives rejected.*
+
+* _The FPC and Delphi runtime-error numbers_ (216 access violation, 202 stack
+  overflow, 200 division by zero).  A Turbo Pascal inheritance that would need
+  a Blaise-specific table.
+* _One fixed code for every fault_ (Go exits with 2).  Loses the kind of
+  fault.
+
+*Consequence.*  The e2e harness gains a per-target "fault exit code" helper,
+so tests that assert 139 today ask the harness instead of hard-coding the
+number.  No test carries a conditional.
+
+[#abi]
+== ABI design
+
+=== Internal convention
+
+Unchanged.  Arguments in `RDI, RSI, RDX, RCX, R8, R9` and `XMM0–7`; callee
+preserves `RBX, RBP, R12–R15`.  The inline-assembler runtime units
+(`runtime.atomic`, `runtime.setjmp`, `runtime.utf8`) are valid as written.
+
+Three obligations apply to *all* code on Windows regardless of convention.
+
+Stack probing::
+Windows grows a thread's stack by faulting on a guard page.  A prologue that
+lowers `RSP` by more than one page and then writes below the guard page
+faults instead of growing.  `BuildFrame` therefore emits a probe when the
+frame is 4096 bytes or larger: touch one byte in each page from the old `RSP`
+downwards before the final adjustment.  The probe is emitted inline; there is
+no `__chkstk` import.  Whether a target needs probing is a Boolean property
+of the boundary-ABI strategy (<<abi-strategy>>), not an OS test.
+
+No red zone::
+Windows may write below `RSP` when it dispatches an exception.  The backend
+must not keep live data below `RSP`.  No red-zone use was found in the
+survey, but this is an audit item for M0 because nothing has forbidden it
+until now.
+
+Stack alignment::
+16-byte alignment at every `call`, as today.
+
+[#abi-strategy]
+=== The boundary strategy
+
+A new abstract class, constructed by the toolkit and held by the backend:
+
+[source,pascal]
+----
+type
+  TX86BoundaryAbi = class
+  public
+    { True when frames of a page or more must be probed in the prologue. }
+    function NeedsStackProbe: Boolean; virtual; abstract;
+    { True when a C-convention routine differs from the internal one. }
+    function ForeignDiffers: Boolean; virtual; abstract;
+    { Outbound: lower a call to a foreign routine. }
+    procedure EmitForeignCall(...); virtual; abstract;
+    { Inbound: prologue/epilogue for a routine foreign code may call. }
+    procedure EmitForeignEntry(...); virtual; abstract;
+    procedure EmitForeignExit(...); virtual; abstract;
+  end;
+----
+
+Two adapters:
+
+* `TSysVBoundaryAbi` — `ForeignDiffers = False`; the foreign paths are never
+  taken.  Used by Linux and FreeBSD.  Introducing it changes no emitted code.
+* `TWin64BoundaryAbi` — implements the rules below.
+
+The exact method signatures are for the implementer to settle against
+`EmitCall`; the constraint is that the backend asks the strategy and never
+tests the OS.
+
+=== Outbound calls (Blaise → foreign)
+
+A call is foreign when the callee's declaration or procedural type has the C
+convention: `cdecl` written explicitly (<<d5>>), or implied by
+`external '<lib>'` (<<d6>>).  A library-less `external name` without `cdecl`
+is an internal call.  Such calls
+reach `EmitCall` (for a named routine) or `EmitCallIndirectEx` (through a
+procedure pointer); both delegate to `EmitForeignCall`.
+
+Win64 lowering rules:
+
+* The first four arguments are positional.  Argument _i_ goes in
+  `RCX, RDX, R8, R9` if it is an integer or pointer, or in `XMM0–XMM3` if it
+  is a float.  An integer in position 2 uses `RDX` even if position 1 was a
+  float.
+* The caller reserves 32 bytes of shadow space above the return address, even
+  for calls with fewer than four arguments.  Further arguments go on the stack
+  above the shadow space, each in an 8-byte slot.
+* An aggregate of exactly 1, 2, 4 or 8 bytes is passed by value in an integer
+  register or slot.  Any other aggregate is passed as a pointer to a copy the
+  caller makes.
+* A result of 8 bytes or fewer is returned in `RAX`, or `XMM0` for a float.
+  Any other aggregate is returned through a hidden pointer passed in `RCX`
+  (ahead of the other arguments); the callee returns that pointer in `RAX`.
+* For a variadic callee, a float passed in `XMM0–3` is also copied into the
+  matching integer register.
+* The callee preserves `RBX, RBP, RDI, RSI, R12–R15` and `XMM6–XMM15`.  This
+  is a superset of what the internal convention assumes, so nothing extra
+  needs saving around the call.
+
+The record-return classifier in `blaise.codegen.native.backend.pas`
+(`ClassifyRecordReturn`) implements System V classification; the Win64 rule is
+simpler and belongs in the Win64 adapter, not as a branch inside the shared
+classifier.
+
+=== Inbound calls (foreign → Blaise)
+
+A routine with a body that is declared `cdecl` is compiled with a foreign
+entry.  Its prologue:
+
+. saves `RDI`, `RSI` and `XMM6–XMM15`, which the caller expects preserved and
+  the body is free to clobber;
+. moves the Win64 arguments into the homes the body expects, exactly as if
+  they had arrived in System V registers;
+
+and its epilogue restores the saved registers and returns the result in the
+Win64 location.
+
+Uses:
+
+* callbacks passed to Windows (window procedures, enumeration callbacks,
+  `CreateThread` start routines);
+* the runtime's own thread trampoline;
+* the image entry point.
+
+A Blaise exception must not propagate out through a foreign entry: the
+Windows frames above it are not Blaise frames and the `setjmp`-based unwinder
+would skip their cleanup.  This matches the existing rule for C callbacks on
+other targets.
+
+[#abi-language-rule]
+=== Language rule: calling convention is part of the type
+
+This is a language decision.  When it is implemented,
+`docs/language-rationale.adoc` and `docs/grammar.ebnf` are updated in the same
+commit, as the project rules require.
+
+The rule, following <<d5>> and <<d6>>:
+
+* `cdecl` is part of a routine's signature and of a procedural type.  The
+  syntax is the one FPC and Delphi share:
+  `type TCallback = function(X: Int32): Int32; cdecl;`.
+* `cdecl` is the only calling-convention directive; the others are errors.
+* `external '<lib>'` implies `cdecl`; a library-less `external name` does not.
+* `varargs` requires `cdecl`.
+* Assigning a default-convention routine to a C-convention procedural type
+  (or the reverse) is a *compile error on a Windows target* and a *portability
+  warning on every other target*, where the two conventions happen to
+  coincide.
+
+The warning on other targets is the valuable part: it tells a Linux developer
+that a callback will not work on Windows before anyone tries.
+
+[NOTE]
+====
+Migration items for the implementing session:
+
+* Existing bindings (`net.sockets`, `runtime.thread`'s start routine, the
+  bindgen output, Blaise Canvas UI) pass default-convention routines as C
+  callbacks.  They will begin to warn.  The bindgen tool should emit `cdecl`
+  on generated callback types as it already does on routines.
+* Audit every library-less `external name` in the standard library that binds
+  a genuine C library symbol (for example the socket calls).  On Windows each
+  must either gain a library name or be supplied by a Blaise leaf unit.
+====
+
+=== Data model
+
+Windows is LLP64: C `long` is 32 bits, where it is 64 bits on Linux, FreeBSD
+and macOS.  This does not affect Blaise's own types, but it does affect
+bindings.  The bindgen tool must map `long` / `unsigned long` by target, and
+hand-written bindings that used `Int64` for a C `long` are wrong on Windows.
+
+[#tls]
+== Thread-local storage
+
+=== Model
+
+A PE image with thread-local data carries a TLS directory.  The loader
+allocates a copy of the TLS template per thread and stores its address in a
+per-thread array.  The image's slot in that array is written by the loader
+into a variable the image names, conventionally `_tls_index`.
+
+Access sequence:
+
+[source,asm]
+----
+    movq  %gs:0x58, %r        # TEB.ThreadLocalStoragePointer
+    movl  _tls_index(%rip), %ecx
+    movq  (%r,%rcx,8), %r     # this image's TLS block for this thread
+    # the variable is at  sym@tpoff(%r)
+----
+
+Offsets are *positive* from the start of the block, where on ELF x86_64 they
+are negative from the thread pointer.
+
+=== Strategy object
+
+[source,pascal]
+----
+type
+  TX86TlsModel = class
+  public
+    { Emit whatever is needed and return an operand addressing AName. }
+    function VarOperand(const ASym: string; AEmit: TEmitProc;
+      const AScratch: string): string; virtual; abstract;
+    { Emit code leaving the address of ASym in ADstReg. }
+    procedure EmitVarAddr(const ASym, ADstReg: string;
+      AEmit: TEmitProc); virtual; abstract;
+  end;
+----
+
+* `TElfLocalExecTls` returns `%fs:sym@tpoff` and emits nothing — today's
+  behaviour.
+* `TPeTlsModel` emits the three-instruction base load into the scratch
+  register and returns `sym@tpoff(%scratch)`.
+
+The call sites to convert are concentrated: `VarOperand` and its siblings
+(around lines 6038–6204 of the x86_64 backend), the thread-variable
+finalisation helpers (around 2020–2067 and 2646), and the `leaq %fs:` rewrite
+(around 22036).
+
+[WARNING]
+====
+The ELF form is a single memory operand and needs no register.  The PE form
+needs a scratch register that is dead at every threadvar access.  Choosing it
+is the main risk in this section.  The implementer must establish which
+register the backend guarantees free at `VarOperand` call sites — or make the
+PE model spill and restore one — before converting any site.  The arm64
+backend already solves the same problem for Mach-O TLV descriptors and is the
+reference.
+====
+
+=== Assembler and linker
+
+* The assembler's `opTLS` operand accepts `%gs:` with a numeric displacement
+  in addition to `%fs:`, and accepts `sym@tpoff(%reg)` (already used by the
+  `leaq` form).
+* No new relocation kind is needed.  The PE linker resolves `crkTPOFF32` as
+  _symbol address minus start of the merged `.tls` section_.
+* `.tbss` is written out as zero bytes in the image and the directory's
+  `SizeOfZeroFill` is 0.  Zero-fill has a history of being ignored by
+  loaders; materialising the bytes removes the dependency.
+* The linker synthesises `_tls_index` in `.data` and the TLS directory in
+  `.rdata`, and points data directory 9 at it.
+
+=== Thread exit
+
+The TLS directory may list callbacks that the loader runs on thread attach
+and detach.  One callback, defined in the Windows thread leaf, runs the
+handlers registered through `_BlaiseThreadAtExit` on `DLL_THREAD_DETACH`.
+This is the Windows counterpart of `__cxa_thread_atexit_impl` on Linux and
+`_tlv_atexit` on macOS.  As a foreign entry it is compiled with the C
+convention.
+
+[#linker]
+== PE32+ linker
+
+=== Units
+
+[cols="2,4",options="header"]
+|===
+| Unit | Role
+
+| `blaise.linker.pe.pas`
+| `TPELinker`.  Reads ELF relocatable objects with `ReadElfObjectFile`,
+  merges sections, resolves symbols, synthesises imports/TLS/relocations,
+  applies relocations.  Public surface modelled on `TMachOLinker`
+  (`AddObjectFile`, `LinkToFile`).
+
+| `blaise.pewriter.pas`
+| Serialises headers, section table and section bodies.  Uses `TByteBuf`
+  from `blaise.container.writer`.
+
+| `blaise.pereader.pas`
+| Parses a PE image: headers, section table, import directory, export
+  directory, base relocations, TLS directory.  Needed by the unit tests, and
+  later by the native-host export check.
+|===
+
+`blaise.linker.elf.pas` is not modified.  Section merging and symbol
+resolution are similar in both linkers; extracting a shared core is a
+worthwhile refactor but is deliberately *not* a precondition — the Mach-O
+linker did not need it either.
+
+=== Image layout
+
+DOS header::
+Minimal `MZ` header with `e_lfanew` and the conventional stub.
+
+COFF file header::
+`Machine = 0x8664`; `Characteristics = EXECUTABLE_IMAGE |
+LARGE_ADDRESS_AWARE`.
+
+Optional header (PE32+, magic `0x20B`)::
+* `ImageBase = 0x140000000`
+* `SectionAlignment = 0x1000`, `FileAlignment = 0x200`
+* `MajorOperatingSystemVersion` / `MajorSubsystemVersion = 6.0`
+* `Subsystem = 3` (console) or `2` (GUI), from `--subsystem`
+* `DllCharacteristics = HIGH_ENTROPY_VA | DYNAMIC_BASE | NX_COMPAT |
+  TERMINAL_SERVER_AWARE`
+* `SizeOfStackReserve = 8 MiB`, `SizeOfStackCommit = 64 KiB` — the reserve
+  matches what Blaise programs get on Linux
+* `AddressOfEntryPoint` = RVA of `_start`
+
+Sections::
++
+[cols="1,1,4",options="header"]
+|===
+| Name | Access | Contents
+
+| `.text`
+| R X
+| Merged code, followed by the import thunks
+
+| `.rdata`
+| R
+| Merged read-only data, import directory, import lookup tables, hint/name
+  table, import address table, TLS directory
+
+| `.data`
+| R W
+| Merged initialised data, then `.bss` as an uninitialised tail
+  (`VirtualSize` greater than `SizeOfRawData`)
+
+| `.tls`
+| R W
+| `.tdata` followed by `.tbss` as zero bytes
+
+| `.blunw`
+| R W
+| Merged `blaise_unwind` blocks, bracketed by the start/end symbols the
+  runtime walks (see `exception-unwind-cleanup-design.adoc`)
+
+| `.opdf`
+| R
+| Merged OPDF debug records, when `--debug-opdf` is given
+
+| `.reloc`
+| R, discardable
+| Base relocations
+|===
+
+Section names are limited to eight bytes, hence `.blunw`.
+
+Data directories populated: import (1), base relocation (5), TLS (9), import
+address table (12).
+
+=== Relocations
+
+[cols="2,4",options="header"]
+|===
+| ELF relocation | PE linker action
+
+| `R_X86_64_PC32`, `R_X86_64_PLT32`
+| Resolve directly.  If the target is an imported function, resolve to its
+  thunk.
+
+| `R_X86_64_64`
+| Write `ImageBase + RVA` and record an `IMAGE_REL_BASED_DIR64` entry for the
+  location.
+
+| `R_X86_64_TPOFF32`
+| Symbol address minus start of `.tls`.
+
+| `R_X86_64_32`, `R_X86_64_32S`
+| Link error.  A 32-bit absolute address cannot be rebased above 4 GiB.  The
+  backend already emits position-independent code for Linux PIE, so none are
+  expected; an occurrence is a codegen defect.
+
+| `R_X86_64_GOTPCREL` and relaxable variants
+| Link error in the first version.  The backend emits none.
+|===
+
+Base relocations are grouped into 4 KiB page blocks, each padded to a
+multiple of four bytes.
+
+Weak symbols from ELF objects (the runtime uses `.weak` for trampolines such
+as `_BlaisePlatformInit` and for generic instances) are resolved by the
+linker with the usual strong-over-weak rule; nothing weak survives into the
+image.
+
+=== Imports
+
+A PE import names its DLL.  Three pieces deliver that:
+
+. *Metadata section.*  A new `TContainerSectionKind` member, `cskImports`,
+  mapped by the ELF writer to a non-allocated section `.blaise.imports`.  The
+  assembler's `.section` handler gains one arm for it.  The section holds
+  pairs of NUL-terminated strings: symbol name, library name.
+
+. *Code generator.*  For each `external` routine the unit references, the
+  backend emits one pair, taking the library from `TMethodDecl.ExternalLib`.
+  This is emitted on every target — it is cheap, and the ELF and Mach-O
+  linkers ignore the section — so it needs no OS test.
+
+. *Linker.*  For every undefined symbol with a metadata entry, the linker
+  maps the library name to a DLL file name through the toolkit, then builds
+  the import directory, one lookup table and one address-table run per DLL, a
+  hint/name entry per symbol (hint 0), and a six-byte thunk
+  `jmp *IAT_slot(%rip)` that direct calls resolve to.
+
+Library-name mapping is a toolkit method.  Initial table:
+
+[cols="1,2",options="header"]
+|===
+| Bare name | DLL
+
+| `c`, `m`
+| `msvcrt.dll`
+
+| `kernel32`, `user32`, `gdi32`, `advapi32`, `ws2_32`, …
+| the name with `.dll` appended
+
+| a name already ending in `.dll`
+| used verbatim
+|===
+
+Rules:
+
+* An undefined symbol with no metadata entry is a link error naming the
+  symbol and advising `external '<dll>' name '…'`.
+* A metadata entry for a symbol that the link *defines* is ignored.  This is
+  how `pthread` stays out of the Windows import table: `runtime.thread` binds
+  `external 'pthread'`, and `runtime.thread.windows` defines those symbols.
+* On a *cross* link the linker cannot check that the DLL exports the symbol;
+  a misspelling fails when the program is loaded.  On a *native* Windows link
+  the linker reads the DLL's export directory with `blaise.pereader` and
+  reports the error at link time.  This mirrors the native/cross split
+  `ResolveLibNeeded` already makes for ELF sonames.
+
+Imported *data* is not supported in the first version.
+
+=== Determinism
+
+`TimeDateStamp` is 0, `CheckSum` is 0, and every table (imports by DLL then
+symbol, base relocations by address) is emitted in sorted order.  The
+linked-binary fixpoint (`scripts/fixpoint-binary.sh --target windows-x86_64`)
+must print `BINARY_FIXPOINT_OK`.
+
+=== Map file
+
+`--map <file>` writes one line per symbol: RVA, section, name.  With no PDB,
+this is how a crash address from Windows is turned back into a routine name.
+It is useful on every target and is specified here because Windows needs it
+first.
+
+=== Later: unwind data
+
+Windows debuggers and the exception dispatcher walk the stack through
+`.pdata` / `.xdata`.  Without them, a debugger shows no call stack through
+Blaise frames.  Blaise frames are uniformly `RBP`-based, so one `UNWIND_INFO`
+shape (push `RBP`, set frame register) covers almost every routine.  This is
+milestone M7; nothing earlier depends on it.
+
+== Driver and command line
+
+* *Toolkit.*  `TWindowsX86_64Toolkit` returns `TX86_64Backend` constructed
+  with `TWin64BoundaryAbi` and `TPeTlsModel`, and `nil` from
+  `MakeLinkTarget`.  One `Register` call in `EnsureRegistry`.
+
+* *Routing.*  `LinkViaInternalLinker` currently treats a `nil` link target as
+  Mach-O.  The toolkit gains a method that performs (or names) the image
+  link, so the driver dispatches without testing the OS.  The macOS toolkit
+  is converted to the same method in M0.
+
+* *Object versus image format.*  `TargetUsesElf` is replaced by two
+  predicates, `TargetObjectIsElf` and `TargetImageIsElf`.  Each existing
+  caller is reviewed and assigned to one.  `AssembleForTarget` keys on CPU and
+  needs no change.  `SupportsLibrary` keys on the image format.
+
+* *Options.*
+** `--target windows-x86_64` (already parsed).
+** `--subsystem console|gui`, default `console`; an error for non-Windows
+   targets.  This option is the only way to select the subsystem.  A source
+   directive in the style of Delphi's `{$APPTYPE GUI}` is deliberately not
+   provided: the subsystem is a property of the build, not of the source, and
+   such a directive would be silently ignored on every other target.
+** `--map <file>`.
+** `--static` is rejected, as on macOS: a PE image always binds system DLLs.
+   `--dynamic` and the default behave identically.
+** `--assembler external` / `--linker external` are rejected (D2).
+
+* *Output name.*  When `--output` has no extension and the target is Windows,
+  `.exe` is appended, using the existing `ExecutableExtension`.
+
+* *RTL unit suffix.*  `RTLOSSuffix(osWindows)` returns `windows`.
+
+* *Library search.*  `BuildLibSearchDirs` and `LinkLibSoname` move behind
+  toolkit methods (M0).  The Windows toolkit's search list is the Windows
+  system directory on a native host and empty on a cross host.
+
+== Runtime
+
+=== Unit list
+
+`BuildRTLUnitList` gains a Windows profile selected by the toolkit rather
+than by the `AStatic` flag.  Windows has one profile.
+
+[cols="3,2,4",options="header"]
+|===
+| Unit | Status | Notes
+
+| `rtl.platform`
+| reused
+| Port definitions.
+
+| `runtime.atomic`, `runtime.setjmp`, `runtime.utf8`
+| reused
+| CPU-keyed; internal convention is unchanged.  `runtime.setjmp` saves the
+  System V callee-saved set, which is the correct set for internal frames.
+
+| `runtime.mem`, `runtime.str`, `runtime.set`, `runtime.arc`,
+  `runtime.weak`, `runtime.float`, `runtime.math`, `runtime.exc`,
+  `runtime.thread`
+| reused
+| They bind POSIX-named leaves, supplied below.
+
+| `runtime.cstub`
+| reused
+| `memcpy`, `memmove`, `memset`, `memcmp`, `strlen` in Pascal.
+
+| `runtime.start.windows`
+| new
+| Entry point.
+
+| `runtime.syscall.windows`
+| new
+| POSIX-named leaves over `kernel32`.
+
+| `runtime.thread.windows`
+| new
+| `pthread_*` names over Windows primitives.
+
+| `runtime.errno.windows`
+| new
+| Error classification over `GetLastError` / `WSAGetLastError`.
+
+| `rtl.platform.layout.windows`
+| new
+| Defines the initialiser the compiler calls from `main`
+  (`PlatformLayoutInitSym`) and the flat pre-init leaves.
+
+| `rtl.platform.windows`
+| new
+| `TRtlPlatformWindows`.
+|===
+
+`rtl.platform.posix` and the POSIX layout units are absent from the Windows
+list.
+
+=== `runtime.start.windows`
+
+`_start` is the PE entry point.  The loader enters it with the Win64
+convention and no arguments.
+
+. Establish stack alignment.
+. Set the console input and output code pages to UTF-8.
+. Install a vectored exception handler (see below).
+. Obtain the command line with `GetCommandLineW`, split it by the standard
+  Windows quoting rules, convert each argument to UTF-8, and build `argc` /
+  `argv`.
+. Call `main(argc, argv)`.
+. Run the at-exit list and call `ExitProcess` with `main`'s result.
+
+The vectored handler reports an access violation, stack overflow or illegal
+instruction on standard error in the same style as other fatal runtime errors
+and terminates the process with the exception code as its exit code (<<d7>>).
+It runs before any frame-based dispatch, so it needs no `.pdata`.  For a stack
+overflow it runs on what little stack remains, so it must stay small and call
+nothing that allocates.  Converting faults into Blaise exceptions is a
+possible later refinement and is not designed here.
+
+[NOTE]
+====
+Some e2e tests assert the POSIX convention of exit code 139 for a crash.  They
+move to the harness's per-target fault exit code (<<d7>>) in M3.
+====
+
+=== `runtime.syscall.windows`
+
+Exports, by the names the core runtime already binds:
+
+[cols="2,4",options="header"]
+|===
+| Symbol | Implementation
+
+| `write`
+| `WriteFile` on the handle for the descriptor
+
+| `mmap` (anonymous only)
+| `VirtualAlloc(MEM_RESERVE or MEM_COMMIT, PAGE_READWRITE)`
+
+| `munmap`
+| `VirtualFree(MEM_RELEASE)`.  `runtime.mem` only ever unmaps whole
+  mappings, which is what `MEM_RELEASE` requires.
+
+| `exit`, `_exit`, `abort`
+| `ExitProcess`; `abort` writes a diagnostic first
+
+| `__cxa_atexit`
+| A Pascal at-exit list, as in `runtime.libc2.linux`
+
+| `sysconf`
+| Processor count from `GetSystemInfo`
+
+| `_MapAnonFlag`
+| A constant; the Windows `mmap` ignores the flag
+|===
+
+File descriptors.  The `TRtlPlatform` port and the stream units use small
+integers.  The leaf keeps a lock-protected table from descriptor to `HANDLE`;
+0, 1 and 2 are pre-bound to the standard handles.  Code that tests `Fd >= 0`
+continues to work.
+
+These leaves are Pascal routines with the *internal* convention; only their
+calls into `kernel32` cross the boundary.
+
+[#runtime-thread-windows]
+=== `runtime.thread.windows`
+
+`runtime.thread` binds these symbols through `external 'pthread'`, so by
+<<d6>> its call sites use the C convention.  Every definition in this unit is
+therefore declared `cdecl`, and the start-routine parameter type in
+`runtime.thread` gains `cdecl` as well.  That is also the correct declaration
+on POSIX targets, where the real `pthread_create` calls the start routine with
+the C convention.
+
+[cols="2,4",options="header"]
+|===
+| Symbol | Implementation
+
+| `pthread_create`
+| `CreateThread` with a C-convention trampoline that calls the Blaise start
+  routine
+
+| `pthread_join`
+| `WaitForSingleObject` + `CloseHandle`
+
+| `pthread_mutex_init` / `lock` / `unlock` / `destroy`
+| Slim reader/writer lock in exclusive mode; it fits in the storage the
+  callers already reserve for a mutex and needs no destruction
+
+| `_BlaiseThreadAtExit`
+| Per-thread handler list, run by the TLS callback (<<tls>>)
+|===
+
+=== `rtl.platform.windows`
+
+`TRtlPlatformWindows` implements every abstract method of `TRtlPlatform`.
+All paths are converted with the `_StringToWideZ` helper that
+`language-rationale.adoc` already specifies, and only `W` APIs are called.
+
+[cols="2,4",options="header"]
+|===
+| Port area | Windows APIs
+
+| Files
+| `CreateFileW`, `ReadFile`, `WriteFile`, `SetFilePointerEx`,
+  `GetFileSizeEx`, `DeleteFileW`, `MoveFileExW`, `GetFileAttributesExW`
+
+| Directories
+| `CreateDirectoryW`, `RemoveDirectoryW`, `GetCurrentDirectoryW`,
+  `SetCurrentDirectoryW`, `FindFirstFileW` / `FindNextFileW` for `ListDir`,
+  `GetFileAttributesW` for `PathKind` (reparse points report as links)
+
+| Environment and process identity
+| `GetEnvironmentVariableW`, `GetCurrentProcessId`, `GetTempPathW`
+
+| Time
+| `GetSystemTimePreciseAsFileTime` for `TimeNow`;
+  `GetTimeZoneInformation` for the local offset; the calendar arithmetic is
+  the pure-Pascal code already in `runtime.libc2.*` and should be shared, not
+  copied
+
+| Sleep, halt
+| `Sleep`, `ExitProcess`
+
+| Child processes
+| `CreateProcessW` with inherited pipe handles for output capture;
+  `WaitForSingleObject`; `GetExitCodeProcess`.  `Exec` runs the command
+  through `cmd.exe /c`.
+
+| Console writes
+| The existing formatting helpers, ending in the `write` leaf; `SysWriteNewline`
+  writes CRLF (D4)
+|===
+
+Path handling accepts both `/` and `\` as separators on input.
+
+=== Direct libc bindings in the compiler
+
+The compiler binds a few libc symbols directly rather than through the
+platform port — for example `getpid` and `rmdir` in
+`blaise.codegen.driver.pas` and `memcpy` in `blaise.container.writer.pas`.
+`memcpy` is satisfied by `runtime.cstub`.  The others either gain a leaf in
+`runtime.syscall.windows` or, preferably, are routed through `GRtlPlatform`.
+A full inventory is an M6 task: link `blaise.exe`, read the list of
+unresolved symbols, and resolve each one deliberately.
+
+== Standard library
+
+Nineteen stdlib units contain `external` bindings.  Those with OS-specific
+content need Windows adapters, by whole-unit selection in the style of the
+existing `async.reactor.epoll` / `async.reactor.kqueue` pair:
+
+[cols="2,4",options="header"]
+|===
+| Unit | Windows work
+
+| `net.sockets`
+| Winsock (`ws2_32`); `WSAStartup`; socket handles are not file descriptors
+
+| `async.reactor.*`
+| New `async.reactor.iocp` (already anticipated in
+  `async-networking-design.adoc`)
+
+| `async.fibers.context`
+| The context switch keeps the internal callee-saved set, and must also swap
+  the stack bounds in the thread environment block (`StackBase`,
+  `StackLimit`, `DeallocationStack`) so Windows sees the active fiber's stack
+
+| `io.files`, `streams`
+| Route through the platform port where they bind POSIX calls directly
+
+| `io.process`
+| `CreateProcessW`
+
+| `io.watch`
+| `ReadDirectoryChangesW`
+
+| `net.tls.provider`
+| OpenSSL DLL names, or the pure-Pascal provider when it lands
+
+| `dateutils`, `uuid`, `sysutils`, others
+| Small; review each binding
+|===
+
+This is milestone M7 and does not block self-hosting, since the compiler uses
+none of the networking or fibre units.
+
+[#testing]
+== Testing
+
+=== Layer 0 — structural, on any host
+
+Runs in the ordinary suite; needs no Windows.
+
+* *PE writer.*  Unit tests link small programs for `windows-x86_64` and parse
+  the result with `blaise.pereader`: machine type, entry point inside
+  `.text`, section flags, import directory naming the expected DLL and
+  symbols, a base relocation for every absolute pointer, TLS directory
+  present exactly when the program has threadvars.
+* *Boundary lowering.*  `cp.test.*` assembly assertions, on a new
+  `TargetWindowsX86_64`, for: integer and float argument registers, shadow
+  space, by-reference aggregates, hidden-pointer returns, stack probes, the
+  TLS access sequence, and foreign-entry prologues.
+* *Structural cross-check.*  `scripts/windows-crosscheck-build.sh` builds the
+  fixtures in `compiler/src/it/windows/` and sanity-checks each image,
+  printing `WINDOWS_CROSSBUILD_OK`.
+* *Independent oracle (optional).*  `llvm-readobj --file-headers --sections
+  --coff-imports --coff-basereloc --coff-tls-directory` reads the same images
+  with a parser Blaise did not write.
+
+=== Layer 1 — behavioural, local VM
+
+`scripts/windows-vm.sh`, modelled on `scripts/freebsd-vm.sh`:
+
+[cols="2,4",options="header"]
+|===
+| Command | Effect
+
+| `start` / `stop` / `status`
+| Boot headless, shut down, report
+
+| `ssh [cmd]`
+| Shell or one command in the guest
+
+| `run <exe> [args]`
+| Copy an executable in, run it, exit with its exit code
+
+| `crosscheck`
+| Build the `compiler/src/it/windows/` fixtures and compare their output
+
+| `stdlib-test [args]`
+| Cross-build the stdlib TestRunner and run it in the guest
+
+| `selfhost`
+| Cross-build `blaise.exe`, have it rebuild itself in the guest, and compare
+  the two images byte for byte
+|===
+
+Like the FreeBSD script it builds from the working tree with
+`compiler/target/blaise`.  Unlike it, there is no `setup` that installs the
+OS unattended; the guest is installed once by hand (<<host-setup>>).
+
+The guest is Windows 11 ARM64.  It runs the x64 images through emulation.
+
+[WARNING]
+====
+Emulated x64 is not real x64.  The loader, the system DLLs and the ABI are
+genuine, so this lane validates the PE image, imports, TLS, the boundary ABI
+and the runtime.  It does *not* validate CPU-feature-dependent paths —
+notably the AVX2 routines in `runtime.utf8` — or timing-sensitive behaviour.
+Layer 2 covers those.
+====
+
+=== Layer 2 — real x64, in CI
+
+A `windows-crosscheck` job in `.github/workflows/bootstrap.yml`:
+
+. on the Linux runner, cross-build the fixtures, the stdlib TestRunner and
+  `blaise.exe`, and upload them;
+. on `windows-latest`, download and run them; then run the self-host check.
+
+It follows the validate-on-a-temporary-branch rule like every other job.
+
+=== Layer 3 — foreign-function fixtures
+
+A small C DLL, built with mingw-w64, exports routines covering every boundary
+case: mixed integer/float arguments beyond four, aggregates of 1–16 bytes by
+value, aggregate returns of each size class, a variadic routine, and routines
+that call back into Blaise.  The Blaise side asserts round-tripped values.
+This is the only test that proves the Win64 lowering against an independent
+compiler.
+
+The types × constructs rule applies: every integer kind, enum and Boolean,
+at boundary values, through the foreign call path.
+
+=== Self-hosting gate
+
+The target is complete for the compiler when the cross-built `blaise.exe`
+rebuilds itself on Windows and the result is byte-identical to the cross-built
+one — the same criterion the release process applies to the Linux binary.
+
+[#host-setup]
+== Development-host setup
+
+Nothing here is needed until milestone M1's exit check.
+
+. *Windows 11 ARM64 installation image*, from Microsoft's Windows 11 Arm64
+  download page.  A fresh install is required: the existing VirtualBox
+  machines are x64 and would run under full emulation.
+. *Guest drivers.*  Either the `virtio-win` driver image for plain QEMU, or
+  install once with UTM (`brew install --cask utm`), which bundles them, and
+  let the script run the resulting disk headless afterwards.
+. *In the guest:* enable the OpenSSH Server optional feature; install the
+  script's public key; disable the Windows Error Reporting dialog so a
+  crashing test exits instead of waiting for a click; exclude the test
+  directory from Defender real-time scanning, which otherwise delays every
+  freshly copied executable.
+. *On the host:* `brew install mingw-w64 llvm` for the Layer 3 fixtures and
+  the independent PE dumper.  Optional, recommended.
+. *Later:* the AMD Ryzen machine, for interactive debugging on real x64 with
+  WinDbg or x64dbg and the map file.
+
+`qemu-system-aarch64` and `qemu-img` are already installed.
+
+== Milestones
+
+Each milestone ends with a check that can be run, not a judgement.
+
+M0 — Seams, no behaviour change::
+Split `TargetUsesElf`.  Introduce `TX86BoundaryAbi` and `TX86TlsModel` with
+their System V / ELF adapters.  Move library-name mapping, library search
+directories and image-link dispatch behind the toolkit.  Emit the
+`.blaise.imports` section.  Red-zone audit.  Reduce the calling-convention
+directives to `cdecl` (<<d5>>), with the rationale, grammar and
+migration-analyser updates; this is target-independent and has no code
+generation effect yet.
++
+_Exit:_ every fixpoint script prints its OK line; the full suite passes;
+emitted assembly for the compiler itself is unchanged apart from the new
+metadata section.
+
+M1 — PE image::
+`blaise.pewriter`, `blaise.pereader`, `blaise.linker.pe`, the Windows
+toolkit.  Program under test: hand-written assembly that calls
+`ExitProcess(42)`.
++
+_Exit:_ Layer 0 structural tests pass; `windows-vm.sh run` returns 42.
+
+M2 — Boundary calls::
+`TWin64BoundaryAbi` outbound path; stack probes.
++
+_Exit:_ a Blaise program writes a line through an `external 'kernel32'`
+binding of `WriteFile` and exits 0 in the guest; the Layer 3 outbound cases
+pass.
+
+M3 — Core runtime::
+`runtime.start.windows`, `runtime.syscall.windows`,
+`rtl.platform.layout.windows`, `TPeTlsModel`, TLS directory.
++
+_Exit:_ `WriteLn`, strings, ARC, exceptions and threadvars work;
+`cp.test.e2e.ordinalmatrix` passes in the guest.
+
+M4 — Platform adapter::
+`rtl.platform.windows`.
++
+_Exit:_ file, directory, time and child-process e2e tests pass in the guest.
+
+M5 — Threads and callbacks::
+`runtime.thread.windows`; foreign entries; the procedural-type compatibility
+rule (<<abi-language-rule>>) with its rationale and grammar updates.
++
+_Exit:_ thread e2e tests and the Layer 3 callback cases pass; the new
+semantic error and warning have unit tests.
+
+M6 — Self-hosting::
+Resolve the compiler's remaining direct libc bindings; host-side path
+handling; `windows-vm.sh selfhost`; the CI job; Windows artefact in the
+release flow.
++
+_Exit:_ the self-hosting gate holds locally and on `windows-latest`.
+
+M7 — Breadth::
+Stdlib networking, async and fibres; `.pdata` / `.xdata`; native-host export
+verification.
+
+== Risks
+
+[cols="2,4",options="header"]
+|===
+| Risk | Mitigation
+
+| No register is reliably free for the TLS base at every threadvar access
+| Establish the guarantee before converting call sites; fall back to
+  save/restore inside the PE model.  Reference: the arm64 TLV path.
+
+| The backend relies on the red zone somewhere
+| M0 audit.  If found, fix generally — it is harmless on other targets.
+
+| A stack probe is missed on a path that allocates dynamically
+| Layer 0 assertion on a routine with a large frame; a guest fixture that
+  recurses with large frames on a secondary thread.
+
+| An import is misspelt and the cross link cannot tell
+| Native-host export check (M7); the CI job runs every fixture, so a bad
+  import fails there.
+
+| Emulated x64 hides a real-hardware defect
+| The CI lane and the Ryzen machine.
+
+| A Blaise routine defines a symbol that is bound through a named library but
+  is not declared `cdecl`
+| M3 audit of the Windows leaf units against <<d6>>; the thread e2e tests
+  fail immediately if `pthread_*` is wrong.
+
+| A callback without `cdecl` is silently wrong
+| It is a compile error on Windows and a warning elsewhere
+  (<<abi-language-rule>>).
+
+| The external LLVM backend emits Win64 calls between Blaise routines
+| It must mark Blaise routines `x86_64_sysvcc` when targeting Windows.
+  Record this in that backend's notes.
+
+| Windows Defender or SmartScreen interferes with freshly built executables
+| Guest exclusion for the test directory; note for end users in the release
+  documentation.
+|===
+
+No question for the project owner remains open; the decisions are recorded as
+<<d1>> to <<d7>>.
+
+== Documents to update during implementation
+
+* `docs/language-rationale.adoc` and `docs/grammar.ebnf` — the directive
+  reduction (M0), the `external` rule (M2), the procedural-type rule (M5);
+  `WriteLn` line ending (M3).
+* `docs/toolchain-independence.adoc` — Phase 4 and the link-mode matrix.
+* `docs/internal-linker-design.adoc` — the Windows section.
+* `docs/native-target-architecture.adoc` — the two new strategy objects.
+* `docs/bif-format.adoc` — the PE/COFF row, which D2 makes moot.
+* `uDebugOPDF.pas` review, per the project rule, if the calling-convention
+  rule adds anything to procedural type descriptions.
+
+[appendix]
+== What the compiler provides for a future pdr port
+
+The debugger port is a separate project.  This appendix lists only the
+compiler-side facts it will depend on, so they are settled here and not
+discovered later.
+
+* *OPDF location.*  The merged OPDF records are in a PE section named
+  `.opdf`.  The records themselves are byte-identical to the ELF form.
+* *Addresses.*  OPDF records carry absolute addresses computed against
+  `ImageBase`.  Every such address has a base-relocation entry, so the loaded
+  image contains the *slid* value.  A debugger reading the file sees unslid
+  values and applies `actual base − ImageBase` itself, as pdr already does
+  for PIE executables.  The linker must not mark `.opdf` discardable if pdr
+  is to read it from the running process; it may if pdr reads the file.  The
+  first version keeps it loadable.
+* *Thread-local variables.*  A threadvar's OPDF location is an offset from
+  the start of the image's TLS block.  The debugger finds the block through
+  the thread environment block and `_tls_index`; the map file and the symbol
+  give `_tls_index`'s address.
+* *Frames.*  Routines use an `RBP` frame, so a frame-pointer walk works
+  without `.pdata`.  Foreign-entry routines save extra registers below the
+  frame pointer; parameter locations in OPDF must reflect the homes the body
+  uses, not the Win64 arrival registers.
+* *Entry breakpoints.*  The existing caveat holds: a breakpoint on a
+  routine's first instruction stops before parameters reach their homes.
+  For a foreign-entry routine this window is longer.
+* *Process control.*  Windows offers the debug-event API (`WaitForDebugEvent`
+  and friends) in place of `ptrace`.  Unlike the current Linux adapter it
+  reports thread creation natively, so the thread limitation recorded for pdr
+  on Linux need not carry over.
