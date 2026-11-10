@@ -1503,11 +1503,15 @@ const
       public
         [Weak] Parent: TNode;
       end;
+      TPlainNode = class
+      public
+        [Unretained] Parent: TPlainNode;
+      end;
 
     { N children naming one parent, released before it (each slot
       unregistered); then N chained, each the target of the next.  The time
       taken, in nanoseconds. }
-    function Cost(N: Int): Int64;
+    function WeakCost(N: Int): Int64;
     var
       Root, X, Prev: TNode;
       L: TList<TNode>;
@@ -1541,6 +1545,41 @@ const
       Result := MonotonicNowNs() - T0;
     end;
 
+    { The same work through an unregistered back-reference: the baseline. }
+    function PlainCost(N: Int): Int64;
+    var
+      Root, X, Prev: TPlainNode;
+      L: TList<TPlainNode>;
+      I: Int;
+      T0: Int64;
+    begin
+      T0 := MonotonicNowNs();
+      Root := TPlainNode.Create();
+      L := TList<TPlainNode>.Create();
+      for I := 1 to N do
+      begin
+        X := TPlainNode.Create();
+        X.Parent := Root;
+        L.Add(X);
+      end;
+      X := nil;
+      L := nil;
+      Root := nil;
+      L := TList<TPlainNode>.Create();
+      Prev := nil;
+      for I := 1 to N do
+      begin
+        X := TPlainNode.Create();
+        X.Parent := Prev;
+        L.Add(X);
+        Prev := X;
+      end;
+      X := nil;
+      Prev := nil;
+      L := nil;
+      Result := MonotonicNowNs() - T0;
+    end;
+
     { The parent released first: every child's slot reads nil. }
     function Nilled(N: Int): Int;
     var
@@ -1564,23 +1603,43 @@ const
           Result := Result + 1;
     end;
 
+    const
+      N = 40000;
     var
-      Small, Large: Int64;
+      Weak, Plain, T: Int64;
+      I: Int;
     begin
       WriteLn('nilled ', Nilled(1000));
-      Cost(2000);
-      Small := Cost(10000);
-      Large := Cost(80000);
-      if Large < 24 * Small then
+      WeakCost(2000);
+      PlainCost(2000);
+      Weak := High(Int64);
+      Plain := High(Int64);
+      for I := 1 to 3 do
+      begin
+        T := WeakCost(N);
+        if T < Weak then
+          Weak := T;
+        T := PlainCost(N);
+        if T < Plain then
+          Plain := T;
+      end;
+      if Weak < 30 * Plain then
         WriteLn('linear')
       else
-        WriteLn('superlinear: ', Large div (Small + 1), 'x for 8x the references');
+        WriteLn('superlinear: weak refs cost ', Weak div (Plain + 1), 'x the plain run');
     end.
     ''';
 var
   Output: string;
   RCode: Int;
 begin
+  { The weak run is compared with an [Unretained] run at the SAME N, not
+    with itself at a smaller N.  Timing one size against another measured
+    the cache hierarchy as much as the algorithm: on a CI macOS runner the
+    larger run fell out of cache and read 28x for 8x the references while
+    being linear.  At one N every constant factor hits both runs alike.  The
+    fixed tables cost ~3x the baseline at any N; the old quadratic ones
+    cost ~260x at N = 40000, so the 30x bound sits far from both. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertTrue('compile+run', CompileAndRunWithRTL(Src, Output, RCode));
   AssertEquals('exit code', 0, RCode);
