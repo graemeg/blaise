@@ -649,23 +649,28 @@ end;
 
 procedure TE2EMathTests.TestRun_Exp_Issue252_Repro;
 const
-  { The exact program from issue #252, which reported "Semantic error:
+  { The program shape from issue #252, which reported "Semantic error:
     Undeclared function 'Exp'" for `i := exp(33.3)` while Sqrt worked
-    without uses Math.  The Single rendering of exp(33.3) is 289738527342592
-    (the host's Single formatting), verified with WriteLn's Single float
-    writer, which is target-independent RTL. }
+    without uses Math.  The value is printed through SingleToStr, whose
+    rendering is identical on every target (the shared _SingleToStr).
+    A bare WriteLn(i) is deliberately NOT asserted: WriteLn of a Single
+    renders differently between the backends (arm64 widens to double and
+    calls _SysWriteDouble -> 289738527342592; x86-64 calls _SysWriteSingle
+    with 7 significant digits -> 2.897385e+14).  That pre-existing writer
+    inconsistency is BUG-20261109-writeln-single-backend-rendering in
+    BUGS.md; the Exp wiring itself is what this test pins. }
   Src = '''
     program P;
     uses math, classicpascaltypes;
     var i: single;
     begin
       i := exp(33.3);
-      writeln(i)
+      writeln(SingleToStr(i))
     end.
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '289738527342592' + LE, 0);
+  AssertRunsOnAll(Src, '2.897385e+14' + LE, 0);
 end;
 
 { --- Expm1 --- }
