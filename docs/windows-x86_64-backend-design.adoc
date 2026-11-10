@@ -301,8 +301,11 @@ expected output.
 
 *Decision.*  `cdecl` means "the platform C calling convention" and is the only
 calling-convention directive in the language.  `stdcall`, `pascal`, `register`
-and `safecall` become compile errors whose message points to `cdecl`.
-`winapi` is not added.  `varargs` remains and is valid only on a `cdecl`
+and `safecall` become compile errors.  The message for `stdcall` and
+`safecall`, which name a C-side convention, says to write `cdecl`.  The message
+for `register` and `pascal`, which name the language's own convention, says to
+delete the directive: writing `cdecl` there would turn a Blaise routine into a
+foreign one under <<d1>>.  `winapi` is not added.  `varargs` remains and is valid only on a `cdecl`
 routine.
 
 *Reasoning.*  The distinctions between these directives exist only on 32-bit
@@ -320,9 +323,13 @@ after a distinction that no longer exists.
 *Consequence.*  This is a target-independent language change.  It needs
 entries in `docs/language-rationale.adoc` and `docs/grammar.ebnf`, a
 migration-analyser rule, and a mechanical rename in Blaise Canvas UI (55 uses
-of `stdcall`, including in its Cocoa units).  The compiler, the runtime and
+of `stdcall`: 53 in its Win32 platform unit and 2 in its event-loop unit).
+One of them, the window procedure, is a callback with a Blaise body; it is
+correct only once foreign entries exist (M5).  The compiler, the runtime and
 the standard library contain no use of the removed directives; the bindgen
-tool already emits `cdecl`.
+tool already emits `cdecl`.  The `varargs` rule does reach them: five
+library-less `varargs` bindings (`fcntl`, `open`, `ioctl`) gain an explicit
+`cdecl`.
 
 [#d6]
 === D6 — A named library implies `cdecl`; a library-less `external` does not
