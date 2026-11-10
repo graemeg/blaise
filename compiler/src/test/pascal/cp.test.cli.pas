@@ -27,7 +27,7 @@ interface
 
 uses
   SysUtils, Classes, Process, blaise.testing,
-  blaise.codegen.target;   { TargetUsesElf / HostTarget: link-mode gating }
+  blaise.codegen.target;   { TargetImageIsElf / HostTarget: link-mode gating }
 
 type
   { Invokes the compiler binary directly and inspects the CLI contract. }
@@ -256,7 +256,7 @@ end;
 
 function TCLIContractTests.ElfHost: Boolean;
 begin
-  Result := TargetUsesElf(HostTarget());
+  Result := TargetImageIsElf(HostTarget());
 end;
 
 function TCLIContractTests.CompilerAvailable: Boolean;

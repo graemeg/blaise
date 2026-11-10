@@ -48,6 +48,10 @@ type
     procedure TestResolve_MacOSArm64_ReturnsToolkit;
     procedure TestMacOSToolkit_MakeBackend_NotNil;
     procedure TestMacOSToolkit_MakeLinkTarget_NilUntilMachOLinker;
+    { Object format and image format are separate questions (Windows design
+      D2: ELF relocatable objects, PE image). }
+    procedure TestObjectIsElf_PerTarget;
+    procedure TestImageIsElf_PerTarget;
   end;
 
 implementation
@@ -176,6 +180,34 @@ begin
   Tk := ResolveToolkit(T);
   AssertTrue('no ELF link facts for macos-arm64',
     Tk.MakeLinkTarget() = nil);
+end;
+
+procedure TTargetToolkitTests.TestObjectIsElf_PerTarget;
+var
+  T: TTargetDesc;
+begin
+  MakeTarget(osLinux, cpuX86_64, T);
+  AssertTrue('linux objects are ELF', TargetObjectIsElf(T));
+  MakeTarget(osFreeBSD, cpuX86_64, T);
+  AssertTrue('freebsd objects are ELF', TargetObjectIsElf(T));
+  MakeTarget(osWindows, cpuX86_64, T);
+  AssertTrue('windows objects are ELF (D2)', TargetObjectIsElf(T));
+  MakeTarget(osMacOS, cpuArm64, T);
+  AssertFalse('macos objects are Mach-O', TargetObjectIsElf(T));
+end;
+
+procedure TTargetToolkitTests.TestImageIsElf_PerTarget;
+var
+  T: TTargetDesc;
+begin
+  MakeTarget(osLinux, cpuX86_64, T);
+  AssertTrue('linux image is ELF', TargetImageIsElf(T));
+  MakeTarget(osFreeBSD, cpuX86_64, T);
+  AssertTrue('freebsd image is ELF', TargetImageIsElf(T));
+  MakeTarget(osWindows, cpuX86_64, T);
+  AssertFalse('windows image is PE', TargetImageIsElf(T));
+  MakeTarget(osMacOS, cpuArm64, T);
+  AssertFalse('macos image is Mach-O', TargetImageIsElf(T));
 end;
 
 initialization

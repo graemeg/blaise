@@ -254,12 +254,10 @@ begin
     sysutils.o for a linux-x86_64 link ("not an ELF file (bad magic)").  An
     object whose container positively belongs to a DIFFERENT target is not a
     usable cache entry: report it and let the source-compile path rebuild. }
-  case GTarget.OS of
-    osMacOS:   Want := 1;
-    osWindows: Want := 2;
+  if TargetObjectIsElf(GTarget) then
+    Want := 0
   else
-    Want := 0;
-  end;
+    Want := 1;   { Mach-O, the only non-ELF object format }
   Have := ObjectContainerKind(Result);
   if (Have >= 0) and (Have <> Want) then
   begin

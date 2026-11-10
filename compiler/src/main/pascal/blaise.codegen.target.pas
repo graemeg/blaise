@@ -61,10 +61,16 @@ function TargetName(const ATarget: TTargetDesc): string;
 { True when the native backend can actually generate code for this target. }
 function TargetHasNativeBackend(const ATarget: TTargetDesc): Boolean;
 
-{ True when the target's object/executable container is ELF.  macOS uses
-  Mach-O; everything else we target is ELF.  Gate ELF-specific output on this
-  rather than on an OS blocklist, so a new ELF OS needs no edit here. }
-function TargetUsesElf(const ATarget: TTargetDesc): Boolean;
+{ True when the target's RELOCATABLE OBJECTS (assembler output, the per-unit
+  object cache, the embedded .bif) are ELF.  macOS uses Mach-O objects; every
+  other target uses ELF, including Windows, whose PE image is linked from ELF
+  objects (windows-x86_64-backend-design.adoc, decision D2). }
+function TargetObjectIsElf(const ATarget: TTargetDesc): Boolean;
+
+{ True when the target's LINKED IMAGE (executable or shared object) is ELF:
+  Linux and FreeBSD.  macOS images are Mach-O and Windows images are PE.  Gate
+  ELF-image facts (shared-object emission, ELF link modes) on this. }
+function TargetImageIsElf(const ATarget: TTargetDesc): Boolean;
 
 { Lower-case OS token used in the OS-specific RTL unit names, e.g.
   'linux' / 'freebsd' in rtl.platform.layout.<os>, runtime.syscall.<os>.
@@ -201,10 +207,13 @@ begin
   Result := (ATarget.OS = osLinux) and (ATarget.CPU = cpuX86_64);
 end;
 
-function TargetUsesElf(const ATarget: TTargetDesc): Boolean;
+function TargetObjectIsElf(const ATarget: TTargetDesc): Boolean;
 begin
-  { macOS is Mach-O; Linux/FreeBSD are ELF.  Windows would be PE, and is not a
-    native-backend target yet — it is excluded here rather than assumed ELF. }
+  Result := ATarget.OS <> osMacOS;
+end;
+
+function TargetImageIsElf(const ATarget: TTargetDesc): Boolean;
+begin
   Result := (ATarget.OS = osLinux) or (ATarget.OS = osFreeBSD);
 end;
 

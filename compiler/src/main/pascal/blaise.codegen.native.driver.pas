@@ -180,7 +180,7 @@ begin
     .init_array load constructors and .dynsym exports.  A Mach-O target needs
     __mod_init_func and LC_DYLD_INFO exports instead, which are not written
     yet — refuse rather than emit an ELF object for a Darwin target. }
-  Result := TargetUsesElf(ATarget);
+  Result := TargetImageIsElf(ATarget);
 end;
 
 function TNativeBackendDriver.LowerToObject(const AIRFile, AObjFile: string;
