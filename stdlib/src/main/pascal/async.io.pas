@@ -116,7 +116,7 @@ const
   stack, so a fixed three-int declaration put the flag in a register fcntl
   never reads -- F_SETFL silently did not set O_NONBLOCK on macOS.  The
   third argument is passed through `varargs`. }
-function c_fcntl3(AFd, ACmd: Int32): Int32; varargs; external name 'fcntl';
+function c_fcntl3(AFd, ACmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
 {$IFNDEF DARWIN}
 function c_accept4(AFd: Int32; AAddr, AAddrLen: Pointer; AFlags: Int32): Int32;
   external name 'accept4';

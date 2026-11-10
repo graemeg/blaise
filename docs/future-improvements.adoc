@@ -32,7 +32,7 @@ prioritise them.
 === Procedural types
 
 - reference to function/procedure (anonymous methods)
-- cdecl/stdcall calling-convention markers on procedural types
+- the cdecl calling-convention marker on procedural types (Windows M5)
 
 === Method level attributes
 

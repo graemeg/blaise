@@ -97,7 +97,7 @@ In scope:
 
 Out of scope (deferred, noted under <<alternatives>> / <<risks>>):
 
-* `cdecl`/`stdcall` markers on `reference to` types (tracked separately in
+* `cdecl` markers on `reference to` types (tracked separately in
   future-improvements).
 * Closures as `published` event-handler RTTI targets.
 * Capture *by value* qualifiers (no Delphi precedent; not required).

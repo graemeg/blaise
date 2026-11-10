@@ -134,7 +134,7 @@ type
 {$IFDEF DARWIN}
 { libSystem's ioctl is C-variadic: on Apple arm64 the argument after the
   request travels on the stack, so it must be declared varargs. }
-function sys_ioctl(Fd: Int32; Request: Int64): Int32; varargs;
+function sys_ioctl(Fd: Int32; Request: Int64): Int32; cdecl; varargs;
   external name 'ioctl';
 {$ELSE}
 { ioctl is a direct syscall provided by the runtime. }

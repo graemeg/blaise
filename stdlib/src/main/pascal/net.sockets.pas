@@ -290,7 +290,7 @@ const
 
 { fcntl is C-VARIADIC: on Apple arm64 the third argument must travel the
   variadic way (on the stack), or F_SETFL never sees O_NONBLOCK. }
-function c_fcntl(AFd, ACmd: Int32): Int32; varargs; external name 'fcntl';
+function c_fcntl(AFd, ACmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
 function c_signal(ASignum: Int32; AHandler: Pointer): Pointer; external name 'signal';
 
 { Per-OS layout seam: O_NONBLOCK (Linux $800, FreeBSD 4) and the sockaddr_in

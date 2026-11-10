@@ -1262,8 +1262,8 @@ type
                                      per block env this routine allocates;
                                      index i ↔ slot '__envp_b<i>' }
     IsInline: Boolean;    { set by uParser — 'inline' directive present }
-    CallingConv: string;  { set by uParser — 'cdecl'/'stdcall'/'register'/'pascal'/
-                            'safecall' directive (lowercased); '' = default }
+    CallingConv: string;  { set by uParser — 'cdecl' when the directive is written,
+                            '' = the Blaise convention (the only other directive) }
     OwningUnit: string;   { set by uSemantic / uSemanticImport — unit that declares this routine }
     IsImplOnly: Boolean;  { set by uSemantic — standalone routine declared only in a unit's
                             implementation section (no interface forward).  Such routines are

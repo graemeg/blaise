@@ -20,6 +20,8 @@ type
     function ParseSource(const ASrc: string): TProgram;
     { the EParseError message for ASrc, or '' when it parses }
     function ParseErrorMsg(const ASrc: string): string;
+    { ParseErrorMsg for a unit source. }
+    function ParseUnitErrorMsg(const ASrc: string): string;
   published
     { a chained base's field element may be followed by more chain: a field
       write, a further subscript, or a call through the element }
@@ -49,6 +51,18 @@ type
     procedure TestGoto_NamesTheRule;
     procedure TestLabel_NamesTheRule;
     procedure TestGotoAndLabel_AsIdentifiers_StillParse;
+    { D5: cdecl is the only calling-convention directive.  stdcall and
+      safecall point to cdecl; register and pascal say to delete the
+      directive (the Blaise convention is the default). }
+    procedure TestCallConv_Stdcall_PointsToCdecl;
+    procedure TestCallConv_Safecall_PointsToCdecl;
+    procedure TestCallConv_Register_SaysDelete;
+    procedure TestCallConv_Pascal_SaysDelete;
+    procedure TestCallConv_OnExternal_Rejected;
+    procedure TestCallConv_OnMethod_Rejected;
+    procedure TestCallConv_InInterfaceForward_Rejected;
+    procedure TestCallConv_Cdecl_StillAccepted;
+    procedure TestCallConvWords_AsIdentifiers_StillParse;
     procedure TestSpecialize_NamesTheRule;
     procedure TestGeneric_NamesTheRule;
     procedure TestGenericAndSpecialize_AsIdentifiers_StillParse;
@@ -1035,6 +1049,27 @@ begin
   AssertTrue('Foo(1:2) does not parse', Raised);
 end;
 
+function TParserTests.ParseUnitErrorMsg(const ASrc: string): string;
+var
+  L: TLexer;
+  P: TParser;
+begin
+  Result := '';
+  L := TLexer.Create(ASrc);
+  P := TParser.Create(L);
+  try
+    try
+      P.ParseUnit().Free();
+    except
+      on E: EParseError do
+        Result := E.Message;
+    end;
+  finally
+    P.Free();
+    L.Free();
+  end;
+end;
+
 function TParserTests.ParseErrorMsg(const ASrc: string): string;
 begin
   Result := '';
@@ -1073,6 +1108,107 @@ begin
   Msg := ParseErrorMsg('program P; label 1, Done; begin end.');
   AssertTrue('a program''s label section names the rule, got: ' + Msg,
     Pos('''label'' declarations are not supported in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_Stdcall_PointsToCdecl;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg('program P; procedure F; stdcall; begin end; begin end.');
+  AssertTrue('names the rule, got: ' + Msg,
+    Pos('''stdcall'' is not supported in Blaise', Msg) >= 0);
+  AssertTrue('points to cdecl, got: ' + Msg, Pos('write ''cdecl''', Msg) >= 0);
+  AssertTrue('cites the rationale, got: ' + Msg,
+    Pos('language-rationale.adoc', Msg) >= 0);
+  AssertTrue('has a location, got: ' + Msg, Pos('at line 1 col', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_Safecall_PointsToCdecl;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg('program P; procedure F; safecall; begin end; begin end.');
+  AssertTrue('names the rule, got: ' + Msg,
+    Pos('''safecall'' is not supported in Blaise', Msg) >= 0);
+  AssertTrue('points to cdecl, got: ' + Msg, Pos('write ''cdecl''', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_Register_SaysDelete;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg('program P; procedure F; register; begin end; begin end.');
+  AssertTrue('names the rule, got: ' + Msg,
+    Pos('''register'' is not supported in Blaise', Msg) >= 0);
+  AssertTrue('says to delete it, got: ' + Msg, Pos('delete it', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_Pascal_SaysDelete;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg('program P; procedure F; pascal; begin end; begin end.');
+  AssertTrue('names the rule, got: ' + Msg,
+    Pos('''pascal'' is not supported in Blaise', Msg) >= 0);
+  AssertTrue('says to delete it, got: ' + Msg, Pos('delete it', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_OnExternal_Rejected;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg('program P; function F(X: Int32): Int32; stdcall; ' +
+    'external ''c'' name ''abs''; begin end.');
+  AssertTrue('external binding rejected, got: ' + Msg,
+    Pos('''stdcall'' is not supported in Blaise', Msg) >= 0);
+  Msg := ParseErrorMsg('program P; function F(X: Int32): Int32; ' +
+    'external ''c'' name ''abs''; stdcall; begin end.');
+  AssertTrue('directive after external rejected, got: ' + Msg,
+    Pos('''stdcall'' is not supported in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_OnMethod_Rejected;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg('program P; type TC = class procedure M; stdcall; ' +
+    'end; procedure TC.M; begin end; begin end.');
+  AssertTrue('method directive rejected, got: ' + Msg,
+    Pos('''stdcall'' is not supported in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_InInterfaceForward_Rejected;
+var
+  Msg: string;
+begin
+  Msg := ParseUnitErrorMsg('unit U; interface procedure F; stdcall; ' +
+    'implementation procedure F; begin end; end.');
+  AssertTrue('interface forward rejected, got: ' + Msg,
+    Pos('''stdcall'' is not supported in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestCallConv_Cdecl_StillAccepted;
+begin
+  AssertEquals('cdecl on a body', '',
+    ParseErrorMsg('program P; procedure F; cdecl; begin end; begin end.'));
+  AssertEquals('cdecl on an external', '',
+    ParseErrorMsg('program P; function F(X: Int32): Int32; cdecl; ' +
+      'external ''c'' name ''abs''; begin end.'));
+  AssertEquals('cdecl in an interface forward', '',
+    ParseUnitErrorMsg('unit U; interface procedure F; cdecl; ' +
+      'implementation procedure F; begin end; end.'));
+end;
+
+procedure TParserTests.TestCallConvWords_AsIdentifiers_StillParse;
+begin
+  { the rejection applies in directive position only }
+  AssertEquals('as variables', '',
+    ParseErrorMsg('program P; var register, pascal, stdcall, safecall: Int32; ' +
+      'begin register := 1; pascal := register; stdcall := 2; ' +
+      'safecall := stdcall; end.'));
+  AssertEquals('as a routine name called as a statement', '',
+    ParseErrorMsg('program P; procedure Register; begin end; ' +
+      'begin Register(); Register(); end.'));
 end;
 
 procedure TParserTests.TestGotoAndLabel_AsIdentifiers_StillParse;

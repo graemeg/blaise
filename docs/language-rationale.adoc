@@ -1415,35 +1415,71 @@ Integer'`).
 
 ---
 
-=== Calling-Convention Directives (`cdecl`, `stdcall`, …)
+=== Calling-Convention Directives: `cdecl` Only
 
 ==== Decision
 
-A routine or method declaration may carry a calling-convention directive —
-`cdecl`, `stdcall`, `register`, `pascal`, or `safecall`. The directive is
-recorded on the declaration (`TMethodDecl.CallingConv`), propagated into the
-exported interface signature (`TRoutineSig.CallingConv`) and persisted in the
-`.bif` interface metadata so it survives separate compilation.
+`cdecl` is the only calling-convention directive.  It means "the platform C
+calling convention" and marks a routine that lives in a C library or that
+foreign code calls back.  A routine without a directive uses the Blaise
+convention.
+
+`stdcall`, `safecall`, `register` and `pascal` are compile errors in directive
+position.  The message for `stdcall` and `safecall` points to `cdecl`; the
+message for `register` and `pascal` says to delete the directive.  `winapi` is
+not added.  The four words remain ordinary identifiers elsewhere, so a
+variable or routine named `Register` keeps working.
+
+`varargs` is valid only on a C-convention routine: one that writes `cdecl`,
+or one that names its library with `external '<lib>'` (which implies the C
+convention).  A library-less `external name 'sym'` binding a C variadic such
+as `fcntl` or `open` must write `cdecl`.
+
+The directive is recorded on the declaration (`TMethodDecl.CallingConv`),
+carried into the exported interface signature (`TRoutineSig.CallingConv`) and
+persisted in the `.bif` interface metadata.
 
 ==== Rationale
 
-The directive is currently *metadata only*. The native backend emits the
-System V AMD64 convention for every routine regardless of the directive; on
-Linux x86_64 that is already the C ABI, so `cdecl` and the default agree and
-external C calls link correctly without honouring the keyword at the ABI
-level.
+The distinctions these directives draw — who pops the arguments, in which
+order they are pushed, whether arguments travel in registers — exist only on
+32-bit x86, which Blaise does not target.  On every 64-bit target FPC and
+Delphi accept them and ignore them, because their default convention already
+is the platform C convention.  Accepting them would preserve legacy syntax
+with no meaning, which the language's design goal rules out (see "FPC and
+Delphi Constructs Blaise Omits — Recognise, Reject, Explain").
 
-Preserving the directive rather than discarding it keeps the door open for:
+The concept itself is not legacy.  On Windows x86_64 the Blaise convention
+(System V AMD64, on every target) differs from the C convention (Microsoft
+x64), so exactly one marker is needed to say "this routine crosses into or
+out of C" (`windows-x86_64-backend-design.adoc`, decisions D1 and D5).  On
+Linux, FreeBSD and macOS the two conventions coincide, so `cdecl` has no code
+generation effect there yet.
 
-* a future Windows/x86 target where `stdcall` and `cdecl` differ in stack
-  cleanup and must be emitted distinctly;
-* FFI tooling and the debugger, which need the declared convention to
-  describe a symbol faithfully.
+The two messages differ because the directives meant different things.
+`stdcall` and `safecall` marked a Windows API binding or callback — the case
+`cdecl` now covers.  `register` and `pascal` asked for the language's own
+convention, which is what a routine without a directive already gets;
+replacing them with `cdecl` would wrongly turn a Blaise routine into a
+C-convention one.  `safecall` additionally wrapped COM calls in HRESULT
+checks, which Blaise does not do; a binding checks the result explicitly.
 
-Discarding the keyword at parse time — the previous behaviour — would have
-forced a parser and interface-format change later to recover information that
-was present in the source all along. Recording it now is cheap and avoids
-that churn.
+`varargs` requires the C convention because a variadic call follows the C
+rules for the extra arguments, and on Windows a library-less `external name`
+binding is otherwise a Blaise-convention call.
+
+==== Alternatives rejected
+
+* _`cdecl`, `stdcall` and `winapi` as synonyms._  Familiar to FPC and Delphi
+  users, but three spellings of one meaning, two of them named after a
+  distinction that no longer exists.
+* _Accept and ignore every directive_ (the previous behaviour).  Code then
+  carries markers that mean nothing, and the one marker that matters on
+  Windows cannot be told apart from the noise.
+
+==== Migration
+
+`stdcall` and `safecall` become `cdecl`; `register` and `pascal` are deleted.
 
 ---
 
@@ -2053,10 +2089,11 @@ signatures are *not* compatible.  Parameter names do not participate.
 - *`reference to function/procedure`* (anonymous methods / closures) —
   now IMPLEMENTED (Phases 0-2); see the dedicated *Anonymous Methods and
   Closures* section below.
-- *Calling-convention markers* (`cdecl`, `stdcall`) on procedural types —
-  *deferred.* The current self-hosting target uses the System V x86_64
-  ABI uniformly; no use case yet requires non-default conventions on
-  procedural pointers.
+- *The `cdecl` marker* on procedural types — *deferred* to the Windows
+  target's callback milestone (`windows-x86_64-backend-design.adoc`, M5).
+  `cdecl` is the only calling-convention directive (see "Calling-Convention
+  Directives: `cdecl` Only"); on the targets supported today the C and Blaise
+  conventions coincide, so procedural pointers need no marker yet.
 
 ==== Rationale
 
@@ -9275,6 +9312,13 @@ it with a message that says it is not part of Blaise and gives the Blaise form.
 | `with R do ...`, `with A, B do ...`
 | naming the record or object in each access (`R.Field`); a long receiver
   expression goes into a local variable first (see below)
+
+| `stdcall`, `safecall` (routine directive)
+| `cdecl`, the only calling-convention directive (see "Calling-Convention
+  Directives: `cdecl` Only")
+
+| `register`, `pascal` (routine directive)
+| deleting the directive: the Blaise convention is the default
 |===
 
 The keywords are ordinary identifiers in Blaise, so a variable named `label`,

@@ -2934,6 +2934,16 @@ end;
 
 procedure TSemanticAnalyser.RegisterProcDecl(const AName: string; ADecl: TMethodDecl);
 begin
+  { A C variadic is a C-convention routine: cdecl written, or implied by a
+    named library (windows-x86_64-backend-design.adoc, D5/D6).  A
+    library-less `external name` is a Blaise routine unless it says cdecl.
+    Checked here because external declarations have no body to analyse. }
+  if ADecl.IsVarArgs and ADecl.IsExternal and (ADecl.CallingConv <> 'cdecl')
+     and (ADecl.ExternalLib = '') then
+    SemanticError(
+      Format('''%s'': varargs requires cdecl (write ''cdecl'', or name ' +
+        'the library with external ''<lib>'')', [ADecl.Name]),
+      ADecl.Line, ADecl.Col);
   if (ADecl.OwningUnit = '') and (FCurrentUnitName <> '') then
     ADecl.OwningUnit := FCurrentUnitName;
   FProcIndex.AddObject(AName, ADecl);

@@ -28,7 +28,7 @@ unit cp.test.varargs;
 interface
 
 uses
-  blaise.testing, cp.test.e2e.base,
+  blaise.testing, cp.test.e2e.base, cp.test.harness,
   uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
@@ -39,6 +39,11 @@ type
   published
     procedure TestParse_VarArgsDirective_SetsFlag;
     procedure TestSemantic_VarArgsWithoutExternal_RaisesError;
+    { D5: varargs is valid only on a C-convention routine -- cdecl written,
+      or implied by a named library (external '<lib>', D6). }
+    procedure TestSemantic_VarArgsLibraryLessWithoutCdecl_RaisesError;
+    procedure TestSemantic_VarArgsWithCdecl_Accepted;
+    procedure TestSemantic_VarArgsNamedLibrary_Accepted;
     procedure TestSemantic_TooFewArgs_RaisesError;
     procedure TestSemantic_StringExtra_RaisesError;
     procedure TestSemantic_SingleExtra_RaisesError;
@@ -111,6 +116,46 @@ begin
       Found := True;
   AssertTrue('IsVarArgs set', Found);
   Prog.Free();
+end;
+
+procedure TVarArgsTests.TestSemantic_VarArgsLibraryLessWithoutCdecl_RaisesError;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(
+    '''
+        program P;
+        function c_fcntl(AFd, ACmd: Int32): Int32; varargs; external name 'fcntl';
+        begin
+          c_fcntl(0, 1, 2);
+        end.
+        ''');
+  AssertTrue('varargs without cdecl rejected, got: ' + Msg,
+    Pos('varargs requires cdecl', Msg) >= 0);
+end;
+
+procedure TVarArgsTests.TestSemantic_VarArgsWithCdecl_Accepted;
+begin
+  AssertEquals('cdecl written', '', SemanticError(
+    '''
+        program P;
+        function c_fcntl(AFd, ACmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
+        begin
+          c_fcntl(0, 1, 2);
+        end.
+        '''));
+end;
+
+procedure TVarArgsTests.TestSemantic_VarArgsNamedLibrary_Accepted;
+begin
+  AssertEquals('external ''c'' implies cdecl', '', SemanticError(
+    '''
+        program P;
+        function printf(AFmt: PChar): Int32; varargs; external 'c' name 'printf';
+        begin
+          printf(PChar('%d'), 1);
+        end.
+        '''));
 end;
 
 procedure TVarArgsTests.TestSemantic_VarArgsWithoutExternal_RaisesError;

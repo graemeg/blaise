@@ -175,7 +175,7 @@ procedure _StringRelease(Ptr: Pointer);     external name '_StringRelease';
   stack — files were created with mode 0111 on the M1
   (SMOKE_MAC_VARIADIC_ABI_HANDOVER.md).  On Linux x86-64 the register
   assignment happens to coincide, which is why this only bit on macOS. }
-function  libc_open(Path: PChar; Flags: Int32): Int32; varargs;       external name 'open';
+function  libc_open(Path: PChar; Flags: Int32): Int32; cdecl; varargs; external name 'open';
 function  libc_open2(Path: PChar; Flags: Int32): Int32;                 external name 'open';
 function  libc_read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;        external name 'read';
 function  libc_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;       external name 'write';

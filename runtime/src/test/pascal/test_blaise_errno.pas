@@ -32,7 +32,7 @@ function pipe(Fds: Pointer): Int32; external name 'pipe';
 { fcntl is variadic: Apple's arm64 ABI passes variadic arguments on the
   stack, so a fixed three-Integer declaration put the flags in a register
   fcntl never read -- the pipe stayed blocking and the setup read hung. }
-function fcntl(Fd, Cmd: Int32): Int32; varargs; external name 'fcntl';
+function fcntl(Fd, Cmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
 function xread(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   external name 'read';
 function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';

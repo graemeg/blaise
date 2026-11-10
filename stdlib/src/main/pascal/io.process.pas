@@ -153,7 +153,7 @@ function c_write(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64; external name
 function c_kill(APid, ASig: Int32): Int32; external name 'kill';
 function c_poll(AFds: Pointer; ANFds: Int64; ATimeout: Int32): Int32; external name 'poll';
 { fcntl is C-variadic: the third argument must travel the variadic way. }
-function c_fcntl(AFd, ACmd: Int32): Int32; varargs; external name 'fcntl';
+function c_fcntl(AFd, ACmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
 function c_signal(ASignum: Int32; AHandler: Pointer): Pointer; external name 'signal';
 { errno, per build profile (runtime.errno.*, chosen at link time): the
   static, libc-free profile has no errno variable; its calls return -errno. }

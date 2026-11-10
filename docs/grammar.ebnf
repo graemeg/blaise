@@ -560,10 +560,16 @@ MethodDirective
     | ExternalDirective
     | "overload"                          (* required on every overload of a same-named proc/func/method *)
     | "nostackframe"                      (* asm body owns the frame; no compiler prologue/epilogue *)
+    | "cdecl"                             (* the platform C calling convention; the ONLY
+                                             calling-convention directive *)
     | "varargs"                           (* C-variadic external: call sites may pass extra args after
-                                             the declared parameters.  Only valid together with EXTERNAL;
-                                             cannot combine with "overload".  See language-rationale.adoc. *)
-    | IDENT                               (* inline, stdcall, cdecl, abstract, reintroduce, assembler, … *)
+                                             the declared parameters.  Only valid together with EXTERNAL,
+                                             on a C-convention routine ("cdecl", or implied by
+                                             EXTERNAL StrLit); cannot combine with "overload".
+                                             See language-rationale.adoc. *)
+    | IDENT                               (* inline, abstract, reintroduce, assembler, … -- but NOT
+                                             stdcall, safecall, register or pascal, which are
+                                             rejected; see the note below *)
     ;
 
 (* Inline-assembler body.  The lexer captures everything between ASM and the
@@ -575,12 +581,13 @@ AsmBlock
     = ASM (* verbatim assembly text *) END
     ;
 
-(* Calling-convention directives (cdecl, stdcall, register, pascal, safecall)
- * are parsed as the IDENT alternative and recorded on the declaration
- * (TMethodDecl.CallingConv, carried into TRoutineSig.CallingConv and the
- * .bif interface metadata).  They are metadata only — the native backend
- * currently emits the System V AMD64 convention regardless; the directive is
- * preserved for FFI/tooling fidelity, not yet honoured at the ABI level. *)
+(* "cdecl" is the only calling-convention directive.  It is recorded on the
+ * declaration (TMethodDecl.CallingConv, carried into TRoutineSig.CallingConv
+ * and the .bif interface metadata).  In directive position the identifiers
+ * stdcall and safecall are rejected with a message pointing to "cdecl", and
+ * register and pascal with a message saying to delete them; elsewhere they
+ * are ordinary identifiers.  See language-rationale.adoc, "Calling-Convention
+ * Directives: `cdecl` Only". *)
 
 ExternalDirective
     = EXTERNAL [ NAME StrLit ]

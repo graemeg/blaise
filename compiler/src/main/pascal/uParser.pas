@@ -95,6 +95,11 @@ type
     procedure Expect(AKind: TTokenKind);
     { an FPC/Delphi construct Blaise omits: raise its targeted message }
     procedure RejectForeignConstruct;
+    { True when the current token is a calling-convention directive Blaise
+      removed (stdcall, safecall, register, pascal). }
+    function  IsRemovedCallingConvention: Boolean;
+    { Raise the targeted message for a removed calling-convention directive. }
+    procedure RejectCallingConvention;
     function  Check(AKind: TTokenKind): Boolean;
     function  CheckUnitNamePart: Boolean;
     function  ParseTypeName: string;  { reads Ident optionally followed by '<' ArgList '>' }
@@ -895,6 +900,38 @@ end;
 
   Called where the keyword would otherwise be consumed as a name, and from
   Expect, so a construct met in a declaration section is caught too. }
+function TParser.IsRemovedCallingConvention: Boolean;
+begin
+  Result := Check(tkIdent) and
+    (SameText(FCurrent.Value, 'stdcall')  or
+     SameText(FCurrent.Value, 'safecall') or
+     SameText(FCurrent.Value, 'register') or
+     SameText(FCurrent.Value, 'pascal'));
+end;
+
+procedure TParser.RejectCallingConvention;
+var
+  Word, Advice: string;
+begin
+  { cdecl is the only calling-convention directive: the distinctions the
+    others drew exist only on 32-bit x86, and every 64-bit target treats them
+    as the C convention or as noise (windows-x86_64-backend-design.adoc, D5).
+    stdcall and safecall mark C interop, so they point to cdecl; register and
+    pascal asked for the language's own convention, which is the default. }
+  Word := LowerCase(FCurrent.Value);
+  if (Word = 'stdcall') or (Word = 'safecall') then
+    Advice := 'write ''cdecl'' for a routine in a C library or one that ' +
+      'foreign code calls back'
+  else
+    Advice := 'delete it: a routine without a directive uses the Blaise ' +
+      'convention, and ''cdecl'' is only for C interop';
+  raise EParseError.Create(Format('''%s'' is not supported in Blaise: ' +
+    '''cdecl'' is the only calling-convention directive; %s at line %d ' +
+    'col %d in %s (see language-rationale.adoc, "Calling-Convention ' +
+    'Directives")',
+    [Word, Advice, FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+end;
+
 procedure TParser.RejectForeignConstruct;
 var
   Kw, Where: string;
@@ -3323,7 +3360,8 @@ begin
     end;
     Expect(tkSemicolon);
     { Consume method directives: virtual, override, and identifier-form directives
-      such as inline, stdcall, cdecl, abstract, reintroduce, static, assembler, etc. }
+      such as inline, cdecl, abstract, reintroduce, static, assembler, etc.  The
+      removed calling conventions (stdcall, ...) are rejected here. }
     while True do
     begin
       if Check(tkVirtual) then
@@ -3373,13 +3411,11 @@ begin
         Advance();
         if Check(tkSemicolon) then Advance();
       end
+      else if Self.IsRemovedCallingConvention() then
+        Self.RejectCallingConvention()
       else if Check(tkIdent) and
               (SameText(FCurrent.Value, 'inline')      or
-               SameText(FCurrent.Value, 'stdcall')     or
                SameText(FCurrent.Value, 'cdecl')       or
-               SameText(FCurrent.Value, 'register')    or
-               SameText(FCurrent.Value, 'pascal')      or
-               SameText(FCurrent.Value, 'safecall')    or
                SameText(FCurrent.Value, 'reintroduce') or
                SameText(FCurrent.Value, 'final')       or
                SameText(FCurrent.Value, 'assembler')   or
@@ -3398,12 +3434,8 @@ begin
           Result.IsVarArgs := True
         else if SameText(FCurrent.Value, 'forward') then
           IsForward := True
-        else if SameText(FCurrent.Value, 'cdecl')    or
-                SameText(FCurrent.Value, 'stdcall')  or
-                SameText(FCurrent.Value, 'register') or
-                SameText(FCurrent.Value, 'pascal')   or
-                SameText(FCurrent.Value, 'safecall') then
-          Result.CallingConv := LowerCase(FCurrent.Value);
+        else if SameText(FCurrent.Value, 'cdecl') then
+          Result.CallingConv := 'cdecl';
         Advance();
         if Check(tkSemicolon) then Advance();
       end
@@ -6056,13 +6088,11 @@ begin
         Advance();
         if Check(tkSemicolon) then Advance();
       end
+      else if Self.IsRemovedCallingConvention() then
+        Self.RejectCallingConvention()
       else if Check(tkIdent) and
               (SameText(FCurrent.Value, 'inline')      or
-               SameText(FCurrent.Value, 'stdcall')     or
                SameText(FCurrent.Value, 'cdecl')       or
-               SameText(FCurrent.Value, 'register')    or
-               SameText(FCurrent.Value, 'pascal')      or
-               SameText(FCurrent.Value, 'safecall')    or
                SameText(FCurrent.Value, 'varargs')     or
                SameText(FCurrent.Value, 'forward')     or
                SameText(FCurrent.Value, 'deprecated')  or
@@ -6073,12 +6103,8 @@ begin
           Result.IsInline := True
         else if SameText(FCurrent.Value, 'varargs') then
           Result.IsVarArgs := True
-        else if SameText(FCurrent.Value, 'cdecl')    or
-                SameText(FCurrent.Value, 'stdcall')  or
-                SameText(FCurrent.Value, 'register') or
-                SameText(FCurrent.Value, 'pascal')   or
-                SameText(FCurrent.Value, 'safecall') then
-          Result.CallingConv := LowerCase(FCurrent.Value);
+        else if SameText(FCurrent.Value, 'cdecl') then
+          Result.CallingConv := 'cdecl';
         Advance();
         if Check(tkSemicolon) then Advance();
       end

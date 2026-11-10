@@ -74,7 +74,7 @@ type
     IsExternal:   Boolean;
     IsVarArgs:    Boolean;       { C-variadic external ('varargs' directive) }
     ExternalName: string;
-    CallingConv:  string;        { 'cdecl', 'stdcall', '' }
+    CallingConv:  string;        { 'cdecl' or '' (the Blaise convention) }
     VTableSlot:   Int;       { -1 = static; >= 0 = vtable index.
                                    Populated by ExportUnitInterface
                                    only when AnalyseUnitForExport has
