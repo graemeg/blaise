@@ -340,9 +340,9 @@ const
     TBackendDriver.SupportsLibrary.  Add it here when Darwin libraries land. }
   { cskIface sits with the other non-loaded metadata, ahead of the zerofill
     sections which must stay last. }
-  SectionEmitOrder: array[0..9] of TContainerSectionKind = (
+  SectionEmitOrder: array[0..10] of TContainerSectionKind = (
     cskText, cskRodata, cskData, cskUnwind, cskTdata, cskTvars, cskOpdf,
-    cskIface, cskBss, cskTbss);
+    cskIface, cskImports, cskBss, cskTbss);
 
 procedure MachOSectionNames(AKind: TContainerSectionKind;
   out ASegName, ASectName: string);
@@ -393,6 +393,11 @@ begin
         '__blaise_iface' / segment '__BLAISE' among the dropped sections, which
         is where these names come from. }
       ASegName := '__BLAISE'; ASectName := '__blaise_iface';
+    end;
+    cskImports:
+    begin
+      { (symbol, library) link metadata; dropped with the __BLAISE segment }
+      ASegName := '__BLAISE'; ASectName := '__blaise_imports';
     end;
   else
     begin

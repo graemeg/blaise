@@ -75,6 +75,14 @@ type
     { an external function returning a jumbo set: the bitmap comes back
       through a hidden result pointer on both ISAs (arm64 refused it) }
     procedure TestCodegen_ExternalJumboSetResult_HiddenPointer;
+    { .blaise.imports: every routine declared `external '<lib>'` records a
+      (symbol, library) pair in its object, so a linker that needs the
+      library per symbol (PE) can find it.  Emitted on every target; the ELF
+      and Mach-O linkers drop the section. }
+    procedure TestImports_LibExternal_RecordsPair;
+    procedure TestImports_LibraryLessExternal_NoSection;
+    procedure TestImports_UnitInterfaceExternal_RecordedInUnit;
+    procedure TestImports_PairsSortedAndDeduplicated;
   end;
 
 implementation
@@ -661,6 +669,90 @@ begin
   AssertTrue('arm64 calls the routine', Pos(#9'bl _GetJ', A64) >= 0);
   AssertTrue('x86-64 calls the routine',
     Pos(#9'callq GetJ', GenAsm(Src, TargetX86_64)) >= 0);
+end;
+
+const
+  ImportsX86 = '.section .blaise.imports,"",@progbits';
+  ImportsArm64 = '.section __BLAISE,__blaise_imports';
+
+{ The emitted form of one (symbol, library) pair: two NUL-terminated strings. }
+function ImportPair(const ASym, ALib: string): string;
+begin
+  Result := #9'.ascii "' + ASym + '"'#10#9'.byte 0'#10 +
+    #9'.ascii "' + ALib + '"'#10#9'.byte 0'#10;
+end;
+
+procedure TExternalTests.TestImports_LibExternal_RecordsPair;
+const
+  Src =
+    '''
+        program Test;
+        function c_abs(X: Int32): Int32; cdecl; external 'c' name 'abs';
+        begin
+          WriteLn(c_abs(-3));
+        end.
+        ''';
+begin
+  AssertEquals('section present', '', AsmMissing(Src, ImportsX86, ImportsArm64));
+  AssertEquals('pair: object symbol + library', '',
+    AsmMissing(Src, ImportPair('abs', 'c'), ImportPair('_abs', 'c')));
+end;
+
+procedure TExternalTests.TestImports_LibraryLessExternal_NoSection;
+const
+  Src =
+    '''
+        program Test;
+        function c_abs(X: Int32): Int32; cdecl; external name 'abs';
+        begin
+          WriteLn(c_abs(-3));
+        end.
+        ''';
+begin
+  AssertTrue('x86-64: no library, no pair',
+    Pos('blaise.imports', GenAsm(Src, TargetX86_64)) < 0);
+  AssertTrue('arm64: no library, no pair',
+    Pos('blaise_imports', GenAsm(Src, TargetArm64)) < 0);
+end;
+
+procedure TExternalTests.TestImports_UnitInterfaceExternal_RecordedInUnit;
+const
+  USrc =
+    '''
+        unit ImpU;
+        interface
+        function c_labs(X: Int64): Int64; cdecl; external 'c' name 'labs';
+        implementation
+        end.
+        ''';
+begin
+  AssertTrue('x86-64 unit object records the pair',
+    Pos(ImportPair('labs', 'c'), GenUnitAsm(USrc, TargetX86_64)) >= 0);
+  AssertTrue('arm64 unit object records the pair',
+    Pos(ImportPair('_labs', 'c'), GenUnitAsm(USrc, TargetArm64)) >= 0);
+end;
+
+procedure TExternalTests.TestImports_PairsSortedAndDeduplicated;
+const
+  Src =
+    '''
+        program Test;
+        function z_b(X: Int32): Int32; cdecl; external 'zz' name 'bsym';
+        function z_a(X: Int32): Int32; cdecl; external 'aa' name 'asym';
+        function z_a2(X: Int32): Int32; cdecl; external 'aa' name 'asym';
+        begin
+          WriteLn(z_b(1) + z_a(2) + z_a2(3));
+        end.
+        ''';
+var
+  A: string;
+begin
+  A := GenAsm(Src, TargetX86_64);
+  AssertTrue('sorted by symbol, one block',
+    Pos(ImportsX86 + #10 + ImportPair('asym', 'aa') + ImportPair('bsym', 'zz'),
+      A) >= 0);
+  AssertTrue('a duplicate pair is recorded once',
+    Pos(ImportPair('asym', 'aa') + ImportPair('asym', 'aa'), A) < 0);
 end;
 
 initialization

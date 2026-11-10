@@ -920,6 +920,8 @@ type
     procedure ArcArrayElemAddr(AByteOffset: Int); override;
     function  ArcArrayElemReg: string; override;
     procedure ArcLeaveArrayWalk; override;
+    function ImportsSectionDirective: string; override;
+    function ImportSymbol(ADecl: TMethodDecl): string; override;
   public
     constructor Create(const ATarget: TTargetDesc); override;
     destructor Destroy; override;
@@ -13411,6 +13413,16 @@ begin
   { '_FieldCleanup_X' is the base name; on Darwin it becomes
     __FieldCleanup_X, which is what QBE emits for the same table }
   Result := DarwinSym('_FieldCleanup_' + ABase);
+end;
+
+function TArm64Backend.ImportsSectionDirective: string;
+begin
+  Result := '.section __BLAISE,__blaise_imports';
+end;
+
+function TArm64Backend.ImportSymbol(ADecl: TMethodDecl): string;
+begin
+  Result := Self.RoutineSym(ADecl, ADecl.Name);
 end;
 
 function TArm64Backend.RoutineSym(ADecl: TMethodDecl;

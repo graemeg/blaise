@@ -393,6 +393,7 @@ begin
     cskIface:  Result := '.blaise.iface';  { never emitted for ELF — the
                  post-hoc uElfObject embedding owns this section on ELF, so
                  cskIface is absent from SecOrder below, like cskTvars }
+    cskImports: Result := '.blaise.imports';
     cskInitArray: Result := '.init_array';
     cskUnwind: Result := 'blaise_unwind';  { a C identifier: the linker
                  defines __start_blaise_unwind / __stop_blaise_unwind }
@@ -740,7 +741,7 @@ const
     ELF never emits.  Adding a kind that ELF *does* emit means extending the
     list AND this bound — otherwise the section is silently dropped from the
     object with no error. }
-  MaxSecOrder = 8;
+  MaxSecOrder = 9;
 
 var
   Buf: string;
@@ -800,6 +801,7 @@ begin
   SecOrder[6] := cskOpdf;
   SecOrder[7] := cskInitArray;
   SecOrder[8] := cskUnwind;
+  SecOrder[9] := cskImports;
 
   NumDataSecs := 0;
   for I := 0 to MaxSecOrder do
@@ -1108,6 +1110,13 @@ begin
             section rides in the writable PT_LOAD (its anchor words are
             relocated) }
           ShFlags := SHF_ALLOC or SHF_WRITE;
+          ShType  := SHT_PROGBITS;
+        end;
+        cskImports:
+        begin
+          { link metadata, not image content: no SHF_ALLOC, so the ELF
+            linker's section merger drops it }
+          ShFlags := 0;
           ShType  := SHT_PROGBITS;
         end;
         cskInitArray:

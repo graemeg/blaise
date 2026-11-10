@@ -32,6 +32,9 @@ type
       initial bytes, its symbols STT_TLS.  The assembler did not recognise the
       section and the ELF writer refused the kind. }
     procedure TestTdataSection_TlsImageAndSttTls;
+    { .blaise.imports is metadata: a non-allocated PROGBITS section, so the
+      ELF linker drops it from the image. }
+    procedure TestImportsSection_NonAllocProgbits;
     { .skip after a .balign in a NOBITS section: the alignment padding lives
       only in the section's Size, and each pushed byte reset Size to the byte
       count, discarding it -- labels after a .skip landed short (an interface
@@ -508,6 +511,32 @@ begin
           STT_TLS, Parsed.Symbols[I].SymType);
       end;
     AssertTrue('symbol tv not found in symtab', Found);
+  finally
+    Parsed.Free();
+  end;
+end;
+
+procedure TAsmEncodingTests.TestImportsSection_NonAllocProgbits;
+var
+  Obj: string;
+  Parsed: TElfObjectFile;
+  Sec: TRdSection;
+begin
+  Obj := AssembleToBytes(
+    '.text' + LineEnding +
+    #9'ret' + LineEnding +
+    '.section .blaise.imports,"",@progbits' + LineEnding +
+    #9'.ascii "abs"' + LineEnding +
+    #9'.byte 0' + LineEnding +
+    #9'.ascii "c"' + LineEnding +
+    #9'.byte 0' + LineEnding);
+  Parsed := ParseElfObject(Obj, 'imports-test');
+  try
+    Sec := Parsed.FindSection('.blaise.imports');
+    AssertTrue('.blaise.imports present', Sec <> nil);
+    AssertEquals('holds bytes', SHT_PROGBITS, Sec.ShType);
+    AssertTrue('not allocated', (Sec.Flags and SHF_ALLOC) = 0);
+    AssertEquals('the pair', 'abs'#0'c'#0, Sec.Data);
   finally
     Parsed.Free();
   end;

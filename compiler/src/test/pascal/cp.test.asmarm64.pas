@@ -74,6 +74,9 @@ type
       the SIMD&FP pair encoding.  They were encoded as the integer pair:
       `stp d0, d1, [sp, #-16]!` saved x0 and x1. }
     procedure TestFPRegisterPairs;
+    { .blaise.imports on Mach-O: __BLAISE,__blaise_imports, which the Mach-O
+      linker drops with the rest of the __BLAISE segment. }
+    procedure TestImportsSection_BlaiseSegment;
   end;
 
 implementation
@@ -102,6 +105,28 @@ begin
   T := TextWords(AAsm + LineEnding, F);
   try
     AssertEquals('encoding of "' + AAsm + '"', AExpected, WordAt(T, 0));
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TArm64AsmTests.TestImportsSection_BlaiseSegment;
+var
+  F: TMachOFile;
+  S: TMoSection;
+begin
+  F := ParseMachO(AssembleArm64ToBytes(
+    '.text' + LineEnding +
+    #9'ret' + LineEnding +
+    '.section __BLAISE,__blaise_imports' + LineEnding +
+    #9'.ascii "_abs"' + LineEnding +
+    #9'.byte 0' + LineEnding +
+    #9'.ascii "c"' + LineEnding +
+    #9'.byte 0' + LineEnding), 'arm64imports');
+  try
+    S := F.FindSection('__BLAISE', '__blaise_imports');
+    AssertTrue('__blaise_imports present', S <> nil);
+    AssertEquals('the pair', '_abs'#0'c'#0, S.Data);
   finally
     F.Free();
   end;

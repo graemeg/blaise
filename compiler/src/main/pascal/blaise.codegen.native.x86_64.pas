@@ -1566,6 +1566,8 @@ type
     procedure EmitFormatCall(AArgs: TObjectList);
     { The TLS model; raises when the backend was built outside the toolkit. }
     function Tls: TX86TlsModel;
+    function ImportsSectionDirective: string; override;
+    function ImportSymbol(ADecl: TMethodDecl): string; override;
   public
     constructor Create(const ATarget: TTargetDesc); override;
     destructor Destroy; override;
@@ -1908,6 +1910,16 @@ begin
   FTlsModel.Free();
   FBoundaryAbi := ABoundaryAbi;
   FTlsModel := ATlsModel;
+end;
+
+function TX86_64Backend.ImportsSectionDirective: string;
+begin
+  Result := '.section .blaise.imports,"",@progbits';
+end;
+
+function TX86_64Backend.ImportSymbol(ADecl: TMethodDecl): string;
+begin
+  Result := FuncSymbolFromDecl(ADecl);
 end;
 
 function TX86_64Backend.Tls: TX86TlsModel;

@@ -3023,6 +3023,9 @@ begin
     else if StartsWithStr(Args, 'blaise_unwind') then
       { exception unwind tables: alloc+write progbits, one block per object }
       ASection := cskUnwind
+    else if StartsWithStr(Args, '.blaise.imports') then
+      { (symbol, library) link metadata: a non-allocated section }
+      ASection := cskImports
     else if StartsWithStr(Args, '.opdf') then
       { OPDF debug section: alloc+write progbits data.  Holds .byte/.word/.int/
         .quad/.ascii records emitted by uDebugOPDF; .quad <label> lines become

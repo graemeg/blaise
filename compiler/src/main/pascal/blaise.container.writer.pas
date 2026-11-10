@@ -69,6 +69,11 @@ type
                    its post-hoc uElfObject embedding, so this kind is never
                    populated there and never reaches the ELF writer's section
                    order, exactly like cskTvars. }
+    cskImports,  { (symbol, library) pairs for the routines a unit declares
+                   `external '<lib>'`: NUL-terminated strings, read by an
+                   image linker that needs the library per symbol (PE).  Not
+                   loaded: ELF .blaise.imports (non-alloc), Mach-O
+                   __BLAISE,__blaise_imports; both linkers drop it. }
     cskInitArray, { load-time constructor pointers the dynamic loader runs.
                    ELF .init_array (DT_INIT_ARRAY); the Mach-O analogue is
                    __DATA,__mod_init_func (S_MOD_INIT_FUNC_POINTERS), not yet

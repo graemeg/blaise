@@ -37,7 +37,7 @@ interface
 
 uses
   SysUtils, Classes, contnrs, uAST, uSymbolTable, blaise.codegen, strutils,
-  blaise.codegen.target, uDebugFacts, uUnwindFacts;
+  blaise.codegen.target, uDebugFacts, uUnwindFacts, uStrCompat;
 
 const
   { The string header the RTL lays out (runtime.str's layout block):
@@ -105,6 +105,16 @@ type
       them all to one buffer, where a second copy redefined every label
       (--no-incremental: "duplicate label: TList_string_Grow"). }
     FEmittedGenericTypes: TStringList;
+    { (symbol, library) pairs for the `external '<lib>'` routines declared by
+      the units and program lowered into this buffer, as 'symbol'#9'library'.
+      Emitted once, at the end of the output, as the .blaise.imports
+      metadata section (EmitImportsSection). }
+    FImportPairs: TStringList;
+    { Record the library-qualified external routines among ADecls. }
+    procedure NoteImports(ADecls: TObjectList);
+    { Emit the recorded pairs, sorted and deduplicated, then forget them.
+      Emits nothing when no routine names a library. }
+    procedure EmitImportsSection;
     { --debug allocation-site unit override while emitting a generic clone
       whose Line fields refer to the template's declaring unit; '' = the
       unit being emitted. }
@@ -260,6 +270,12 @@ type
       EmitUnit itself, because in unit-mode the driver appends dep units
       first and the data section must materialise only once at the end. }
     procedure FinalizeEmit; virtual;
+    { The directive that opens the .blaise.imports metadata section in this
+      ISA's assembly dialect. }
+    function ImportsSectionDirective: string; virtual; abstract;
+    { The symbol under which an external routine is referenced in this
+      backend's objects. }
+    function ImportSymbol(ADecl: TMethodDecl): string; virtual; abstract;
   public
     constructor Create(const ATarget: TTargetDesc); virtual;
     destructor Destroy; override;
@@ -378,10 +394,13 @@ begin
   FEmittedGenericFuncs.CaseSensitive := True;
   FEmittedGenericTypes := TStringList.Create();
   FEmittedGenericTypes.CaseSensitive := True;
+  FImportPairs := TStringList.Create();
+  FImportPairs.CaseSensitive := True;
 end;
 
 destructor TNativeBackend.Destroy;
 begin
+  FImportPairs.Free();
   FAsm.Free();
   FEmittedGenericFuncs.Free();
   FEmittedGenericTypes.Free();
@@ -826,11 +845,67 @@ begin
   Result := 4;
 end;
 
+procedure TNativeBackend.NoteImports(ADecls: TObjectList);
+var
+  I: Int;
+  D: TMethodDecl;
+  Pair: string;
+begin
+  if ADecls = nil then Exit;
+  for I := 0 to ADecls.Count - 1 do
+  begin
+    D := TMethodDecl(ADecls.Items[I]);
+    if (not D.IsExternal) or (D.ExternalLib = '') then Continue;
+    Pair := Self.ImportSymbol(D) + #9 + D.ExternalLib;
+    if FImportPairs.IndexOf(Pair) < 0 then
+      FImportPairs.Add(Pair);
+  end;
+end;
+
+{ A string as a gas .ascii operand body: backslash and quote escaped. }
+function AsciiOperand(const AText: string): string;
+var
+  I, C: Int;
+begin
+  Result := '';
+  for I := 0 to Length(AText) - 1 do
+  begin
+    C := StrAt(AText, I);
+    if (C = Ord('\')) or (C = Ord('"')) then
+      Result := Result + '\';
+    Result := Result + Chr(C);
+  end;
+end;
+
+procedure TNativeBackend.EmitImportsSection;
+var
+  I, Tab: Int;
+  Pair: string;
+begin
+  if FImportPairs.Count = 0 then Exit;
+  { sorted: the section bytes must not depend on declaration order }
+  FImportPairs.Sort();
+  Self.Emit(Self.ImportsSectionDirective());
+  for I := 0 to FImportPairs.Count - 1 do
+  begin
+    Pair := FImportPairs.Strings[I];
+    Tab := Pos(#9, Pair);
+    Self.Emit(#9'.ascii "' + AsciiOperand(Copy(Pair, 0, Tab)) + '"');
+    Self.Emit(#9'.byte 0');
+    Self.Emit(#9'.ascii "' +
+      AsciiOperand(Copy(Pair, Tab + 1, Length(Pair) - Tab - 1)) + '"');
+    Self.Emit(#9'.byte 0');
+  end;
+  FImportPairs.Clear();
+end;
+
 function TNativeBackend.GenerateProgram(AProg: TProgram): string;
 begin
   FAsm.Clear();
   FEmittedGenericTypes.Clear();   { a claim is per buffer }
   Self.EmitProgram(AProg);
+  Self.NoteImports(AProg.Block.ProcDecls);
+  Self.EmitImportsSection();
   Result := FAsm.ToString();
 end;
 
@@ -841,6 +916,9 @@ begin
   FSeparateCompile := True;
   Self.EmitUnit(AUnit);
   Self.FinalizeEmit();
+  Self.NoteImports(AUnit.IntfBlock.ProcDecls);
+  Self.NoteImports(AUnit.ImplBlock.ProcDecls);
+  Self.EmitImportsSection();
   Result := FAsm.ToString();
 end;
 
@@ -848,12 +926,15 @@ procedure TNativeBackend.AppendUnit(AUnit: TUnit);
 begin
   { No clear — units and the program accumulate into one buffer. }
   Self.EmitUnit(AUnit);
+  Self.NoteImports(AUnit.IntfBlock.ProcDecls);
+  Self.NoteImports(AUnit.ImplBlock.ProcDecls);
 end;
 
 procedure TNativeBackend.AppendProgram(AProg: TProgram);
 begin
   { No clear — emit the program after the already-appended units. }
   Self.EmitProgram(AProg);
+  Self.NoteImports(AProg.Block.ProcDecls);
 end;
 
 procedure TNativeBackend.NoteDepInitUnit(const AUnitName: string;
@@ -872,6 +953,8 @@ function TNativeBackend.GetOutput: string;
 begin
   if FSeparateCompile and (not FFinalized) then
     Self.FinalizeEmit();
+  { last, so no later text depends on the section it leaves current }
+  Self.EmitImportsSection();
   Result := FAsm.ToString();
 end;
 
