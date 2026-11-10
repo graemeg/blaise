@@ -11,10 +11,20 @@
     <manualUnitPaths>true</manualUnitPaths>
     <unitPaths>
       <path>src/main/pascal</path>
+      <path>src/test/pascal</path>
+      <!-- The compiler's tokeniser (uPasTokeniser): rules read the raw token
+           stream, which evaluates no conditional directives. -->
+      <path>../../compiler/src/main/pascal</path>
+      <!-- stdlib: generic collections, IO.Files, the test framework -->
+      <path>../../stdlib/src/main/pascal</path>
     </unitPaths>
   </build>
 
-  <!-- Reuses the compiler's lexer and parser units -->
+  <test>
+    <framework>blaise</framework>
+    <testSource>TestRunner.pas</testSource>
+  </test>
+
   <moduleDependencies>
     <module>../../compiler</module>
   </moduleDependencies>

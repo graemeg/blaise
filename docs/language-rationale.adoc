@@ -1480,6 +1480,9 @@ binding is otherwise a Blaise-convention call.
 ==== Migration
 
 `stdcall` and `safecall` become `cdecl`; `register` and `pascal` are deleted.
+The migration analyser (`tools/migration-analyser`, `cp-migrate <file-or-dir>`)
+reports each occurrence with its replacement, in every conditional-compilation
+branch, since it reads the token stream rather than the parse tree.
 
 ---
 
