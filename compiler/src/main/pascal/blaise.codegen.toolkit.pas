@@ -30,10 +30,14 @@ unit blaise.codegen.toolkit;
 interface
 
 uses
-  SysUtils, Generics.Collections,
+  SysUtils, Classes, Generics.Collections,
   blaise.codegen.target, blaise.codegen.native.backend, blaise.linker.elf;
 
 type
+  { The container of a linked image.  The driver dispatches the image link
+    on this rather than on the OS. }
+  TImageFormat = (ifElf, ifMachO);
+
   { Abstract Factory for one target's compiler-side object family. }
   TTargetToolkit = class
   public
@@ -41,40 +45,70 @@ type
     function Name: string; virtual; abstract;
     { Construct the native backend for this target.  Caller owns the result. }
     function MakeBackend: TNativeBackend; virtual; abstract;
-    { Construct the link target (ELF header facts) for this target.  Caller
-      owns the result. }
+    { Construct the link target (ELF header facts) for this target, or nil
+      when the image is not ELF.  Caller owns the result. }
     function MakeLinkTarget: TLinkTarget; virtual; abstract;
+    { The container the linker writes for this target. }
+    function ImageFormat: TImageFormat; virtual; abstract;
+    { The name under which the linked image records a dependency on the
+      link library ALibName (as written in `external '<lib>'`): the
+      DT_NEEDED soname for an ELF image.  On a native link the driver
+      prefers the soname read off the library file; this table is the
+      authority for a cross link, and the fallback on a miss. }
+    function LibraryImageName(const ALibName: string): string; virtual;
+    { Append this target's default library search directories to AOut,
+      skipping any already present.  The driver adds --lib-path and the
+      environment's lists first. }
+    procedure AddSystemLibDirs(AOut: TStringList); virtual;
+  end;
+
+  { An x86-64 target with an ELF image and the System V convention: the
+    backend uses the System V boundary ABI and ELF local-exec TLS. }
+  TSysVElfX86_64Toolkit = class(TTargetToolkit)
+  public
+    function MakeBackend: TNativeBackend; override;
+    function ImageFormat: TImageFormat; override;
+    { The POSIX directories common to every ELF target; on FreeBSD
+      /usr/local/lib is where pkg(8) installs third-party libraries such as
+      X11 and ncurses. }
+    procedure AddSystemLibDirs(AOut: TStringList); override;
   end;
 
   { Linux x86_64 — the original (and, before FreeBSD, only) target. }
-  TLinuxX86_64Toolkit = class(TTargetToolkit)
+  TLinuxX86_64Toolkit = class(TSysVElfX86_64Toolkit)
   public
     function Name: string; override;
-    function MakeBackend: TNativeBackend; override;
     function MakeLinkTarget: TLinkTarget; override;
+    { glibc's canonical sonames. }
+    function LibraryImageName(const ALibName: string): string; override;
+    { The Debian/Ubuntu multiarch directories, ahead of the common set. }
+    procedure AddSystemLibDirs(AOut: TStringList); override;
   end;
 
   { FreeBSD x86_64 — shares the System V AMD64 ABI and the x86_64 instruction
     selector with Linux, so MakeBackend reuses TX86_64Backend; only the link
     target's OS/ABI byte differs.  The runtime/syscall divergence is handled
     in the RTL (TKernelABI / TPlatformLayout), not here. }
-  TFreeBSDX86_64Toolkit = class(TTargetToolkit)
+  TFreeBSDX86_64Toolkit = class(TSysVElfX86_64Toolkit)
   public
     function Name: string; override;
-    function MakeBackend: TNativeBackend; override;
     function MakeLinkTarget: TLinkTarget; override;
+    { FreeBSD is not a re-versioned Linux: threads live in libthr, and
+      dlopen/dlsym and the POSIX realtime routines are part of libc. }
+    function LibraryImageName(const ALibName: string): string; override;
   end;
 
-  { macOS arm64 — the first Mach-O target: TArm64Backend + the in-process
-    arm64 assembler produce Mach-O MH_OBJECT files.  MakeLinkTarget returns
-    nil for now: the executable link needs the Mach-O linker + ad-hoc code
-    signature (Phase 4/5 of the macOS bring-up); until then the target
-    supports object emission and --emit-asm only. }
+  { macOS arm64 — the Mach-O target: TArm64Backend + the in-process arm64
+    assembler produce Mach-O MH_OBJECT files, and the Mach-O linker writes
+    the image.  There are no ELF link facts, so MakeLinkTarget returns nil;
+    dylib resolution lives with the Mach-O linker
+    (blaise.linker.macho.dylib). }
   TMacOSArm64Toolkit = class(TTargetToolkit)
   public
     function Name: string; override;
     function MakeBackend: TNativeBackend; override;
     function MakeLinkTarget: TLinkTarget; override;
+    function ImageFormat: TImageFormat; override;
   end;
 
   { Toolkit registry.  Owns the registered toolkit instances.  A linear list
@@ -109,15 +143,51 @@ uses
   blaise.codegen.native.x86_64, blaise.codegen.native.x86_64.abi,
   blaise.codegen.native.arm64;
 
-{ An x86-64 backend for a System V / ELF target: the boundary convention is
-  the internal one and threadvars use the ELF local-exec model. }
-function MakeSysVElfX86Backend(const ATarget: TTargetDesc): TNativeBackend;
+{ Add ADir to AOut unless it is already listed. }
+procedure AddLibDir(AOut: TStringList; const ADir: string);
+begin
+  if AOut.IndexOf(ADir) < 0 then
+    AOut.Add(ADir);
+end;
+
+{ ---- TTargetToolkit -------------------------------------------------- }
+
+function TTargetToolkit.LibraryImageName(const ALibName: string): string;
+begin
+  raise Exception.Create('internal: target ' + Self.Name() +
+    ' does not map link libraries to image dependencies');
+end;
+
+procedure TTargetToolkit.AddSystemLibDirs(AOut: TStringList);
+begin
+  raise Exception.Create('internal: target ' + Self.Name() +
+    ' has no ELF library search directories');
+end;
+
+{ ---- TSysVElfX86_64Toolkit -------------------------------------------- }
+
+function TSysVElfX86_64Toolkit.MakeBackend: TNativeBackend;
 var
+  T: TTargetDesc;
   B: TX86_64Backend;
 begin
-  B := TX86_64Backend.Create(ATarget);
+  if not ParseTargetName(Self.Name(), T) then
+    raise Exception.Create('internal: unparsable toolkit name ' + Self.Name());
+  B := TX86_64Backend.Create(T);
   B.AdoptStrategies(TSysVBoundaryAbi.Create(), TElfLocalExecTls.Create());
   Result := B;
+end;
+
+function TSysVElfX86_64Toolkit.ImageFormat: TImageFormat;
+begin
+  Result := ifElf;
+end;
+
+procedure TSysVElfX86_64Toolkit.AddSystemLibDirs(AOut: TStringList);
+begin
+  AddLibDir(AOut, '/usr/local/lib');
+  AddLibDir(AOut, '/lib');
+  AddLibDir(AOut, '/usr/lib');
 end;
 
 { ---- TLinuxX86_64Toolkit --------------------------------------------- }
@@ -127,17 +197,26 @@ begin
   Result := 'linux-x86_64';
 end;
 
-function TLinuxX86_64Toolkit.MakeBackend: TNativeBackend;
-var
-  T: TTargetDesc;
-begin
-  MakeTarget(osLinux, cpuX86_64, T);
-  Result := MakeSysVElfX86Backend(T);
-end;
-
 function TLinuxX86_64Toolkit.MakeLinkTarget: TLinkTarget;
 begin
   Result := LinuxX86_64Target();
+end;
+
+function TLinuxX86_64Toolkit.LibraryImageName(const ALibName: string): string;
+begin
+  if SameText(ALibName, 'pthread') then Result := 'libpthread.so.0'
+  else if SameText(ALibName, 'm')  then Result := 'libm.so.6'
+  else if SameText(ALibName, 'dl') then Result := 'libdl.so.2'
+  else if SameText(ALibName, 'rt') then Result := 'librt.so.1'
+  else if SameText(ALibName, 'c')  then Result := 'libc.so.6'
+  else Result := 'lib' + ALibName + '.so';
+end;
+
+procedure TLinuxX86_64Toolkit.AddSystemLibDirs(AOut: TStringList);
+begin
+  AddLibDir(AOut, '/lib/x86_64-linux-gnu');
+  AddLibDir(AOut, '/usr/lib/x86_64-linux-gnu');
+  inherited AddSystemLibDirs(AOut);
 end;
 
 { ---- TFreeBSDX86_64Toolkit ------------------------------------------- }
@@ -147,17 +226,19 @@ begin
   Result := 'freebsd-x86_64';
 end;
 
-function TFreeBSDX86_64Toolkit.MakeBackend: TNativeBackend;
-var
-  T: TTargetDesc;
-begin
-  MakeTarget(osFreeBSD, cpuX86_64, T);
-  Result := MakeSysVElfX86Backend(T);
-end;
-
 function TFreeBSDX86_64Toolkit.MakeLinkTarget: TLinkTarget;
 begin
   Result := FreeBSDX86_64Target();
+end;
+
+function TFreeBSDX86_64Toolkit.LibraryImageName(const ALibName: string): string;
+begin
+  if SameText(ALibName, 'pthread') then Result := 'libthr.so.3'
+  else if SameText(ALibName, 'm')  then Result := 'libm.so.5'
+  else if SameText(ALibName, 'dl') then Result := 'libc.so.7'
+  else if SameText(ALibName, 'rt') then Result := 'libc.so.7'
+  else if SameText(ALibName, 'c')  then Result := 'libc.so.7'
+  else Result := 'lib' + ALibName + '.so';
 end;
 
 { ---- TMacOSArm64Toolkit ----------------------------------------------- }
@@ -177,9 +258,13 @@ end;
 
 function TMacOSArm64Toolkit.MakeLinkTarget: TLinkTarget;
 begin
-  { no ELF link facts for a Mach-O target — the executable link path
-    checks for nil and reports the honest gap }
+  { no ELF link facts for a Mach-O image }
   Result := nil;
+end;
+
+function TMacOSArm64Toolkit.ImageFormat: TImageFormat;
+begin
+  Result := ifMachO;
 end;
 
 { ---- TTargetRegistry ------------------------------------------------- }

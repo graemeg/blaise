@@ -24,7 +24,8 @@ uses
   uStrCompat,                     { StrAt — byte reads, house style }
   blaise.codegen.driver,
   blaise.codegen.target,          { TTargetOS: osLinux / osFreeBSD }
-  blaise.codegen.native.driver;   { registers the native driver }
+  blaise.codegen.native.driver,   { registers the native driver }
+  blaise.codegen.toolkit;         { per-target soname table }
 
 type
   TBackendDriverContractTests = class(TTestCase)
@@ -606,6 +607,14 @@ begin
   finally
     Units.Free();
   end;
+end;
+
+{ The soname table moved from the driver to the target toolkit (Windows M0);
+  these tests keep their original assertions through it. }
+function LinkLibSoname(const ALibName: string;
+  const ATarget: TTargetDesc): string;
+begin
+  Result := ResolveToolkit(ATarget).LibraryImageName(ALibName);
 end;
 
 procedure TBackendDriverContractTests.TestLinkLibSoname_Linux_GlibcSonames;

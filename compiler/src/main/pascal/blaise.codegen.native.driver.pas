@@ -41,17 +41,6 @@ uses
   blaise.codegen.target,
   blaise.codegen.driver;
 
-{ Map a link-library name (as it appears in `external 'lib'` or the codegen's
-  required-libs list) to the SONAME the TARGET's loader records in DT_NEEDED.
-
-  Exposed for testing: on a native link ResolveLibNeeded prefers the real
-  DT_SONAME read off the library file, so this table is only reached on a miss
-  — but for a CROSS link it is the sole authority, and probing the host's
-  libraries would name the host's sonames (a Linux-hosted freebsd-x86_64 link
-  must emit libc.so.7, never the host's libc.so.6). }
-function LinkLibSoname(const ALibName: string;
-  const ATarget: TTargetDesc): string;
-
 { True when ASymbol is a symbol the COMPILER emits, not one the C world could
   ever supply (typeinfo_/vtable_/itab_/impllist_/__cn_/__mn_).  Such a name
   turning up unresolved at link is a codegen defect, never a missing libc
@@ -236,34 +225,8 @@ end;
 
 { The external cc linker resolves `-l<name>` to lib<name>.so at link time and
   the resulting binary carries the library's real SONAME; the internal linker
-  writes DT_NEEDED itself, so it must name the versioned SONAME directly.  Known
-  system libs get their canonical SONAME; anything else falls back to the
-  conventional unversioned 'lib<name>.so' (a dev symlink, matching -l<name>).
-
-  FreeBSD is not a re-versioned Linux: threads live in libthr (libpthread.so.N
-  does not exist), and dlopen/dlsym plus the POSIX realtime routines are part
-  of libc rather than separate libdl/librt objects — so 'dl' and 'rt' fold into
-  libc.so.7 instead of naming a library the loader would fail to find. }
-function LinkLibSoname(const ALibName: string;
-  const ATarget: TTargetDesc): string;
-begin
-  if ATarget.OS = osFreeBSD then
-  begin
-    if SameText(ALibName, 'pthread') then Result := 'libthr.so.3'
-    else if SameText(ALibName, 'm')  then Result := 'libm.so.5'
-    else if SameText(ALibName, 'dl') then Result := 'libc.so.7'
-    else if SameText(ALibName, 'rt') then Result := 'libc.so.7'
-    else if SameText(ALibName, 'c')  then Result := 'libc.so.7'
-    else Result := 'lib' + ALibName + '.so';
-    Exit;
-  end;
-  if SameText(ALibName, 'pthread') then Result := 'libpthread.so.0'
-  else if SameText(ALibName, 'm')  then Result := 'libm.so.6'
-  else if SameText(ALibName, 'dl') then Result := 'libdl.so.2'
-  else if SameText(ALibName, 'rt') then Result := 'librt.so.1'
-  else if SameText(ALibName, 'c')  then Result := 'libc.so.6'
-  else Result := 'lib' + ALibName + '.so';
-end;
+  writes DT_NEEDED itself, so it must name the versioned SONAME directly.  The
+  per-target soname table is TTargetToolkit.LibraryImageName. }
 
 { ------------------------------------------------------------------------
   Shared-library resolution for the internal linker (GH #188).
@@ -326,11 +289,11 @@ end;
 
 { Default ELF shared-library search directories, plus any from LibPaths /
   LD_LIBRARY_PATH / LIBRARY_PATH.  A --lib-path entry (AExtra) takes
-  precedence.  The defaults are per-target: Linux uses the Debian/Ubuntu
-  multiarch layout, while FreeBSD has no multiarch split and puts third-party
-  packages under /usr/local/lib. }
+  precedence.  The defaults are per-target, supplied by the toolkit
+  (AddSystemLibDirs): Linux uses the Debian/Ubuntu multiarch layout, while
+  FreeBSD has no multiarch split. }
 procedure BuildLibSearchDirs(AExtra: TStringList; AOut: TStringList;
-  const ATarget: TTargetDesc);
+  AToolkit: TTargetToolkit);
   procedure AddColonList(const AList: string);
   var Seg: string; K, N, B: Int;
   begin
@@ -361,18 +324,7 @@ begin
         AOut.Add(AExtra.Strings[I]);
   AddColonList(GetEnvironmentVariable('LD_LIBRARY_PATH'));
   AddColonList(GetEnvironmentVariable('LIBRARY_PATH'));
-  { The multiarch split is Linux's own convention — name it positively so a
-    new target gets the plain POSIX set rather than inheriting Linux's paths. }
-  if ATarget.OS = osLinux then
-  begin
-    if AOut.IndexOf('/lib/x86_64-linux-gnu') < 0 then AOut.Add('/lib/x86_64-linux-gnu');
-    if AOut.IndexOf('/usr/lib/x86_64-linux-gnu') < 0 then AOut.Add('/usr/lib/x86_64-linux-gnu');
-  end;
-  { Common to every POSIX target; on FreeBSD /usr/local/lib is where pkg(8)
-    installs third-party libraries such as X11 and ncurses. }
-  if AOut.IndexOf('/usr/local/lib') < 0 then AOut.Add('/usr/local/lib');
-  if AOut.IndexOf('/lib') < 0 then AOut.Add('/lib');
-  if AOut.IndexOf('/usr/lib') < 0 then AOut.Add('/usr/lib');
+  AToolkit.AddSystemLibDirs(AOut);
 end;
 
 { Read DT_SONAME from an ET_DYN ELF image.  Returns '' if the bytes are not a
@@ -497,7 +449,7 @@ end;
 { Find lib<AName>.so on the search path; also probe the versioned dev names.
   Returns the resolved path or '' if not found. }
 function FindLibFile(const AName: string; ADirs: TStringList;
-  const ATarget: TTargetDesc): string;
+  AToolkit: TTargetToolkit): string;
 var
   I: Int;
   Cand: string;
@@ -513,7 +465,7 @@ begin
     the target's soname table rather than assuming glibc's. }
   for I := 0 to ADirs.Count - 1 do
   begin
-    Cand := ADirs.Strings[I] + '/' + LinkLibSoname(AName, ATarget);
+    Cand := ADirs.Strings[I] + '/' + AToolkit.LibraryImageName(AName);
     if FileExists(Cand) then Exit(Cand);
   end;
 end;
@@ -528,7 +480,7 @@ end;
   libm.so.6 into a FreeBSD binary — so the per-target soname table is used
   directly and the host's files are left alone. }
 procedure ResolveLibNeeded(const AName: string; ADirs, ANeeded,
-  AVisited: TStringList; const ATarget: TTargetDesc);
+  AVisited: TStringList; const ATarget: TTargetDesc; AToolkit: TTargetToolkit);
 var
   Path, Bytes, Soname, Tok: string;
   Scr: TStringList;
@@ -538,16 +490,16 @@ begin
   AVisited.Add(AName);
   if ATarget.OS <> HostTarget().OS then
   begin
-    Soname := LinkLibSoname(AName, ATarget);
+    Soname := AToolkit.LibraryImageName(AName);
     if ANeeded.IndexOf(Soname) < 0 then ANeeded.Add(Soname);
     Exit;
   end;
-  Path := FindLibFile(AName, ADirs, ATarget);
+  Path := FindLibFile(AName, ADirs, AToolkit);
   if Path = '' then
   begin
     { Not found on the path — keep the historical guess so previously-working
       links (e.g. a lib present only at runtime) are unaffected. }
-    Soname := LinkLibSoname(AName, ATarget);
+    Soname := AToolkit.LibraryImageName(AName);
     if ANeeded.IndexOf(Soname) < 0 then ANeeded.Add(Soname);
     Exit;
   end;
@@ -572,7 +524,7 @@ begin
            and (StrAt(Tok, 1) = Ord('l')) then
           { A bare -lNAME reference — resolve it as its own library. }
           ResolveLibNeeded(StrCopyTail(Tok, 2), ADirs, ANeeded, AVisited,
-            ATarget)
+            ATarget, AToolkit)
         else
         begin
           { A file token — possibly an absolute path (a GROUP() script names
@@ -590,7 +542,7 @@ begin
               { An unversioned libX.so (another dev symlink / script) — recurse
                 on its base name so its own SONAME / script is resolved. }
               ResolveLibNeeded(StrCopyFrom(Tok, 3, StrPos('.so', Tok) - 3),
-                ADirs, ANeeded, AVisited, ATarget);
+                ADirs, ANeeded, AVisited, ATarget, AToolkit);
           end;
         end;
       end;
@@ -598,7 +550,7 @@ begin
     else
     begin
       { Neither ELF nor a recognisable script — fall back. }
-      Soname := LinkLibSoname(AName, ATarget);
+      Soname := AToolkit.LibraryImageName(AName);
       if ANeeded.IndexOf(Soname) < 0 then ANeeded.Add(Soname);
     end;
   finally
@@ -680,14 +632,19 @@ var
   LibName: string;
   I: Int;
 begin
+  { macOS has no freestanding mode: libSystem is the only stable kernel ABI
+    Apple offers, so lmAuto silently resolves to dynamic and an explicit
+    --static is an error rather than a silent lie. }
+  if AOpts.LinkMode = lmStatic then
+    Exit('--static: macOS binaries are always dynamic against libSystem '
+      + '(Apple offers no stable freestanding syscall ABI)');
   Result := '';
   RTLObjs := TStringList.Create();
   try
     { same implicit-RTL machinery as the ELF path: the darwin unit list
       (BuildRTLUnitList) has no start unit — LC_MAIN enters _main.  macOS
-      binaries are ALWAYS dynamic against libSystem (the only stable kernel
-      ABI Apple offers), so the static RTL profile never applies here; a
-      --static request is rejected before we get this far. }
+      binaries are ALWAYS dynamic against libSystem, so the static RTL
+      profile never applies here. }
     Result := Self.EnsureRTLObjects(AOpts, True, False, AExtraObjects, RTLObjs);
     if Result <> '' then Exit;
     Lk := TMachOLinker.Create();
@@ -782,20 +739,15 @@ begin
   if Toolkit = nil then
     Exit('internal linker: no toolkit registered for target ' +
       TargetName(AOpts.Target));
-  { A toolkit without ELF link facts is a Mach-O target — hand the whole
-    link to the Mach-O linker (same RTL-object machinery, different
-    container).  macOS has no freestanding mode: libSystem is the only
-    stable kernel ABI Apple offers, so lmAuto silently resolves to dynamic
-    and an explicit --static is an error rather than a silent lie. }
-  LinkTarget := Toolkit.MakeLinkTarget();
-  if LinkTarget = nil then
-  begin
-    if AOpts.LinkMode = lmStatic then
-      Exit('--static: macOS binaries are always dynamic against libSystem '
-        + '(Apple offers no stable freestanding syscall ABI)');
+  { The toolkit names the image container; each container has its own
+    linker (same RTL-object machinery).  Only the ELF image is linked below. }
+  if Toolkit.ImageFormat() = ifMachO then
     Exit(Self.LinkViaMachOLinker(AObjFile, AOutputFile, AOpts,
       AExtraObjects));
-  end;
+  LinkTarget := Toolkit.MakeLinkTarget();
+  if LinkTarget = nil then
+    Exit('internal linker: toolkit ' + Toolkit.Name() +
+      ' has an ELF image but no ELF link target');
 
   { ---------------- resolve the link mode (lmAuto policy) ----------------
     Freestanding when the program binds no C libraries and every external
@@ -880,10 +832,10 @@ begin
             Needed := TStringList.Create();
             Visited := TStringList.Create();
             try
-              BuildLibSearchDirs(AOpts.LibPaths, LibDirs, AOpts.Target);
+              BuildLibSearchDirs(AOpts.LibPaths, LibDirs, Toolkit);
               for I := 0 to AOpts.LinkLibs.Count - 1 do
                 ResolveLibNeeded(AOpts.LinkLibs.Strings[I], LibDirs, Needed,
-                  Visited, AOpts.Target);
+                  Visited, AOpts.Target, Toolkit);
               for I := 0 to Needed.Count - 1 do
                 Lk.AddNeededLib(Needed.Strings[I]);
             finally

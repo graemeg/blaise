@@ -21,7 +21,7 @@ unit cp.test.targettoolkit;
 interface
 
 uses
-  blaise.testing,
+  SysUtils, Classes, blaise.testing,
   blaise.codegen.target, blaise.codegen.toolkit,
   blaise.codegen.native.backend, blaise.linker.elf,
   blaise.codegen.native.x86_64, blaise.codegen.native.x86_64.abi;
@@ -59,6 +59,14 @@ type
     procedure TestFreeBSDToolkit_Backend_HasSysVAndElfTls;
     procedure TestSysVBoundaryAbi_NoProbeNoTranslation;
     procedure TestElfLocalExecTls_OperandAndAddress;
+    { The toolkit names the image container the driver dispatches on. }
+    procedure TestImageFormat_PerToolkit;
+    { Default library search directories, in search order, per toolkit. }
+    procedure TestLinuxToolkit_SystemLibDirs_MultiarchFirst;
+    procedure TestFreeBSDToolkit_SystemLibDirs_NoMultiarch;
+    procedure TestSystemLibDirs_SkipsDirsAlreadyListed;
+    { A Mach-O toolkit does not map ELF link libraries. }
+    procedure TestMacOSToolkit_LibraryImageName_Raises;
   end;
 
 implementation
@@ -293,6 +301,69 @@ begin
     Sink.Free();
     M.Free();
   end;
+end;
+
+procedure TTargetToolkitTests.TestImageFormat_PerToolkit;
+var
+  T: TTargetDesc;
+begin
+  AssertTrue('linux image is ELF',
+    ResolveToolkit(Self.LinuxTarget()).ImageFormat() = ifElf);
+  AssertTrue('freebsd image is ELF',
+    ResolveToolkit(Self.FreeBSDTarget()).ImageFormat() = ifElf);
+  MakeTarget(osMacOS, cpuArm64, T);
+  AssertTrue('macos image is Mach-O',
+    ResolveToolkit(T).ImageFormat() = ifMachO);
+end;
+
+function SystemDirs(const ATarget: TTargetDesc; const APreset: string): string;
+var
+  L: TStringList;
+begin
+  L := TStringList.Create();
+  try
+    if APreset <> '' then
+      L.Add(APreset);
+    ResolveToolkit(ATarget).AddSystemLibDirs(L);
+    Result := L.CommaText;
+  finally
+    L.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestLinuxToolkit_SystemLibDirs_MultiarchFirst;
+begin
+  AssertEquals('/lib/x86_64-linux-gnu,/usr/lib/x86_64-linux-gnu,' +
+    '/usr/local/lib,/lib,/usr/lib', SystemDirs(Self.LinuxTarget(), ''));
+end;
+
+procedure TTargetToolkitTests.TestFreeBSDToolkit_SystemLibDirs_NoMultiarch;
+begin
+  AssertEquals('/usr/local/lib,/lib,/usr/lib',
+    SystemDirs(Self.FreeBSDTarget(), ''));
+end;
+
+procedure TTargetToolkitTests.TestSystemLibDirs_SkipsDirsAlreadyListed;
+begin
+  { a --lib-path or LD_LIBRARY_PATH entry keeps its earlier position }
+  AssertEquals('/lib,/usr/local/lib,/usr/lib',
+    SystemDirs(Self.FreeBSDTarget(), '/lib'));
+end;
+
+procedure TTargetToolkitTests.TestMacOSToolkit_LibraryImageName_Raises;
+var
+  T: TTargetDesc;
+  Raised: Boolean;
+begin
+  MakeTarget(osMacOS, cpuArm64, T);
+  Raised := False;
+  try
+    ResolveToolkit(T).LibraryImageName('c');
+  except
+    on E: Exception do
+      Raised := True;
+  end;
+  AssertTrue('Mach-O dylibs are resolved by the Mach-O linker', Raised);
 end;
 
 initialization
