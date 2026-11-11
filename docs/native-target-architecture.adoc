@@ -267,8 +267,19 @@ type
     function Name: string; virtual; abstract;               { "linux-x86_64" }
     function MakeBackend: TNativeBackend; virtual; abstract;
     function MakeLinkTarget: TLinkTarget; virtual; abstract;
+    function ImageFormat: TImageFormat; virtual; abstract;  { ifElf, ifMachO }
+    function LibraryImageName(const ALibName: string): string; virtual;
+    procedure AddSystemLibDirs(AOut: TStringList); virtual;
   end;
 ----
+
+`ImageFormat`, `LibraryImageName` and `AddSystemLibDirs` replaced the OS
+chains the driver used to carry: the driver dispatches the image link on
+`ImageFormat`, records a library dependency under the name
+`LibraryImageName` returns (an ELF soname such as `libpthread.so.0` on Linux,
+`libthr.so.3` on FreeBSD), and searches the directories the toolkit adds.  The
+base versions of the last two raise, so a target that links libraries must
+state its own answers rather than inherit another OS's.
 
 The compiler-side toolkit (Step 0a, as built) makes the backend and the link
 target.  It does *not* have a `MakeKernelABI` — the kernel leaf is a link-time
@@ -286,7 +297,47 @@ the textbook
 Abstract Factory motivation (families of related products that must be used
 together).
 
-Concrete factories: `TLinuxX86_64Toolkit`, `TFreeBSDX86_64Toolkit`.
+Concrete factories: `TLinuxX86_64Toolkit` and `TFreeBSDX86_64Toolkit`, both
+derived from `TSysVElfX86_64Toolkit`, which holds what every System V ELF
+x86_64 target shares; and `TMacOSArm64Toolkit`.
+
+[#x86-strategies]
+=== Strategy objects inside the x86_64 backend
+
+Linux, FreeBSD and Windows share one x86_64 instruction selector
+(`TX86_64Backend`).  Where the targets genuinely differ, the backend holds a
+strategy object instead of testing the OS, and the toolkit's `MakeBackend`
+supplies the adapters (`TX86_64Backend.AdoptStrategies`).  The backend owns
+them.  A backend constructed outside the toolkit has no TLS model, and its
+first threadvar access raises an internal error that says to construct it
+through `MakeBackend`.  Both live in `blaise.codegen.native.x86_64.abi`.
+
+`TX86BoundaryAbi` — the calling convention where control crosses into or out
+of foreign code::
+  Blaise's internal convention is System V on every target
+  (`windows-x86_64-backend-design.adoc`, D1), so the boundary is the only
+  place a target's C convention matters.  The class currently answers two
+  queries: `NeedsStackProbe` (frames of a page or more must touch each page
+  in the prologue) and `ForeignDiffers` (a `cdecl` routine uses a different
+  convention from the internal one).  `TSysVBoundaryAbi` answers False to
+  both.  The foreign-call and foreign-entry lowerings join the interface with
+  the first adapter that needs them, the Win64 one.
+
+`TX86TlsModel` — threadvar addressing::
+  `DirectOperand(ASym)` returns a memory operand that needs no preparatory
+  code and no register, for splicing into any instruction;
+  `EmitAddress(ASym, ADstReg, AEmit)` emits code that leaves the slot's
+  address in a register; `RewriteAddressOf` is the backend's peephole hook
+  for a `leaq` of a direct operand.  `TElfLocalExecTls` is the ELF
+  local-exec model (`%fs:sym@tpoff`).  A model with no direct operand, such
+  as the PE TLS-index sequence, must route each access through the address
+  form: no register is free at every threadvar operand site, because the
+  operand is spliced into arbitrary instructions while the scratch registers
+  and the register-promotion pool are live.
+
+Every other x86_64 difference between these targets lives outside the
+backend: in the toolkit (image format, library names and directories), in
+the container writers, or in the RTL.
 
 === Registry — name → toolkit
 
@@ -314,7 +365,8 @@ hard-wiring with a lookup that the CLI *and* the test runner share.
 | GoF pattern | Applied to | Why it earns its place
 
 | Strategy
-| `TNativeBackend`, `TRtlPlatform`, `TPlatformLayout`
+| `TNativeBackend`, `TX86BoundaryAbi`, `TX86TlsModel`, `TRtlPlatform`,
+  `TPlatformLayout`
 | Interchangeable target behaviour chosen at run time.  Already in use
   (`TProfilerStrategy`, `TNativeBackend`).  Note the kernel leaf is *not* a
   Strategy object — it is a link-time symbol swap (<<kernel-leaf>>).
