@@ -9,6 +9,8 @@ releases/
 *.res
 *.rst
 *.s
+# hand-written assembly fixtures are source
+!compiler/src/it/windows/*.s
 !runtime/src/main/asm/*.s
 
 # Shared / dynamic libraries
