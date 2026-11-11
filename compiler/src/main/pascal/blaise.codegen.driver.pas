@@ -678,14 +678,14 @@ end;
   the shared globals (GPlatformLayout, GRtlPlatform) so it must be built first
   and linked once. }
 const
-  RTL_UNITS: array[0..16] of string = (
+  RTL_UNITS: array[0..17] of string = (
     'rtl.platform',
     'runtime.start', 'runtime.atomic', 'runtime.setjmp', 'runtime.utf8',
     'runtime.mem', 'runtime.str', 'runtime.set', 'runtime.arc',
     'runtime.weak', 'runtime.float', 'runtime.math', 'runtime.thread',
     'runtime.exc',
     'runtime.errno.linux',
-    'rtl.platform.layout.linux', 'rtl.platform.posix');
+    'rtl.platform.layout.linux', 'rtl.platform.posix', 'rtl.platform.abi');
 
 { Lower-case OS suffix used in the OS-specific RTL unit names
   (rtl.platform.layout.<os>, runtime.syscall.<os>, …). }

@@ -105,7 +105,7 @@ $START_UNIT runtime.atomic runtime.setjmp runtime.utf8
 runtime.mem runtime.str runtime.set runtime.arc
 runtime.weak runtime.float runtime.math runtime.thread runtime.exc
 $ERRNO_UNIT
-$LAYOUT_UNIT rtl.platform.posix"
+$LAYOUT_UNIT rtl.platform.posix rtl.platform.abi"
 
 # Symbols the main program object already defines (for --exclude-defined-by).
 # Written to a temp file so the per-object comm(1) below stays POSIX (no
