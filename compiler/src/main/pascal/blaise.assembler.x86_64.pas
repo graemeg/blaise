@@ -2723,6 +2723,15 @@ begin
   else
     raise EAssembler.Create('SSE: unhandled mnemonic: ' + AMnem);
 
+  { movdqu/movdqa: the store direction is opcode $7F instead of $6F }
+  if ((AMnem = 'movdqu') or (AMnem = 'movdqa')) and
+     (ASrc.Kind = opReg) and IsMemLike(ADst) then
+  begin
+    EmitSSERegMem(ACB, ACtx, Prefix, NeedRexW, $7F, Opcode2, ASrc.Reg, ADst);
+    Result := ACB.Data;
+    Exit;
+  end;
+
   { movsd/movss: store direction uses opcode $11 instead of $10 }
   if ((AMnem = 'movsd') or (AMnem = 'movss')) and
      (ASrc.Kind = opReg) and IsMemLike(ADst) then

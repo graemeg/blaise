@@ -55,10 +55,14 @@ type
     procedure TestLibraryLessExternal_KeepsInternalConvention;
     procedure TestCdeclExternal_IsForeign;
     procedure TestLinux_ExternalLibCall_StaysSystemV;
-    { Not lowered yet: an aggregate result from a foreign routine, and a
-      routine with a body that foreign code calls (M5). }
+    { Not lowered yet: an aggregate result from a foreign routine. }
     procedure TestRecordResult_FromForeignRoutine_IsAnError;
-    procedure TestCdeclRoutineWithBody_IsAnError;
+    { A cdecl routine with a body: the body keeps the internal convention
+      under <sym>.cbody, and a foreign entry under the public name
+      translates from Win64. }
+    procedure TestCdeclRoutineWithBody_GetsForeignEntry;
+    procedure TestForeignEntry_StackAndFloatArgs;
+    procedure TestLinux_CdeclRoutineWithBody_NoEntry;
     { Threadvars (PE TLS): every instruction that touches one is preceded
       by the TLS block load into %r11, even when the operand is reused after
       a call. }
@@ -81,6 +85,7 @@ type
   published
     procedure TestLink_M2Calls;
     procedure TestLink_M3Tls;
+    procedure TestLink_M3Callback;
   end;
 
 implementation
@@ -303,17 +308,61 @@ begin
     (Pos('R', Msg) >= 0) and (Pos('foreign routine', Msg) >= 0));
 end;
 
-procedure TWin64CallTests.TestCdeclRoutineWithBody_IsAnError;
+procedure TWin64CallTests.TestCdeclRoutineWithBody_GetsForeignEntry;
 var
-  Msg: string;
+  A: string;
 begin
-  Msg := WinError(
+  A := WinAsm(
     'program p;' + NL +
-    'function CB(A: Int32): Int32; cdecl;' + NL +
+    'function CB(A: Int32; B: Pointer): Int32; cdecl;' + NL +
     'begin Result := A; end;' + NL +
-    'begin CB(1); end.');
-  AssertTrue('names the routine and the missing foreign entry: ' + Msg,
-    (Pos('CB', Msg) >= 0) and (Pos('foreign entry', Msg) >= 0));
+    'begin CB(1, nil); end.');
+  { the entry: Win64-callee-saved registers kept, the register arguments
+    spilled to the home area, then loaded the System V way }
+  AssertHas(A, 'CB:' + NL + #9'pushq %rbp' + NL + #9'movq %rsp, %rbp' + NL +
+    #9'pushq %rdi' + NL + #9'pushq %rsi');
+  AssertHas(A, #9'movq %rcx, 16(%rbp)');
+  AssertHas(A, #9'movq %rdx, 24(%rbp)');
+  AssertHas(A, #9'movdqu %xmm6, 0(%rsp)');
+  AssertHas(A, #9'movq 16(%rbp), %rdi' + NL + #9'movq 24(%rbp), %rsi' + NL +
+    #9'callq CB.cbody');
+  AssertHas(A, #9'movdqu 144(%rsp), %xmm15');
+  AssertHas(A, 'CB.cbody:');
+  { the program's own call goes through the entry, the foreign way }
+  AssertHas(A, #9'movq 32(%rsp), %rcx');
+  AssertHas(A, #9'callq CB' + NL);
+end;
+
+procedure TWin64CallTests.TestForeignEntry_StackAndFloatArgs;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'function CB(A: Float64; B: Int64; C: Float32; D, E: Int64; F: Float64): Int64; cdecl;' + NL +
+    'begin Result := B; end;' + NL +
+    'begin CB(1.0, 2, 3.0, 4, 5, 6.0); end.');
+  AssertHas(A, #9'movsd %xmm0, 16(%rbp)');
+  AssertHas(A, #9'movss %xmm2, 32(%rbp)');
+  { System V: floats and integers counted separately }
+  AssertHas(A, #9'movsd 16(%rbp), %xmm0');
+  AssertHas(A, #9'movq 24(%rbp), %rdi');
+  AssertHas(A, #9'movss 32(%rbp), %xmm1');
+  AssertHas(A, #9'movq 40(%rbp), %rsi');
+  AssertHas(A, #9'movq 48(%rbp), %rdx');
+  AssertHas(A, #9'movsd 56(%rbp), %xmm2');
+end;
+
+procedure TWin64CallTests.TestLinux_CdeclRoutineWithBody_NoEntry;
+var
+  A: string;
+begin
+  A := GenAsm(
+    'program p;' + NL +
+    'function CB(A: Int32; B: Pointer): Int32; cdecl;' + NL +
+    'begin Result := A; end;' + NL +
+    'begin CB(1, nil); end.', 'linux-x86_64');
+  AssertLacks(A, '.cbody');
 end;
 
 { ---- threadvars ---- }
@@ -483,6 +532,14 @@ begin
   finally
     Img.Free();
   end;
+end;
+
+procedure TWin64FixtureTests.TestLink_M3Callback;
+var
+  Img: TPeImage;
+begin
+  Img := LinkFixture('m3callback');
+  Img.Free();
 end;
 
 initialization

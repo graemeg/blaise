@@ -53,6 +53,22 @@ memset:
 .Lmemset_done:
         ret
 
+# memcpy(dest, src, count), System V: record copies.
+        .globl memcpy
+memcpy:
+        movq %rdi, %rax
+        testq %rdx, %rdx
+        je .Lmemcpy_done
+.Lmemcpy_loop:
+        movb (%rsi), %cl
+        movb %cl, (%rdi)
+        incq %rsi
+        incq %rdi
+        decq %rdx
+        jne .Lmemcpy_loop
+.Lmemcpy_done:
+        ret
+
         .section .blaise.imports,"",@progbits
         .ascii "ExitProcess"
         .byte 0

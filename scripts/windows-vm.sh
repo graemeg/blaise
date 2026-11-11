@@ -155,7 +155,7 @@ case "$cmd" in
     link_fixture exit42.exe TPeLinkerTests.TestLink_Exit42Fixture
     # the Blaise programs: <name>:<fixture test>, each checked against
     # compiler/src/it/windows/<name>.expected
-    progs="m2calls:TWin64FixtureTests.TestLink_M2Calls m3tls:TWin64FixtureTests.TestLink_M3Tls"
+    progs="m2calls:TWin64FixtureTests.TestLink_M2Calls m3tls:TWin64FixtureTests.TestLink_M3Tls m3callback:TWin64FixtureTests.TestLink_M3Callback"
     for p in $progs; do link_fixture "${p%%:*}.exe" "${p#*:}"; done
     fail=0
     echo "=== exit42 ==="

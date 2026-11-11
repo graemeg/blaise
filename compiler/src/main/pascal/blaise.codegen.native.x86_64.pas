@@ -946,6 +946,12 @@ type
       temporary, then move each where the boundary strategy says. }
     procedure EmitForeignCall(const AFuncSym: string; ADecl: TMethodDecl;
                               AArgs: TObjectList);
+    { The foreign entry of a cdecl routine with a body, where the C
+      convention differs from the internal one: a thunk under AEntrySym
+      that takes the arguments the foreign way and calls the body, compiled
+      the internal way under ABodySym. }
+    procedure EmitForeignEntry(ADecl: TMethodDecl;
+      const AEntrySym, ABodySym: string; AExported: Boolean);
     { The bytes of a `subq $N, %rsp` line in N, when ALine is one. }
     function IsRspReserve(const ALine: string; out N: Int): Boolean;
     { Emit a call to a record-returning function using the sret convention:
@@ -24350,6 +24356,158 @@ begin
   end;
 end;
 
+procedure TX86_64Backend.EmitForeignEntry(ADecl: TMethodDecl;
+  const AEntrySym, ABodySym: string; AExported: Boolean);
+var
+  I, N, IntIdx, XmmIdx, Home, Pad: Int;
+  Par: TMethodParam;
+  Ty: TTypeDesc;
+  Kind: TX86ForeignArgKind;
+  Loc: TX86ForeignArgLoc;
+  Overflow: TList<Int>;     { home offsets of the System V stack arguments }
+  RT: TTypeDesc;
+
+  procedure Line(const AText: string);
+  begin
+    { straight to the tracked stream: no TLS or promotion rewrite applies
+      to the thunk, which addresses only its own frame }
+    Self.EmitTracked(AText);
+  end;
+
+begin
+  RT := ADecl.ResolvedReturnType;
+  if (ADecl.OwnerTypeName <> '') or
+     ((ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0)) or
+     (RT <> nil) and ((AggRetRec(RT) <> nil) or IsJumboSet(RT) or
+       (RT.Kind in [tyStaticArray, tyInterface])) then
+    raise ENativeCodeGenError.Create(Format('''%s'': a cdecl routine on %s ' +
+      'must be a standalone routine without captures that returns no ' +
+      'aggregate', [ADecl.Name, TargetName(Self.Target)]));
+  if AExported then
+    Self.Emit('.globl ' + AEntrySym);
+  Line(AEntrySym + ':');
+  Line(#9'pushq %rbp');
+  Line(#9'movq %rsp, %rbp');
+  { RDI, RSI and XMM6-XMM15 survive a Win64 call; the body, compiled the
+    internal way, may use them freely }
+  Line(#9'pushq %rdi');
+  Line(#9'pushq %rsi');
+  Line(#9'subq $160, %rsp');
+  for I := 6 to 15 do
+    Line(Format(#9'movdqu %%xmm%d, %d(%%rsp)', [I, (I - 6) * 16]));
+  { Spill the register arguments into the caller's home area: then argument
+    I is at 16+8*I(%rbp) for every I, the stack ones included. }
+  N := ADecl.Params.Count;
+  for I := 0 to N - 1 do
+  begin
+    Par := TMethodParam(ADecl.Params.Items[I]);
+    Ty := Par.ResolvedType;
+    if Par.IsOpenArray or ((not Par.IsVarParam) and (Ty <> nil) and
+       ((Ty.Kind = tyInterface) or IsMethodPtrType(Ty))) then
+      raise ENativeCodeGenError.Create(Format('''%s'': parameter %s has a ' +
+        'type foreign code cannot pass', [ADecl.Name, Par.ParamName]));
+    if Par.IsVarParam then
+      Kind := fakInt
+    else if (Ty <> nil) and (Ty.Kind = tySingle) then
+      Kind := fakSingle
+    else if (Ty <> nil) and (Ty.Kind = tyDouble) then
+      Kind := fakDouble
+    else if (Ty <> nil) and (Ty.Kind = tyRecord) then
+      Kind := fakRecord
+    else
+      Kind := fakInt;
+    Loc := FBoundaryAbi.ForeignArgLoc(I, Kind, 0, False);
+    if (Kind = fakRecord) and (Ty <> nil) then
+      Loc := FBoundaryAbi.ForeignArgLoc(I, Kind, Ty.RawSize(), False);
+    if Loc.Reg = '' then Continue;
+    Home := 16 + 8 * I;
+    if Kind = fakSingle then
+      Line(Format(#9'movss %s, %d(%%rbp)', [Loc.Reg, Home]))
+    else if Kind = fakDouble then
+      Line(Format(#9'movsd %s, %d(%%rbp)', [Loc.Reg, Home]))
+    else
+      Line(Format(#9'movq %s, %d(%%rbp)', [Loc.Reg, Home]));
+  end;
+  { Load the internal (System V) homes: integers and floats counted
+    separately, the rest on the stack in order.  A record is passed to the
+    body by address: its own bytes in the home slot when Win64 passed them
+    by value, else the copy Win64 passed the address of. }
+  Overflow := TList<Int>.Create();
+  try
+    IntIdx := 0;
+    XmmIdx := 0;
+    for I := 0 to N - 1 do
+    begin
+      Par := TMethodParam(ADecl.Params.Items[I]);
+      Ty := Par.ResolvedType;
+      Home := 16 + 8 * I;
+      if (not Par.IsVarParam) and (Ty <> nil) and
+         (Ty.Kind in [tySingle, tyDouble]) then
+      begin
+        if XmmIdx < 8 then
+        begin
+          if Ty.Kind = tySingle then
+            Line(Format(#9'movss %d(%%rbp), %s', [Home, SysVXmmArgRegs[XmmIdx]]))
+          else
+            Line(Format(#9'movsd %d(%%rbp), %s', [Home, SysVXmmArgRegs[XmmIdx]]));
+          Inc(XmmIdx);
+        end
+        else
+          Overflow.Add(Home);
+      end
+      else if (not Par.IsVarParam) and (Ty <> nil) and (Ty.Kind = tyRecord) and
+              not FBoundaryAbi.ForeignArgLoc(I, fakRecord, Ty.RawSize(),
+                False).ByRef then
+      begin
+        if IntIdx < 6 then
+        begin
+          Line(Format(#9'leaq %d(%%rbp), %s', [Home, SysVArg64(IntIdx)]));
+          Inc(IntIdx);
+        end
+        else
+          Overflow.Add(-Home);    { negative: pass the slot's address }
+      end
+      else if IntIdx < 6 then
+      begin
+        Line(Format(#9'movq %d(%%rbp), %s', [Home, SysVArg64(IntIdx)]));
+        Inc(IntIdx);
+      end
+      else
+        Overflow.Add(Home);
+    end;
+    { System V stack arguments, first at the lowest address; the call site
+      stays 16-byte aligned (it is aligned here) }
+    Pad := 0;
+    if Overflow.Count mod 2 = 1 then
+    begin
+      Pad := 8;
+      Line(#9'subq $8, %rsp');
+    end;
+    for I := Overflow.Count - 1 downto 0 do
+      if Overflow.Get(I) < 0 then
+      begin
+        Line(Format(#9'leaq %d(%%rbp), %%rax', [-Overflow.Get(I)]));
+        Line(#9'pushq %rax');
+      end
+      else
+        Line(Format(#9'pushq %d(%%rbp)', [Overflow.Get(I)]));
+    Line(#9'callq ' + ABodySym);
+    if Overflow.Count * 8 + Pad > 0 then
+      Line(Format(#9'addq $%d, %%rsp', [Overflow.Count * 8 + Pad]));
+  finally
+    Overflow.Free();
+  end;
+  { the result is where Win64 wants it already: RAX, or XMM0 }
+  for I := 6 to 15 do
+    Line(Format(#9'movdqu %d(%%rsp), %%xmm%d', [(I - 6) * 16, I]));
+  Line(#9'addq $160, %rsp');
+  Line(#9'popq %rsi');
+  Line(#9'popq %rdi');
+  Line(#9'popq %rbp');
+  Line(#9'ret');
+  Line('.type ' + AEntrySym + ', @function');
+end;
+
 { Spill the incoming argument register at index AIdx into the param slot
   AOperand, using the register sub-view matching the param's width. }
 procedure TX86_64Backend.EmitSpillArg(AIdx: Int; const AOperand: string;
@@ -26991,17 +27149,21 @@ var
   SplitOff: Int;
   SavedArmNodes: TStringList;
   SavedArmPos: Int;
+  EntrySym: string;
 begin
-  { A routine with a body declared cdecl is one foreign code calls; where
-    the C convention differs it needs a foreign entry, which arrives with
-    milestone M5.  Until then it is an error, never a body that reads its
-    arguments from the wrong registers. }
-  if (ADecl.CallingConv = 'cdecl') and (FBoundaryAbi <> nil) and
-     FBoundaryAbi.ForeignDiffers() then
-    raise ENativeCodeGenError.Create(Format('''%s'': a cdecl routine with ' +
-      'a body needs a foreign entry, which is not implemented on %s yet',
-      [ADecl.Name, TargetName(Self.Target)]));
   Sym := FuncSymbolFromDecl(ADecl);
+  { A routine with a body declared cdecl is one foreign code may call.
+    Where the C convention differs, the body is compiled the internal way
+    under <sym>.cbody, and EmitForeignEntry puts a translating thunk under
+    the public name -- so a callback handed to Windows, and every call
+    through the routine's name, enters the foreign way. }
+  EntrySym := '';
+  if (ADecl.CallingConv = 'cdecl') and (FBoundaryAbi <> nil) and
+     FBoundaryAbi.ForeignDiffers() and not ADecl.NoStackFrame then
+  begin
+    EntrySym := Sym;
+    Sym := Sym + '.cbody';
+  end;
   Self.DbgBeginFunc(Sym);
   if (FDbgCur <> nil) and (ADecl.EnclosingDecl <> nil) then
     FDbgCur.ParentSymbol := FuncSymbolFromDecl(ADecl.EnclosingDecl);
@@ -27009,7 +27171,9 @@ begin
   Self.DbgMarkParams(ADecl);
 
   Self.Emit('.text');
-  if AExported then
+  if EntrySym <> '' then
+    Self.EmitForeignEntry(ADecl, EntrySym, Sym, AExported)
+  else if AExported then
   begin
     { Generic-instance bodies (instance methods, monomorphised generic
       functions/methods) are emitted WEAK: any number of objects in a link

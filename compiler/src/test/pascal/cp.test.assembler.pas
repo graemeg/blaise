@@ -30,6 +30,9 @@ type
     { The Windows TLS base load: the GS segment, a numeric displacement
       (TEB.ThreadLocalStoragePointer), REX.R for %r11. }
     procedure TestGsNumeric_LoadsTebSlot;
+    { The store form of movdqu (F3 0F 7F), as the Win64 foreign entry saves
+      XMM6-XMM15. }
+    procedure TestMovdquStore;
     procedure TestTbssSymbol_TypedSttTls;
     { an initialised threadvar's .tdata: a TLS PROGBITS section carrying the
       initial bytes, its symbols STT_TLS.  The assembler did not recognise the
@@ -459,6 +462,22 @@ begin
   AssertTrue('65 4C 8B 1C 25 58 00 00 00 expected',
     ContainsBytes(Obj, Chr($65) + Chr($4C) + Chr($8B) + Chr($1C) + Chr($25) +
       Chr($58) + Chr(0) + Chr(0) + Chr(0)));
+end;
+
+procedure TAsmEncodingTests.TestMovdquStore;
+var
+  Obj: string;
+begin
+  { movdqu %xmm6, 16(%rsp) -> F3 0F 7F 74 24 10 }
+  Obj := AssembleToBytes('movdqu %xmm6, 16(%rsp)' + LineEnding);
+  AssertTrue('F3 0F 7F 74 24 10 expected',
+    ContainsBytes(Obj, Chr($F3) + Chr($0F) + Chr($7F) + Chr($74) + Chr($24) +
+      Chr($10)));
+  { movdqu %xmm15, 144(%rsp) -> F3 44 0F 7F BC 24 90 00 00 00 }
+  Obj := AssembleToBytes('movdqu %xmm15, 144(%rsp)' + LineEnding);
+  AssertTrue('F3 44 0F 7F BC 24 90 00 00 00 expected',
+    ContainsBytes(Obj, Chr($F3) + Chr($44) + Chr($0F) + Chr($7F) + Chr($BC) +
+      Chr($24) + Chr($90) + Chr(0) + Chr(0) + Chr(0)));
 end;
 
 procedure TAsmEncodingTests.TestTbssSymbol_TypedSttTls;
