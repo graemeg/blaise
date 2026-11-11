@@ -424,24 +424,39 @@ Stack alignment::
 [#abi-strategy]
 === The boundary strategy
 
-A new abstract class, constructed by the toolkit and held by the backend:
+A new abstract class, constructed by the toolkit and held by the backend.
+The backend keeps the mechanics of a call -- evaluating each argument -- and
+the strategy holds the convention's rules: where each argument goes.  As
+built in M2:
 
 [source,pascal]
 ----
 type
+  TX86ForeignArgKind = (fakInt, fakSingle, fakDouble, fakRecord);
+
+  TX86ForeignArgLoc = record
+    Reg: string;        { the register, or '' for the stack }
+    MirrorReg: string;  { a second register (a variadic float), or '' }
+    StackOff: Int;      { offset from %rsp at the call, when Reg = '' }
+    ByRef: Boolean;     { a record passed as the address of a copy }
+  end;
+
   TX86BoundaryAbi = class
   public
-    { True when frames of a page or more must be probed in the prologue. }
+    { True when a reservation of more than a page must be probed. }
     function NeedsStackProbe: Boolean; virtual; abstract;
     { True when a C-convention routine differs from the internal one. }
     function ForeignDiffers: Boolean; virtual; abstract;
-    { Outbound: lower a call to a foreign routine. }
-    procedure EmitForeignCall(...); virtual; abstract;
-    { Inbound: prologue/epilogue for a routine foreign code may call. }
-    procedure EmitForeignEntry(...); virtual; abstract;
-    procedure EmitForeignExit(...); virtual; abstract;
+    { Home space plus stack-passed arguments for AArgCount arguments. }
+    function ForeignOutgoingBytes(AArgCount: Int): Int; virtual; abstract;
+    { Where argument AIndex travels. }
+    function ForeignArgLoc(AIndex: Int; AKind: TX86ForeignArgKind;
+      ASize: Int; AVariadic: Boolean): TX86ForeignArgLoc; virtual; abstract;
   end;
 ----
+
+The inbound side -- the prologue and epilogue of a routine foreign code
+calls -- is added in M5.
 
 Two adapters:
 
@@ -449,9 +464,22 @@ Two adapters:
   taken.  Used by Linux and FreeBSD.  Introducing it changes no emitted code.
 * `TWin64BoundaryAbi` — implements the rules below.
 
-The exact method signatures are for the implementer to settle against
-`EmitCall`; the constraint is that the backend asks the strategy and never
-tests the OS.
+The constraint is that the backend asks the strategy and never tests the OS.
+
+A foreign call reserves one block below `RSP`: the outgoing area at the
+bottom (32 bytes of home space, then the stack-passed arguments), one 8-byte
+temporary per argument above it, and the copies of records passed by
+reference above those, padded so the call site is 16-byte aligned.  Each
+argument is evaluated, left to right, into its temporary; then the
+stack-passed arguments and finally the registers are loaded from the
+temporaries, so no argument's evaluation can disturb another's register.
+
+Stack probes are emitted in the backend's `Emit` hook, through which every
+`subq $N, %rsp` passes -- the prologue's frame and the body's argument and
+buffer blocks alike.  A reservation of more than 4096 bytes becomes 4096-byte
+steps, each followed by `orq $0, (%rsp)`, then the remainder.  A step of at
+most one page lands at worst on the guard page itself, which grows the stack
+as intended.  No register is needed.
 
 === Outbound calls (Blaise → foreign)
 
@@ -1389,11 +1417,30 @@ toolkit.  Program under test: hand-written assembly that calls
 _Exit:_ Layer 0 structural tests pass; `windows-vm.sh run` returns 42.
 
 M2 — Boundary calls::
-`TWin64BoundaryAbi` outbound path; stack probes.
+`TWin64BoundaryAbi` outbound path; stack probes; the toolkit registered.
 +
 _Exit:_ a Blaise program writes a line through an `external 'kernel32'`
 binding of `WriteFile` and exits 0 in the guest; the Layer 3 outbound cases
 pass.
++
+_As delivered:_ `compiler/src/it/windows/m2calls.pas` writes through
+`WriteFile`, calls `MulDiv`, calls `msvcrt` `sprintf` with six variadic
+integers and variadic floats, and runs a 256 KiB frame;
+`windows-vm.sh crosscheck` checks its output and exit code.  With no Windows
+runtime before M3, the program is compiled in-process and linked against
+`m2rt.s`, a stand-in providing the entry point and the runtime routines
+`main` calls.  Moved to later milestones:
++
+* Aggregate results from foreign routines, and with them the Layer 3
+  outbound cases, which also need mingw-w64 on the host: M3.  Until then a
+  foreign routine returning a record is a compile error naming it.
+* The driver's PE route (`--target windows-x86_64 --output`), `.exe` naming,
+  `--subsystem`, `--map` and the `--static` and external-tool rejections:
+  M3, when a program built from the command line can first run.
+* `TPeTlsPending` stands in for the TLS model and reports a threadvar access
+  as a compile error until `TPeTlsModel` (M3).
+* A `cdecl` routine with a body is a compile error until its foreign entry
+  (M5).
 
 M3 — Core runtime::
 `runtime.start.windows`, `runtime.syscall.windows`,
