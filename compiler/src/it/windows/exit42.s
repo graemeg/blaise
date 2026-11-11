@@ -15,10 +15,11 @@ _start:
         call ExitProcess
         hlt                     # not reached: ExitProcess does not return
 
-# The import: symbol, then library, each NUL-terminated -- the same
-# .blaise.imports pairs the code generator emits for external '<lib>'.
+# The import: symbol, then library, each NUL-terminated -- the pair the code
+# generator emits for `external 'kernel32' name 'ExitProcess'`.  The Windows
+# toolkit maps the library to kernel32.dll.
         .section .blaise.imports,"",@progbits
         .ascii "ExitProcess"
         .byte 0
-        .ascii "kernel32.dll"
+        .ascii "kernel32"
         .byte 0

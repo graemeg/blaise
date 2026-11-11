@@ -36,7 +36,7 @@ uses
 type
   { The container of a linked image.  The driver dispatches the image link
     on this rather than on the OS. }
-  TImageFormat = (ifElf, ifMachO);
+  TImageFormat = (ifElf, ifMachO, ifPe);
 
   { Abstract Factory for one target's compiler-side object family. }
   TTargetToolkit = class
@@ -109,6 +109,29 @@ type
     function MakeBackend: TNativeBackend; override;
     function MakeLinkTarget: TLinkTarget; override;
     function ImageFormat: TImageFormat; override;
+  end;
+
+  { Windows x86_64 -- a PE32+ image linked from ELF objects (design
+    decision D2, blaise.linker.pe).  The link facts are complete; the code
+    generator needs the Win64 boundary ABI and the PE TLS model, which
+    arrive with Windows milestones M2 and M3, so MakeBackend refuses
+    rather than hand out System V adapters, and the toolkit is not yet
+    registered. }
+  TWindowsX86_64Toolkit = class(TTargetToolkit)
+  public
+    function Name: string; override;
+    function MakeBackend: TNativeBackend; override;
+    { nil: a PE image has no ELF link facts }
+    function MakeLinkTarget: TLinkTarget; override;
+    function ImageFormat: TImageFormat; override;
+    { The DLL that exports a library's routines: the C runtime for c and m,
+      a name already ending in .dll verbatim, otherwise the name with .dll
+      appended. }
+    function LibraryImageName(const ALibName: string): string; override;
+    { Nothing on a cross host: the linker cannot read the DLLs, so a cross
+      link trusts the import names.  A native Windows host adds its system
+      directory here, for the export check. }
+    procedure AddSystemLibDirs(AOut: TStringList); override;
   end;
 
   { Toolkit registry.  Owns the registered toolkit instances.  A linear list
@@ -265,6 +288,49 @@ end;
 function TMacOSArm64Toolkit.ImageFormat: TImageFormat;
 begin
   Result := ifMachO;
+end;
+
+{ ---- TWindowsX86_64Toolkit ---- }
+
+function TWindowsX86_64Toolkit.Name: string;
+begin
+  Result := 'windows-x86_64';
+end;
+
+function TWindowsX86_64Toolkit.MakeBackend: TNativeBackend;
+begin
+  raise Exception.Create('windows-x86_64: the code generator needs the ' +
+    'Win64 boundary ABI and the PE TLS model, which are not implemented ' +
+    'yet');
+end;
+
+function TWindowsX86_64Toolkit.MakeLinkTarget: TLinkTarget;
+begin
+  Result := nil;
+end;
+
+function TWindowsX86_64Toolkit.ImageFormat: TImageFormat;
+begin
+  Result := ifPe;
+end;
+
+function TWindowsX86_64Toolkit.LibraryImageName(
+  const ALibName: string): string;
+var
+  Lower: string;
+begin
+  Lower := LowerCase(ALibName);
+  if (Lower = 'c') or (Lower = 'm') then
+    Result := 'msvcrt.dll'
+  else if (Length(Lower) > 4) and
+          (Copy(Lower, Length(Lower) - 4, 4) = '.dll') then
+    Result := ALibName
+  else
+    Result := ALibName + '.dll';
+end;
+
+procedure TWindowsX86_64Toolkit.AddSystemLibDirs(AOut: TStringList);
+begin
 end;
 
 { ---- TTargetRegistry ------------------------------------------------- }

@@ -67,6 +67,12 @@ type
     procedure TestSystemLibDirs_SkipsDirsAlreadyListed;
     { A Mach-O toolkit does not map ELF link libraries. }
     procedure TestMacOSToolkit_LibraryImageName_Raises;
+    { windows-x86_64: PE image over ELF objects (Windows M1) }
+    procedure TestWindowsToolkit_NameAndPeImage;
+    procedure TestWindowsToolkit_NoElfLinkTarget;
+    procedure TestWindowsToolkit_DllNames;
+    procedure TestWindowsToolkit_NoSystemLibDirsOnCrossHost;
+    procedure TestWindowsToolkit_MakeBackend_NotYet;
   end;
 
 implementation
@@ -364,6 +370,89 @@ begin
       Raised := True;
   end;
   AssertTrue('Mach-O dylibs are resolved by the Mach-O linker', Raised);
+end;
+
+procedure TTargetToolkitTests.TestWindowsToolkit_NameAndPeImage;
+var
+  Tk: TWindowsX86_64Toolkit;
+begin
+  Tk := TWindowsX86_64Toolkit.Create();
+  try
+    AssertEquals('windows-x86_64', Tk.Name());
+    AssertTrue('windows image is PE', Tk.ImageFormat() = ifPe);
+  finally
+    Tk.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestWindowsToolkit_NoElfLinkTarget;
+var
+  Tk: TWindowsX86_64Toolkit;
+  LT: TLinkTarget;
+begin
+  Tk := TWindowsX86_64Toolkit.Create();
+  try
+    LT := Tk.MakeLinkTarget();
+    AssertTrue('no ELF link facts for a PE image', LT = nil);
+  finally
+    Tk.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestWindowsToolkit_DllNames;
+var
+  Tk: TWindowsX86_64Toolkit;
+begin
+  Tk := TWindowsX86_64Toolkit.Create();
+  try
+    AssertEquals('the C runtime', 'msvcrt.dll', Tk.LibraryImageName('c'));
+    AssertEquals('libm lives in the C runtime', 'msvcrt.dll',
+      Tk.LibraryImageName('m'));
+    AssertEquals('kernel32.dll', Tk.LibraryImageName('kernel32'));
+    AssertEquals('ws2_32.dll', Tk.LibraryImageName('ws2_32'));
+    AssertEquals('a DLL name is used verbatim', 'user32.dll',
+      Tk.LibraryImageName('user32.dll'));
+    AssertEquals('whatever its case', 'GDI32.DLL',
+      Tk.LibraryImageName('GDI32.DLL'));
+  finally
+    Tk.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestWindowsToolkit_NoSystemLibDirsOnCrossHost;
+var
+  Tk: TWindowsX86_64Toolkit;
+  L: TStringList;
+begin
+  Tk := TWindowsX86_64Toolkit.Create();
+  L := TStringList.Create();
+  try
+    Tk.AddSystemLibDirs(L);
+    AssertEquals('a cross link reads no DLLs', 0, L.Count);
+  finally
+    L.Free();
+    Tk.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestWindowsToolkit_MakeBackend_NotYet;
+var
+  Tk: TWindowsX86_64Toolkit;
+  Raised: Boolean;
+begin
+  Tk := TWindowsX86_64Toolkit.Create();
+  Raised := False;
+  try
+    try
+      Tk.MakeBackend().Free();
+    except
+      on E: Exception do
+        Raised := Pos('Win64', E.Message) >= 0;
+    end;
+  finally
+    Tk.Free();
+  end;
+  AssertTrue('no System V backend is handed out for Windows', Raised);
 end;
 
 initialization

@@ -21,7 +21,7 @@ interface
 uses
   SysUtils, Classes, blaise.testing, uStrCompat,
   blaise.pewriter, blaise.pereader, blaise.linker.pe, blaise.elfreader,
-  blaise.assembler.x86_64;
+  blaise.assembler.x86_64, blaise.codegen.toolkit;
 
 type
   { The PE linker: ELF relocatable objects in, a PE32+ image out. }
@@ -483,6 +483,7 @@ var
   Root, Src, OutDir: string;
   L: TStringList;
   Lk: TPeLinker;
+  Tk: TWindowsX86_64Toolkit;
   Img: TPeImage;
 begin
   Root := GetCurrentDir();
@@ -499,12 +500,15 @@ begin
   end;
   OutDir := Root + '/compiler/target/it/windows';
   ForceDirectories(OutDir);
+  Tk := TWindowsX86_64Toolkit.Create();
   Lk := TPeLinker.Create();
   try
+    Lk.DllNameOf := @Tk.LibraryImageName;
     Lk.AddObject(ParseElfObject(AssembleToBytes(Src), 'exit42.o'));
     Lk.LinkToFile('_start', OutDir + '/exit42.exe');
   finally
     Lk.Free();
+    Tk.Free();
   end;
   Img := ReadPeImageFile(OutDir + '/exit42.exe');
   try
