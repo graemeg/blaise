@@ -233,9 +233,8 @@ begin
   case AOS of
     osFreeBSD: Result := 'freebsd';
     osMacOS:   Result := 'darwin';
+    osWindows: Result := 'windows';
   else
-    { Linux is the default host leaf; other OSes gain their own suffix as
-      their adapter set lands. }
     Result := 'linux';
   end;
 end;

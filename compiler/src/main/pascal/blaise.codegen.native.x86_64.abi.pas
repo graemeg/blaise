@@ -22,21 +22,53 @@ unit blaise.codegen.native.x86_64.abi;
 
 interface
 
+uses
+  SysUtils;
+
 type
   { Emits one line of assembly through the backend, so the backend's stream
     observers (stack-depth tracking, register-promotion rewrites) see it. }
   TX86EmitProc = procedure(const ALine: string) of object;
 
+  { How the backend classifies one argument of a foreign call: an integer or
+    pointer (a var parameter is its address), a Single, a Double, or a record
+    passed by value (with its size). }
+  TX86ForeignArgKind = (fakInt, fakSingle, fakDouble, fakRecord);
+
+  { Where one argument of a foreign call travels. }
+  TX86ForeignArgLoc = record
+    { The register, or '' when the argument goes on the stack. }
+    Reg: string;
+    { A second register that also receives the value (a variadic float), or
+      ''. }
+    MirrorReg: string;
+    { The argument's offset from %rsp at the call, when Reg is ''. }
+    StackOff: Int;
+    { A record that travels as the address of a copy the caller makes. }
+    ByRef: Boolean;
+  end;
+
   { The calling convention where control crosses into or out of foreign
     code (design decision D1: the internal convention is System V on every
-    target).  M0 exposes only the queries; the foreign-call and foreign-entry
-    lowerings are added with the first adapter that differs (Win64, M2). }
+    target).  The backend evaluates a foreign call's arguments; the strategy
+    says where each one goes.  The foreign-entry lowering (a routine foreign
+    code calls) is added in M5. }
   TX86BoundaryAbi = class
   public
     { True when frames of a page or more must be probed in the prologue. }
     function NeedsStackProbe: Boolean; virtual; abstract;
-    { True when a C-convention routine differs from the internal one. }
+    { True when a C-convention routine differs from the internal one.  The
+      foreign-call queries below are asked only when it does. }
     function ForeignDiffers: Boolean; virtual; abstract;
+    { The bytes a caller reserves at the bottom of its outgoing area for a
+      foreign call with AArgCount arguments: the callee's home space plus
+      the stack-passed arguments. }
+    function ForeignOutgoingBytes(AArgCount: Int): Int; virtual; abstract;
+    { Where argument AIndex (0-based, counting every argument the callee
+      sees) of kind AKind and, for a record, ASize bytes travels.  AVariadic
+      marks an argument in the variadic part of the call. }
+    function ForeignArgLoc(AIndex: Int; AKind: TX86ForeignArgKind;
+      ASize: Int; AVariadic: Boolean): TX86ForeignArgLoc; virtual; abstract;
   end;
 
   { System V AMD64: the C convention IS the internal convention, and the
@@ -45,6 +77,26 @@ type
   public
     function NeedsStackProbe: Boolean; override;
     function ForeignDiffers: Boolean; override;
+    { Never asked: a System V foreign call is an internal call. }
+    function ForeignOutgoingBytes(AArgCount: Int): Int; override;
+    function ForeignArgLoc(AIndex: Int; AKind: TX86ForeignArgKind;
+      ASize: Int; AVariadic: Boolean): TX86ForeignArgLoc; override;
+  end;
+
+  { The Microsoft x64 convention (windows-x86_64-backend-design.adoc,
+    "Outbound calls"): arguments are positional, the first four in RCX, RDX,
+    R8, R9 or XMM0-XMM3 by type, the rest in 8-byte stack slots above 32
+    bytes of home space; a record of 1, 2, 4 or 8 bytes travels as its bytes,
+    any other as the address of a copy; a variadic float in the first four
+    is also copied to the matching integer register.  Windows grows a
+    thread's stack one guard page at a time, so large frames are probed. }
+  TWin64BoundaryAbi = class(TX86BoundaryAbi)
+  public
+    function NeedsStackProbe: Boolean; override;
+    function ForeignDiffers: Boolean; override;
+    function ForeignOutgoingBytes(AArgCount: Int): Int; override;
+    function ForeignArgLoc(AIndex: Int; AKind: TX86ForeignArgKind;
+      ASize: Int; AVariadic: Boolean): TX86ForeignArgLoc; override;
   end;
 
   { Threadvar addressing.  ASym is the final assembler symbol of the TLS slot
@@ -77,6 +129,20 @@ type
       AEmit: TX86EmitProc): Boolean; override;
   end;
 
+  { Windows threadvars are addressed through the PE TLS directory and the
+    thread's TLS array, which arrive with the PE TLS model in milestone M3.
+    Until then a threadvar access compiled for windows-x86_64 is a compile
+    error, never ELF code that would fault at run time. }
+  TPeTlsPending = class(TX86TlsModel)
+  public
+    function DirectOperand(const ASym: string): string; override;
+    procedure EmitAddress(const ASym, ADstReg: string;
+      AEmit: TX86EmitProc); override;
+    { Nothing to rewrite: no DirectOperand is ever handed out. }
+    function RewriteAddressOf(const ALine: string;
+      AEmit: TX86EmitProc): Boolean; override;
+  end;
+
 implementation
 
 { TSysVBoundaryAbi }
@@ -89,6 +155,69 @@ end;
 function TSysVBoundaryAbi.ForeignDiffers: Boolean;
 begin
   Result := False;
+end;
+
+function TSysVBoundaryAbi.ForeignOutgoingBytes(AArgCount: Int): Int;
+begin
+  raise Exception.Create('internal: a System V foreign call is an ' +
+    'internal call');
+end;
+
+function TSysVBoundaryAbi.ForeignArgLoc(AIndex: Int;
+  AKind: TX86ForeignArgKind; ASize: Int;
+  AVariadic: Boolean): TX86ForeignArgLoc;
+begin
+  raise Exception.Create('internal: a System V foreign call is an ' +
+    'internal call');
+end;
+
+{ TWin64BoundaryAbi }
+
+const
+  Win64IntArgRegs: array[0..3] of string = ('%rcx', '%rdx', '%r8', '%r9');
+  Win64XmmArgRegs: array[0..3] of string = ('%xmm0', '%xmm1', '%xmm2', '%xmm3');
+  { The callee's home space for the four register arguments. }
+  Win64HomeBytes = 32;
+
+function TWin64BoundaryAbi.NeedsStackProbe: Boolean;
+begin
+  Result := True;
+end;
+
+function TWin64BoundaryAbi.ForeignDiffers: Boolean;
+begin
+  Result := True;
+end;
+
+function TWin64BoundaryAbi.ForeignOutgoingBytes(AArgCount: Int): Int;
+begin
+  Result := Win64HomeBytes;
+  if AArgCount > 4 then
+    Result := Result + 8 * (AArgCount - 4);
+end;
+
+function TWin64BoundaryAbi.ForeignArgLoc(AIndex: Int;
+  AKind: TX86ForeignArgKind; ASize: Int;
+  AVariadic: Boolean): TX86ForeignArgLoc;
+begin
+  Result.Reg := '';
+  Result.MirrorReg := '';
+  Result.StackOff := 0;
+  Result.ByRef := (AKind = fakRecord) and
+    not ((ASize = 1) or (ASize = 2) or (ASize = 4) or (ASize = 8));
+  if AIndex >= 4 then
+  begin
+    Result.StackOff := Win64HomeBytes + 8 * (AIndex - 4);
+    Exit;
+  end;
+  if AKind in [fakSingle, fakDouble] then
+  begin
+    Result.Reg := Win64XmmArgRegs[AIndex];
+    if AVariadic then
+      Result.MirrorReg := Win64IntArgRegs[AIndex];
+  end
+  else
+    Result.Reg := Win64IntArgRegs[AIndex];
 end;
 
 { TElfLocalExecTls }
@@ -126,6 +255,31 @@ begin
     AEmit(#9'leaq ' + Copy(ALine, 10, Q - 10) + '(' + Dst + '), ' + Dst);
     Result := True;
   end;
+end;
+
+{ TPeTlsPending }
+
+function PeTlsPendingError(const ASym: string): Exception;
+begin
+  Result := Exception.Create('threadvar ' + ASym + ': threadvars on ' +
+    'windows-x86_64 need the PE TLS model, which is not implemented yet');
+end;
+
+function TPeTlsPending.DirectOperand(const ASym: string): string;
+begin
+  raise PeTlsPendingError(ASym);
+end;
+
+procedure TPeTlsPending.EmitAddress(const ASym, ADstReg: string;
+  AEmit: TX86EmitProc);
+begin
+  raise PeTlsPendingError(ASym);
+end;
+
+function TPeTlsPending.RewriteAddressOf(const ALine: string;
+  AEmit: TX86EmitProc): Boolean;
+begin
+  Result := False;
 end;
 
 end.

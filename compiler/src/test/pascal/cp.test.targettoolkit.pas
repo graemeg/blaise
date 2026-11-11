@@ -72,7 +72,17 @@ type
     procedure TestWindowsToolkit_NoElfLinkTarget;
     procedure TestWindowsToolkit_DllNames;
     procedure TestWindowsToolkit_NoSystemLibDirsOnCrossHost;
-    procedure TestWindowsToolkit_MakeBackend_NotYet;
+    { Registered since M2: System V inside, Win64 at the foreign boundary;
+      threadvars wait for the PE TLS model (M3). }
+    procedure TestWindowsToolkit_Registered;
+    procedure TestWindowsToolkit_Backend_HasWin64AbiAndPendingTls;
+    procedure TestWin64BoundaryAbi_ProbesAndTranslates;
+    procedure TestWin64BoundaryAbi_ArgLocations;
+    procedure TestPeTlsPending_ThreadvarIsAnError;
+    { The OS suffix of the RTL's per-OS units, and the layout initialiser
+      every program's main calls. }
+    procedure TestRTLOSSuffix_PerOS;
+    procedure TestPlatformLayoutInitSym_Windows;
   end;
 
 implementation
@@ -435,24 +445,120 @@ begin
   end;
 end;
 
-procedure TTargetToolkitTests.TestWindowsToolkit_MakeBackend_NotYet;
+procedure TTargetToolkitTests.TestWindowsToolkit_Registered;
 var
-  Tk: TWindowsX86_64Toolkit;
-  Raised: Boolean;
+  T: TTargetDesc;
 begin
-  Tk := TWindowsX86_64Toolkit.Create();
-  Raised := False;
+  MakeTarget(osWindows, cpuX86_64, T);
+  AssertTrue('windows-x86_64 resolves to a toolkit', ResolveToolkit(T) <> nil);
+  AssertEquals('windows-x86_64', ResolveToolkit(T).Name());
+end;
+
+procedure TTargetToolkitTests.TestWindowsToolkit_Backend_HasWin64AbiAndPendingTls;
+var
+  T: TTargetDesc;
+  B: TNativeBackend;
+begin
+  MakeTarget(osWindows, cpuX86_64, T);
+  B := ResolveToolkit(T).MakeBackend();
   try
+    AssertTrue('an x86-64 backend', B is TX86_64Backend);
+    AssertTrue('Win64 boundary ABI',
+      TX86_64Backend(B).BoundaryAbi is TWin64BoundaryAbi);
+    AssertTrue('PE TLS pending',
+      TX86_64Backend(B).TlsModel is TPeTlsPending);
+  finally
+    B.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestWin64BoundaryAbi_ProbesAndTranslates;
+var
+  A: TX86BoundaryAbi;
+begin
+  A := TWin64BoundaryAbi.Create();
+  try
+    AssertTrue('stack probe', A.NeedsStackProbe());
+    AssertTrue('C convention differs', A.ForeignDiffers());
+    AssertEquals('home space only', 32, A.ForeignOutgoingBytes(0));
+    AssertEquals('home space for four', 32, A.ForeignOutgoingBytes(4));
+    AssertEquals('plus two stack slots', 48, A.ForeignOutgoingBytes(6));
+  finally
+    A.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestWin64BoundaryAbi_ArgLocations;
+var
+  A: TX86BoundaryAbi;
+  L: TX86ForeignArgLoc;
+begin
+  A := TWin64BoundaryAbi.Create();
+  try
+    AssertEquals('%rcx', A.ForeignArgLoc(0, fakInt, 0, False).Reg);
+    { positional: an integer second argument uses RDX after a float }
+    AssertEquals('%xmm0', A.ForeignArgLoc(0, fakDouble, 0, False).Reg);
+    AssertEquals('%rdx', A.ForeignArgLoc(1, fakInt, 0, False).Reg);
+    AssertEquals('%xmm2', A.ForeignArgLoc(2, fakSingle, 0, False).Reg);
+    AssertEquals('%r9', A.ForeignArgLoc(3, fakInt, 0, False).Reg);
+    L := A.ForeignArgLoc(4, fakInt, 0, False);
+    AssertEquals('fifth on the stack', '', L.Reg);
+    AssertEquals('above the home space', 32, L.StackOff);
+    AssertEquals('sixth', 40, A.ForeignArgLoc(5, fakDouble, 0, False).StackOff);
+    { a variadic float is mirrored into the integer register }
+    L := A.ForeignArgLoc(1, fakDouble, 0, True);
+    AssertEquals('%xmm1', L.Reg);
+    AssertEquals('%rdx', L.MirrorReg);
+    AssertEquals('no mirror when fixed', '',
+      A.ForeignArgLoc(1, fakDouble, 0, False).MirrorReg);
+    { records: 1, 2, 4 and 8 bytes by value, anything else by reference }
+    AssertFalse('8-byte record by value', A.ForeignArgLoc(0, fakRecord, 8, False).ByRef);
+    AssertFalse('2-byte record by value', A.ForeignArgLoc(0, fakRecord, 2, False).ByRef);
+    AssertTrue('3-byte record by reference', A.ForeignArgLoc(0, fakRecord, 3, False).ByRef);
+    AssertTrue('16-byte record by reference', A.ForeignArgLoc(0, fakRecord, 16, False).ByRef);
+    AssertEquals('a record travels in an integer register', '%rcx',
+      A.ForeignArgLoc(0, fakRecord, 16, False).Reg);
+  finally
+    A.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestPeTlsPending_ThreadvarIsAnError;
+var
+  M: TX86TlsModel;
+  Msg: string;
+begin
+  M := TPeTlsPending.Create();
+  try
+    AssertFalse('no line rewritten', M.RewriteAddressOf(#9'leaq x(%rip), %rax', nil));
+    Msg := '';
     try
-      Tk.MakeBackend().Free();
+      M.DirectOperand('tv_X');
     except
       on E: Exception do
-        Raised := Pos('Win64', E.Message) >= 0;
+        Msg := E.Message;
     end;
+    AssertTrue('names the threadvar and the missing model: ' + Msg,
+      (Pos('tv_X', Msg) >= 0) and (Pos('PE TLS model', Msg) >= 0));
   finally
-    Tk.Free();
+    M.Free();
   end;
-  AssertTrue('no System V backend is handed out for Windows', Raised);
+end;
+
+procedure TTargetToolkitTests.TestRTLOSSuffix_PerOS;
+begin
+  AssertEquals('linux', RTLOSSuffix(osLinux));
+  AssertEquals('freebsd', RTLOSSuffix(osFreeBSD));
+  AssertEquals('darwin', RTLOSSuffix(osMacOS));
+  AssertEquals('windows', RTLOSSuffix(osWindows));
+end;
+
+procedure TTargetToolkitTests.TestPlatformLayoutInitSym_Windows;
+var
+  T: TTargetDesc;
+begin
+  MakeTarget(osWindows, cpuX86_64, T);
+  AssertEquals('rtl.platform.layout.windows_init', PlatformLayoutInitSym(T));
 end;
 
 initialization

@@ -938,6 +938,16 @@ type
       captured-variable pointers (EmitSretCall). }
     procedure EmitCall(const AFuncSym: string; ADecl: TMethodDecl;
                        AArgs: TObjectList; ASretOnStack: Boolean = False);
+    { True when a call to ADecl crosses the foreign boundary and the target's
+      C convention differs from the internal one: the routine is declared
+      cdecl, or named in a library (design decisions D5 and D6). }
+    function IsForeignCall(ADecl: TMethodDecl): Boolean;
+    { Lower a call to a foreign routine: evaluate every argument into a
+      temporary, then move each where the boundary strategy says. }
+    procedure EmitForeignCall(const AFuncSym: string; ADecl: TMethodDecl;
+                              AArgs: TObjectList);
+    { The bytes of a `subq $N, %rsp` line in N, when ALine is one. }
+    function IsRspReserve(const ALine: string; out N: Int): Boolean;
     { Emit a call to a record-returning function using the sret convention:
       ASretAddr is the AT&T operand for the destination buffer (already allocated
       by the caller), passed as the hidden first integer argument in %rdi.
@@ -22069,7 +22079,22 @@ begin
     Result := PlainRegOperandAt(ALine, 6);   { after TAB + 'popq ' }
 end;
 
+function TX86_64Backend.IsRspReserve(const ALine: string; out N: Int): Boolean;
+var
+  Q: Int;
+begin
+  N := 0;
+  Result := False;
+  if not LineStartsWith(ALine, #9'subq $') then Exit;
+  Q := Pos(', %rsp', ALine);
+  if (Q < 0) or (Q + 6 <> Length(ALine)) then Exit;
+  N := StrToIntDef(Copy(ALine, 7, Q - 7), -1);
+  Result := N > 0;
+end;
+
 procedure TX86_64Backend.Emit(const ALine: string);
+var
+  N: Int;
 begin
   { An address-of path that formats a threadvar's operand (`leaq <operand>,
     %reg`) does not yield the per-thread address; the TLS model rewrites it
@@ -22077,6 +22102,27 @@ begin
     toolkit, which emits no threadvar access. }
   if (FTlsModel <> nil) and FTlsModel.RewriteAddressOf(ALine, @Self.Emit) then
     Exit;
+  { Stack probe (design, "Stack probing").  Where the stack grows by
+    faulting on a guard page, one adjustment of a page or more could step
+    over the guard page, and the next write would fault instead of growing
+    the stack.  Every reservation passes through here -- the prologue's and
+    the body's argument and buffer blocks alike -- so each one of more
+    than a page is split into page steps that touch each new page in turn.
+    A step of at most one page lands at worst on the guard page itself,
+    which grows the stack as intended.  No register is needed; the flags
+    are clobbered, as the subtraction itself clobbers them. }
+  if (FBoundaryAbi <> nil) and FBoundaryAbi.NeedsStackProbe() and
+     Self.IsRspReserve(ALine, N) and (N > 4096) then
+  begin
+    while N > 4096 do
+    begin
+      Self.Emit(#9'subq $4096, %rsp');
+      Self.Emit(#9'orq $0, (%rsp)');
+      N := N - 4096;
+    end;
+    Self.Emit(Format(#9'subq $%d, %%rsp', [N]));
+    Exit;
+  end;
   if FPromoActive then
     Self.EmitTracked(Self.PromoRewrite(ALine))
   else
@@ -23493,6 +23539,11 @@ var
   NIntNeed, NSseNeed: Int;
   InMem: Boolean;
 begin
+  if Self.IsForeignCall(ADecl) then
+  begin
+    Self.EmitForeignCall(AFuncSym, ADecl, AArgs);
+    Exit;
+  end;
   HasExtRecord := False;
   { Detect whether any arg is float-typed.
     Also compute SlotCount: open-array args expand to 2 register slots each. }
@@ -24093,6 +24144,210 @@ begin
   OALD.Free();
   OALK.Free();
   OverflowOffs.Free();
+end;
+
+function TX86_64Backend.IsForeignCall(ADecl: TMethodDecl): Boolean;
+begin
+  Result := (ADecl <> nil) and (FBoundaryAbi <> nil) and
+    FBoundaryAbi.ForeignDiffers() and
+    ((ADecl.CallingConv = 'cdecl') or
+     (ADecl.IsExternal and (ADecl.ExternalLib <> '')));
+end;
+
+procedure TX86_64Backend.EmitForeignCall(const AFuncSym: string;
+  ADecl: TMethodDecl; AArgs: TObjectList);
+var
+  N, I, Outgoing, TempBase, CopyOff, Total, Rem, Temp: Int;
+  Arg: TASTExpr;
+  Par: TMethodParam;
+  ParamType: TTypeDesc;
+  IsVar, Variadic: Boolean;
+  Kinds: TList<Int>;
+  Sizes: TList<Int>;
+  CopyAt: TList<Int>;
+  Loc: TX86ForeignArgLoc;
+  OALD, OALK: TList<Int>;
+  OALTotal: Int;
+  RT: TTypeDesc;
+begin
+  { What the convention lowering does not cover yet is an error naming the
+    routine, never a silently mismatched call. }
+  RT := ADecl.ResolvedReturnType;
+  if (RT <> nil) and ((AggRetRec(RT) <> nil) or IsJumboSet(RT) or
+     (RT.Kind in [tyStaticArray, tyInterface])) then
+    raise ENativeCodeGenError.Create(Format('''%s'': returning a record or ' +
+      'other aggregate from a foreign routine is not supported on %s yet',
+      [ADecl.Name, TargetName(Self.Target)]));
+  if (ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0) then
+    raise ENativeCodeGenError.Create(Format('''%s'': a foreign routine ' +
+      'cannot capture variables', [ADecl.Name]));
+
+  { Classify every argument.  Arguments past the declared parameters are the
+    variadic part; a float there travels as a Double, as C promotes it. }
+  N := AArgs.Count;
+  Kinds := TList<Int>.Create();
+  Sizes := TList<Int>.Create();
+  CopyAt := TList<Int>.Create();
+  OALD := TList<Int>.Create();
+  OALK := TList<Int>.Create();
+  try
+    Outgoing := FBoundaryAbi.ForeignOutgoingBytes(N);
+    TempBase := Outgoing;
+    CopyOff := TempBase + 8 * N;
+    for I := 0 to N - 1 do
+    begin
+      Arg := TASTExpr(AArgs.Items[I]);
+      Par := nil;
+      if I < ADecl.Params.Count then
+        Par := TMethodParam(ADecl.Params.Items[I]);
+      IsVar := (Par <> nil) and Par.IsVarParam;
+      ParamType := nil;
+      if Par <> nil then
+        ParamType := Par.ResolvedType;
+      if ParamType = nil then
+        ParamType := Arg.ResolvedType;
+      if ((Par <> nil) and Par.IsOpenArray) or
+         ((not IsVar) and (ParamType <> nil) and
+          ((ParamType.Kind = tyInterface) or IsMethodPtrType(ParamType))) then
+        raise ENativeCodeGenError.Create(Format('''%s'': argument %d has a ' +
+          'type that cannot be passed to a foreign routine', [ADecl.Name, I + 1]));
+      Sizes.Add(0);
+      CopyAt.Add(-1);
+      if IsVar then
+        Kinds.Add(Ord(fakInt))
+      else if IsFloatFamily(ParamType) then
+      begin
+        if (ParamType.Kind = tySingle) and (Par <> nil) then
+          Kinds.Add(Ord(fakSingle))
+        else
+          Kinds.Add(Ord(fakDouble));
+      end
+      else if (ParamType <> nil) and (ParamType.Kind = tyRecord) then
+      begin
+        Kinds.Add(Ord(fakRecord));
+        Sizes.SetItem(I, ParamType.RawSize());
+        Loc := FBoundaryAbi.ForeignArgLoc(I, fakRecord, ParamType.RawSize(),
+          Par = nil);
+        if Loc.ByRef then
+        begin
+          CopyAt.SetItem(I, CopyOff);
+          CopyOff := CopyOff + ((ParamType.RawSize() + 7) and (-8));
+        end;
+      end
+      else
+        Kinds.Add(Ord(fakInt));
+    end;
+
+    { One block: the outgoing area, the temporaries, the copies; padded so
+      the call site is 16-byte aligned. }
+    OALTotal := Self.EmitArgHoist(ADecl.Params, nil, True, '', AArgs,
+      OALD, OALK, nil);
+    Total := CopyOff;
+    Rem := (FSPDepth + Total) mod 16;
+    if Rem < 0 then
+      Rem := Rem + 16;
+    if Rem <> 0 then
+      Total := Total + (16 - Rem);
+    Self.Emit(Format(#9'subq $%d, %%rsp', [Total]));
+
+    { Pass 1: evaluate each argument, left to right, into its temporary. }
+    for I := 0 to N - 1 do
+    begin
+      Arg := TASTExpr(AArgs.Items[I]);
+      Temp := TempBase + 8 * I;
+      Par := nil;
+      if I < ADecl.Params.Count then
+        Par := TMethodParam(ADecl.Params.Items[I]);
+      if Kinds.Get(I) = Ord(fakRecord) then
+      begin
+        { the record's address: a hoisted record call saved its buffer's
+          address; otherwise the record expression's value is its address }
+        if OALK.Get(I) >= akRecCall then
+          Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+            [Total + OALTotal - OALD.Get(I)]))
+        else
+          Self.EmitExprToEax(Arg);
+        if CopyAt.Get(I) >= 0 then
+        begin
+          Self.EmitRecordBytesToSlots(Sizes.Get(I), CopyAt.Get(I));
+          Self.Emit(Format(#9'leaq %d(%%rsp), %%rax', [CopyAt.Get(I)]));
+          Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Temp]));
+        end
+        else
+          Self.EmitRecordBytesToSlots(Sizes.Get(I), Temp);
+      end
+      else if (Par <> nil) and Par.IsVarParam then
+      begin
+        Self.EmitVarArgAddrToRax(Arg);
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Temp]));
+      end
+      else if OALK.Get(I) >= akRecCall then
+      begin
+        { a hoisted const-string or record-call value }
+        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+          [Total + OALTotal - OALD.Get(I)]));
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Temp]));
+      end
+      else if Kinds.Get(I) = Ord(fakSingle) then
+      begin
+        Self.EmitExprToXmm0(Arg);
+        if (Arg.ResolvedType = nil) or (Arg.ResolvedType.Kind <> tySingle) then
+          Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
+        Self.Emit(Format(#9'movss %%xmm0, %d(%%rsp)', [Temp]));
+      end
+      else if Kinds.Get(I) = Ord(fakDouble) then
+      begin
+        Self.EmitExprToXmm0(Arg);
+        if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tySingle) then
+          Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
+        Self.Emit(Format(#9'movsd %%xmm0, %d(%%rsp)', [Temp]));
+      end
+      else
+      begin
+        Self.EmitExprToEax(Arg);
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Temp]));
+      end;
+    end;
+
+    { Pass 2: the stack-passed arguments first (they go through %rax), then
+      the registers, which nothing touches before the call. }
+    for I := 0 to N - 1 do
+    begin
+      Variadic := I >= ADecl.Params.Count;
+      Loc := FBoundaryAbi.ForeignArgLoc(I, TX86ForeignArgKind(Kinds.Get(I)),
+        Sizes.Get(I), Variadic);
+      if Loc.Reg = '' then
+      begin
+        Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [TempBase + 8 * I]));
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Loc.StackOff]));
+      end;
+    end;
+    for I := 0 to N - 1 do
+    begin
+      Variadic := I >= ADecl.Params.Count;
+      Loc := FBoundaryAbi.ForeignArgLoc(I, TX86ForeignArgKind(Kinds.Get(I)),
+        Sizes.Get(I), Variadic);
+      if Loc.Reg = '' then Continue;
+      Temp := TempBase + 8 * I;
+      if Kinds.Get(I) = Ord(fakSingle) then
+        Self.Emit(Format(#9'movss %d(%%rsp), %s', [Temp, Loc.Reg]))
+      else if Kinds.Get(I) = Ord(fakDouble) then
+        Self.Emit(Format(#9'movsd %d(%%rsp), %s', [Temp, Loc.Reg]))
+      else
+        Self.Emit(Format(#9'movq %d(%%rsp), %s', [Temp, Loc.Reg]));
+      if Loc.MirrorReg <> '' then
+        Self.Emit(Format(#9'movq %d(%%rsp), %s', [Temp, Loc.MirrorReg]));
+    end;
+
+    Self.Emit(#9'callq ' + AFuncSym);
+    Self.EmitHoistEpilogue(AArgs, OALD, OALK, OALTotal, Total, True);
+  finally
+    Kinds.Free();
+    Sizes.Free();
+    CopyAt.Free();
+    OALD.Free();
+    OALK.Free();
+  end;
 end;
 
 { Spill the incoming argument register at index AIdx into the param slot
@@ -26737,6 +26992,15 @@ var
   SavedArmNodes: TStringList;
   SavedArmPos: Int;
 begin
+  { A routine with a body declared cdecl is one foreign code calls; where
+    the C convention differs it needs a foreign entry, which arrives with
+    milestone M5.  Until then it is an error, never a body that reads its
+    arguments from the wrong registers. }
+  if (ADecl.CallingConv = 'cdecl') and (FBoundaryAbi <> nil) and
+     FBoundaryAbi.ForeignDiffers() then
+    raise ENativeCodeGenError.Create(Format('''%s'': a cdecl routine with ' +
+      'a body needs a foreign entry, which is not implemented on %s yet',
+      [ADecl.Name, TargetName(Self.Target)]));
   Sym := FuncSymbolFromDecl(ADecl);
   Self.DbgBeginFunc(Sym);
   if (FDbgCur <> nil) and (ADecl.EnclosingDecl <> nil) then

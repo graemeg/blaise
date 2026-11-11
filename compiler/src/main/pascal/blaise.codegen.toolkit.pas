@@ -112,11 +112,10 @@ type
   end;
 
   { Windows x86_64 -- a PE32+ image linked from ELF objects (design
-    decision D2, blaise.linker.pe).  The link facts are complete; the code
-    generator needs the Win64 boundary ABI and the PE TLS model, which
-    arrive with Windows milestones M2 and M3, so MakeBackend refuses
-    rather than hand out System V adapters, and the toolkit is not yet
-    registered. }
+    decision D2, blaise.linker.pe).  The backend keeps the System V
+    convention internally and uses the Win64 convention at the foreign
+    boundary (D1).  Threadvars need the PE TLS model (milestone M3); until
+    then the backend's TLS model reports a threadvar access as an error. }
   TWindowsX86_64Toolkit = class(TTargetToolkit)
   public
     function Name: string; override;
@@ -298,10 +297,15 @@ begin
 end;
 
 function TWindowsX86_64Toolkit.MakeBackend: TNativeBackend;
+var
+  T: TTargetDesc;
+  B: TX86_64Backend;
 begin
-  raise Exception.Create('windows-x86_64: the code generator needs the ' +
-    'Win64 boundary ABI and the PE TLS model, which are not implemented ' +
-    'yet');
+  if not ParseTargetName(Self.Name(), T) then
+    raise Exception.Create('internal: unparsable toolkit name ' + Self.Name());
+  B := TX86_64Backend.Create(T);
+  B.AdoptStrategies(TWin64BoundaryAbi.Create(), TPeTlsPending.Create());
+  Result := B;
 end;
 
 function TWindowsX86_64Toolkit.MakeLinkTarget: TLinkTarget;
@@ -401,6 +405,7 @@ begin
     R.Register(TLinuxX86_64Toolkit.Create());
     R.Register(TFreeBSDX86_64Toolkit.Create());
     R.Register(TMacOSArm64Toolkit.Create());
+    R.Register(TWindowsX86_64Toolkit.Create());
     GRegistry := R;
   end;
 end;

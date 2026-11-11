@@ -199,6 +199,7 @@ uses
   cp.test.macho,
   cp.test.pe,
   cp.test.pelinker,
+  cp.test.win64,
   cp.test.containerwriter,
   cp.test.asmarm64,
   cp.test.arm64,

@@ -12,10 +12,11 @@
 #   scripts/windows-vm.sh run <exe> [args]
 #                                     copy a local executable in and run it;
 #                                     exits with the executable's exit code
-#   scripts/windows-vm.sh crosscheck  the windows fixture smoke: link
-#                                     compiler/src/it/windows/exit42.s through
-#                                     the PE linker (TPeLinkerTests) and check
-#                                     that it exits 42 in the VM
+#   scripts/windows-vm.sh crosscheck  the windows fixture smoke: link the
+#                                     compiler/src/it/windows/ programs (the
+#                                     TPeLinkerTests and TWin64FixtureTests
+#                                     fixture tests) and check their exit
+#                                     codes and output in the VM
 #
 # stdlib-test and selfhost arrive with the milestones that make them
 # possible (design: windows-x86_64-backend-design.adoc, M3 and M7).
@@ -132,18 +133,32 @@ case "$cmd" in
     ;;
   crosscheck)
     [ -x compiler/target/TestRunner ] || die "build the test runner first (scripts/macos-dev.sh test-compile)"
-    echo ">> linking $OUT/exit42.exe (TPeLinkerTests.TestLink_Exit42Fixture)"
-    rm -f "$OUT/exit42.exe"
-    compiler/target/TestRunner --suite TPeLinkerTests.TestLink_Exit42Fixture >/dev/null \
-      || die "fixture link test failed: compiler/target/TestRunner --suite TPeLinkerTests"
-    [ -f "$OUT/exit42.exe" ] || die "fixture link test did not write $OUT/exit42.exe"
+    # link_fixture <exe> <test>: the fixture test writes $OUT/<exe>
+    link_fixture() {
+      echo ">> linking $OUT/$1 ($2)"
+      rm -f "$OUT/$1"
+      compiler/target/TestRunner --suite "$2" >/dev/null \
+        || die "fixture link test failed: compiler/target/TestRunner --suite $2"
+      [ -f "$OUT/$1" ] || die "$2 did not write $OUT/$1"
+    }
+    link_fixture exit42.exe TPeLinkerTests.TestLink_Exit42Fixture
+    link_fixture m2calls.exe TWin64FixtureTests.TestLink_M2Calls
+    fail=0
     echo "=== exit42 ==="
     rc=0
     run_in_vm "$OUT/exit42.exe" || rc=$?
-    [ $rc -eq 42 ] || die "FAIL: exit42.exe exited $rc, want 42"
-    echo "exit 42"
+    echo "exit $rc"
+    [ $rc -eq 42 ] || { echo "FAIL: exit42.exe exited $rc, want 42"; fail=1; }
+    echo "=== m2calls ==="
+    rc=0
+    got=$(run_in_vm "$OUT/m2calls.exe" | tr -d '\r') || rc=$?
+    echo "$got"
+    if [ $rc -ne 0 ] || [ "$got" != "$(cat compiler/src/it/windows/m2calls.expected)" ]; then
+      echo "FAIL: m2calls.exe exit $rc, output differs from m2calls.expected"; fail=1
+    fi
+    [ $fail -eq 0 ] || exit 1
     echo "WINDOWS_CROSSCHECK_OK"
     ;;
   *)
-    sed -n '2,34p' "$0"; exit 1 ;;
+    sed -n '2,35p' "$0"; exit 1 ;;
 esac
