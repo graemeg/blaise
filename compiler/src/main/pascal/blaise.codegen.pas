@@ -37,8 +37,7 @@ type
     rcSSE1,
     rcSSE2,
     rcIntSSE,
-    rcSSEInt,
-    rcWin64Agg
+    rcSSEInt
   );
 
   { How a scope-exit ARC teardown walk must dispose of one variable, keyed on
@@ -147,7 +146,9 @@ function RecretAllIntOrFloatLeaves(ARec: TRecordTypeDesc): Boolean;
 { True when the eightbyte starting at AStartByte holds any float leaf — i.e.
   the eightbyte is SSE-classified under the SysV mixed-class rules. }
 function RecretEightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Int): Boolean;
-{ Classify ARec's return-passing for ATarget's OS. }
+{ Classify ARec's return-passing under the internal convention, System V on
+  every target (Windows design decision D1); a foreign routine's result
+  follows its boundary ABI instead. }
 { Type of the outer variable AName captured by nested routine ADecl: walks
   the EnclosingDecl chain's local var decls and parameters.  nil when the
   name is not found (e.g. a method's captured 'Self').  Both backends use
@@ -160,8 +161,7 @@ function NestedCapturedVarType(ADecl: TMethodDecl;
   test both backends share. }
 function IsIntfType(AType: TTypeDesc): Boolean;
 
-function RecretClassify(ARec: TRecordTypeDesc;
-  const ATarget: TTargetDesc): TRecReturnClass;
+function RecretClassify(ARec: TRecordTypeDesc): TRecReturnClass;
 
 { ----------------------------------------------------------------------
   Shared ARC ownership-transfer predicate.
@@ -528,8 +528,7 @@ begin
     not RecretEightbyteHasLeaf(ARec, 0, AStartByte, False);
 end;
 
-function RecretClassify(ARec: TRecordTypeDesc;
-  const ATarget: TTargetDesc): TRecReturnClass;
+function RecretClassify(ARec: TRecordTypeDesc): TRecReturnClass;
 var
   Sz:               Int;
   Eb0SSE, Eb1SSE:   Boolean;
@@ -539,13 +538,6 @@ begin
   if ARec.Fields.Count = 0 then Exit;
   if not RecretManagedClean(ARec) then Exit;
   Sz := ARec.TotalSize();
-
-  if ATarget.OS = osWindows then
-  begin
-    if RecretAllIntOrFloatLeaves(ARec) then
-      Result := rcWin64Agg;
-    Exit;
-  end;
 
   if RecretAllIntegerLeaves(ARec) then
   begin

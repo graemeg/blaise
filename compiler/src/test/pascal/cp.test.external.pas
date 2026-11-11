@@ -594,20 +594,19 @@ begin
 end;
 
 
-function ClassOfVarType(AProg: TProgram; const AName: string;
-  const ATarget: TTargetDesc): TRecReturnClass;
+function ClassOfVarType(AProg: TProgram; const AName: string): TRecReturnClass;
 var
   I: Int;
   VD: TVarDecl;
 begin
-  Result := rcWin64Agg;
+  Result := rcSret;
   for I := 0 to AProg.Block.Decls.Count - 1 do
   begin
     if not (TObject(AProg.Block.Decls.Items[I]) is TVarDecl) then
       Continue;
     VD := TVarDecl(AProg.Block.Decls.Items[I]);
     if SameText(VD.TypeName, AName) then
-      Exit(RecretClassify(TRecordTypeDesc(VD.ResolvedType), ATarget));
+      Exit(RecretClassify(TRecordTypeDesc(VD.ResolvedType)));
   end;
 end;
 
@@ -627,21 +626,19 @@ const
     ''';
 var
   Prog: TProgram;
-  T: TTargetDesc;
 begin
-  AssertTrue('target', ParseTargetName(TargetX86_64, T));
   Prog := Analyse(Src);
   try
     AssertTrue('8-byte float+int: INTEGER',
-      ClassOfVarType(Prog, 'TM8', T) = rcInt1);
+      ClassOfVarType(Prog, 'TM8') = rcInt1);
     AssertTrue('int+float | double: INTEGER, SSE',
-      ClassOfVarType(Prog, 'TM16', T) = rcIntSSE);
+      ClassOfVarType(Prog, 'TM16') = rcIntSSE);
     AssertTrue('int+float | int+int: INTEGER, INTEGER',
-      ClassOfVarType(Prog, 'TII', T) = rcInt2);
+      ClassOfVarType(Prog, 'TII') = rcInt2);
     AssertTrue('double | int64: SSE, INTEGER',
-      ClassOfVarType(Prog, 'TDL', T) = rcSSEInt);
+      ClassOfVarType(Prog, 'TDL') = rcSSEInt);
     AssertTrue('three Singles: SSE, SSE',
-      ClassOfVarType(Prog, 'TFF', T) = rcSSE2);
+      ClassOfVarType(Prog, 'TFF') = rcSSE2);
   finally
     Prog.Free();
   end;

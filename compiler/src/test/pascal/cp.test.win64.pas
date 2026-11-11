@@ -63,6 +63,9 @@ type
     procedure TestCdeclRoutineWithBody_GetsForeignEntry;
     procedure TestForeignEntry_StackAndFloatArgs;
     procedure TestLinux_CdeclRoutineWithBody_NoEntry;
+    { D1: a Blaise routine keeps the System V convention on Windows, record
+      results included -- a 16-byte record comes back in RAX:RDX. }
+    procedure TestInternalRecordResult_IsSystemV;
     { Threadvars (PE TLS): every instruction that touches one is preceded
       by the TLS block load into %r11, even when the operand is reused after
       a call. }
@@ -363,6 +366,23 @@ begin
     'begin Result := A; end;' + NL +
     'begin CB(1, nil); end.', 'linux-x86_64');
   AssertLacks(A, '.cbody');
+end;
+
+procedure TWin64CallTests.TestInternalRecordResult_IsSystemV;
+const
+  Src = 'program p;' + NL +
+    'type TDIY = record F: Int64; E: Int32; end;' + NL +
+    'function Mk(A: Int64): TDIY; begin Result.F := A; Result.E := 3; end;' + NL +
+    'var R: TDIY;' + NL +
+    'begin R := Mk(7); end.';
+var
+  W, L: string;
+begin
+  W := WinAsm(Src);
+  L := GenAsm(Src, 'linux-x86_64');
+  AssertHas(L, #9'movq 8(%rcx), %rdx');
+  AssertHas(W, #9'movq 8(%rcx), %rdx');
+  AssertHas(W, #9'movq %rdx, 8(%rcx)');
 end;
 
 { ---- threadvars ---- }

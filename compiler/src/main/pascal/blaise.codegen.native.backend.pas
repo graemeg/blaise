@@ -570,7 +570,7 @@ end;
 
 function TNativeBackend.ClassifyRecordReturn(ARec: TRecordTypeDesc): TRecReturnClass;
 begin
-  Result := RecretClassify(ARec, FTarget);
+  Result := RecretClassify(ARec);
 end;
 
 { ---- ARC field-kind walk (Template Method bodies) ----
