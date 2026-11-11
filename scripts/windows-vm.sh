@@ -14,6 +14,10 @@
 #                                     exits with the executable's exit code
 #                                     (its low 8 bits; the full code is on
 #                                     stderr when it is not 0)
+#   scripts/windows-vm.sh e2e-run <exe> [args]
+#                                     as run, for the e2e harness
+#                                     (BLAISE_E2E_RUNNER): LF line ends, no
+#                                     exit-code line
 #   scripts/windows-vm.sh crosscheck  the windows fixture smoke: link the
 #                                     compiler/src/it/windows/ programs (the
 #                                     TPeLinkerTests and TWin64FixtureTests
@@ -50,6 +54,7 @@ UTMCTL=${UTMCTL:-/Applications/UTM.app/Contents/MacOS/utmctl}
 GUEST_DIR='C:\blaise-test'
 OUT=compiler/target/it/windows
 RUN_TIMEOUT=${BLAISE_WINDOWS_RUN_TIMEOUT:-300}
+RUN_QUIET=
 
 die() { echo "$*" >&2; exit 1; }
 [ -x "$UTMCTL" ] || die "utmctl not found at $UTMCTL: brew install --cask utm"
@@ -135,7 +140,7 @@ run_in_vm() {
     "$GUEST_USER@127.0.0.1:${dir//\\//}/"
   rm -rf "$tmp"
   local rc=0
-  vm_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File $dir\\windows-run.ps1 -Exe $dir\\$name -TimeoutSec $RUN_TIMEOUT" || rc=$?
+  vm_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File $dir\\windows-run.ps1 -Exe $dir\\$name -TimeoutSec $RUN_TIMEOUT $RUN_QUIET" || rc=$?
   vm_ssh "cd /d $GUEST_DIR && rmdir /s /q $dir" >/dev/null 2>&1 || true
   return $rc
 }
@@ -164,6 +169,15 @@ case "$cmd" in
   run)
     [ $# -ge 1 ] || die "usage: scripts/windows-vm.sh run <local-exe> [args]"
     run_in_vm "$@"
+    ;;
+  e2e-run)
+    # The e2e harness's runner (BLAISE_E2E_RUNNER): the program's output
+    # with LF line ends and no exit-code line, then its exit code.
+    [ $# -ge 1 ] || die "usage: scripts/windows-vm.sh e2e-run <local-exe> [args]"
+    RUN_QUIET=-Quiet
+    rc=0
+    run_in_vm "$@" | tr -d '\r' || rc=$?
+    exit $rc
     ;;
   crosscheck)
     [ -x compiler/target/TestRunner ] || die "build the test runner first (scripts/macos-dev.sh test-compile)"
@@ -231,5 +245,5 @@ case "$cmd" in
     echo "WINDOWS_CROSSCHECK_OK"
     ;;
   *)
-    sed -n '2,38p' "$0"; exit 1 ;;
+    sed -n '2,42p' "$0"; exit 1 ;;
 esac

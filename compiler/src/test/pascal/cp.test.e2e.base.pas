@@ -210,6 +210,33 @@ type
 
 implementation
 
+{ Cross-target runs (windows-x86_64-backend-design.adoc, "Layer 1").  With
+  BLAISE_E2E_TARGET set, every program is compiled for that target, and
+  BLAISE_E2E_RUNNER names the command that runs one on a machine of that
+  target -- `<runner> <exe> [args]` prints the program's output with LF line
+  ends and exits with its exit code (scripts/windows-vm.sh e2e-run does this
+  for Windows).  Unset, programs are built for and run on the host. }
+function E2ETarget: string;
+begin
+  Result := GetEnvironmentVariable('BLAISE_E2E_TARGET');
+end;
+
+function E2ERunner: string;
+begin
+  Result := GetEnvironmentVariable('BLAISE_E2E_RUNNER');
+end;
+
+{ The name the compiler gives the executable for output path ABin: the
+  target's executable extension is appended. }
+function E2EBinaryName(const ABin: string): string;
+var
+  T: TTargetDesc;
+begin
+  Result := ABin;
+  if (E2ETarget() <> '') and ParseTargetName(E2ETarget(), T) then
+    Result := ABin + ExecutableExtension(T);
+end;
+
 var
   { Process-lifetime-unique counter for CompileAndRunNativeCLI's output paths.
     FCounter resets to 0 in every test's SetUp, so two DIFFERENT test methods
@@ -316,7 +343,13 @@ var
 begin
   Proc := TProcess.Create(nil);
   try
-    Proc.Executable := AExe;
+    if E2ERunner() <> '' then
+    begin
+      Proc.Executable := E2ERunner();
+      Proc.Parameters.Add(AExe);
+    end
+    else
+      Proc.Executable := AExe;
     for I := 0 to High(AArgs) do
       Proc.Parameters.Add(AArgs[I]);
     Proc.Execute();
@@ -365,6 +398,11 @@ begin
     end;
     if ADebugMode then
       Proc.Parameters.Add('--debug');
+    if E2ETarget() <> '' then
+    begin
+      Proc.Parameters.Add('--target');
+      Proc.Parameters.Add(E2ETarget());
+    end;
     Proc.Parameters.Add('--output');
     Proc.Parameters.Add(BinFile);
     Proc.Execute();
@@ -378,7 +416,7 @@ begin
   finally
     Proc.Free()
   end;
-  ABinFile := BinFile;
+  ABinFile := E2EBinaryName(BinFile);
   AToolOut := ToolOut;
   Result := Rc
 end;
@@ -506,7 +544,13 @@ begin
       the program itself is killed by SIGALRM (exit 142) once the budget is
       spent, and no helper process is left holding the output pipe.  Hosts
       without perl in base (FreeBSD) run the program directly, as before. }
-    if FileExists(Watchdog) then
+    if E2ERunner() <> '' then
+    begin
+      { the runner applies its own time limit }
+      Proc.Executable := E2ERunner();
+      Proc.Parameters.Add(AExe)
+    end
+    else if FileExists(Watchdog) then
     begin
       Proc.Executable := Watchdog;
       Proc.Parameters.Add('-e');

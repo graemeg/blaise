@@ -567,6 +567,11 @@ begin
   M := TPeTlsModel.Create();
   Sink := TLineSink.Create();
   try
+    { %r11 only as the destination of a load or address: safe }
+    AssertTrue('leaq into %r11', M.RewriteLine(#9'leaq ' +
+      M.DirectOperand('U_X') + ', %r11', @Sink.Add));
+    AssertEquals(#9'movq %gs:88, %r11|'#9'movq (%r11), %r11|' +
+      #9'leaq U_X@tpoff(%r11), %r11|', Sink.Lines);
     Msg := '';
     try
       M.RewriteLine(#9'movq %r11, ' + M.DirectOperand('U_X'), @Sink.Add);

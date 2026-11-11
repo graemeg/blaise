@@ -6,8 +6,9 @@
 # is not 0: ssh passes on only the low 8 bits, which turns 0xC0000005 into 5
 # (design decision D7 makes the NTSTATUS code the exit code of a fault).
 # A run that outlives the timeout -- a hang, or a crash that Windows Error
-# Reporting holds open -- is killed and exits 124.
-param([string]$Exe, [int]$TimeoutSec = 300)
+# Reporting holds open -- is killed and exits 124.  -Quiet leaves out the
+# exit-code line, for callers that compare the program's output.
+param([string]$Exe, [int]$TimeoutSec = 300, [switch]$Quiet)
 $argFile = Join-Path (Split-Path $Exe) 'args.txt'
 $argLine = ''
 if (Test-Path $argFile) {
@@ -27,7 +28,7 @@ if (-not $p.WaitForExit($TimeoutSec * 1000)) {
   exit 124
 }
 $code = $p.ExitCode
-if ($code -ne 0) {
+if (($code -ne 0) -and -not $Quiet) {
   [Console]::Error.WriteLine(('windows-vm: exit code 0x{0:X8}' -f $code))
 }
 exit $code

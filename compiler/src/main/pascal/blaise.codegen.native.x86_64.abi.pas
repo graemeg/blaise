@@ -144,7 +144,8 @@ type
     sym@tpoff(%r11) in place of the marker.  Each use reloads the base, so a
     call in between cannot leave it stale.  %r11 is caller-saved scratch the
     backend never keeps live across a global variable's operand; a line that
-    uses %r11 itself as well as the marker is reported, never miscompiled. }
+    uses %r11 itself as well as the marker -- other than as the destination
+    of a load or address of the operand -- is reported, never miscompiled. }
   TPeTlsModel = class(TX86TlsModel)
   public
     function DirectOperand(const ASym: string): string; override;
@@ -309,7 +310,14 @@ begin
   Sym := Copy(Rest, 0, Q);
   Rest := Copy(ALine, 0, P) + Sym + '@tpoff(%r11)' +
     Copy(Rest, Q + 1, Length(Rest) - Q - 1);
-  if (Pos('%r11', ALine) >= 0) or (Pos(PeTlsMark, Rest) >= 0) then
+  { %r11 may appear only as the destination of a load or address of the
+    operand itself, which the expansion leaves correct }
+  if ((Pos('%r11', ALine) >= 0) and
+      not (((Copy(ALine, 0, 6) = #9'leaq ') or (Copy(ALine, 0, 6) = #9'movq ')) and
+           (Copy(ALine, 6, P - 6) = '') and
+           (Copy(ALine, Length(ALine) - 6, 6) = ', %r11') and
+           (Pos('%r11', Copy(ALine, 0, Length(ALine) - 6)) < 0))) or
+     (Pos(PeTlsMark, Rest) >= 0) then
     raise Exception.Create('internal: a threadvar operand needs %r11 for ' +
       'the TLS block, which this line also uses: [' + ALine + ']');
   AEmit(#9'movq ' + PeTebTlsArray + ', %r11');
