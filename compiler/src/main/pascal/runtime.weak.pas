@@ -90,12 +90,16 @@ type
 
 function _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer); external name '_BlaiseFreeMem';
+{ Bound exactly as runtime.thread binds them: through the 'pthread'
+  library, so with the C convention (D6).  Library-less they were Blaise
+  calls, which on Windows reach the cdecl definitions in
+  runtime.thread.windows with their arguments in the wrong registers. }
 function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Int32;
-  external name 'pthread_mutex_init';
+  external 'pthread' name 'pthread_mutex_init';
 function pthread_mutex_lock(Mutex: Pointer): Int32;
-  external name 'pthread_mutex_lock';
+  external 'pthread' name 'pthread_mutex_lock';
 function pthread_mutex_unlock(Mutex: Pointer): Int32;
-  external name 'pthread_mutex_unlock';
+  external 'pthread' name 'pthread_mutex_unlock';
 
 var
   { Buckets of entries (by target) and of slots (by address). }
