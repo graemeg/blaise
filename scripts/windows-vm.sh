@@ -12,6 +12,8 @@
 #   scripts/windows-vm.sh run <exe> [args]
 #                                     copy a local executable in and run it;
 #                                     exits with the executable's exit code
+#                                     (its low 8 bits; the full code is on
+#                                     stderr when it is not 0)
 #   scripts/windows-vm.sh crosscheck  the windows fixture smoke: link the
 #                                     compiler/src/it/windows/ programs (the
 #                                     TPeLinkerTests and TWin64FixtureTests
@@ -32,7 +34,8 @@
 # Environment: BLAISE_WINDOWS_VM (UTM VM name, default blaise-win11),
 #              BLAISE_WINDOWS_SSH_PORT (default 2222),
 #              BLAISE_WINDOWS_USER (default blaise),
-#              BLAISE_WINDOWS_KEY (default ~/.ssh/blaise_windows).
+#              BLAISE_WINDOWS_KEY (default ~/.ssh/blaise_windows),
+#              BLAISE_WINDOWS_RUN_TIMEOUT (seconds per run, default 300).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -46,6 +49,7 @@ UTMCTL=${UTMCTL:-/Applications/UTM.app/Contents/MacOS/utmctl}
 # subdirectory so concurrent runs of same-named executables cannot collide.
 GUEST_DIR='C:\blaise-test'
 OUT=compiler/target/it/windows
+RUN_TIMEOUT=${BLAISE_WINDOWS_RUN_TIMEOUT:-300}
 
 die() { echo "$*" >&2; exit 1; }
 [ -x "$UTMCTL" ] || die "utmctl not found at $UTMCTL: brew install --cask utm"
@@ -88,20 +92,27 @@ stop_vm() {
 }
 
 # run_in_vm <local-exe> [args]: copy into a fresh directory under
-# $GUEST_DIR, run it there, remove the directory, keep the exit code.
+# $GUEST_DIR, run it there through scripts/windows-run.ps1, remove the
+# directory, keep the exit code.  ssh passes on only its low 8 bits; the
+# full code of a failing run is on standard error ("windows-vm: exit code
+# 0x..."), and a run longer than $RUN_TIMEOUT seconds is killed (exit 124).
 run_in_vm() {
   local exe=$1; shift
   [ -f "$exe" ] || die "no such file: $exe"
   ssh_up || die "VM not reachable: scripts/windows-vm.sh start"
   local name; name=$(basename "$exe")
   local dir="$GUEST_DIR\\run-$$-$RANDOM"
-  vm_ssh "mkdir $dir" >/dev/null
-  vm_scp "$exe" "$GUEST_USER@127.0.0.1:${dir//\\//}/$name"
-  # cmd.exe is the guest's login shell: double-quote each argument.
+  local tmp; tmp=$(mktemp -d)
+  # The command line, each argument double-quoted for Windows.
   local q="" a
-  for a in "$@"; do q+=" \"$a\""; done
+  for a in "$@"; do q+="\"$a\" "; done
+  printf '%s' "$q" > "$tmp/args.txt"
+  vm_ssh "mkdir $dir" >/dev/null
+  vm_scp "$exe" "$tmp/args.txt" scripts/windows-run.ps1 \
+    "$GUEST_USER@127.0.0.1:${dir//\\//}/"
+  rm -rf "$tmp"
   local rc=0
-  vm_ssh "cd /d $dir && $name$q" || rc=$?
+  vm_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File $dir\\windows-run.ps1 -Exe $dir\\$name -TimeoutSec $RUN_TIMEOUT" || rc=$?
   vm_ssh "cd /d $GUEST_DIR && rmdir /s /q $dir" >/dev/null 2>&1 || true
   return $rc
 }
@@ -142,23 +153,29 @@ case "$cmd" in
       [ -f "$OUT/$1" ] || die "$2 did not write $OUT/$1"
     }
     link_fixture exit42.exe TPeLinkerTests.TestLink_Exit42Fixture
-    link_fixture m2calls.exe TWin64FixtureTests.TestLink_M2Calls
+    # the Blaise programs: <name>:<fixture test>, each checked against
+    # compiler/src/it/windows/<name>.expected
+    progs="m2calls:TWin64FixtureTests.TestLink_M2Calls m3tls:TWin64FixtureTests.TestLink_M3Tls"
+    for p in $progs; do link_fixture "${p%%:*}.exe" "${p#*:}"; done
     fail=0
     echo "=== exit42 ==="
     rc=0
-    run_in_vm "$OUT/exit42.exe" || rc=$?
+    run_in_vm "$OUT/exit42.exe" 2>/dev/null || rc=$?
     echo "exit $rc"
     [ $rc -eq 42 ] || { echo "FAIL: exit42.exe exited $rc, want 42"; fail=1; }
-    echo "=== m2calls ==="
-    rc=0
-    got=$(run_in_vm "$OUT/m2calls.exe" | tr -d '\r') || rc=$?
-    echo "$got"
-    if [ $rc -ne 0 ] || [ "$got" != "$(cat compiler/src/it/windows/m2calls.expected)" ]; then
-      echo "FAIL: m2calls.exe exit $rc, output differs from m2calls.expected"; fail=1
-    fi
+    for p in $progs; do
+      name=${p%%:*}
+      echo "=== $name ==="
+      rc=0
+      got=$(run_in_vm "$OUT/$name.exe" | tr -d '\r') || rc=$?
+      echo "$got"
+      if [ $rc -ne 0 ] || [ "$got" != "$(cat "compiler/src/it/windows/$name.expected")" ]; then
+        echo "FAIL: $name.exe exit $rc, output differs from $name.expected"; fail=1
+      fi
+    done
     [ $fail -eq 0 ] || exit 1
     echo "WINDOWS_CROSSCHECK_OK"
     ;;
   *)
-    sed -n '2,35p' "$0"; exit 1 ;;
+    sed -n '2,38p' "$0"; exit 1 ;;
 esac
