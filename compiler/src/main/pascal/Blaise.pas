@@ -1108,6 +1108,10 @@ begin
   OPDFEnabled    := Opts.OPDFEnabled;
   DebugMode      := Opts.DebugMode;
   Target         := Opts.Target;
+  { An output name without an extension gets the target's executable one:
+    hello becomes hello.exe for windows-x86_64, and stays hello elsewhere. }
+  if (OutputFile <> '') and (ExtractFileExt(OutputFile) = '') then
+    OutputFile := OutputFile + ExecutableExtension(Target);
   { UseInternalAsm is not seeded here: --assembler now flows through the
     driver's AcceptOption during the post-PickTopDriver drain, which writes
     Opts.UseInternalAsm.  Downstream link code reads Opts.UseInternalAsm

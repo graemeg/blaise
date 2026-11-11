@@ -52,6 +52,9 @@ type
     procedure TestRTLUnits_Errno_LinuxStatic_StaticVariant;
     procedure TestRTLUnits_Errno_FreeBSD_FollowsTarget;
     procedure TestRTLUnits_MacOSArm64_DarwinProfile;
+    { Windows: its own start, errno, layout and adapter, the kernel32
+      leaves, the C stubs and the pthread leaf; no POSIX adapter. }
+    procedure TestRTLUnits_Windows_Profile;
 
     { BUG-20260726: the RTL object cache must be keyed on the COMPILER as well
       as the target.  Cached objects are invalidated on source mtime, which
@@ -284,6 +287,28 @@ begin
       ListContains(U, 'rtl.platform.layout.linux'));
     AssertFalse('no syscall leaf — libSystem only',
       ListContains(U, 'runtime.syscall.darwin'));
+  finally
+    U.Free();
+  end;
+end;
+
+procedure TBackendDriverContractTests.TestRTLUnits_Windows_Profile;
+var
+  U: TStringList;
+begin
+  U := BuildRTLUnitList(False, osWindows);
+  try
+    AssertTrue('start', ListContains(U, 'runtime.start.windows'));
+    AssertTrue('errno', ListContains(U, 'runtime.errno.windows'));
+    AssertTrue('layout', ListContains(U, 'rtl.platform.layout.windows'));
+    AssertTrue('adapter', ListContains(U, 'rtl.platform.windows'));
+    AssertTrue('flat ABI', ListContains(U, 'rtl.platform.abi'));
+    AssertTrue('kernel32 leaves', ListContains(U, 'runtime.syscall.windows'));
+    AssertTrue('C stubs', ListContains(U, 'runtime.cstub'));
+    AssertTrue('pthread leaf', ListContains(U, 'runtime.thread.windows'));
+    AssertFalse('no POSIX adapter', ListContains(U, 'rtl.platform.posix'));
+    AssertFalse('no Linux unit', ListContains(U, 'runtime.start.linux') or
+      ListContains(U, 'rtl.platform.layout.linux'));
   finally
     U.Free();
   end;

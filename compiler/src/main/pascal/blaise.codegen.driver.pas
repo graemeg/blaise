@@ -721,6 +721,14 @@ begin
       else
         Result.Add('runtime.start.' + OS);
     end
+    else if SameText(RTL_UNITS[I], 'rtl.platform.posix') then
+    begin
+      { the platform adapter: one for the POSIX targets, Windows its own }
+      if AOS = osWindows then
+        Result.Add('rtl.platform.windows')
+      else
+        Result.Add('rtl.platform.posix');
+    end
     else if SameText(RTL_UNITS[I], 'runtime.errno.linux') then
     begin
       { The errno-classification leaf (P3, async design) follows the target OS
@@ -741,7 +749,15 @@ begin
   { The freestanding kernel leaf that replaces libc under --static: the raw
     syscall stubs, the OS-invariant freestanding C functions (runtime.cstub),
     the libc-shim layers, and the static-TLS thread leaf. }
-  if AStatic then
+  { Windows has one profile: the POSIX-named leaves over kernel32, the
+    C stubs, and the pthread names over Windows threads. }
+  if AOS = osWindows then
+  begin
+    Result.Add('runtime.syscall.windows');
+    Result.Add('runtime.cstub');
+    Result.Add('runtime.thread.windows');
+  end
+  else if AStatic then
   begin
     Result.Add('runtime.syscall.' + OS);
     Result.Add('runtime.cstub');

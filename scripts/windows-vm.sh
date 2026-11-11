@@ -91,6 +91,28 @@ stop_vm() {
   if running; then echo ">> still up after 120s, powering off"; "$UTMCTL" stop --force "$VM"; fi
 }
 
+# win_quote <arg>: <arg> as one Windows command-line argument.  Within the
+# quotes, a run of N backslashes before a quote becomes 2N+1 followed by the
+# quote; before the closing quote, 2N; elsewhere backslashes are literal.
+win_quote() {
+  local s=$1 out='"' n=0 c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    if [ "$c" = '\' ]; then
+      n=$((n + 1))
+    elif [ "$c" = '"' ]; then
+      out+=$(printf '%*s' $((2 * n + 1)) '' | tr ' ' '\\')'"'
+      n=0
+    else
+      [ $n -gt 0 ] && out+=$(printf '%*s' "$n" '' | tr ' ' '\\')
+      out+=$c
+      n=0
+    fi
+  done
+  [ $n -gt 0 ] && out+=$(printf '%*s' $((2 * n)) '' | tr ' ' '\\')
+  printf '%s"' "$out"
+}
+
 # run_in_vm <local-exe> [args]: copy into a fresh directory under
 # $GUEST_DIR, run it there through scripts/windows-run.ps1, remove the
 # directory, keep the exit code.  ssh passes on only its low 8 bits; the
@@ -103,9 +125,10 @@ run_in_vm() {
   local name; name=$(basename "$exe")
   local dir="$GUEST_DIR\\run-$$-$RANDOM"
   local tmp; tmp=$(mktemp -d)
-  # The command line, each argument double-quoted for Windows.
+  # The command line, each argument quoted so CommandLineToArgvW gives it
+  # back unchanged.
   local q="" a
-  for a in "$@"; do q+="\"$a\" "; done
+  for a in "$@"; do q+="$(win_quote "$a") "; done
   printf '%s' "$q" > "$tmp/args.txt"
   vm_ssh "mkdir $dir" >/dev/null
   vm_scp "$exe" "$tmp/args.txt" scripts/windows-run.ps1 \
@@ -157,6 +180,17 @@ case "$cmd" in
     # compiler/src/it/windows/<name>.expected
     progs="m2calls:TWin64FixtureTests.TestLink_M2Calls m3tls:TWin64FixtureTests.TestLink_M3Tls m3callback:TWin64FixtureTests.TestLink_M3Callback"
     for p in $progs; do link_fixture "${p%%:*}.exe" "${p#*:}"; done
+    # the programs built from the command line, with the Windows runtime
+    [ -x compiler/target/blaise ] || die "build compiler/target/blaise first"
+    xbuild() {
+      echo ">> cross-compiling $1 -> $2.exe (windows-x86_64)"
+      compiler/target/blaise --source "$1" --target windows-x86_64 \
+        --output "$2" --unit-path stdlib/src/main/pascal \
+        --rtl-src compiler/src/main/pascal > "$2.log" 2>&1 \
+        || { grep -v 'note:' "$2.log" | head -20; die "CROSS BUILD FAILED: $1"; }
+    }
+    xbuild compiler/src/it/windows/m3rtl.pas "$OUT/m3rtl"
+    xbuild compiler/src/it/windows/m3fault.pas "$OUT/m3fault"
     fail=0
     echo "=== exit42 ==="
     rc=0
@@ -172,6 +206,26 @@ case "$cmd" in
       if [ $rc -ne 0 ] || [ "$got" != "$(cat "compiler/src/it/windows/$name.expected")" ]; then
         echo "FAIL: $name.exe exit $rc, output differs from $name.expected"; fail=1
       fi
+    done
+    echo "=== m3rtl ==="
+    rc=0
+    got=$(run_in_vm "$OUT/m3rtl.exe" | tr -d '\r') || rc=$?
+    echo "$got"
+    if [ $rc -ne 0 ] || [ "$got" != "$(cat compiler/src/it/windows/m3rtl.expected)" ]; then
+      echo "FAIL: m3rtl.exe exit $rc, output differs from m3rtl.expected"; fail=1
+    fi
+    # D7: a fault is reported and its NTSTATUS code is the exit code
+    for f in "nil:access violation:0xC0000005" \
+             "div:integer division by zero:0xC0000094" \
+             "stack:stack overflow:0xC00000FD"; do
+      mode=${f%%:*}; rest=${f#*:}; what=${rest%%:*}; code=${rest#*:}
+      echo "=== m3fault $mode ==="
+      err=$(run_in_vm "$OUT/m3fault.exe" "$mode" 2>&1 >/dev/null | tr -d '\r') || true
+      echo "$err"
+      case "$err" in
+        *"Runtime error: $what ($code)"*"exit code $code"*) ;;
+        *) echo "FAIL: m3fault $mode, want '$what' and exit code $code"; fail=1 ;;
+      esac
     done
     [ $fail -eq 0 ] || exit 1
     echo "WINDOWS_CROSSCHECK_OK"

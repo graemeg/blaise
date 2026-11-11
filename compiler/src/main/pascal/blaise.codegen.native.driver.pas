@@ -76,6 +76,10 @@ type
   private
     function LinkViaMachOLinker(const AObjFile, AOutputFile: string;
       AOpts: TBackendOpts; AExtraObjects: TStringList): string;
+    { The PE image (Windows): the program, the RTL and any extra objects,
+      ELF relocatables all, linked by blaise.linker.pe. }
+    function LinkViaPeLinker(const AObjFile, AOutputFile: string;
+      AOpts: TBackendOpts; AExtraObjects: TStringList): string;
     function LinkViaInternalLinker(const AObjFile, AOutputFile: string;
       AOpts: TBackendOpts; AExtraObjects: TStringList): string;
     { EnsureRTLObjects is inherited from TBackendDriver — both the native
@@ -96,6 +100,7 @@ uses
   blaise.linker.elf,
   blaise.linker.macho,
   blaise.linker.macho.dylib,
+  blaise.linker.pe,
   blaise.entitlements;
 
 { In-process assembly, keyed on the target CPU: x86-64 text goes to the
@@ -710,6 +715,50 @@ begin
   end;
 end;
 
+function TNativeBackendDriver.LinkViaPeLinker(
+  const AObjFile, AOutputFile: string;
+  AOpts: TBackendOpts; AExtraObjects: TStringList): string;
+var
+  Lk: TPeLinker;
+  Toolkit: TTargetToolkit;
+  RTLObjs: TStringList;
+  I: Int;
+begin
+  Toolkit := ResolveToolkit(AOpts.Target);
+  { A PE image binds the system DLLs (kernel32 at least); there is no
+    freestanding Windows. }
+  if AOpts.LinkMode = lmStatic then
+    Exit('--static: a Windows executable always binds the system DLLs; ' +
+      'drop --static');
+  Result := '';
+  RTLObjs := TStringList.Create();
+  try
+    Result := Self.EnsureRTLObjects(AOpts, True, False, AExtraObjects, RTLObjs);
+    if Result <> '' then Exit;
+    Lk := TPeLinker.Create();
+    try
+      try
+        Lk.DllNameOf := @Toolkit.LibraryImageName;
+        Lk.AddObjectFile(AObjFile);
+        if AExtraObjects <> nil then
+          for I := 0 to AExtraObjects.Count - 1 do
+            Lk.AddObjectFile(AExtraObjects.Strings[I]);
+        for I := 0 to RTLObjs.Count - 1 do
+          Lk.AddObjectFile(RTLObjs.Strings[I]);
+        Lk.LinkToFile('_start', AOutputFile);
+      except
+        on E: Exception do
+          Result := 'pe linker error [' + Exception(E).ClassName + ']: ' +
+            Exception(E).Message;
+      end;
+    finally
+      Lk.Free();
+    end;
+  finally
+    RTLObjs.Free();
+  end;
+end;
+
 function TNativeBackendDriver.LinkViaInternalLinker(
   const AObjFile, AOutputFile: string;
   AOpts: TBackendOpts; AExtraObjects: TStringList): string;
@@ -744,6 +793,8 @@ begin
   if Toolkit.ImageFormat() = ifMachO then
     Exit(Self.LinkViaMachOLinker(AObjFile, AOutputFile, AOpts,
       AExtraObjects));
+  if Toolkit.ImageFormat() = ifPe then
+    Exit(Self.LinkViaPeLinker(AObjFile, AOutputFile, AOpts, AExtraObjects));
   LinkTarget := Toolkit.MakeLinkTarget();
   if LinkTarget = nil then
     Exit('internal linker: toolkit ' + Toolkit.Name() +
@@ -1029,6 +1080,15 @@ begin
     AOpts.UseInternalAsm := True;
   if not AOpts.LinkerExplicit then
     AOpts.UseInternalLinker := True;
+  { A PE image has no external toolchain path (design decision D2): the
+    emitted assembly uses ELF directives a COFF assembler rejects, and only
+    blaise.linker.pe writes the image. }
+  if (Result = '') and (ResolveToolkit(AOpts.Target) <> nil) and
+     (ResolveToolkit(AOpts.Target).ImageFormat() = ifPe) and
+     ((not AOpts.UseInternalAsm) or (not AOpts.UseInternalLinker)) then
+    Result := '--assembler external and --linker external are not ' +
+      'available for ' + TargetName(AOpts.Target) + ': only the internal ' +
+      'assembler and linker produce a Windows image';
   { entitlements are written by the internal Mach-O signer only }
   if (Result = '') and (AOpts.EntitlementsFile <> '') then
   begin

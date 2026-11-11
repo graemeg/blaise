@@ -27,7 +27,8 @@ interface
 
 uses
   SysUtils, Classes, Process, blaise.testing,
-  blaise.codegen.target;   { TargetImageIsElf / HostTarget: link-mode gating }
+  blaise.codegen.target,   { TargetImageIsElf / HostTarget: link-mode gating }
+  blaise.pereader, blaise.pewriter;
 
 type
   { Invokes the compiler binary directly and inspects the CLI contract. }
@@ -70,6 +71,13 @@ type
   published
     { ---- Step 0: FPC CLI removal ---- }
     procedure TestHelpStillWorks;
+    { windows-x86_64 from the command line: an output name without an
+      extension gets .exe, the image is a console PE32+ executable that
+      imports kernel32, and the options a PE image cannot honour are
+      refused. }
+    procedure TestWindows_OutputGetsExeAndIsPe;
+    procedure TestWindows_StaticRefused;
+    procedure TestWindows_ExternalToolsRefused;
     { --check: parse and analyse only (no output file, no toolchain);
       --diagnostics=json: one JSON object per line. }
     procedure TestCheck_CleanSourceSucceedsSilently;
@@ -332,6 +340,70 @@ begin
 end;
 
 { ---- Step 0: FPC CLI removal ---- }
+
+{ ---- windows-x86_64 ---- }
+
+procedure TCLIContractTests.TestWindows_OutputGetsExeAndIsPe;
+var
+  Src, Out_, Exe: string;
+  EC, I: Int;
+  Img: TPeImage;
+  Kernel32: Boolean;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program winhello;' + LineEnding + 'begin' +
+    LineEnding + '  WriteLn(''hi'')' + LineEnding + 'end.');
+  Exe := FScratch + 'winhello';
+  DeleteFile(Exe + '.exe');
+  EC := RunCompiler(['--source', Src, '--target', 'windows-x86_64',
+    '--output', Exe, '--rtl-src', FRTLPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  AssertTrue('.exe appended', FileExists(Exe + '.exe'));
+  AssertFalse('no extensionless output', FileExists(Exe));
+  Img := ReadPeImageFile(Exe + '.exe');
+  try
+    AssertEquals('x86-64', $8664, Img.Machine);
+    AssertEquals('console', PeSubsystemConsole, Img.Subsystem);
+    Kernel32 := False;
+    for I := 0 to Img.Imports.Count - 1 do
+      if Img.Imports[I].Dll = 'kernel32.dll' then
+        Kernel32 := True;
+    AssertTrue('imports kernel32.dll', Kernel32);
+    AssertFalse('no pthread DLL: the leaf defines those',
+      Pos('pthread', LowerCase(Img.Imports[0].Dll)) >= 0);
+  finally
+    Img.Free();
+  end;
+end;
+
+procedure TCLIContractTests.TestWindows_StaticRefused;
+var
+  Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program winstatic;' + LineEnding + 'begin' +
+    LineEnding + 'end.');
+  EC := RunCompiler(['--source', Src, '--target', 'windows-x86_64',
+    '--static', '--output', FScratch + 'winstatic', '--rtl-src', FRTLPath], Out_);
+  AssertTrue('refused', EC <> 0);
+  AssertTrue('says why: ' + Out_, Pos('system DLLs', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestWindows_ExternalToolsRefused;
+var
+  Src, Out_: string;
+  EC: Int;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program winext;' + LineEnding + 'begin' +
+    LineEnding + 'end.');
+  EC := RunCompiler(['--source', Src, '--target', 'windows-x86_64',
+    '--linker', 'external', '--output', FScratch + 'winext',
+    '--rtl-src', FRTLPath], Out_);
+  AssertTrue('refused', EC <> 0);
+  AssertTrue('says why: ' + Out_, Pos('internal assembler and linker', Out_) >= 0);
+end;
 
 procedure TCLIContractTests.TestHelpStillWorks;
 var
