@@ -78,6 +78,7 @@ type
     FBaseRelocs: TList<Int>;
     FHasTls: Boolean;
     FTlsIndexOff: Int64;               { offset of the index slot in .data }
+    FWantTlsIndex: Boolean;            { an object references _tls_index }
     FTlsDirOff: Int64;                 { offset of the TLS directory in .rdata }
     FImpTableOff: Int64;               { offset of the import tables in .rdata }
     FTextRva, FRdataRva, FDataRva, FTlsRva, FUnwRva, FOpdfRva: Int64;
@@ -373,7 +374,8 @@ end;
 function TPeLinker.IsSynthName(const AName: string): Boolean;
 begin
   Result := (AName = '__start_blaise_unwind') or
-    (AName = '__stop_blaise_unwind') or (AName = '__ImageBase');
+    (AName = '__stop_blaise_unwind') or (AName = '__ImageBase') or
+    (AName = '_tls_index');
 end;
 
 { Every strong undefined reference that no object defines must be an
@@ -395,6 +397,8 @@ begin
       if FSecStream[FSecFirst[Oi] + Rel.TargetSection] < 0 then Continue;
       Sym := Obj.Symbols[Rel.SymIndex];
       if Sym.Shndx <> SHN_UNDEF then Continue;
+      if Sym.Name = '_tls_index' then
+        FWantTlsIndex := True;
       if FDefIndex.ContainsKey(Sym.Name) or IsSynthName(Sym.Name) then
         Continue;
       if FImpIndex.TryGetValue(Sym.Name, D) then Continue;
@@ -436,9 +440,10 @@ begin
   end;
 
   FHasTls := (FStreamSize[stTdata] > 0) or (FStreamSize[stTbss] > 0);
-  if FHasTls then
+  if FHasTls or FWantTlsIndex then
   begin
-    { the index slot the loader writes }
+    { the index slot the loader writes, named _tls_index; without TLS it
+      stays 0 }
     FTlsIndexOff := PeAlignUp(FStreamSize[stData], 8);
     FStreams[stData].PadTo(FTlsIndexOff);
     FStreams[stData].PushU64(0);
@@ -515,6 +520,8 @@ begin
     Result := FStreamRva[stUnwind]
   else if AName = '__stop_blaise_unwind' then
     Result := FStreamRva[stUnwind] + FStreamSize[stUnwind]
+  else if AName = '_tls_index' then
+    Result := FDataRva + FTlsIndexOff
   else
     Result := 0;   { __ImageBase }
 end;

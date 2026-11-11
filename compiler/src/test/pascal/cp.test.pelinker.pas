@@ -48,6 +48,11 @@ type
     procedure TestLink_NoTlsWithoutThreadvars;
     procedure TestLink_TlsDirectoryForThreadvars;
     procedure TestLink_TpOffIsOffsetIntoTlsTemplate;
+    { _tls_index names the slot the loader writes the TLS index into;
+      runtime.start.windows reads it.  Without TLS the slot still exists,
+      and holds 0. }
+    procedure TestLink_TlsIndexSymbol_IsTheDirectorySlot;
+    procedure TestLink_TlsIndexSymbol_WithoutTls;
     procedure TestLink_UnwindBoundsDefined;
     procedure TestLink_Deterministic;
     procedure TestLink_MissingEntryFails;
@@ -401,6 +406,50 @@ begin
          (Img.BaseRelocs[I] < Img.DirectoryRva(PeDirTls) + 32) then
         Inc(Found);
     AssertEquals(4, Found);
+  finally
+    Img.Free();
+  end;
+end;
+
+{ The RVA a rip-relative disp32 at text offset AOff (after the 1-byte ret)
+  addresses: the field's own end plus the displacement. }
+function RipTarget(AImg: TPeImage; ATextRva, AFieldOff: Int): Int64;
+var
+  D: Int64;
+begin
+  D := AImg.ReadU32(ATextRva + AFieldOff);
+  if D >= $80000000 then D := D - $100000000;
+  Result := ATextRva + AFieldOff + 4 + D;
+end;
+
+procedure TPeLinkerTests.TestLink_TlsIndexSymbol_IsTheDirectorySlot;
+var
+  Img: TPeImage;
+begin
+  { movl _tls_index(%rip), %eax: 8B 05 disp32 after the ret }
+  Img := LinkAsm([StartRet + 'movl _tls_index(%rip), %eax' + NL +
+    '.section .tbss,"awT",@nobits' + NL + 'tv:' + NL + '.skip 8' + NL]);
+  try
+    AssertTrue('the directory names the same slot',
+      RipTarget(Img, TextRvaOf(Img), 3) =
+        Img.Tls.AddressOfIndex - Img.ImageBase);
+  finally
+    Img.Free();
+  end;
+end;
+
+procedure TPeLinkerTests.TestLink_TlsIndexSymbol_WithoutTls;
+var
+  Img: TPeImage;
+  Slot: Int64;
+begin
+  Img := LinkAsm([StartRet + 'movl _tls_index(%rip), %eax' + NL]);
+  try
+    AssertFalse('no TLS directory', Img.HasTls);
+    Slot := RipTarget(Img, TextRvaOf(Img), 3);
+    AssertTrue('the slot is writable data',
+      (Img.SectionOfRva(Slot).Characteristics and PeScnMemWrite) <> 0);
+    AssertTrue('and holds 0', Img.ReadU32(Slot) = 0);
   finally
     Img.Free();
   end;
