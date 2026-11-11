@@ -1217,6 +1217,12 @@ possible (M3 and M7).
 | Build the `compiler/src/it/windows/` fixtures and check their output and
   exit codes; prints `WINDOWS_CROSSCHECK_OK`
 
+| `e2e-run <exe> [args]`
+| As `run`, for the e2e harness: LF line ends, no exit-code line.
+  `scripts/windows-e2e-runner.sh` wraps it as `BLAISE_E2E_RUNNER`; with
+  `BLAISE_E2E_TARGET=windows-x86_64` every e2e program is cross-compiled and
+  run in the guest
+
 | `stdlib-test [args]`
 | Cross-build the stdlib TestRunner and run it in the guest
 
@@ -1464,6 +1470,38 @@ M3 — Core runtime::
 +
 _Exit:_ `WriteLn`, strings, ARC, exceptions and threadvars work;
 `cp.test.e2e.ordinalmatrix` passes in the guest.
++
+_As delivered:_ `blaise --target windows-x86_64 --output hello` writes
+`hello.exe`.  The e2e harness runs its programs in the guest
+(`BLAISE_E2E_TARGET`, `BLAISE_E2E_RUNNER`; see Layer 1): the ordinal
+matrix, threadvar, exception and control-flow suites pass there, and
+`windows-vm.sh crosscheck` covers strings, ARC, classes, exceptions,
+threadvars, callbacks and the three D7 faults.  Brought forward or added on
+the way:
++
+* *Foreign entries (from M5).*  `runtime.thread` binds `pthread_*` through
+  `external 'pthread'`, so the Windows definitions are `cdecl` routines with
+  bodies and need the inbound path.  A `cdecl` routine's body is compiled
+  the internal way under `<sym>.cbody`; a thunk under the public name enters
+  from Win64.  `runtime.thread.windows` (threads over `CreateThread`,
+  mutexes over SRW locks) is in M3 as well; the thread e2e suites and the
+  procedural-type rule remain M5.
+* *`rtl.platform.abi`.*  The 54 flat functions the compiler emits calls to
+  (`_SysWriteStr`, `_FileExists`, ...) only delegate to `GRtlPlatform`; they
+  moved out of `rtl.platform.posix` into a unit every target links, so a
+  target supplies only its `TRtlPlatform` subclass.
+* *`rtl.platform.windows`* has the console writes, parameters, `Halt`,
+  process id and `Sleep`; its file, directory, time and process operations
+  (M4) report themselves by name until then.
+* *Fixes found by running in the guest:* the linker's TLS zero fill (the
+  loader ignores `SizeOfZeroFill`); a leftover Windows branch in record-
+  return classification that broke every register-sized record result (and
+  with it float formatting); `runtime.weak` binding the `pthread` mutexes
+  without the library; `_tls_index` synthesised by the linker.
++
+Still open, now M4: aggregate results from foreign routines (a compile error
+naming the routine until then) and the Layer 3 fixtures, which need
+mingw-w64 on the host.
 
 M4 — Platform adapter::
 `rtl.platform.windows`.
