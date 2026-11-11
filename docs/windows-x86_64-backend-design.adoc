@@ -267,7 +267,8 @@ relies on.  A COFF *reader* can be added later without disturbing this design.
 === D3 — Test on Windows 11 ARM64 under QEMU; real x64 in CI
 
 *Decision.*  The local automated lane is a Windows 11 ARM64 guest under
-`qemu-system-aarch64` with HVF acceleration.  It runs x64 executables through
+`qemu-system-aarch64` with HVF acceleration, managed by UTM, which bundles the
+guest drivers and provides the `utmctl` command line.  It runs x64 executables through
 Windows' built-in x64 emulation, with the real loader and the real
 `kernel32`.  Coverage on genuine x64 hardware comes from a GitHub Actions
 `windows-latest` job.
@@ -1148,23 +1149,29 @@ Runs in the ordinary suite; needs no Windows.
 
 === Layer 1 — behavioural, local VM
 
-`scripts/windows-vm.sh`, modelled on `scripts/freebsd-vm.sh`:
+`scripts/windows-vm.sh`, modelled on `scripts/freebsd-vm.sh`.  It drives the
+UTM virtual machine by name through `utmctl`, and reaches the guest over SSH.
+`stdlib-test` and `selfhost` are added by the milestones that make them
+possible (M3 and M7).
 
 [cols="2,4",options="header"]
 |===
 | Command | Effect
 
 | `start` / `stop` / `status`
-| Boot headless, shut down, report
+| Start the VM and wait for SSH; shut Windows down, powering off only if it
+  hangs; report
 
 | `ssh [cmd]`
-| Shell or one command in the guest
+| Shell or one `cmd.exe` command in the guest
 
 | `run <exe> [args]`
-| Copy an executable in, run it, exit with its exit code
+| Copy an executable into a per-run directory under `C:\blaise-test`, run it,
+  remove the directory, exit with its exit code
 
 | `crosscheck`
-| Build the `compiler/src/it/windows/` fixtures and compare their output
+| Build the `compiler/src/it/windows/` fixtures and check their output and
+  exit codes; prints `WINDOWS_CROSSCHECK_OK`
 
 | `stdlib-test [args]`
 | Cross-build the stdlib TestRunner and run it in the guest
@@ -1220,25 +1227,142 @@ one — the same criterion the release process applies to the Linux binary.
 [#host-setup]
 == Development-host setup
 
-Nothing here is needed until milestone M1's exit check.
+The guest is installed once by hand.  The steps below are the ones used to
+build the `blaise-win11` guest on 2026-11-11; `scripts/windows-vm.sh` assumes
+the names, port and key they produce, each of which can be overridden through
+the environment variables listed in the script's header.
 
-. *Windows 11 ARM64 installation image*, from Microsoft's Windows 11 Arm64
-  download page.  A fresh install is required: the existing VirtualBox
-  machines are x64 and would run under full emulation.
-. *Guest drivers.*  Either the `virtio-win` driver image for plain QEMU, or
-  install once with UTM (`brew install --cask utm`), which bundles them, and
-  let the script run the resulting disk headless afterwards.
-. *In the guest:* enable the OpenSSH Server optional feature; install the
-  script's public key; disable the Windows Error Reporting dialog so a
-  crashing test exits instead of waiting for a click; exclude the test
-  directory from Defender real-time scanning, which otherwise delays every
-  freshly copied executable.
-. *On the host:* `brew install mingw-w64 llvm` for the Layer 3 fixtures and
-  the independent PE dumper.  Optional, recommended.
-. *Later:* the AMD Ryzen machine, for interactive debugging on real x64 with
-  WinDbg or x64dbg and the map file.
+A fresh ARM64 install is required: the existing VirtualBox machines are x64
+and would run under full emulation.  Plan for about 25 GB of disk once
+Windows is installed and updated.
 
-`qemu-system-aarch64` and `qemu-img` are already installed.
+=== Host software
+
+[source,sh]
+----
+brew install --cask utm
+brew install --cask crystalfetch      # only if Microsoft's ISO page offers none
+brew install mingw-w64 llvm           # optional: Layer 3 fixtures, PE oracle
+----
+
+=== Installation image
+
+Download the Windows 11 Arm64 ISO from Microsoft's
+`software-download/windows11arm64` page.  When that page offers no ISO,
+CrystalFetch builds one from Microsoft's update servers.  No licence key is
+needed: an unactivated installation runs indefinitely with a watermark.
+
+=== Creating the VM in UTM
+
+. *+* → *Virtualize* → *Windows*.  Keep *Install Windows 10 or higher* and
+  *Install drivers and SPICE tools* ticked, and choose the ISO as the boot
+  image.
+. 8192 MB of memory, 4 CPU cores, a 64 GB disk.  The disk image is sparse and
+  grows only as Windows writes to it.
+. Name the VM `blaise-win11` and save it, without starting it.
+. _Optional, when the Mac is short of space:_ move the VM to another volume
+  before the first start.  Either use *Move…* from the VM's context menu, or
+  quit UTM, move the `blaise-win11.utm` bundle out of
+  `~/Library/Containers/com.utmapp.UTM/Data/Documents/` and reopen it with
+  *File → Open…*.  An NFS share works; allow UTM access to network volumes
+  when macOS asks.  Keep the share mounted while the VM runs.  Should QEMU
+  report that it cannot lock the disk image, mount the share with the
+  `locallocks` option.
+. *Settings → Network:* set *Network Mode* to *Emulated VLAN* and add a port
+  forward: TCP, guest port 22, host address `127.0.0.1`, host port 2222, guest
+  address left blank.  The forward listens on the loopback address only, so
+  the guest is unreachable from the network.
+
+=== Installing Windows
+
+. Start the VM and press a key at "Press any key to boot from CD or DVD".
+. Choose Windows 11 Pro and a custom install onto the empty disk.
+. Out-of-box setup insists on a Microsoft account.  Press *Shift+F10* and run
+  `start ms-cxh:localonly`; on builds where that does nothing, run
+  `OOBE\BYPASSNRO`, after which setup offers "I don't have internet".  Create
+  the local account `blaise`.
+. Once logged in, run the UTM guest tools installer from the driver CD and
+  reboot.  It installs the network and display drivers.  *Do not select the
+  experimental 3D graphics driver*: it needs the `virtio-gpu-gl-pci` display
+  card, and with any other card the display stays black with "Display output
+  is not active".  The VM's display card should be `virtio-ramfb` or
+  `virtio-gpu-pci`.
+
+=== Configuring the guest
+
+In an administrator PowerShell:
+
+[source,powershell]
+----
+# OpenSSH server, started now and at every boot
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service sshd -StartupType Automatic
+
+# The capability's own firewall rule did not admit forwarded connections
+# (ssh from the host timed out "during banner exchange"); a port rule does.
+New-NetFirewallRule -DisplayName 'SSH 22 in' -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -Profile Any
+
+# A crashing test exits instead of waiting for a click
+New-Item -Force 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' | Out-Null
+Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name DontShowUI -Value 1 -Type DWord
+Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name Disabled -Value 1 -Type DWord
+
+# The test directory, excluded from Defender real-time scanning, which
+# otherwise delays every freshly copied executable
+New-Item -ItemType Directory -Force C:\blaise-test | Out-Null
+Add-MpPreference -ExclusionPath C:\blaise-test
+
+# Never sleep
+powercfg /change standby-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+----
+
+No x64 emulation package is needed: Windows 11 on ARM runs x64 executables
+out of the box.
+
+=== The SSH key
+
+On the host:
+
+[source,sh]
+----
+ssh-keygen -t ed25519 -f ~/.ssh/blaise_windows -N ""
+scp -P 2222 ~/.ssh/blaise_windows.pub blaise@127.0.0.1:
+----
+
+`blaise` is an administrator, and for administrators Windows' OpenSSH reads
+keys from `C:\ProgramData\ssh\administrators_authorized_keys`, not from the
+user's `.ssh` directory.  The file must be readable by Administrators and
+SYSTEM only.  In the administrator PowerShell:
+
+[source,powershell]
+----
+Copy-Item C:\Users\blaise\blaise_windows.pub C:\ProgramData\ssh\administrators_authorized_keys
+icacls.exe C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+----
+
+=== Verification
+
+[source,sh]
+----
+ssh -i ~/.ssh/blaise_windows -p 2222 blaise@127.0.0.1 "echo %PROCESSOR_ARCHITECTURE%"   # ARM64
+scripts/windows-vm.sh crosscheck                                                        # WINDOWS_CROSSCHECK_OK
+----
+
+=== Notes
+
+* `utmctl start --hide` fails with `OSStatus -10004`, although the VM still
+  starts, so the script does not hide the UTM window.
+* With the network in Emulated VLAN mode the guest sits behind QEMU's NAT and
+  only the loopback forward reaches it, so the guest firewall adds little;
+  it is kept on so that a later switch to Shared or Bridged networking does
+  not expose the guest's services.
+
+=== Later
+
+The AMD Ryzen machine, for interactive debugging on real x64 with WinDbg or
+x64dbg and the map file.
 
 == Milestones
 
