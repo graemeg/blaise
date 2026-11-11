@@ -27,6 +27,9 @@ type
     procedure TestBareMemOperand_LoadViaReg;
     procedure TestQuadSymbol_EmitsReloc;
     procedure TestTLSPrefix_PrecedesRex;
+    { The Windows TLS base load: the GS segment, a numeric displacement
+      (TEB.ThreadLocalStoragePointer), REX.R for %r11. }
+    procedure TestGsNumeric_LoadsTebSlot;
     procedure TestTbssSymbol_TypedSttTls;
     { an initialised threadvar's .tdata: a TLS PROGBITS section carrying the
       initial bytes, its symbols STT_TLS.  The assembler did not recognise the
@@ -445,6 +448,17 @@ begin
   Obj := AssembleToBytes('movq %fs:tv@tpoff, %rax' + LineEnding);
   AssertTrue('64 48 8B prefix order wrong',
     ContainsBytes(Obj, Chr($64) + Chr($48) + Chr($8B) + Chr($04) + Chr($25)));
+end;
+
+procedure TAsmEncodingTests.TestGsNumeric_LoadsTebSlot;
+var
+  Obj: string;
+begin
+  { movq %gs:88, %r11 -> 65 4C 8B 1C 25 58 00 00 00 }
+  Obj := AssembleToBytes('movq %gs:88, %r11' + LineEnding);
+  AssertTrue('65 4C 8B 1C 25 58 00 00 00 expected',
+    ContainsBytes(Obj, Chr($65) + Chr($4C) + Chr($8B) + Chr($1C) + Chr($25) +
+      Chr($58) + Chr(0) + Chr(0) + Chr(0)));
 end;
 
 procedure TAsmEncodingTests.TestTbssSymbol_TypedSttTls;

@@ -59,6 +59,11 @@ type
       routine with a body that foreign code calls (M5). }
     procedure TestRecordResult_FromForeignRoutine_IsAnError;
     procedure TestCdeclRoutineWithBody_IsAnError;
+    { Threadvars (PE TLS): every instruction that touches one is preceded
+      by the TLS block load into %r11, even when the operand is reused after
+      a call. }
+    procedure TestThreadvar_EveryUseReloadsTheBlock;
+    procedure TestThreadvar_AddressOf;
     { Stack probes: on Windows no single adjustment of %rsp spans a page. }
     procedure TestLargeFrame_ProbedOnWindows;
     procedure TestLargeFrame_NotProbedOnLinux;
@@ -68,8 +73,14 @@ type
     the stand-in runtime; scripts/windows-vm.sh crosscheck runs the result
     in the guest. }
   TWin64FixtureTests = class(TTestCase)
+  private
+    { Compile compiler/src/it/windows/<AName>.pas for windows-x86_64, link
+      it with the stand-in runtime m2rt.s into compiler/target/it/windows/
+      <AName>.exe, and return the parsed image. }
+    function LinkFixture(const AName: string): TPeImage;
   published
     procedure TestLink_M2Calls;
+    procedure TestLink_M3Tls;
   end;
 
 implementation
@@ -305,6 +316,71 @@ begin
     (Pos('CB', Msg) >= 0) and (Pos('foreign entry', Msg) >= 0));
 end;
 
+{ ---- threadvars ---- }
+
+{ The number of lines using a TLS offset off %r11 that are NOT directly
+  preceded by the two-line block load. }
+function UnpreparedTlsUses(const AAsm: string; out AUses: Int): Int;
+var
+  L: TStringList;
+  I: Int;
+begin
+  Result := 0;
+  AUses := 0;
+  L := TStringList.Create();
+  try
+    L.Text := AAsm;
+    for I := 0 to L.Count - 1 do
+      if Pos('@tpoff(%r11)', L.Strings[I]) >= 0 then
+      begin
+        Inc(AUses);
+        if (I < 2) or (L.Strings[I - 2] <> #9'movq %gs:88, %r11') or
+           (L.Strings[I - 1] <> #9'movq (%r11), %r11') then
+          Inc(Result);
+      end;
+  finally
+    L.Free();
+  end;
+end;
+
+procedure TWin64CallTests.TestThreadvar_EveryUseReloadsTheBlock;
+var
+  A: string;
+  NUses: Int;
+begin
+  { a managed threadvar: the store releases the old value through a call,
+    then writes the new one -- the operand outlives that call }
+  A := WinAsm(
+    'program p;' + NL +
+    'threadvar' + NL +
+    '  Count: Int64;' + NL +
+    '  Name: string;' + NL +
+    'begin' + NL +
+    '  Count := Count + 1;' + NL +
+    '  Name := ''abc'';' + NL +
+    '  Name := Name + ''d'';' + NL +
+    'end.');
+  AssertLacks(A, '%fs:');
+  AssertLacks(A, '%tls<');
+  AssertEquals('every TLS use reloads the block', 0, UnpreparedTlsUses(A, NUses));
+  AssertTrue('threadvars used', NUses >= 4);
+end;
+
+procedure TWin64CallTests.TestThreadvar_AddressOf;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'threadvar' + NL +
+    '  N: Int64;' + NL +
+    'procedure Bump(var V: Int64); begin V := V + 1; end;' + NL +
+    'begin Bump(N); end.');
+  { the address form loads the block into the destination itself }
+  AssertHas(A, #9'movq %gs:88, %rax' + NL + #9'movq (%rax), %rax' + NL +
+    #9'leaq N@tpoff(%rax), %rax');
+end;
+
 { ---- stack probes ---- }
 
 const
@@ -350,18 +426,15 @@ begin
   end;
 end;
 
-procedure TWin64FixtureTests.TestLink_M2Calls;
+function TWin64FixtureTests.LinkFixture(const AName: string): TPeImage;
 var
   Root, Dir, OutDir: string;
   Lk: TPeLinker;
   Tk: TWindowsX86_64Toolkit;
-  Img: TPeImage;
-  I: Int;
-  Dlls: string;
 begin
   Root := GetCurrentDir();
   while (Root <> '') and
-        not FileExists(Root + '/compiler/src/it/windows/m2calls.pas') do
+        not FileExists(Root + '/compiler/src/it/windows/' + AName + '.pas') do
     Root := ExtractFileDir(Root);
   AssertTrue('fixture found', Root <> '');
   Dir := Root + '/compiler/src/it/windows/';
@@ -372,20 +445,41 @@ begin
   try
     Lk.DllNameOf := @Tk.LibraryImageName;
     Lk.AddObject(ParseElfObject(AssembleToBytes(
-      GenAsm(ReadText(Dir + 'm2calls.pas'), Win)), 'm2calls.o'));
+      GenAsm(ReadText(Dir + AName + '.pas'), Win)), AName + '.o'));
     Lk.AddObject(ParseElfObject(AssembleToBytes(ReadText(Dir + 'm2rt.s')),
       'm2rt.o'));
-    Lk.LinkToFile('_start', OutDir + '/m2calls.exe');
+    Lk.LinkToFile('_start', OutDir + '/' + AName + '.exe');
   finally
     Lk.Free();
     Tk.Free();
   end;
-  Img := ReadPeImageFile(OutDir + '/m2calls.exe');
+  Result := ReadPeImageFile(OutDir + '/' + AName + '.exe');
+end;
+
+procedure TWin64FixtureTests.TestLink_M2Calls;
+var
+  Img: TPeImage;
+  I: Int;
+  Dlls: string;
+begin
+  Img := LinkFixture('m2calls');
   try
     Dlls := '';
     for I := 0 to Img.Imports.Count - 1 do
       Dlls := Dlls + Img.Imports[I].Dll + ' ';
     AssertEquals('kernel32.dll msvcrt.dll ', Dlls);
+  finally
+    Img.Free();
+  end;
+end;
+
+procedure TWin64FixtureTests.TestLink_M3Tls;
+var
+  Img: TPeImage;
+begin
+  Img := LinkFixture('m3tls');
+  try
+    AssertTrue('a TLS directory', Img.HasTls);
   finally
     Img.Free();
   end;

@@ -22100,7 +22100,7 @@ begin
     %reg`) does not yield the per-thread address; the TLS model rewrites it
     here, once.  FTlsModel is nil only on a backend built outside the
     toolkit, which emits no threadvar access. }
-  if (FTlsModel <> nil) and FTlsModel.RewriteAddressOf(ALine, @Self.Emit) then
+  if (FTlsModel <> nil) and FTlsModel.RewriteLine(ALine, @Self.Emit) then
     Exit;
   { Stack probe (design, "Stack probing").  Where the stack grows by
     faulting on a guard page, one adjustment of a page or more could step

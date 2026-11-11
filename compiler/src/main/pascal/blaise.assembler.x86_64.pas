@@ -185,6 +185,7 @@ type
     Sym:     string;       { symbol name (for RIP-rel, labels, TLS) }
     SymDisp: Int64;        { addend to symbol (sym + N) }
     TpOff:   Boolean;      { sym@tpoff — emit R_X86_64_TPOFF32 relocation }
+    Seg:     Int32;        { opTLS segment-override prefix: $64 %fs, $65 %gs }
     Indirect: Boolean;     { memory operand reached via *mem (call/jmp *disp(%reg)) }
   end;
 
@@ -416,11 +417,17 @@ begin
   { Register: %reg }
   if S[P]= Ord('%') then
   begin
-    { Check for TLS: %fs:sym@tpoff or %fs:disp (numeric) }
-    if (P + 2 < Length(S)) and (S[P + 1]= Ord('f')) and (S[P + 2]= Ord('s')) then
+    { Check for TLS: %fs:sym@tpoff or %fs:disp (numeric), and the Windows
+      form %gs:disp (a TEB field) }
+    if (P + 2 < Length(S)) and
+       ((S[P + 1]= Ord('f')) or (S[P + 1]= Ord('g'))) and (S[P + 2]= Ord('s')) then
     begin
       if (P + 3 < Length(S)) and (S[P + 3]= Ord(':')) then
       begin
+        if S[P + 1]= Ord('g') then
+          Result.Seg := $65
+        else
+          Result.Seg := $64;
         P := P + 4;
         if (P < Length(S)) and (IsDigit(S[P]) or (S[P]= Ord('-'))) then
         begin
@@ -1260,13 +1267,17 @@ begin
                 AOp.SymDisp - 4 - ACtx.ImmTail);
 end;
 
-{ Encode a TLS memory operand (%fs:sym@tpoff or %fs:disp). }
+{ Encode a segment-relative memory operand (%fs:sym@tpoff, %fs:disp or
+  %gs:disp). }
 procedure EncodeTLSOperand(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AOp: TOperand; AReg: Int32);
 var
   DispOff: Int;
 begin
-  CBPrepend(ACB, $64);
+  if AOp.Seg = $65 then
+    CBPrepend(ACB, $65)
+  else
+    CBPrepend(ACB, $64);
   CBEmit(ACB, MakeModRM(0, AReg, 4));
   CBEmit(ACB, MakeSIB(1, 4, 5));
   DispOff := ACB.Len;

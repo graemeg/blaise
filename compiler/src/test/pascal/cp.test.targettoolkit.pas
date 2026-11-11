@@ -72,13 +72,14 @@ type
     procedure TestWindowsToolkit_NoElfLinkTarget;
     procedure TestWindowsToolkit_DllNames;
     procedure TestWindowsToolkit_NoSystemLibDirsOnCrossHost;
-    { Registered since M2: System V inside, Win64 at the foreign boundary;
-      threadvars wait for the PE TLS model (M3). }
+    { Registered since M2: System V inside, Win64 at the foreign boundary,
+      PE TLS for threadvars (M3). }
     procedure TestWindowsToolkit_Registered;
-    procedure TestWindowsToolkit_Backend_HasWin64AbiAndPendingTls;
+    procedure TestWindowsToolkit_Backend_HasWin64AbiAndPeTls;
     procedure TestWin64BoundaryAbi_ProbesAndTranslates;
     procedure TestWin64BoundaryAbi_ArgLocations;
-    procedure TestPeTlsPending_ThreadvarIsAnError;
+    procedure TestPeTlsModel_OperandAndAddress;
+    procedure TestPeTlsModel_LineUsingR11_IsAnError;
     { The OS suffix of the RTL's per-OS units, and the layout initialiser
       every program's main calls. }
     procedure TestRTLOSSuffix_PerOS;
@@ -308,11 +309,11 @@ begin
       Sink.Lines);
     Sink.Lines := '';
     AssertTrue('leaq of the operand is rewritten',
-      M.RewriteAddressOf(#9'leaq %fs:U_X@tpoff, %rcx', @Sink.Add));
+      M.RewriteLine(#9'leaq %fs:U_X@tpoff, %rcx', @Sink.Add));
     AssertEquals(#9'movq %fs:0, %rcx|'#9'leaq U_X@tpoff(%rcx), %rcx|',
       Sink.Lines);
     AssertFalse('other lines pass through',
-      M.RewriteAddressOf(#9'leaq U_X(%rip), %rcx', @Sink.Add));
+      M.RewriteLine(#9'leaq U_X(%rip), %rcx', @Sink.Add));
   finally
     Sink.Free();
     M.Free();
@@ -454,7 +455,7 @@ begin
   AssertEquals('windows-x86_64', ResolveToolkit(T).Name());
 end;
 
-procedure TTargetToolkitTests.TestWindowsToolkit_Backend_HasWin64AbiAndPendingTls;
+procedure TTargetToolkitTests.TestWindowsToolkit_Backend_HasWin64AbiAndPeTls;
 var
   T: TTargetDesc;
   B: TNativeBackend;
@@ -465,8 +466,8 @@ begin
     AssertTrue('an x86-64 backend', B is TX86_64Backend);
     AssertTrue('Win64 boundary ABI',
       TX86_64Backend(B).BoundaryAbi is TWin64BoundaryAbi);
-    AssertTrue('PE TLS pending',
-      TX86_64Backend(B).TlsModel is TPeTlsPending);
+    AssertTrue('PE TLS model',
+      TX86_64Backend(B).TlsModel is TPeTlsModel);
   finally
     B.Free();
   end;
@@ -523,24 +524,60 @@ begin
   end;
 end;
 
-procedure TTargetToolkitTests.TestPeTlsPending_ThreadvarIsAnError;
+procedure TTargetToolkitTests.TestPeTlsModel_OperandAndAddress;
 var
   M: TX86TlsModel;
+  Sink: TLineSink;
+  Op: string;
+begin
+  M := TPeTlsModel.Create();
+  Sink := TLineSink.Create();
+  try
+    { the address form: the TLS block of this thread, then the offset }
+    M.EmitAddress('U_X', '%rax', @Sink.Add);
+    AssertEquals(#9'movq %gs:88, %rax|'#9'movq (%rax), %rax|' +
+      #9'leaq U_X@tpoff(%rax), %rax|', Sink.Lines);
+    { the operand form is expanded at each line that uses it, so an operand
+      reused after a call is still right }
+    Op := M.DirectOperand('U_X');
+    Sink.Lines := '';
+    AssertTrue('a line using the operand is rewritten',
+      M.RewriteLine(#9'movq ' + Op + ', %rdi', @Sink.Add));
+    AssertEquals(#9'movq %gs:88, %r11|'#9'movq (%r11), %r11|' +
+      #9'movq U_X@tpoff(%r11), %rdi|', Sink.Lines);
+    Sink.Lines := '';
+    AssertTrue('its address too',
+      M.RewriteLine(#9'leaq ' + Op + ', %rcx', @Sink.Add));
+    AssertEquals(#9'movq %gs:88, %r11|'#9'movq (%r11), %r11|' +
+      #9'leaq U_X@tpoff(%r11), %rcx|', Sink.Lines);
+    AssertFalse('other lines pass through',
+      M.RewriteLine(#9'leaq U_X(%rip), %rcx', @Sink.Add));
+  finally
+    Sink.Free();
+    M.Free();
+  end;
+end;
+
+procedure TTargetToolkitTests.TestPeTlsModel_LineUsingR11_IsAnError;
+var
+  M: TX86TlsModel;
+  Sink: TLineSink;
   Msg: string;
 begin
-  M := TPeTlsPending.Create();
+  M := TPeTlsModel.Create();
+  Sink := TLineSink.Create();
   try
-    AssertFalse('no line rewritten', M.RewriteAddressOf(#9'leaq x(%rip), %rax', nil));
     Msg := '';
     try
-      M.DirectOperand('tv_X');
+      M.RewriteLine(#9'movq %r11, ' + M.DirectOperand('U_X'), @Sink.Add);
     except
       on E: Exception do
         Msg := E.Message;
     end;
-    AssertTrue('names the threadvar and the missing model: ' + Msg,
-      (Pos('tv_X', Msg) >= 0) and (Pos('PE TLS model', Msg) >= 0));
+    AssertTrue('the TLS base register clash is reported: ' + Msg,
+      Pos('%r11', Msg) >= 0);
   finally
+    Sink.Free();
     M.Free();
   end;
 end;

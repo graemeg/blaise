@@ -110,11 +110,10 @@ type
       else. }
     procedure EmitAddress(const ASym, ADstReg: string;
       AEmit: TX86EmitProc); virtual; abstract;
-    { The backend's peephole hook: when ALine takes the address of a
-      DirectOperand (`leaq <operand>, %reg`), emit the real per-thread address
-      sequence instead and return True; otherwise emit nothing and return
-      False. }
-    function RewriteAddressOf(const ALine: string;
+    { The backend's line hook, applied to every emitted line before it is
+      written.  Returns True after emitting a replacement for ALine through
+      AEmit; False when ALine needs nothing and was not emitted. }
+    function RewriteLine(const ALine: string;
       AEmit: TX86EmitProc): Boolean; virtual; abstract;
   end;
 
@@ -125,21 +124,33 @@ type
     function DirectOperand(const ASym: string): string; override;
     procedure EmitAddress(const ASym, ADstReg: string;
       AEmit: TX86EmitProc); override;
-    function RewriteAddressOf(const ALine: string;
+    { `leaq <operand>, %reg` yields the bare offset (lea ignores the
+      segment), so it becomes thread pointer plus offset. }
+    function RewriteLine(const ALine: string;
       AEmit: TX86EmitProc): Boolean; override;
   end;
 
-  { Windows threadvars are addressed through the PE TLS directory and the
-    thread's TLS array, which arrive with the PE TLS model in milestone M3.
-    Until then a threadvar access compiled for windows-x86_64 is a compile
-    error, never ELF code that would fault at run time. }
-  TPeTlsPending = class(TX86TlsModel)
+  { PE TLS (windows-x86_64-backend-design.adoc, "Thread-local storage"): the
+    loader gives each thread a copy of the image's TLS template and stores
+    its address in the TEB's ThreadLocalStoragePointer array (%gs:88), at the
+    image's index.  An executable's index is 0; runtime.start.windows checks
+    that _tls_index is.  A variable is at a positive offset into the block
+    (sym@tpoff, resolved by the PE linker).
+
+    Reaching the block takes a register, and the backend splices operands
+    into arbitrary instructions and reuses them across calls.  So
+    DirectOperand returns a marker, and RewriteLine expands every line that
+    contains one: it loads the block into %r11, then emits the line with
+    sym@tpoff(%r11) in place of the marker.  Each use reloads the base, so a
+    call in between cannot leave it stale.  %r11 is caller-saved scratch the
+    backend never keeps live across a global variable's operand; a line that
+    uses %r11 itself as well as the marker is reported, never miscompiled. }
+  TPeTlsModel = class(TX86TlsModel)
   public
     function DirectOperand(const ASym: string): string; override;
     procedure EmitAddress(const ASym, ADstReg: string;
       AEmit: TX86EmitProc); override;
-    { Nothing to rewrite: no DirectOperand is ever handed out. }
-    function RewriteAddressOf(const ALine: string;
+    function RewriteLine(const ALine: string;
       AEmit: TX86EmitProc): Boolean; override;
   end;
 
@@ -234,7 +245,7 @@ begin
   AEmit(#9'leaq ' + ASym + '@tpoff(' + ADstReg + '), ' + ADstReg);
 end;
 
-function TElfLocalExecTls.RewriteAddressOf(const ALine: string;
+function TElfLocalExecTls.RewriteLine(const ALine: string;
   AEmit: TX86EmitProc): Boolean;
 var
   P, Q: Int;
@@ -257,29 +268,54 @@ begin
   end;
 end;
 
-{ TPeTlsPending }
+{ TPeTlsModel }
 
-function PeTlsPendingError(const ASym: string): Exception;
+const
+  { The marker DirectOperand hands out, followed by the symbol and closed by
+    PeTlsMarkEnd.  It never reaches the assembler: RewriteLine replaces it. }
+  PeTlsMark = '%tls<';
+  PeTlsMarkEnd = '>';
+  { TEB.ThreadLocalStoragePointer }
+  PeTebTlsArray = '%gs:88';
+
+function TPeTlsModel.DirectOperand(const ASym: string): string;
 begin
-  Result := Exception.Create('threadvar ' + ASym + ': threadvars on ' +
-    'windows-x86_64 need the PE TLS model, which is not implemented yet');
+  Result := PeTlsMark + ASym + PeTlsMarkEnd;
 end;
 
-function TPeTlsPending.DirectOperand(const ASym: string): string;
-begin
-  raise PeTlsPendingError(ASym);
-end;
-
-procedure TPeTlsPending.EmitAddress(const ASym, ADstReg: string;
+procedure TPeTlsModel.EmitAddress(const ASym, ADstReg: string;
   AEmit: TX86EmitProc);
 begin
-  raise PeTlsPendingError(ASym);
+  AEmit(#9'movq ' + PeTebTlsArray + ', ' + ADstReg);
+  AEmit(#9'movq (' + ADstReg + '), ' + ADstReg);
+  AEmit(#9'leaq ' + ASym + '@tpoff(' + ADstReg + '), ' + ADstReg);
 end;
 
-function TPeTlsPending.RewriteAddressOf(const ALine: string;
+function TPeTlsModel.RewriteLine(const ALine: string;
   AEmit: TX86EmitProc): Boolean;
+var
+  P, Q: Int;
+  Sym, Rest: string;
 begin
   Result := False;
+  P := Pos(PeTlsMark, ALine);
+  if P < 0 then Exit;
+  Rest := Copy(ALine, P + Length(PeTlsMark),
+    Length(ALine) - P - Length(PeTlsMark));
+  Q := Pos(PeTlsMarkEnd, Rest);
+  if Q < 0 then
+    raise Exception.Create('internal: unterminated TLS operand in [' +
+      ALine + ']');
+  Sym := Copy(Rest, 0, Q);
+  Rest := Copy(ALine, 0, P) + Sym + '@tpoff(%r11)' +
+    Copy(Rest, Q + 1, Length(Rest) - Q - 1);
+  if (Pos('%r11', ALine) >= 0) or (Pos(PeTlsMark, Rest) >= 0) then
+    raise Exception.Create('internal: a threadvar operand needs %r11 for ' +
+      'the TLS block, which this line also uses: [' + ALine + ']');
+  AEmit(#9'movq ' + PeTebTlsArray + ', %r11');
+  AEmit(#9'movq (%r11), %r11');
+  AEmit(Rest);
+  Result := True;
 end;
 
 end.

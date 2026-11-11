@@ -114,8 +114,7 @@ type
   { Windows x86_64 -- a PE32+ image linked from ELF objects (design
     decision D2, blaise.linker.pe).  The backend keeps the System V
     convention internally and uses the Win64 convention at the foreign
-    boundary (D1).  Threadvars need the PE TLS model (milestone M3); until
-    then the backend's TLS model reports a threadvar access as an error. }
+    boundary (D1); threadvars use the PE TLS model. }
   TWindowsX86_64Toolkit = class(TTargetToolkit)
   public
     function Name: string; override;
@@ -304,7 +303,7 @@ begin
   if not ParseTargetName(Self.Name(), T) then
     raise Exception.Create('internal: unparsable toolkit name ' + Self.Name());
   B := TX86_64Backend.Create(T);
-  B.AdoptStrategies(TWin64BoundaryAbi.Create(), TPeTlsPending.Create());
+  B.AdoptStrategies(TWin64BoundaryAbi.Create(), TPeTlsModel.Create());
   Result := B;
 end;
 
