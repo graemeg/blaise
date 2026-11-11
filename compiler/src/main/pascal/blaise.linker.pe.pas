@@ -25,7 +25,7 @@ unit blaise.linker.pe;
     .text   R X   code, then the import thunks
     .rdata  R     read-only data, the import tables, the TLS directory
     .data   R W   initialised data, the TLS index, then .bss as a tail
-    .tls    R W   .tdata, then .tbss as zero fill
+    .tls    R W   .tdata, then .tbss written out as zero bytes
     .blunw  R W   the blaise_unwind blocks, bracketed by
                   __start_blaise_unwind and __stop_blaise_unwind
     .opdf   R     OPDF debug records
@@ -683,13 +683,16 @@ begin
   begin
     Off := FTlsDirOff;
     Patch64(stRdata, Off, PeDefaultImageBase + FTlsRva);
-    Patch64(stRdata, Off + 8, PeDefaultImageBase + FTlsRva +
-      FStreamSize[stTdata]);
+    { The template covers .tbss as well, materialised as zeros, and the
+      zero fill is 0: the loader in Windows 11 on ARM sizes the block from
+      the raw data range alone, so .tbss counted only as zero fill left
+      threadvars outside the allocation (heap corruption at exit). }
+    Patch64(stRdata, Off + 8, PeDefaultImageBase + FStreamRva[stTbss] +
+      FStreamSize[stTbss]);
     Patch64(stRdata, Off + 16, PeDefaultImageBase + FDataRva + FTlsIndexOff);
     Patch64(stRdata, Off + 24, PeDefaultImageBase + FRdataRva + Off +
       PeTlsDirectorySize);
-    Patch32(stRdata, Off + 32, (FStreamRva[stTbss] - FTlsRva -
-      FStreamSize[stTdata]) + FStreamSize[stTbss]);
+    Patch32(stRdata, Off + 32, 0);
     for I := 0 to 3 do
       FBaseRelocs.Add(FRdataRva + Off + I * 8);
   end;
@@ -737,6 +740,10 @@ begin
     end;
     if FHasTls then
     begin
+      { the .tbss bytes follow the .tdata ones as zeros (see the TLS
+        directory in ApplyRelocations) }
+      FStreams[stTdata].PadTo(FStreamRva[stTbss] + FStreamSize[stTbss] -
+        FTlsRva);
       W.AddSection('.tls', FTlsRva,
         FStreamRva[stTbss] + FStreamSize[stTbss] - FTlsRva,
         FStreams[stTdata].AsString(),

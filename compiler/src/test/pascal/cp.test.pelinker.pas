@@ -379,9 +379,16 @@ begin
     AssertNotNull('.tls section', Tls);
     AssertTrue('raw data starts at .tls',
       Img.Tls.StartAddressOfRawData = Img.ImageBase + Tls.VirtualAddress);
-    AssertTrue('raw data is the .tdata bytes',
-      Img.Tls.EndAddressOfRawData = Img.Tls.StartAddressOfRawData + 8);
-    AssertEquals('the .tbss bytes are zero fill', 16, Img.Tls.SizeOfZeroFill);
+    { The loader in Windows 11 on ARM allocates the block from the raw data
+      range alone and ignores SizeOfZeroFill, so the .tbss bytes are written
+      out as zeros in the template (design, "Assembler and linker"). }
+    AssertTrue('raw data is the .tdata bytes and the .tbss zeros',
+      Img.Tls.EndAddressOfRawData = Img.Tls.StartAddressOfRawData + 24);
+    AssertEquals('no zero fill', 0, Img.Tls.SizeOfZeroFill);
+    AssertTrue('the .tbss bytes are in the file as zeros',
+      (Img.ReadU64(Tls.VirtualAddress + 8) = 0) and
+      (Img.ReadU64(Tls.VirtualAddress + 16) = 0) and
+      (Tls.SizeOfRawData >= 24));
     AssertTrue('the index slot is writable',
       (Img.SectionOfRva(Img.Tls.AddressOfIndex - Img.ImageBase)
         .Characteristics and PeScnMemWrite) <> 0);
