@@ -609,40 +609,53 @@ are negative from the thread pointer.
 
 === Strategy object
 
+As built in M3:
+
 [source,pascal]
 ----
 type
   TX86TlsModel = class
   public
-    { Emit whatever is needed and return an operand addressing AName. }
-    function VarOperand(const ASym: string; AEmit: TEmitProc;
-      const AScratch: string): string; virtual; abstract;
+    { An operand for ASym that a caller may splice into any instruction. }
+    function DirectOperand(const ASym: string): string; virtual; abstract;
     { Emit code leaving the address of ASym in ADstReg. }
-    procedure EmitVarAddr(const ASym, ADstReg: string;
-      AEmit: TEmitProc); virtual; abstract;
+    procedure EmitAddress(const ASym, ADstReg: string;
+      AEmit: TX86EmitProc); virtual; abstract;
+    { The backend's Emit hook, applied to every line before it is written:
+      True after emitting a replacement for ALine. }
+    function RewriteLine(const ALine: string;
+      AEmit: TX86EmitProc): Boolean; virtual; abstract;
   end;
 ----
 
-* `TElfLocalExecTls` returns `%fs:sym@tpoff` and emits nothing — today's
-  behaviour.
-* `TPeTlsModel` emits the three-instruction base load into the scratch
-  register and returns `sym@tpoff(%scratch)`.
+* `TElfLocalExecTls` returns `%fs:sym@tpoff`; its hook rewrites
+  `leaq %fs:sym@tpoff, %reg`, which would yield the bare offset, into thread
+  pointer plus offset — today's behaviour.
+* `TPeTlsModel` returns a marker operand.  Its hook expands every line that
+  carries one into the block load and the line itself:
++
+[source,asm]
+----
+    movq  %gs:88, %r11           # TEB.ThreadLocalStoragePointer
+    movq  (%r11), %r11           # this image's block: index 0
+    <the line, with the marker replaced by sym@tpoff(%r11)>
+----
++
+`EmitAddress` loads the block into the destination register itself.
 
-The call sites to convert are concentrated: `VarOperand` and its siblings
-(around lines 6038–6204 of the x86_64 backend), the thread-variable
-finalisation helpers (around 2020–2067 and 2646), and the `leaq %fs:` rewrite
-(around 22036).
+The register question the original design left open was settled as follows.
+The backend splices operands into arbitrary instructions and reuses an
+operand string across later instructions, including across calls, so a base
+register loaded when the operand is formed could be stale or clobbered when
+it is used.  Expanding at emission time instead reloads the base for every
+instruction that uses it.  The base lives in `%r11`, caller-saved scratch
+whose six live ranges in the backend were audited: none holds `%r11` across
+a global variable's operand.  A line that uses `%r11` as well as the marker
+is an internal error, never wrong code.
 
-[WARNING]
-====
-The ELF form is a single memory operand and needs no register.  The PE form
-needs a scratch register that is dead at every threadvar access.  Choosing it
-is the main risk in this section.  The implementer must establish which
-register the backend guarantees free at `VarOperand` call sites — or make the
-PE model spill and restore one — before converting any site.  The arm64
-backend already solves the same problem for Mach-O TLV descriptors and is the
-reference.
-====
+The access sequence assumes the executable's TLS index is 0, which saves the
+second register an indexed load would need.  `runtime.start.windows` checks
+`_tls_index` at start-up and stops with a diagnostic if it is not.
 
 === Assembler and linker
 
@@ -653,7 +666,10 @@ reference.
   _symbol address minus start of the merged `.tls` section_.
 * `.tbss` is written out as zero bytes in the image and the directory's
   `SizeOfZeroFill` is 0.  Zero-fill has a history of being ignored by
-  loaders; materialising the bytes removes the dependency.
+  loaders; materialising the bytes removes the dependency.  (Confirmed in
+  M3: the loader in Windows 11 on ARM sizes the block from the raw data
+  range alone; with `.tbss` as zero fill, writes to threadvars corrupted the
+  heap and the process crashed in `ntdll` at exit.)
 * The linker synthesises `_tls_index` in `.data` and the TLS directory in
   `.rdata`, and points data directory 9 at it.
 
