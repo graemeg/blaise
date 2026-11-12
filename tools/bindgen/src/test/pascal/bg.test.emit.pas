@@ -405,7 +405,7 @@ begin
     'int (*)(Display *, int)'));
   Src := Self.Emit();
   AssertTrue(ContainsStr(Src,
-    'XErrorHandler = function(a0: PDisplay; a1: Int32): Int32;'));
+    'XErrorHandler = function(a0: PDisplay; a1: Int32): Int32; cdecl;'));
 end;
 
 procedure TEmitTests.TestEmit_InlineFnPtrParam_SynthesisedType;
@@ -419,7 +419,7 @@ begin
   FModel.AddFunction(F);
   Src := Self.Emit();
   AssertTrue('synth type declared', ContainsStr(Src,
-    'TXIfThing_predicate = function(a0: PDisplay; a1: XID): Int32;'));
+    'TXIfThing_predicate = function(a0: PDisplay; a1: XID): Int32; cdecl;'));
   AssertTrue('param uses it', ContainsStr(Src,
     'XIfThing(predicate: TXIfThing_predicate)'));
 end;

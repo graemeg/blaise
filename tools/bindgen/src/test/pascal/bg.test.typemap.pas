@@ -235,19 +235,19 @@ end;
 
 procedure TTypeMapTests.TestFnPtrDecl_IntArgs_FunctionType;
 begin
-  AssertEquals('function(a0: PDisplay; a1: Int32): Int32',
+  AssertEquals('function(a0: PDisplay; a1: Int32): Int32; cdecl',
     FMapper.FnPtrDecl('int (*)(Display *, int)'));
 end;
 
 procedure TTypeMapTests.TestFnPtrDecl_VoidReturn_ProcedureType;
 begin
-  AssertEquals('procedure(a0: Pointer)',
+  AssertEquals('procedure(a0: Pointer); cdecl',
     FMapper.FnPtrDecl('void (*)(void *)'));
 end;
 
 procedure TTypeMapTests.TestFnPtrDecl_NoParams;
 begin
-  AssertEquals('function: Int32', FMapper.FnPtrDecl('int (*)(void)'));
+  AssertEquals('function: Int32; cdecl', FMapper.FnPtrDecl('int (*)(void)'));
 end;
 
 procedure TTypeMapTests.TestFnPtrDecl_Variadic_Fails;
@@ -262,7 +262,7 @@ begin
     FMapper.MapCallback('int (*)(Display *, XID)', 'XSampleIfEvent_predicate'));
   AssertEquals('one synth type', 1, FMapper.ProcTypes.Count);
   AssertEquals('TXSampleIfEvent_predicate', FMapper.ProcTypes[0].Name);
-  AssertEquals('function(a0: PDisplay; a1: XID): Int32',
+  AssertEquals('function(a0: PDisplay; a1: XID): Int32; cdecl',
     FMapper.ProcTypes[0].Decl);
 end;
 

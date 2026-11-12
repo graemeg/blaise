@@ -58,7 +58,8 @@ type
       in contexts where a synthesised procedural type is wanted. }
     function Map(const AQualType: string): string;
     { Render a function-pointer qualType as a Blaise procedural-type
-      right-hand side ('function(a0: X): Y' / 'procedure(...)').
+      right-hand side ('function(a0: X): Y; cdecl' / 'procedure(...);
+      cdecl').
       Returns '' when it cannot be represented (variadic, unparsable). }
     function FnPtrDecl(const AQualType: string): string;
     { Like Map, but a representable function pointer synthesises a
@@ -261,10 +262,12 @@ begin
   if Params <> '' then
     Params := '(' + Params + ')';
   Ret := Self.Map(RetC);
+  { C calls it, so it has the C convention -- part of the type in Blaise,
+    and a Blaise-convention routine assigned to it is an error on Windows }
   if Ret = '' then
-    Result := 'procedure' + Params
+    Result := 'procedure' + Params + '; cdecl'
   else
-    Result := 'function' + Params + ': ' + Ret;
+    Result := 'function' + Params + ': ' + Ret + '; cdecl';
 end;
 
 function TTypeMapper.MapCallback(const AQualType, AHint: string): string;
