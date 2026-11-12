@@ -23,7 +23,7 @@ unit blaise.codegen.native.x86_64.abi;
 interface
 
 uses
-  SysUtils;
+  SysUtils, uStrCompat;
 
 type
   { Emits one line of assembly through the backend, so the backend's stream
@@ -320,6 +320,11 @@ begin
   Result := False;
   P := Pos(PeTlsMark, ALine);
   if P < 0 then Exit;
+  { only an instruction carries a threadvar operand; a directive or a label
+    that spells the marker -- a string literal's .ascii -- is data }
+  if (Length(ALine) < 2) or (StrAt(ALine, 0) <> 9) or
+     (StrAt(ALine, 1) = Ord('.')) then
+    Exit;
   Rest := Copy(ALine, P + Length(PeTlsMark),
     Length(ALine) - P - Length(PeTlsMark));
   Q := Pos(PeTlsMarkEnd, Rest);

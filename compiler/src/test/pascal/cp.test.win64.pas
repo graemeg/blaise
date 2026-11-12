@@ -96,6 +96,9 @@ type
       a call. }
     procedure TestThreadvar_EveryUseReloadsTheBlock;
     procedure TestThreadvar_AddressOf;
+    { the TLS rewrite reads instructions only: a string literal that spells
+      the operand marker is data (the compiler's own source holds one) }
+    procedure TestThreadvar_MarkerTextInAStringIsData;
     { Stack probes: on Windows no single adjustment of %rsp spans a page. }
     procedure TestLargeFrame_ProbedOnWindows;
     procedure TestLargeFrame_NotProbedOnLinux;
@@ -508,6 +511,18 @@ begin
     'begin end.');
   AssertTrue('names the routine, got: ' + Msg, Pos('''CB''', Msg) >= 0);
   AssertTrue('says why, got: ' + Msg, Pos('foreign', Msg) >= 0);
+end;
+
+procedure TWin64CallTests.TestThreadvar_MarkerTextInAStringIsData;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'threadvar T: Int64;' + NL +
+    'begin T := 1; WriteLn(''%tls<''); WriteLn(''a %tls<b> c''); end.');
+  AssertHas(A, '%tls<');
+  AssertHas(A, #9'movq %gs:88, %r11');
 end;
 
 procedure TWin64CallTests.TestCdeclProcTypeCall_Win64Registers;
