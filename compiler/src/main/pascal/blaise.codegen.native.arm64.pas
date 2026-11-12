@@ -18463,8 +18463,9 @@ begin
     interface local or by-value parameter of this frame is exempt }
   if not Owned and not FNoRecvHold and
      not ((AObjExpr = nil) and (AImplicitBase = nil) and not AVarParam and
-          not IsCaptured(AVarName) and IsLocal(AVarName) and
-          (FIntfLocals.IndexOf(AVarName) >= 0)) then
+          ((Pos('__forin_', AVarName) = 0) or
+           (not IsCaptured(AVarName) and IsLocal(AVarName) and
+            (FIntfLocals.IndexOf(AVarName) >= 0)))) then
   begin
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');
     EmitCallSym('_ClassAddRef');
@@ -19057,6 +19058,11 @@ function TArm64Backend.RecvNameIsHeld(const AName: string;
   AIsVarParam: Boolean): Boolean;
 begin
   Result := False;
+  { a for-in loop's hidden enumerator variable ('__forin_<n>', a global at
+    program level) is the loop's own reference and nothing else can assign
+    it }
+  if Pos('__forin_', AName) = 0 then
+    Exit(True);
   if AIsVarParam or IsCaptured(AName) or not IsLocal(AName) then Exit;
   Result := SameText(AName, 'Self') or SameText(AName, 'Result') or
             (FObjLocals.IndexOf(AName) >= 0);

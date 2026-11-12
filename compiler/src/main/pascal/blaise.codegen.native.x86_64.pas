@@ -4899,7 +4899,7 @@ begin
       for the call, as a class receiver is (see RecvNameIsHeld): only a
       strong interface local or by-value parameter of this frame is exempt }
     if not FNoRecvHold and
-       not ((AObjExpr = nil) and not AIsGlobal and
+       not ((AObjExpr = nil) and
             Self.RecvNameIsHeld(AObjName, AIsVarParam)) then
     begin
       Self.Emit(#9'pushq %rax');
@@ -25875,6 +25875,12 @@ var
   P: TMethodParam;
 begin
   Result := False;
+  { a for-in loop's hidden enumerator variable ('__forin_<n>', a global at
+    program level) is the loop's own reference and nothing else can assign
+    it.  Its MoveNext / Current calls run once per iteration, outside any
+    statement's flush, so a hold there would also never be released. }
+  if Pos('__forin_', AName) = 0 then
+    Exit(True);
   if AIsVarParam or FInlineActive or (FRecvDecl = nil) or
      Self.IsCaptured(AName) or not Self.IsLocal(AName) then
     Exit;
