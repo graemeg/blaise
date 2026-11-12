@@ -342,11 +342,15 @@ begin
   Bad[6] := '';
   Bad[7] := 'a' + #0 + '.txt';
   for I := 0 to 7 do
+  begin
+    { a copy of this iteration's own: the closure captures by reference }
+    var Path: string := Bad[I];
     AssertRaises('#' + IntToStr(I), 'EZipError',
       procedure
       begin
-        ZipSafePath('/out', Bad[I]);
+        ZipSafePath('/out', Path);
       end);
+  end;
 end;
 
 procedure TZipReaderTests.TestExtractAll;

@@ -188,6 +188,11 @@ type
     FForInLoopVars:        TStringList;  { stack of active for-in loop-variable names (nested loops
                                            push/pop); a write to one of these is diagnosed — the
                                            mutation goes to a per-iteration copy and is discarded }
+    FLoopSharedNames:      TStringList;  { the variables every iteration of an active loop
+                                           shares: each loop's control variable, and the
+                                           routine-level locals assigned in its body so far.
+                                           A closure made in the loop that captures one sees
+                                           its last value, not this iteration's -- warned }
     { Enum names already warned about for a sparse array index, so the same
       enum does not nag once per declaration. }
     FSparseEnumWarned:     TStringList;
@@ -808,6 +813,13 @@ type
       the mutation writes the per-iteration copy and never reaches the
       collection element.  Call at each site that accepts a by-ref actual. }
     procedure WarnIfVarArgIsForInLoopVar(AExpr: TASTExpr);
+    { Loop bookkeeping for the shared-capture warning: LoopEnter opens a
+      loop (AVarName = its control variable, '' for while / repeat) and
+      returns the mark LoopLeave closes it with. }
+    function  LoopEnter(const AVarName: string): Int;
+    procedure LoopLeave(AMark: Int);
+    procedure NoteLoopAssigned(ASym: TSymbol);
+    procedure WarnLoopSharedCaptures(AThunk: TMethodDecl);
     function  ForInCopyRoot(AExpr: TASTExpr): string;
     procedure WarnIfForInElementWrite(AStmt: TStaticSubscriptAssign);
     { Enforce the lvalue constraint on every var/out actual of a resolved method
@@ -1733,6 +1745,8 @@ begin
   FShadowedRoutines.Duplicates := dupIgnore;
   FContestedGlobals.Duplicates := dupIgnore;
   FForInLoopVars.CaseSensitive := False;
+  FLoopSharedNames      := TStringList.Create();
+  FLoopSharedNames.CaseSensitive := False;
   FWarnings             := TStringList.Create();
   FSparseEnumWarned     := TStringList.Create();
   FPendingGenericInstances       := TObjectList.Create(False);
@@ -1782,6 +1796,7 @@ begin
   FGenericSourceUnits.Free();
   FActiveTypeParams.Free();
   FForInLoopVars.Free();
+  FLoopSharedNames.Free();
   FContestedGlobals.Free();
   FShadowedRoutines.Free();
   FDeferredConsts.Free();
@@ -1927,6 +1942,58 @@ begin
   FWarnings.Add(Full);
   if not GQuietWarnings then
     WriteLn(StdErr, Full);
+end;
+
+function TSemanticAnalyser.LoopEnter(const AVarName: string): Int;
+begin
+  Result := FLoopSharedNames.Count;
+  if AVarName <> '' then
+    FLoopSharedNames.Add(AVarName);
+  Inc(FLoopDepth);
+end;
+
+procedure TSemanticAnalyser.LoopLeave(AMark: Int);
+begin
+  Dec(FLoopDepth);
+  while FLoopSharedNames.Count > AMark do
+    FLoopSharedNames.Delete(FLoopSharedNames.Count - 1);
+end;
+
+procedure TSemanticAnalyser.NoteLoopAssigned(ASym: TSymbol);
+begin
+  { a routine-level local assigned in a loop body is one variable for every
+    iteration; a block-scoped 'var' declared in the body is a fresh one each
+    time round, and a global is never captured }
+  if (FLoopDepth = 0) or (ASym = nil) or (ASym.Kind <> skVariable) or
+     ASym.IsGlobal or (ASym.BlockSite <> nil) then
+    Exit;
+  if FLoopSharedNames.IndexOf(ASym.Name) < 0 then
+    FLoopSharedNames.Add(ASym.Name);
+end;
+
+procedure TSemanticAnalyser.WarnLoopSharedCaptures(AThunk: TMethodDecl);
+var
+  I: Int;
+  Name: string;
+begin
+  { Capture is by reference (docs/language-rationale.adoc, "Capture
+    semantics"): a closure made in a loop that captures the loop variable,
+    or a routine-level local the loop assigns, shares that ONE variable with
+    the closures of every other iteration, and each sees its last value --
+    the 3,3,3 trap.  It is the documented behaviour, so it is a warning, and
+    it names the remedy. }
+  if (FLoopSharedNames.Count = 0) or (AThunk.CapturedVars = nil) then Exit;
+  for I := 0 to AThunk.CapturedVars.Count - 1 do
+  begin
+    Name := AThunk.CapturedVars.Strings[I];
+    if FLoopSharedNames.IndexOf(Name) >= 0 then
+      SemanticWarning(
+        Format('closure captures ''%s'', which every iteration of the ' +
+          'enclosing loop shares (capture is by reference): to capture ' +
+          'this iteration''s value, copy it into a block-scoped ''var'' ' +
+          'inside the loop body', [Name]),
+        AThunk.Line, AThunk.Col);
+  end;
 end;
 
 function TSemanticAnalyser.GetWarnings: TStringList;
@@ -14137,6 +14204,7 @@ end;
 function TSemanticAnalyser.LowerForInEnumerator(AStmt: TForInStmt;
   ACollType: TTypeDesc; AColl: TASTExpr): Boolean;
 var
+  LoopMark: Int;
   EnumType:   TTypeDesc;
   GetE:       TMethodDecl;
   Intf:       TInterfaceTypeDesc;
@@ -14278,13 +14346,13 @@ begin
         [EnumType.Name]), AStmt.Line, AStmt.Col);
   Self.AnalyseStmt(CurAssign);
   AStmt.ResolvedVarType := CurRead.ResolvedType;
-  Inc(FLoopDepth);
+  LoopMark := Self.LoopEnter(AStmt.VarName);
   FForInLoopVars.Add(AStmt.VarName);
   try
     Self.AnalyseStmt(AStmt.Body);
   finally
     FForInLoopVars.Delete(FForInLoopVars.Count - 1);
-    Dec(FLoopDepth);
+    Self.LoopLeave(LoopMark);
   end;
   Result := True;
 end;
@@ -14407,6 +14475,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseStmtCore(AStmt: TASTStmt);
 var
+  LoopMark: Int;
   XRecv, XMember: string;     { --emit-xref: a member's names as written }
   XCall: TMethodCallStmt;
   IfS:    TIfStmt;
@@ -14488,11 +14557,11 @@ begin
       Self.WarnIfNarrowing(VarSym.TypeDesc, ForS.EndExpr, ForS.Line, ForS.Col);
     end;
     Self.WarnIfUnsignedDowntoZero(ForS, VarSym.TypeDesc);
-    Inc(FLoopDepth);
+    LoopMark := Self.LoopEnter(ForS.VarName);
     try
       AnalyseStmt(ForS.Body);
     finally
-      Dec(FLoopDepth);
+      Self.LoopLeave(LoopMark);
     end;
   end
   else if AStmt is TForInStmt then
@@ -14849,7 +14918,7 @@ begin
 
     if ForInS.Lowered = nil then
     begin
-      Inc(FLoopDepth);
+      LoopMark := Self.LoopEnter(ForInS.VarName);
       { Track the loop variable so a write to it inside the body is diagnosed
         (BUG-001): the mutation goes to a per-iteration copy and is discarded.
         Nested for-in loops push/pop, so an inner loop's variable does not mask
@@ -14859,7 +14928,7 @@ begin
         AnalyseStmt(ForInS.Body);
       finally
         FForInLoopVars.Delete(FForInLoopVars.Count - 1);
-        Dec(FLoopDepth);
+        Self.LoopLeave(LoopMark);
       end;
     end;
   end
@@ -14871,21 +14940,21 @@ begin
       SemanticError(
         Format('while condition must be Boolean, got ''%s''', [CondType.Name]),
         AStmt.Line, AStmt.Col);
-    Inc(FLoopDepth);
+    LoopMark := Self.LoopEnter('');
     try
       AnalyseStmt(WS.Body);
     finally
-      Dec(FLoopDepth);
+      Self.LoopLeave(LoopMark);
     end;
   end
   else if AStmt is TRepeatStmt then
   begin
     RS := TRepeatStmt(AStmt);
-    Inc(FLoopDepth);
+    LoopMark := Self.LoopEnter('');
     try
       AnalyseCompoundBody(RS.Body);
     finally
-      Dec(FLoopDepth);
+      Self.LoopLeave(LoopMark);
     end;
     CondType := Self.AnalyseExprSlot(RS.Condition);
     if CondType.Kind <> tyBoolean then
@@ -15676,6 +15745,7 @@ begin
     if not AAssign.IsSynthetic then
       NoteNameXref(AAssign.Line, AAssign.Col, AAssign.Name, VarSym, False);
   end;
+  Self.NoteLoopAssigned(VarSym);
   { BUG-001: assigning to a for-in loop variable writes a per-iteration COPY
     that never reaches the collection element — almost always a mistake.
     Standard Pascal (FPC/Delphi) treats for-in as read-only, so the behaviour
@@ -24298,6 +24368,7 @@ begin
         end;
       if Own then AThunk.CapturedVars.Delete(I);
     end;
+  Self.WarnLoopSharedCaptures(AThunk);
   { A variable of a routine OUTSIDE the enclosing one -- reached by that
     routine through a hidden pointer, never in its own frame -- cannot be
     put in the enclosing frame's environment: the env would hold a COPY, so

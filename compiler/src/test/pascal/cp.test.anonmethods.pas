@@ -43,6 +43,13 @@ type
       internal error inside the closure, and the idle frame slot (garbage
       Self) outside it. }
     procedure TestCodegen_PropertyOnCapturedLocal_UsesCapSlot;
+    { A closure made in a loop that captures the loop variable, or a
+      routine-level local the loop assigns, shares it with every other
+      iteration's closure (capture is by reference): warned, naming the
+      variable.  A block-scoped 'var' copy, and a variable the loop does not
+      touch, are not. }
+    procedure TestWarn_ClosureInLoop_CapturesSharedVariable;
+    procedure TestWarn_ClosureInLoop_BlockVarAndUntouched_NoWarning;
     { Parser }
     procedure TestParse_ReferenceToProcedure_TypeDecl;
     procedure TestParse_ReferenceToFunction_ReturnType;
@@ -2140,6 +2147,89 @@ begin
     reference), and still the getter's Self }
   AssertEquals('the getter is called on it', '',
     AsmMissing(Src, #9'callq TFoo_GetCount', #9'bl _TFoo_GetCount'));
+end;
+
+const
+  WarnLoopHead = '''
+    program P;
+    type
+      TProc = reference to procedure;
+      TItems = array of Int;
+    var
+      A: array[0..2] of TProc;
+    procedure Fill(const AItems: TItems);
+    var
+      I, N, Total, X: Int;
+      S: string;
+    begin
+      Total := 0;
+
+    ''';
+  WarnLoopTail = ' end; begin end.';
+
+function LoopCaptureWarned(const AWarnings, AName: string): Boolean;
+begin
+  Result := Pos('closure captures ''' + AName + ''', which every iteration',
+    AWarnings) >= 0;
+end;
+
+procedure TAnonMethodTests.TestWarn_ClosureInLoop_CapturesSharedVariable;
+var
+  W: string;
+begin
+  W := SemanticWarnings(WarnLoopHead +
+    'for I := 0 to 2 do A[I] := procedure begin WriteLn(I) end;' +
+    WarnLoopTail);
+  AssertTrue('for: the loop variable', LoopCaptureWarned(W, 'I'));
+  AssertTrue('names the remedy', Pos('block-scoped ''var''', W) >= 0);
+
+  W := SemanticWarnings(WarnLoopHead +
+    'for I := 0 to 2 do begin S := ''x''; ' +
+    'A[I] := procedure begin WriteLn(S) end end;' + WarnLoopTail);
+  AssertTrue('a local assigned in the body', LoopCaptureWarned(W, 'S'));
+  AssertFalse('not the loop variable it does not use',
+    LoopCaptureWarned(W, 'I'));
+
+  W := SemanticWarnings(WarnLoopHead +
+    'for X in AItems do A[0] := procedure begin WriteLn(X) end;' +
+    WarnLoopTail);
+  AssertTrue('for-in: the loop variable', LoopCaptureWarned(W, 'X'));
+
+  W := SemanticWarnings(WarnLoopHead +
+    'N := 0; while N < 3 do begin N := N + 1; ' +
+    'A[0] := procedure begin WriteLn(N) end end;' + WarnLoopTail);
+  AssertTrue('while: a local assigned in the body', LoopCaptureWarned(W, 'N'));
+
+  W := SemanticWarnings(WarnLoopHead +
+    'N := 0; repeat N := N + 1; ' +
+    'A[0] := procedure begin WriteLn(N) end until N >= 3;' + WarnLoopTail);
+  AssertTrue('repeat: a local assigned in the body', LoopCaptureWarned(W, 'N'));
+
+  W := SemanticWarnings(WarnLoopHead +
+    'for I := 0 to 2 do for N := 0 to 2 do ' +
+    'A[N] := procedure begin WriteLn(I) end;' + WarnLoopTail);
+  AssertTrue('an outer loop''s variable from an inner loop',
+    LoopCaptureWarned(W, 'I'));
+end;
+
+procedure TAnonMethodTests.TestWarn_ClosureInLoop_BlockVarAndUntouched_NoWarning;
+var
+  W: string;
+begin
+  W := SemanticWarnings(WarnLoopHead +
+    'for I := 0 to 2 do begin var Snap: Int := I; ' +
+    'A[I] := procedure begin WriteLn(Snap) end end;' + WarnLoopTail);
+  AssertEquals('a block-scoped copy is per iteration', '', W);
+
+  W := SemanticWarnings(WarnLoopHead +
+    'for I := 0 to 2 do A[0] := procedure begin WriteLn(Total) end;' +
+    WarnLoopTail);
+  AssertEquals('a variable the loop does not assign', '', W);
+
+  W := SemanticWarnings(WarnLoopHead +
+    'for I := 0 to 2 do N := I; ' +
+    'A[0] := procedure begin WriteLn(I + N) end;' + WarnLoopTail);
+  AssertEquals('a closure made after the loop', '', W);
 end;
 
 initialization

@@ -2453,6 +2453,34 @@ env, so the stored closures observe their own iteration's values
 behaviour (`3, 3, 3`).  One closure may not mix block-scoped and
 routine-level (or `Self`) captures — environment chaining is deferred.
 
+The compiler warns about the trap rather than leaving it to be found at run
+time.  A closure literal inside a loop body (`for`, `for ... in`, `while`,
+`repeat`) is reported when it captures a variable that every iteration of
+that loop shares: the loop's control variable, or a routine-level local
+assigned earlier in the body.
+
+[source,pascal]
+----
+for I := 1 to 3 do
+begin
+  S := 'item' + IntToStr(I);
+  L.Add(procedure begin WriteLn(I, ' ', S) end);   { warning: I, and S }
+end;
+----
+
+----
+Warning: closure captures 'I', which every iteration of the enclosing loop
+shares (capture is by reference): to capture this iteration's value, copy it
+into a block-scoped 'var' inside the loop body
+----
+
+The behaviour is unchanged -- the closures above still print `4 item3` three
+times -- and a closure that runs before its iteration ends (a callback
+handed to a call that invokes it at once) is correct as written; a
+block-scoped copy silences the warning there too.  A block-scoped `var`, a
+variable the loop does not assign, and a closure made after the loop are not
+reported.
+
 === Generics interaction (Phase 6)
 
 Blaise generics are reified/monomorphised, and closures compose with them:
