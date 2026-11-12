@@ -1126,7 +1126,8 @@ platform port — for example `getpid` and `rmdir` in
 `memcpy` is satisfied by `runtime.cstub`.  The others either gain a leaf in
 `runtime.syscall.windows` or, preferably, are routed through `GRtlPlatform`.
 A full inventory is an M6 task: link `blaise.exe`, read the list of
-unresolved symbols, and resolve each one deliberately.
+unresolved symbols, and resolve each one deliberately.  (Done in M6: every
+one goes through `GRtlPlatform`; see M6, _As delivered_.)
 
 == Standard library
 
@@ -1610,6 +1611,40 @@ handling; `windows-vm.sh selfhost`; the CI job; Windows artefact in the
 release flow.
 +
 _Exit:_ the self-hosting gate holds locally and on `windows-latest`.
++
+_As delivered:_ the cross-built `blaise.exe` compiles a program and then
+itself in the guest, and the result is byte-identical (about 20 seconds
+under emulation): `scripts/windows-vm.sh selfhost` prints
+`WINDOWS_SELFHOST_OK`.  In detail:
++
+* *The inventory.*  Linking `blaise.exe` left four direct libc bindings in
+  the compiler: `getpid` and `rmdir` in the driver now use the
+  `GetProcessID` and `RemoveDir` builtins; `readlink` (finding the
+  compiler's own installation) and `chmod` (the ELF linker's executable
+  bit) became two `TRtlPlatform` operations, `ReadLink` and
+  `MakeExecutable`, reached through `_ReadLink` and `_MakeExecutable` in
+  `rtl.platform.abi`.  On Windows there is no link target to report and no
+  bit to set.  `memcpy` is `runtime.cstub`'s.
+* *Host paths.*  The compiler is compiled for its host, so its predefined
+  `DirectorySeparator` and `PathSeparator` are the host's.  What assumed a
+  POSIX host was the test for an absolute path (a leading `/`) and
+  `ExpandFileName`: the compiler asks `IsAbsolutePath` (`uStrCompat`) instead,
+  and the standard library gains `ExtractFileDrive` (FPC and Delphi
+  semantics) and a drive- and UNC-aware `ExpandFileName`.  Both recognise a
+  drive only where `DirectorySeparator` is `\`, so POSIX results are
+  unchanged.
+* *CI.*  `windows-build` (Ubuntu) cross-builds `blaise.exe`, `m3rtl`,
+  `m3fault` and the Layer 3 fixture with its mingw-w64 DLL and uploads them
+  as `blaise-windows-x86_64-<sha>`; `windows-check` (`windows-latest`) runs
+  `scripts/windows-ci-check.ps1`: the fixtures, the D7 fault codes, and the
+  self-hosting gate on real x64 hardware.  The uploaded `blaise.exe` is the
+  Windows artefact a release takes.
+* *Fixes found on the way:* the PE TLS rewrite read the operand marker in
+  a string literal's `.ascii` directive (the compiler's own source holds
+  one) and failed the cross build; and `Exec` returned `system()`'s raw
+  wait status on POSIX targets (768 for `exit 3`) while Windows returned
+  the exit code -- every target now returns the exit code, 128 plus the
+  signal for a killed command.
 
 M7 — Breadth::
 Stdlib networking, async and fibres; `.pdata` / `.xdata`; native-host export
