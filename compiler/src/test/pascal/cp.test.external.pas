@@ -22,6 +22,10 @@ type
     function ParseUnit(const ASrc: string): TUnit;
     procedure AssertCodegenRefused(const AWhat, ASrc, ATarget: string);
   published
+    { @Routine of an external routine is the address of its external name:
+      @c_strlen is strlen's address (it named the Pascal symbol c_strlen,
+      which nothing defines) }
+    procedure TestAddrOfExternal_IsItsExternalName;
     { Parser — standalone procedure }
     procedure TestParse_ExternalProc_IsExternal;
     procedure TestParse_ExternalProc_ExternalNameEmpty;
@@ -750,6 +754,16 @@ begin
       A) >= 0);
   AssertTrue('a duplicate pair is recorded once',
     Pos(ImportPair('asym', 'aa') + ImportPair('asym', 'aa'), A) < 0);
+end;
+
+procedure TExternalTests.TestAddrOfExternal_IsItsExternalName;
+const
+  SRC = 'program P; type TLen = function(S: PChar): UInt64; cdecl; ' +
+    'function c_strlen(S: PChar): UInt64; external ''c'' name ''strlen''; ' +
+    'var L: TLen; begin L := @c_strlen; end.';
+begin
+  AssertEquals('', AsmMissing(SRC, 'leaq strlen(%rip), %rax',
+    'adrp x0, _strlen@GOTPAGE'));
 end;
 
 initialization

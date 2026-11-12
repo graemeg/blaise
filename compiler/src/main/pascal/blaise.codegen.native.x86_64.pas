@@ -11918,9 +11918,11 @@ begin
        (TIdentExpr(AOE.Expr).ResolvedType <> nil) and
        (TIdentExpr(AOE.Expr).ResolvedType.Kind = tyProcedural) then
     begin
+      { the routine's link symbol: an external one is known by its
+        external name (@c_strlen is the address of strlen) }
       if AOE.ResolvedFreeRoutine <> nil then
         Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-          [NativeMangle(TMethodDecl(AOE.ResolvedFreeRoutine).ResolvedEmitName)]))
+          [FuncSymbolFromDecl(TMethodDecl(AOE.ResolvedFreeRoutine))]))
       else if Self.IsLocal(TIdentExpr(AOE.Expr).Name) and
               not Self.IsCaptured(TIdentExpr(AOE.Expr).Name) then
         { @F with F a LOCAL variable of procedural type (a closure / method
