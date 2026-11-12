@@ -16555,6 +16555,23 @@ begin
               UnwParkOpen(TransTop + TransN);
               Inc(TransN);
               FStrTransTop := TransTop + TransN;
+            end
+            else if ArcExprIsUnownedStrTransient(
+                      TASTExpr(TArrayLiteralExpr(Arg).Elements.Items[K])) then
+            begin
+              { an rc=0 string transient (['f', 'a' + S]) is pinned for the
+                call and released after it, as an rc=0 const string
+                argument is (shape '0').  Stored unpinned, nothing owned it:
+                a callee that took and dropped a reference (Comp := AData;
+                Comp := ...) took it 0 -> 1 -> 0 and freed it while the
+                literal still pointed at it, and otherwise it leaked. }
+              EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+              UnwParkOpen(TransTop + TransN);
+              EmitCallSym('_StringAddRef');
+              EmitLoadSlot('x0', StrTransSlot(TransTop + TransN));
+              TransShapes := TransShapes + '0';
+              Inc(TransN);
+              FStrTransTop := TransTop + TransN;
             end;
             EmitAddSubImm('add', 'x9', 'sp',
               PopRegs.Count * 16 + LitBase + LitOff + K * ESz);

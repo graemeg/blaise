@@ -23,6 +23,10 @@ type
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
   published
+    { an rc=0 string element of an open-array literal (a concatenation) is
+      pinned for the call and released after it: it was stored unpinned and
+      a callee's retain/release pair freed it under the literal }
+    procedure TestCodegen_OALiteral_ConcatElementIsPinned;
     { an open-array literal of records, interfaces, closures and static
       arrays is typed as a temporary dynamic array (the backends build an
       in-frame block only for one-word elements); an Integer literal keeps
@@ -962,6 +966,28 @@ begin
   Body := Copy(X, P, Pos('ret', Copy(X, P, Length(X))));
   AssertTrue('the element is not loaded as a pointer: ' + Body,
     Pos('addq %rcx, %rax' + #10 + #9 + 'movq (%rax), %rax', Body) < 0);
+end;
+
+procedure TOpenArrayTests.TestCodegen_OALiteral_ConcatElementIsPinned;
+const
+  Src = '''
+    program OA;
+    procedure P(const A: array of string);
+    begin
+    end;
+    procedure Q(const S: string);
+    begin
+      P(['a', S + 'b'])
+    end;
+    begin
+      Q('z')
+    end.
+    ''';
+begin
+  AssertEquals('the element is retained as it is stored', '',
+    AsmMissing(Src,
+      #9'movq %rax, %rdi'#10#9'callq _StringAddRef'#10#9'movq %rsp, %rax',
+      #9'bl __StringAddRef'#10#9'ldur x0, [x29'));
 end;
 
 initialization

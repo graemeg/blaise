@@ -21691,6 +21691,19 @@ begin
         Self.DeferNativeRelease('_ClassRelease')
       else if ElemType.Kind = tyDynArray then
         Self.DeferNativeRelease('_DynArrayRelease');
+    end
+    else if ArcExprIsUnownedStrTransient(TASTExpr(ALit.Elements.Items[I])) then
+    begin
+      { an rc=0 string transient (['f', 'a' + S]) is pinned for the call
+        and released at the statement end, as an rc=0 string argument is.
+        Stored unpinned, nothing owned it: a callee that took and dropped a
+        reference (Comp := AData; Comp := ...) took it 0 -> 1 -> 0 and freed
+        it while the literal still pointed at it, and otherwise it leaked. }
+      Self.DeferNativeRelease('_StringRelease');
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * ElemSize]));
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _StringAddRef');
+      Continue;
     end;
     case ElemSize of
       1: Self.Emit(Format(#9'movb %%al, %d(%%rsp)', [I * ElemSize]));

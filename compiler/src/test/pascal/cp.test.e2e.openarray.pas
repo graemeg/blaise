@@ -32,6 +32,14 @@ type
       never releasing an owned element.  Through a function, a method, a
       procedural variable and an interface dispatch }
     procedure TestRun_OpenArrayLiteral_RichElements;
+    { a concatenation in a string open-array literal (['f', 'a' + S]) is
+      kept alive for the call: a callee that took and dropped a reference to
+      the element (Comp := AData; Comp := ...) freed it while the literal
+      still pointed at it -- "_StringRelease corrupted header", and a crash
+      in TZipWriter.AddEntry's CRC.  Through a routine, a method with
+      default parameters forwarding the element, several elements, and a
+      loop }
+    procedure TestRun_OpenArrayLiteral_ConcatElementOutlivesCallee;
     { an interface method with an open-array parameter, given a dynamic
       array, a dynamic-array call result and a literal (x86-64 passed one
       word and a garbage high, or refused the literal) }
@@ -1599,6 +1607,71 @@ begin
   AssertRunsOnAll(Src,
     'rec x 1' + LE + 'int 1 2 9 2' + LE + 'int 3 4 10 5' + LE +
     'int 6 3 24 10' + LE + 'int 11 2 3 12' + LE + 'rec x 2' + LE, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_OpenArrayLiteral_ConcatElementOutlivesCallee;
+const
+  Src = '''
+    program P;
+    uses sysutils;
+    type
+      TW = class
+      public
+        procedure AddRaw(const AName, AData: string; AMethod: Int);
+        procedure AddEntry(const AName, AData: string; AMethod: Int = 8);
+      end;
+    procedure Take(const AData: string; AMethod: Int);
+    var
+      Comp: string;
+    begin
+      Comp := AData;
+      if AMethod = 8 then
+      begin
+        Comp := 'replaced ' + AData;
+        if Length(Comp) >= Length(AData) then
+          Comp := AData;
+      end;
+      WriteLn(AData, ' ', Length(AData));
+    end;
+    procedure TW.AddRaw(const AName, AData: string; AMethod: Int);
+    begin
+      Take(AData, AMethod);
+      WriteLn(AName);
+    end;
+    procedure TW.AddEntry(const AName, AData: string; AMethod: Int);
+    begin
+      Self.AddRaw(AName, AData, AMethod);
+    end;
+    procedure Each(const AItems: array of string);
+    var
+      I: Int;
+    begin
+      for I := 0 to High(AItems) do
+        Take(AItems[I], 8);
+    end;
+    procedure Zip(const AItems: array of string);
+    begin
+      TW.Create().AddEntry(AItems[0], AItems[1]);
+    end;
+    var
+      I: Int;
+      S: string;
+    begin
+      S := 'x';
+      for I := 1 to 3 do
+        Each(['lit', 'ab' + 'cd', S + IntToStr(I)]);
+      Zip(['f.json', '{"id": "sodium",' + ' "version": "0.6.0"}']);
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  AssertRunsOnAll(Src,
+    'lit 3' + LE + 'abcd 4' + LE + 'x1 2' + LE +
+    'lit 3' + LE + 'abcd 4' + LE + 'x2 2' + LE +
+    'lit 3' + LE + 'abcd 4' + LE + 'x3 2' + LE +
+    '{"id": "sodium", "version": "0.6.0"} 36' + LE + 'f.json' + LE, 0);
 end;
 
 procedure TE2EOpenArrayTests.TestRun_OpenArray_OfStaticArrays;
