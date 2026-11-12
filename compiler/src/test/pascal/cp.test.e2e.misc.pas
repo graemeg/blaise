@@ -1835,7 +1835,7 @@ const
 var
   BinFile, ToolOut: string;
 begin
-  if HostTarget().OS <> osMacOS then
+  if E2ETargetDesc().OS <> osMacOS then
   begin
     Ignore('Mach-O dylib binding: macOS only');
     Exit;
@@ -1871,7 +1871,7 @@ const
 var
   BinFile, ToolOut: string;
 begin
-  if HostTarget().OS <> osMacOS then
+  if E2ETargetDesc().OS <> osMacOS then
   begin
     Ignore('Mach-O libSystem binding: macOS only');
     Exit;
@@ -3812,7 +3812,8 @@ const
       DeleteFile(Path);
       WriteLn(FileExists(Path));
       WriteLn(GetEnvVar('PATH') <> '', ' ', GetEnvironmentVariable('PATH') = GetEnvVar('PATH'));
-      WriteLn(Exec('true'), ' ', Exec('false') <> 0);
+      { `exit N` means the same to /bin/sh and to cmd.exe }
+      WriteLn(Exec('exit 0'), ' ', Exec('exit 1') <> 0);
       WriteLn(ChangeFileExt('test.pas', '.bak'), ' ', ExtractFileName('/usr/bin/ls'), ' ',
         ExtractFilePath('/usr/bin/ls'), ' ', IncludeTrailingPathDelimiter('/usr/bin'));
       S := 'abcdef';
@@ -3832,7 +3833,8 @@ begin
     'False' + LE +
     'True True' + LE +
     '0 True' + LE +
-    'test.bak ls /usr/bin/ /usr/bin/' + LE +
+    { a trailing delimiter is added as the target's own separator }
+    'test.bak ls /usr/bin/ /usr/bin' + TargetDirectorySeparator(E2ETargetDesc()) + LE +
     '9223372036854775807 cdef' + LE +
     'TA TB' + LE, 3);
 end;
@@ -5055,6 +5057,11 @@ var
   I, Rc: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  if not E2ERunsOnHost() then
+  begin
+    Ignore('runs host tools (sh, cc)');
+    Exit
+  end;
   { A program object whose symbol list mixes case and underscores, so a
     collating sort and a byte-wise comm disagree on its order. }
   SrcFile := FScratch + '/rtlsel.pas';

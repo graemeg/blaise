@@ -96,8 +96,8 @@ const
     ''';
 
   { Round-trip 5 bytes through TFileOutputStream and TFileInputStream
-    via the system temp directory.  Uses /tmp directly to avoid pulling
-    in SysUtils path helpers from this small program. }
+    via the system temp directory (the GetTempDir builtin, so the program
+    runs on any target and needs no SysUtils). }
   SrcFileRoundTrip = '''
     program P;
     uses Streams;
@@ -108,7 +108,7 @@ const
         I:    Int;
     begin
       for I := 0 to 4 do Buf[I] := 65 + I;
-      Fout := TFileOutputStream.Create('/tmp/blaise_streams_e2e.txt');
+      Fout := TFileOutputStream.Create(GetTempDir() + 'blaise_streams_e2e.txt');
       try
         Fout.Write(@Buf[0], 5);
       finally
@@ -116,7 +116,7 @@ const
         Fout.Free()
       end;
       for I := 0 to 15 do Buf[I] := 0;
-      Fin := TFileInputStream.Create('/tmp/blaise_streams_e2e.txt');
+      Fin := TFileInputStream.Create(GetTempDir() + 'blaise_streams_e2e.txt');
       try
         N := Fin.Read(@Buf[0], 16);
         WriteLn(N);
@@ -169,7 +169,7 @@ const
         N, I: Int;
     begin
       for I := 0 to 9 do Buf[I] := 65 + I;
-      Fout := TFileOutputStream.Create('/tmp/blaise_buf_e2e.txt');
+      Fout := TFileOutputStream.Create(GetTempDir() + 'blaise_buf_e2e.txt');
       Bout := TBufferedOutputStream.Create(Fout);
       try
         Bout.Write(@Buf[0], 10);
@@ -178,7 +178,7 @@ const
         Bout.Free()
       end;
       for I := 0 to 31 do Buf[I] := 0;
-      Fin := TFileInputStream.Create('/tmp/blaise_buf_e2e.txt');
+      Fin := TFileInputStream.Create(GetTempDir() + 'blaise_buf_e2e.txt');
       Bin := TBufferedInputStream.Create(Fin);
       try
         N := Bin.Read(@Buf[0], 32);
@@ -205,7 +205,7 @@ const
     begin
       Buf[0] := 1; Buf[1] := 2; Buf[2] := 3;
       Buf[3] := 4; Buf[4] := 5;
-      Fout := TFileOutputStream.Create('/tmp/blaise_flush_e2e.bin');
+      Fout := TFileOutputStream.Create(GetTempDir() + 'blaise_flush_e2e.bin');
       Bout := TBufferedOutputStream.Create(Fout);
       try
         Bout.Write(@Buf[0], 5)
@@ -215,7 +215,7 @@ const
         Bout.Free()
       end;
       for I := 0 to 7 do Buf[I] := 0;
-      Fin := TFileInputStream.Create('/tmp/blaise_flush_e2e.bin');
+      Fin := TFileInputStream.Create(GetTempDir() + 'blaise_flush_e2e.bin');
       try
         N := Fin.Read(@Buf[0], 8);
         WriteLn(N);
@@ -235,7 +235,7 @@ const
     var Fin: TFileInputStream;
     begin
       try
-        Fin := TFileInputStream.Create('/tmp/blaise_does_not_exist_x42.bin');
+        Fin := TFileInputStream.Create(GetTempDir() + 'blaise_does_not_exist_x42.bin');
         WriteLn('unreachable');
         Fin.Free()
       except
@@ -263,7 +263,7 @@ const
         Line: string;
         Count: Int;
     begin
-      Fout := TFileOutputStream.Create('/tmp/blaise_text_e2e.txt');
+      Fout := TFileOutputStream.Create(GetTempDir() + 'blaise_text_e2e.txt');
       Bout := TBufferedOutputStream.Create(Fout);
       W    := TStreamWriter.Create(Bout);
       try
@@ -275,7 +275,7 @@ const
         W.Free()
       end;
       Count := 0;
-      Fin := TFileInputStream.Create('/tmp/blaise_text_e2e.txt');
+      Fin := TFileInputStream.Create(GetTempDir() + 'blaise_text_e2e.txt');
       Bin := TBufferedInputStream.Create(Fin);
       R   := TStreamReader.Create(Bin);
       try
@@ -525,7 +525,7 @@ const
         N:    Int64;
         I:    Int;
     begin
-      Wri := TFileOutputStream.Create('/tmp/blaise_copy_src_e2e.txt');
+      Wri := TFileOutputStream.Create(GetTempDir() + 'blaise_copy_src_e2e.txt');
       try
         for I := 0 to 9 do Buf[I] := 65 + I;
         Wri.Write(@Buf[0], 10);
@@ -533,8 +533,8 @@ const
         Wri.Close();
         Wri.Free()
       end;
-      Src := TFileInputStream.Create('/tmp/blaise_copy_src_e2e.txt');
-      Dst := TFileOutputStream.Create('/tmp/blaise_copy_dst_e2e.txt');
+      Src := TFileInputStream.Create(GetTempDir() + 'blaise_copy_src_e2e.txt');
+      Dst := TFileOutputStream.Create(GetTempDir() + 'blaise_copy_dst_e2e.txt');
       try
         N := CopyStream(Src, Dst);
         WriteLn(N)
@@ -542,7 +542,7 @@ const
         Src.Close(); Src.Free();
         Dst.Close(); Dst.Free()
       end;
-      Vrf := TFileInputStream.Create('/tmp/blaise_copy_dst_e2e.txt');
+      Vrf := TFileInputStream.Create(GetTempDir() + 'blaise_copy_dst_e2e.txt');
       R   := TStreamReader.Create(Vrf);
       try
         WriteLn(R.ReadAll())

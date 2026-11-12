@@ -754,6 +754,7 @@ begin
   if AOS = osWindows then
   begin
     Result.Add('runtime.syscall.windows');
+    Result.Add('runtime.civil');
     Result.Add('runtime.cstub');
     Result.Add('runtime.thread.windows');
   end

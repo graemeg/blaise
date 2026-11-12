@@ -14,7 +14,7 @@ unit cp.test.e2e.sysutils;
 interface
 
 uses
-  blaise.testing, classes, sysutils, cp.test.e2e.base;
+  blaise.testing, classes, sysutils, blaise.codegen.target, cp.test.e2e.base;
 
 type
   [Threaded]
@@ -23,6 +23,7 @@ type
     procedure SetUp; override;
   published
     procedure TestRun_ListDir_ReturnsWholeNames;
+    procedure TestRun_FileOps_MadeByTheProgram;
     procedure TestRun_ParamStr_PrintsArg;
     procedure TestRun_ParamCount_WithArgs;
     procedure TestRun_ReadWriteFile_RoundTrip;
@@ -184,8 +185,8 @@ const
     '''
         program P;
         begin
-          WriteLn(DirectoryExists('/tmp'));
-          WriteLn(DirectoryExists('/__no_such_dir__'))
+          WriteLn(DirectoryExists(GetTempDir()));
+          WriteLn(DirectoryExists(GetTempDir() + '__no_such_dir__'))
         end.
         ''';
 
@@ -279,8 +280,14 @@ const
           Output: string;
           Chunk:  string;
         begin
+          { the child is this program, so the test needs no host command }
+          if ParamCount() > 0 then
+          begin
+            Write(ParamStr(1));
+            Exit
+          end;
           H := ProcessCreate();
-          ProcessSetExe(H, 'echo');
+          ProcessSetExe(H, ParamStr(0));
           ProcessAddArg(H, 'hello from process');
           ProcessExecute(H);
           Output := '';
@@ -299,23 +306,81 @@ const
   SrcProcessBuiltinsExitCode =
     '''
         program P;
+
+        { Run this program again with argument AArg; its exit code. }
+        function RunChild(const AArg: string): Int;
         var
-          H:    Pointer;
-          Code: Int;
+          H: Pointer;
           Chunk: string;
         begin
           H := ProcessCreate();
-          ProcessSetExe(H, 'true');
+          ProcessSetExe(H, ParamStr(0));
+          ProcessAddArg(H, AArg);
           ProcessExecute(H);
           Chunk := ProcessReadOutput(H);
           while Chunk <> '' do
             Chunk := ProcessReadOutput(H);
           ProcessWaitOnExit(H);
-          Code := ProcessExitCode(H);
-          ProcessFree(H);
-          WriteLn(IntToStr(Code))
+          Result := ProcessExitCode(H);
+          ProcessFree(H)
+        end;
+
+        begin
+          { the child is this program, so the test needs no host command }
+          if ParamCount() > 0 then
+            Halt(StrToInt(ParamStr(1)));
+          WriteLn(IntToStr(RunChild('0')), ' ', IntToStr(RunChild('7')))
         end.
         ''';
+
+procedure TE2ESysUtilsTests.TestRun_FileOps_MadeByTheProgram;
+const
+  { The file and directory operations on paths the program makes itself, so
+    it runs on any machine: '/' and the target's own separator both appear,
+    and ListDir's order is the file system's. }
+  Src = '''
+    program P;
+    uses SysUtils;
+    var
+      D, F, S, T: string;
+    begin
+      D := GetTempDir() + 'blaise_fileops_' + IntToStr(GetProcessID());
+      WriteLn(ForceDirectories(D + '/sub' + DirectorySeparator + 'deeper'), ' ',
+        DirectoryExists(D + DirectorySeparator + 'sub/deeper'));
+      F := D + '/sub/data.txt';
+      WriteLn(FileExists(F));
+      WriteFile(F, 'hello');
+      AppendFile(F, ' world');
+      WriteLn(FileExists(F), ' ', ReadFile(F), ' ', Length(ReadFile(F)));
+      WriteLn(FileAge(F) > 1700000000, ' ', FileAge(F + '.missing'));
+      WriteLn(DirectoryExists(F), ' ', DirectoryExists(D + '/sub'));
+      WriteLn(RenameFile(F, D + '/sub/moved.txt'), ' ', FileExists(F), ' ',
+        ReadFile(D + '/sub/moved.txt'));
+      S := ListDir(D + '/sub');
+      WriteLn((S = 'deeper' + #10 + 'moved.txt') or (S = 'moved.txt' + #10 + 'deeper'));
+      T := GetTempFileName(D, 'bfo');
+      WriteLn(FileExists(T), ' ', Copy(ExtractFileName(T), 0, 3));
+      DeleteFile(T);
+      DeleteFile(D + '/sub/moved.txt');
+      RemoveDir(D + '/sub/deeper');
+      RemoveDir(D + '/sub');
+      RemoveDir(D);
+      WriteLn(FileExists(D + '/sub/moved.txt'), ' ', DirectoryExists(D))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src,
+    'True True' + LineEnding +
+    'False' + LineEnding +
+    'True hello world 11' + LineEnding +
+    'True -1' + LineEnding +
+    'False True' + LineEnding +
+    'True False hello world' + LineEnding +
+    'True' + LineEnding +
+    'True bfo' + LineEnding +
+    'False False' + LineEnding, 0);
+end;
 
 procedure TE2ESysUtilsTests.TestRun_ListDir_ReturnsWholeNames;
 var
@@ -330,6 +395,12 @@ begin
     did not sort at all until it was fixed -- the test passed or failed
     with the filesystem's listing order). }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  if not E2ERunsOnHost() then
+  begin
+    Ignore('the program runs on another machine and cannot see the test''s files'
+      + ' (TestRun_FileOps_MadeByTheProgram covers it there)');
+    Exit
+  end;
   Dir := FScratch + '/listdir_probe';
   ForceDirectories(Dir);
   WriteFile(Dir + '/alpha.txt', 'a');
@@ -373,8 +444,13 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   TmpFile := GetTempFileName('', 'blaise_rwtest');
   try
-    AssertTrue('compile+run',
-      CompileAndRun(SrcReadWriteFile, Output, RCode, [TmpFile]));
+    { a program on another machine writes beside itself instead }
+    if E2ERunsOnHost() then
+      AssertTrue('compile+run',
+        CompileAndRun(SrcReadWriteFile, Output, RCode, [TmpFile]))
+    else
+      AssertTrue('compile+run',
+        CompileAndRun(SrcReadWriteFile, Output, RCode, [ExtractFileName(TmpFile)]));
     AssertEquals('ReadFile content', 'hello file', Trim(Output));
   finally
     if FileExists(TmpFile) then DeleteFile(TmpFile);
@@ -389,6 +465,12 @@ var
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not E2ERunsOnHost() then
+  begin
+    Ignore('the program runs on another machine and cannot see the test''s files'
+      + ' (TestRun_FileOps_MadeByTheProgram covers it there)');
+    Exit
+  end;
   TmpFile := GetTempFileName('', 'blaise_fe_test');
   Lines := TStringList.Create();
   Lines.Add('x');
@@ -483,7 +565,9 @@ begin
   Lines := TStringList.Create();
   try
     Lines.Text := Trim(Output);
-    AssertEquals('/usr/bin -> /usr/bin/', '/usr/bin/', Lines.Strings[0]);
+    { the delimiter added is the target's own separator }
+    AssertEquals('/usr/bin -> /usr/bin + separator',
+      '/usr/bin' + TargetDirectorySeparator(E2ETargetDesc()), Lines.Strings[0]);
     AssertEquals('/usr/bin/ unchanged',   '/usr/bin/', Lines.Strings[1]);
   finally
     Lines.Free();
@@ -509,7 +593,7 @@ begin
   Lines := TStringList.Create();
   try
     Lines.Text := Trim(Output);
-    AssertEquals('/tmp exists = True',  'True',  Lines.Strings[0]);
+    AssertEquals('temp dir exists = True',  'True',  Lines.Strings[0]);
     AssertEquals('missing dir = False', 'False', Lines.Strings[1]);
   finally
     Lines.Free();
@@ -524,7 +608,8 @@ begin
   AssertEquals('exit code 0', 0, RCode);
   Dir := Trim(Output);
   AssertTrue('dir is non-empty', Length(Dir) > 0);
-  AssertTrue('dir ends with /', Dir[Length(Dir) - 1] = '/');
+  AssertEquals('dir ends with the directory separator',
+    TargetDirectorySeparator(E2ETargetDesc()), Copy(Dir, Length(Dir) - 1, 1));
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ForceDirectories_CreatesTree;
@@ -632,7 +717,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(SrcProcessBuiltinsExitCode, Output, RCode));
   AssertEquals('program exit code 0', 0, RCode);
-  AssertEquals('true exits with 0', '0', Trim(Output));
+  AssertEquals('children exit with 0 and 7', '0 7', Trim(Output));
 end;
 
 const
@@ -663,7 +748,7 @@ const
         program P;
         var D: string;
         begin
-          WriteLn(SetCurrentDir('/tmp'));
+          WriteLn(SetCurrentDir(GetTempDir()));
           D := GetCurrentDir();
           WriteLn(Length(D) > 0)
         end.
@@ -703,9 +788,9 @@ const
     '''
         program P;
         begin
-          WriteLn(LineEnding = #10);
-          WriteLn(DirectorySeparator = '/');
-          WriteLn(PathSeparator = ':')
+          WriteLn(Length(LineEnding), ' ', Ord(LineEnding[Length(LineEnding) - 1]));
+          WriteLn(DirectorySeparator);
+          WriteLn(PathSeparator)
         end.
         ''';
 
@@ -778,7 +863,7 @@ begin
   Lines := TStringList.Create();
   try
     Lines.Text := Trim(Output);
-    AssertEquals('SetCurrentDir /tmp returns True', 'True', Lines.Strings[0]);
+    AssertEquals('SetCurrentDir temp dir returns True', 'True', Lines.Strings[0]);
     AssertEquals('GetCurrentDir non-empty',         'True', Lines.Strings[1]);
   finally
     Lines.Free();
@@ -855,9 +940,14 @@ begin
   Lines := TStringList.Create();
   try
     Lines.Text := Trim(Output);
-    AssertEquals('LineEnding = #10', 'True', Lines.Strings[0]);
-    AssertEquals('DirectorySeparator = /', 'True', Lines.Strings[1]);
-    AssertEquals('PathSeparator = :', 'True', Lines.Strings[2]);
+    { the target's values, from the facts the compiler reads }
+    AssertEquals('LineEnding',
+      IntToStr(Length(TargetLineEnding(E2ETargetDesc()))) + ' 10',
+      Lines.Strings[0]);
+    AssertEquals('DirectorySeparator',
+      TargetDirectorySeparator(E2ETargetDesc()), Lines.Strings[1]);
+    AssertEquals('PathSeparator',
+      TargetPathSeparator(E2ETargetDesc()), Lines.Strings[2]);
   finally
     Lines.Free();
   end;
@@ -880,6 +970,12 @@ var
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not E2ERunsOnHost() then
+  begin
+    Ignore('the program runs on another machine and cannot see the test''s files'
+      + ' (TestRun_FileOps_MadeByTheProgram covers it there)');
+    Exit
+  end;
   TmpFile := GetTempFileName('', 'blaise_fileage_test');
   Lines := TStringList.Create();
   Lines.Add('x');
@@ -922,6 +1018,12 @@ var
   Lines: TStringList;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not E2ERunsOnHost() then
+  begin
+    Ignore('the program runs on another machine and cannot see the test''s files'
+      + ' (TestRun_FileOps_MadeByTheProgram covers it there)');
+    Exit
+  end;
   Dir := FScratch + '/statfile';
   ForceDirectories(Dir);
   TmpFile := Dir + '/known.dat';

@@ -55,6 +55,10 @@ GUEST_DIR='C:\blaise-test'
 OUT=compiler/target/it/windows
 RUN_TIMEOUT=${BLAISE_WINDOWS_RUN_TIMEOUT:-300}
 RUN_QUIET=
+# ' 2>&1' for e2e-run: the guest joins the program's standard error to its
+# standard output, so the two keep their order, as the harness's one pipe
+# does on the host.  Over ssh they are separate streams and arrive apart.
+RUN_JOIN=
 
 die() { echo "$*" >&2; exit 1; }
 [ -x "$UTMCTL" ] || die "utmctl not found at $UTMCTL: brew install --cask utm"
@@ -140,7 +144,7 @@ run_in_vm() {
     "$GUEST_USER@127.0.0.1:${dir//\\//}/"
   rm -rf "$tmp"
   local rc=0
-  vm_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File $dir\\windows-run.ps1 -Exe $dir\\$name -TimeoutSec $RUN_TIMEOUT $RUN_QUIET" || rc=$?
+  vm_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File $dir\\windows-run.ps1 -Exe $dir\\$name -TimeoutSec $RUN_TIMEOUT $RUN_QUIET$RUN_JOIN" || rc=$?
   vm_ssh "cd /d $GUEST_DIR && rmdir /s /q $dir" >/dev/null 2>&1 || true
   return $rc
 }
@@ -175,6 +179,7 @@ case "$cmd" in
     # with LF line ends and no exit-code line, then its exit code.
     [ $# -ge 1 ] || die "usage: scripts/windows-vm.sh e2e-run <local-exe> [args]"
     RUN_QUIET=-Quiet
+    RUN_JOIN=' 2>&1'
     rc=0
     run_in_vm "$@" | tr -d '\r' || rc=$?
     exit $rc

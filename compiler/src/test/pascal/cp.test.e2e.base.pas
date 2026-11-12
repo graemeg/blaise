@@ -208,6 +208,15 @@ type
     procedure WriteScratchUnit(const AUnitSrc: string);
   end;
 
+{ The target e2e programs are compiled for: BLAISE_E2E_TARGET, else the
+  host.  A test whose expectation is a fact of the target (its line ending,
+  its directory separator) asks this, not the host. }
+function E2ETargetDesc: TTargetDesc;
+{ Whether e2e programs run on this machine.  False under BLAISE_E2E_RUNNER:
+  the program then runs on another machine and cannot see files the test
+  makes, nor can the test run host tools through RunProc. }
+function E2ERunsOnHost: Boolean;
+
 implementation
 
 { Cross-target runs (windows-x86_64-backend-design.adoc, "Layer 1").  With
@@ -224,6 +233,17 @@ end;
 function E2ERunner: string;
 begin
   Result := GetEnvironmentVariable('BLAISE_E2E_RUNNER');
+end;
+
+function E2ETargetDesc: TTargetDesc;
+begin
+  if (E2ETarget() = '') or not ParseTargetName(E2ETarget(), Result) then
+    Result := HostTarget();
+end;
+
+function E2ERunsOnHost: Boolean;
+begin
+  Result := E2ERunner() = '';
 end;
 
 { The name the compiler gives the executable for output path ABin: the

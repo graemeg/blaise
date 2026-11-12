@@ -1339,6 +1339,17 @@ end;
 { File-path manipulation                                               }
 { ------------------------------------------------------------------ }
 
+{ Whether byte I of P separates path components: '/' on every target, and
+  the target's own DirectorySeparator as well, so '\' too on Windows.  On a
+  POSIX target the two are the same character and '\' stays an ordinary
+  file-name byte. }
+function IsPathDelim(P: PChar; I: Int64): Boolean;
+const
+  Native = DirectorySeparator;
+begin
+  Result := (P[I] = '/') or (P[I] = Native[0]);
+end;
+
 function _ChangeFileExt(Path, Ext: Pointer): Pointer;
 var
   P, E: PChar;
@@ -1352,7 +1363,7 @@ begin
   I := PLen - 1;
   while I >= 0 do
   begin
-    if P[I] = 47 then Break;
+    if IsPathDelim(P, I) then Break;
     if P[I] = 46 then begin DotPos := I; Break end;
     Dec(I);
   end;
@@ -1372,7 +1383,7 @@ begin
   PLen := StrLen(Path);
   Start := 0;
   for I := 0 to PLen - 1 do
-    if P[I] = 47 then Start := I + 1;
+    if IsPathDelim(P, I) then Start := I + 1;
   Result := StrAlloc(PLen - Start);
   if (Result <> nil) and (PLen - Start > 0) then
     MemCopy(Result, P + Start, PLen - Start);
@@ -1387,7 +1398,7 @@ begin
   PLen := StrLen(Path);
   SlashPos := -1;
   for I := 0 to PLen - 1 do
-    if P[I] = 47 then SlashPos := I;
+    if IsPathDelim(P, I) then SlashPos := I;
   if SlashPos < 0 then
   begin
     Exit(StrAlloc(0));
@@ -1405,7 +1416,7 @@ begin
   PLen := StrLen(Path);
   SlashPos := -1;
   for I := 0 to PLen - 1 do
-    if P[I] = 47 then SlashPos := I;
+    if IsPathDelim(P, I) then SlashPos := I;
   if (SlashPos < 0) or (SlashPos = 0) then
   begin
     Exit(StrAlloc(0));
@@ -1426,7 +1437,7 @@ begin
   LastSep := -1;
   for I := 0 to PLen - 1 do
   begin
-    if P[I] = 47 then LastSep := I;
+    if IsPathDelim(P, I) then LastSep := I;
     if P[I] = 46 then LastDot := I;
   end;
   if (LastDot < 0) or ((LastSep >= 0) and (LastDot < LastSep)) then
@@ -1439,14 +1450,18 @@ begin
     MemCopy(Result, P + LastDot, ExtLen);
 end;
 
+{ Path ending in a separator: the target's DirectorySeparator is added when
+  it does not end in one already. }
 function _IncludeTrailingPathDelimiter(Path: Pointer): Pointer;
+const
+  Native = DirectorySeparator;
 var
   P, DP: PChar;
   PLen: Int64;
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
-  if (PLen > 0) and (P[PLen - 1] = 47) then
+  if (PLen > 0) and IsPathDelim(P, PLen - 1) then
   begin
     Result := StrAlloc(PLen);
     if Result <> nil then MemCopy(Result, P, PLen);
@@ -1456,7 +1471,7 @@ begin
   if Result = nil then Exit;
   if PLen > 0 then MemCopy(Result, P, PLen);
   DP := StrData(Result);
-  DP[PLen] := 47;
+  DP[PLen] := Native[0];
 end;
 
 function _ExcludeTrailingPathDelimiter(Path: Pointer): Pointer;
@@ -1466,7 +1481,7 @@ var
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
-  if (PLen > 0) and (P[PLen - 1] = 47) then Dec(PLen);
+  if (PLen > 0) and IsPathDelim(P, PLen - 1) then Dec(PLen);
   Result := StrAlloc(PLen);
   if (Result <> nil) and (PLen > 0) then
     MemCopy(Result, P, PLen);

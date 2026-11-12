@@ -15,8 +15,9 @@ unit runtime.syscall.windows;
 // Blaise routines do, with the internal convention.  Only their own calls into
 // kernel32 cross the boundary, each through an `external 'kernel32'` binding.
 //
-// File descriptors 0, 1 and 2 are the standard handles.  The descriptor table
-// for files the program opens arrives with the platform adapter (M4).
+// File descriptors 0, 1 and 2 are the standard handles.  A file or pipe the
+// platform adapter opens is entered in a descriptor table and gets the next
+// free number from 3, so the RTL's Int32 descriptors work unchanged.
 
 interface
 
@@ -51,6 +52,12 @@ function sysconf(Name: Int32): Int64;
 
 { The kernel32 handle behind descriptor Fd, or nil. }
 function _WinHandleOfFd(Fd: Int32): Pointer;
+{ Enter AHandle in the descriptor table: its descriptor, or -1 when the
+  table is full. }
+function _WinFdAdd(AHandle: Pointer): Int32;
+{ Take descriptor Fd out of the table: its handle, for the caller to close,
+  or nil when Fd is not a table entry. }
+function _WinFdRemove(Fd: Int32): Pointer;
 
 implementation
 
@@ -67,6 +74,10 @@ function VirtualFree(AAddress: Pointer; ASize: UInt64;
   AFreeType: UInt32): Int32; external 'kernel32' name 'VirtualFree';
 procedure ExitProcess(ACode: UInt32); external 'kernel32' name 'ExitProcess';
 procedure GetSystemInfo(AInfo: Pointer); external 'kernel32' name 'GetSystemInfo';
+procedure AcquireSRWLockExclusive(ALock: Pointer);
+  external 'kernel32' name 'AcquireSRWLockExclusive';
+procedure ReleaseSRWLockExclusive(ALock: Pointer);
+  external 'kernel32' name 'ReleaseSRWLockExclusive';
 
 const
   STD_INPUT_HANDLE = UInt32(-10);
@@ -77,6 +88,9 @@ const
   MEM_RELEASE = $8000;
   PAGE_READWRITE = $04;
   MAX_ATEXIT = 64;
+  { The first descriptor the table hands out, and its size. }
+  FIRST_TABLE_FD = 3;
+  MAX_TABLE_FDS = 1024;
 
 type
   { SYSTEM_INFO: dwNumberOfProcessors is the DWORD at offset 32. }
@@ -90,6 +104,11 @@ var
   GAtExitFns: array[0..MAX_ATEXIT - 1] of Pointer;
   GAtExitArgs: array[0..MAX_ATEXIT - 1] of Pointer;
   GAtExitCount: Int;
+  { The descriptor table: slot I holds descriptor FIRST_TABLE_FD + I, nil
+    when free.  GFdLock, an SRWLOCK, is all zero bits when unlocked, so the
+    zeroed global needs no initialisation. }
+  GFdHandles: array[0..MAX_TABLE_FDS - 1] of Pointer;
+  GFdLock: Pointer;
 
 function _WinHandleOfFd(Fd: Int32): Pointer;
 begin
@@ -98,8 +117,42 @@ begin
     1: Result := GetStdHandle(STD_OUTPUT_HANDLE);
     2: Result := GetStdHandle(STD_ERROR_HANDLE);
   else
-    Result := nil;
+    if (Fd >= FIRST_TABLE_FD) and (Fd < FIRST_TABLE_FD + MAX_TABLE_FDS) then
+    begin
+      AcquireSRWLockExclusive(@GFdLock);
+      Result := GFdHandles[Fd - FIRST_TABLE_FD];
+      ReleaseSRWLockExclusive(@GFdLock);
+    end
+    else
+      Result := nil;
   end;
+end;
+
+function _WinFdAdd(AHandle: Pointer): Int32;
+var
+  I: Int;
+begin
+  Result := -1;
+  AcquireSRWLockExclusive(@GFdLock);
+  for I := 0 to MAX_TABLE_FDS - 1 do
+    if GFdHandles[I] = nil then
+    begin
+      GFdHandles[I] := AHandle;
+      Result := Int32(FIRST_TABLE_FD + I);
+      Break;
+    end;
+  ReleaseSRWLockExclusive(@GFdLock);
+end;
+
+function _WinFdRemove(Fd: Int32): Pointer;
+begin
+  Result := nil;
+  if (Fd < FIRST_TABLE_FD) or (Fd >= FIRST_TABLE_FD + MAX_TABLE_FDS) then
+    Exit;
+  AcquireSRWLockExclusive(@GFdLock);
+  Result := GFdHandles[Fd - FIRST_TABLE_FD];
+  GFdHandles[Fd - FIRST_TABLE_FD] := nil;
+  ReleaseSRWLockExclusive(@GFdLock);
 end;
 
 function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
