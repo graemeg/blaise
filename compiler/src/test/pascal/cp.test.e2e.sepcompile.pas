@@ -101,6 +101,14 @@ type
       wrote — so the import saw a blank base and failed outright with
       "Type alias TMid = : base not found". }
     procedure TestTopLevelEnumSubrange_SurvivesIfaceRoundTrip;
+    { A procedural type whose parameters and result are generic instances
+      (TAction<TChoice>, TList<TChoice>) comes back from a cached interface
+      with all its parameters.  The importer looked each type up by name and
+      DROPPED a parameter whose instance did not exist yet, so assigning a
+      closure to such a property failed with "Type mismatch in field
+      assignment: expected 'TPickLoader' but got ''" -- only when the unit
+      came precompiled (as under PasBuild), never from source. }
+    procedure TestProcTypeWithGenericParams_SurvivesIfaceRoundTrip;
     { Regression (GH #194): Pascal identifiers are case-insensitive, so the
       spelling of a unit name in a `uses` clause must not decide whether its
       file is found.  The loader only tried two spellings — all-lowercase and
@@ -998,6 +1006,104 @@ begin
   AssertEquals('use_sub exit code', 0, Rc);
   { 1 5 20 — bounds 1..5 and a 5-element Integer array (not 0 255 1024). }
   AssertEquals('use_sub stdout', '1 5 20' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestProcTypeWithGenericParams_SurvivesIfaceRoundTrip;
+const
+  DepSrc =
+    '''
+    unit PickDep;
+    interface
+    uses
+      functional, generics.collections;
+    type
+      TChoice = class
+      public
+        Name: string;
+      end;
+      TPickLoader = reference to procedure(const AFor: string; ADone: TAction<TChoice>);
+      TPickFrom = reference to function(AList: TList<TChoice>): TList<TChoice>;
+      TPanel = class
+      private
+        FPick: TPickLoader;
+        FFrom: TPickFrom;
+      public
+        procedure Go();
+        property PickLoader: TPickLoader read FPick write FPick;
+        property PickFrom: TPickFrom read FFrom write FFrom;
+      end;
+    implementation
+    procedure TPanel.Go();
+    var
+      L: TList<TChoice>;
+    begin
+      FPick('1.21', procedure(AChoice: TChoice) begin WriteLn('chosen ', AChoice.Name); end);
+      L := TList<TChoice>.Create();
+      L.Add(TChoice.Create());
+      WriteLn('kept ', FFrom(L).Count);
+    end;
+    end.
+    ''';
+  UseSrc =
+    '''
+    program UsePick;
+    uses functional, generics.collections, PickDep;
+    var
+      P: TPanel;
+    begin
+      P := TPanel.Create();
+      P.PickLoader := procedure(const AFor: string; ADone: TAction<TChoice>)
+        var C: TChoice;
+        begin
+          C := TChoice.Create();
+          C.Name := 'fabric for ' + AFor;
+          ADone(C);
+        end;
+      P.PickFrom := function(AList: TList<TChoice>): TList<TChoice>
+        begin
+          Result := AList;
+        end;
+      P.Go()
+    end.
+    ''';
+var
+  DepPas, DepObj, UsePas, UseBin: string;
+  Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  DepPas := FScratch + '/PickDep.pas';
+  DepObj := FScratch + '/PickDep.o';
+  UsePas := FScratch + '/use_pick.pas';
+  UseBin := FScratch + '/use_pick';
+
+  { the dep becomes an .o carrying its interface; its source is hidden so
+    the program must read that interface }
+  WriteFile(DepPas, DepSrc);
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  AssertEquals('blaise(PickDep) exit code (output: ' + Captured + ')', 0, Rc);
+  AssertTrue('PickDep.o exists', FileExists(DepObj));
+  DeleteFile(DepPas);
+
+  WriteFile(UsePas, UseSrc);
+  Rc := RunBlaise(['--source', UsePas, '--output', UseBin,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_pick) exit code (output: ' + Captured + ')',
+               0, Rc);
+  Rc := RunBinary(UseBin, Captured);
+  AssertEquals('use_pick exit code', 0, Rc);
+  AssertEquals('use_pick stdout', 'chosen fabric for 1.21' + #10 + 'kept 1' + #10,
+    Captured)
 end;
 
 procedure TSepCompileTests.TestTopLevelEnumSubrange_SurvivesIfaceRoundTrip;

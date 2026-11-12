@@ -1200,7 +1200,7 @@ begin
 end;
 
 procedure RegisterProcType(AEntry: TTypeEntry; ATable: TSymbolTable;
-                           const AUnitName: string);
+                           const AUnitName: string; ASemantic: TSemanticAnalyser);
 var
   Def:       TProceduralTypeDef;
   ProcDesc:  TProceduralTypeDesc;
@@ -1208,7 +1208,7 @@ var
   K:         Int;
   MParam:    TMethodParam;
   ParamInfo: TProcParamInfo;
-  TSym:      TSymbol;
+  ParType:   TTypeDesc;
 begin
   Def      := TProceduralTypeDef(AEntry.Def);
   ProcDesc := ATable.NewProceduralType(AEntry.Name);
@@ -1218,26 +1218,30 @@ begin
     and the 16-byte fat-value ABI is lost (BUG-043 follow-on). }
   ProcDesc.IsReference := Def.IsReference;
   ProcDesc.CallingConv := Def.CallingConv;
+  { Parameter and result types resolve as the source path resolves them,
+    instantiating a generic one on demand.  A plain lookup found no
+    TAction<TLoaderChoice> (an instance nothing in the importing unit had
+    made yet), and the parameter was DROPPED: the warm-cache build saw a
+    one-parameter TPickLoader, and assigning a two-parameter closure to it
+    failed with "expected 'TPickLoader' but got ''" where a cold build
+    compiled. }
   for K := 0 to Def.Params.Count - 1 do
   begin
-    MParam := TMethodParam(Def.Params.Items[K]);
-    TSym   := ATable.Lookup(MParam.TypeName);
-    if (TSym <> nil) and (TSym.Kind = skType) then
+    MParam  := TMethodParam(Def.Params.Items[K]);
+    ParType := ResolveImportTypeName(MParam.TypeName, ATable, ASemantic);
+    if ParType <> nil then
     begin
       ParamInfo := TProcParamInfo.Create();
       ParamInfo.Name         := MParam.ParamName;
-      ParamInfo.TypeDesc     := ATable.ParamTypeFor(TSym.TypeDesc, MParam.IsOpenArray);
+      ParamInfo.TypeDesc     := ATable.ParamTypeFor(ParType, MParam.IsOpenArray);
       ParamInfo.IsVarParam   := MParam.IsVarParam;
       ParamInfo.IsConstParam := MParam.IsConstParam;
       ProcDesc.Params.Add(ParamInfo);
     end;
   end;
   if Def.IsFunction then
-  begin
-    TSym := ATable.Lookup(Def.ReturnTypeName);
-    if (TSym <> nil) and (TSym.Kind = skType) then
-      ProcDesc.ReturnType := TSym.TypeDesc;
-  end;
+    ProcDesc.ReturnType := ResolveImportTypeName(Def.ReturnTypeName, ATable,
+      ASemantic);
   Sym := TSymbol.Create(AEntry.Name, skType, ProcDesc);
   Sym.OwningUnit := AUnitName;
   DefineImportedType(Sym, ATable, AUnitName);
@@ -1388,7 +1392,7 @@ begin
     else if Entry.Def is TRecordTypeDef then
       RegisterRecord(Entry, ATable, AIface.Name, ASemantic)
     else if Entry.Def is TProceduralTypeDef then
-      RegisterProcType(Entry, ATable, AIface.Name)
+      RegisterProcType(Entry, ATable, AIface.Name, ASemantic)
     else
       raise EImportError.CreateFmt(
         'Type %s.%s: import of %s not yet implemented',
