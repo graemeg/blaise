@@ -4450,6 +4450,15 @@ begin
     record/field chain — see TryCollapseUnitQualifier. }
   TryCollapseUnitQualifier(Name, Line, Col, QualUnit);
 
+  { Name<Args> starting a statement: the type arguments join the name, as
+    in an expression.  A '(' after them is a generic routine's call (the
+    final arm below; GH #217); a '.' is a static method or a constructor of a
+    generic class, TW<Int>.Go(1);, which the '.' arm takes (it failed with
+    "Expected '(' after generic type arguments").  GenericArgsAhead only
+    matches a complete argument list followed by '.' or '(', and no
+    statement starts with a comparison. }
+  Self.FoldGenericArgs(Name);
+
   if Check(tkLBracket) then
   begin
     { Subscript on the statement LHS.  Three shapes:
@@ -5286,26 +5295,6 @@ begin
       or chained Ident(arg).Field.Method(args). Detect by peeking for
       '(' followed by a '.' after the paren closure — parse directly
       into a TFuncCallExpr receiver so the inner arg lives on. }
-    if GenericArgsAhead(0) then
-    begin
-      { a generic routine called as a statement, GenericProc<Integer>(1, 2);
-        -- the type arguments join the name, as in an expression, and the
-        semantic pass instantiates it (GH #217: "Bare reference to
-        'GenericProc' requires ()") }
-      Advance();  { consume '<' }
-      Name := Name + '<' + Self.ParseTypeName();
-      while Check(tkComma) do
-      begin
-        Advance();
-        Name := Name + ',' + Self.ParseTypeName();
-      end;
-      Expect(tkGreaterThan);
-      Name := Name + '>';
-      if not Check(tkLParen) then
-        raise EParseError.Create(Format(
-          'Expected ''('' after generic type arguments at line %d col %d in %s',
-          [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
-    end;
     if Check(tkLParen) then
     begin
       FCallNode      := TFuncCallExpr.Create();

@@ -6479,6 +6479,7 @@ var
   MDecl:    TMethodDecl;
   NewMDecl: TMethodDecl;
   MangledKey: string;
+  Slot:     Int;
   Par:      TMethodParam;
   NewPar:   TMethodParam;
   PDecl:    TPropertyDecl;
@@ -6719,11 +6720,21 @@ begin
       if NewMDecl.TypeParams <> nil then Continue;  { generic method — no slot }
       MangledKey := InstanceMethodKey(ClonedCD.Methods, J);
       if NewMDecl.IsVirtual then
-        RT.AddVTableSlot(MangledKey, '$' + ATypeName + '_' + MangledKey)
+      begin
+        Slot := RT.AddVTableSlot(MangledKey, '$' + ATypeName + '_' + MangledKey);
+        if NewMDecl.IsAbstract then
+          RT.VTableEntryAt(Slot).IsAbstract := True;
+      end
       else if NewMDecl.IsOverride then
-        RT.OverrideVTableSlot(
-          RT.FindVTableSlot(MangledKey),
-          '$' + ATypeName + '_' + MangledKey)
+      begin
+        Slot := RT.FindVTableSlot(MangledKey);
+        RT.OverrideVTableSlot(Slot, '$' + ATypeName + '_' + MangledKey);
+        { The override implements a slot the parent left abstract: without
+          this the instance's vtable kept the parent's abort stub
+          ("abstract method called" through TBase(TWork<Int>...).Wait). }
+        if Slot >= 0 then
+          RT.VTableEntryAt(Slot).IsAbstract := False;
+      end
       else if NewMDecl.IsConstructor and
               (not NewMDecl.IsVirtual) and (not NewMDecl.IsOverride) then
       begin
@@ -15299,6 +15310,12 @@ begin
   end;
 
   ObjSym := FTable.Lookup(ACall.ObjectName);
+  { TGen<Args>.StaticMethod(): instantiate the generic type on demand,
+    resolving type parameters bound in scope, as AnalyseMethodCallExpr does
+    for the expression form.  ObjectName is left as written: a generic
+    method body is shared by its instances. }
+  if (ObjSym = nil) and (StrPos('<', ACall.ObjectName) >= 0) then
+    ObjSym := Self.InstanceSymbol(ResolveScopeBoundTypeParams(ACall.ObjectName));
   { TypeName.StaticMethod() — a static (type-level) method called through the
     CLASS or RECORD name in statement position.  Resolve the method on the
     type; it must be declared static.  Lowered with NO Self.  (Records took
@@ -15321,7 +15338,9 @@ begin
       RecvIdent := TIdentExpr.Create();
       RecvIdent.Line := ACall.Line;
       RecvIdent.Col := ACall.Col;
-      RecvIdent.Name := ACall.ObjectName;
+      { the symbol's name: a generic instance (TW<Int>.Create();) is known
+        by the name it was instantiated under, not as written }
+      RecvIdent.Name := ObjSym.Name;
       ACall.ObjExpr := RecvIdent;
       ACall.ObjectName := '';
       Self.AnalyseMethodCall(ACall);

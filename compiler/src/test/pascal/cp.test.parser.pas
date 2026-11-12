@@ -41,6 +41,10 @@ type
     { GH #217: a statement calling a generic routine keeps the type
       arguments in the call's name, as an expression does }
     procedure TestParse_GenericCallStatement_KeepsTypeArgs;
+    { A static method of a generic class called as a statement,
+      TW<Int>.Go(1); -- it was "Expected '(' after generic type arguments"
+      though the same call parsed as an expression }
+    procedure TestParse_GenericClassStaticCallStatement;
     { FPC/Delphi constructs Blaise deliberately omits are recognised and
       rejected with the Blaise form ("recognise, reject, explain";
       language-rationale.adoc).  They used to fail with an unrelated
@@ -1342,6 +1346,29 @@ begin
       TProcCall(Prog.Block.Stmts.Items[0]).Name);
     AssertEquals('two type arguments', 'Show<string,Int>',
       TProcCall(Prog.Block.Stmts.Items[1]).Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_GenericClassStaticCallStatement;
+var
+  Prog: TProgram;
+begin
+  Prog := ParseSource(
+    'program P;'
+    + ' begin TW<Int>.Go(1); TMap<string, TList<Int>>.Reset() end.');
+  try
+    AssertTrue('a method call statement',
+      Prog.Block.Stmts.Items[0] is TMethodCallStmt);
+    AssertEquals('on the generic type', 'TW<Int>',
+      TMethodCallStmt(Prog.Block.Stmts.Items[0]).ObjectName);
+    AssertEquals('of its method', 'Go',
+      TMethodCallStmt(Prog.Block.Stmts.Items[0]).Name);
+    AssertTrue('two and nested type arguments',
+      Prog.Block.Stmts.Items[1] is TMethodCallStmt);
+    AssertEquals('TMap<string,TList<Int>>',
+      TMethodCallStmt(Prog.Block.Stmts.Items[1]).ObjectName);
   finally
     Prog.Free();
   end;

@@ -101,6 +101,16 @@ type
       statements -- one and two type parameters, var parameters, after
       `if` -- (it was "Bare reference to 'GenericProc' requires ()") }
     procedure TestRun_GenericProcedure_CalledAsStatement;
+    { A static procedure, and a static function whose result is dropped, of
+      a generic class called as statements -- TW<Int>.Go(1); -- with two
+      type arguments, after `if`, as TW<T>.Go(A) in another generic's body,
+      and a constructor whose result is dropped (it was "Expected '(' after
+      generic type arguments"; only the expression form parsed) }
+    procedure TestRun_GenericClassStaticMethod_CalledAsStatement;
+    { A generic class overriding an abstract method of a non-generic parent,
+      called through the parent type, for two instances (it was "Runtime
+      error: abstract method called"; a plain virtual parent method worked) }
+    procedure TestRun_GenericOverrideOfAbstractMethod;
     { The type parameter is in scope in a generic function's body: a
       generic class constructed over T (TBox<T>.Create()) and SizeOf(T)
       (they failed with "Unknown type '^T' for field in 'TList<T>'" and
@@ -1393,6 +1403,111 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '10 11' + LE + 'x y' + LE + '21ba' + LE + '8' + LE +
     'k=9' + LE + '7 8' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericClassStaticMethod_CalledAsStatement;
+const
+  Src = '''
+    program P;
+    type
+      TW<T> = class
+      public
+        constructor Create();
+        static procedure Go(A: T);
+        static function Twice(A: T): T;
+      end;
+      TPair<K, V> = class
+      public
+        static procedure Show(AKey: K; AVal: V);
+      end;
+      TCaller<T> = class
+      public
+        procedure Call(A: T);
+      end;
+    constructor TW<T>.Create();
+    begin
+      WriteLn('created')
+    end;
+    procedure TCaller<T>.Call(A: T);
+    begin
+      TW<T>.Go(A)
+    end;
+    static procedure TW<T>.Go(A: T);
+    begin
+      WriteLn('go ', A)
+    end;
+    static function TW<T>.Twice(A: T): T;
+    begin
+      WriteLn('twice');
+      Result := A + A
+    end;
+    static procedure TPair<K, V>.Show(AKey: K; AVal: V);
+    begin
+      WriteLn(AKey, '=', AVal)
+    end;
+    var X: Int;
+    begin
+      TW<Int>.Go(1);
+      TW<string>.Go('s');
+      TW<Int>.Twice(2);
+      X := TW<Int>.Twice(3);
+      WriteLn(X);
+      TPair<string, Int>.Show('k', 9);
+      if X > 1 then TW<Int>.Go(7);
+      TCaller<Int>.Create().Call(8);
+      TCaller<string>.Create().Call('c');
+      TW<Int>.Create()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'go 1' + LE + 'go s' + LE + 'twice' + LE + 'twice' + LE +
+    '6' + LE + 'k=9' + LE + 'go 7' + LE + 'go 8' + LE + 'go c' + LE +
+    'created' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericOverrideOfAbstractMethod;
+const
+  Src = '''
+    program P;
+    type
+      TBase = class
+      public
+        procedure Wait; virtual; abstract;
+        function Name(): string; virtual; abstract;
+      end;
+      TWork<T> = class(TBase)
+      public
+        Value: T;
+        procedure Wait; override;
+        function Name(): string; override;
+      end;
+    procedure TWork<T>.Wait;
+    begin
+      WriteLn('waited ', Value)
+    end;
+    function TWork<T>.Name(): string;
+    begin
+      Result := 'work'
+    end;
+    var
+      B: TBase;
+      W: TWork<string>;
+    begin
+      B := TWork<Int>.Create();
+      B.Wait();
+      W := TWork<string>.Create();
+      W.Value := 's';
+      B := W;
+      B.Wait();
+      WriteLn(B.Name());
+      TBase(TWork<Int>.Create()).Wait()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'waited 0' + LE + 'waited s' + LE + 'work' + LE +
+    'waited 0' + LE, 0);
 end;
 
 procedure TE2EGenericsTests.TestRun_GenericFunc_BodyUsesTypeParam;

@@ -61,6 +61,11 @@ type
     procedure TestSemantic_AbstractMethod_NoBody_OK;
     procedure TestSemantic_ConcreteSubclass_OK;
     procedure TestSemantic_ConcreteSubclass_MissingOverride_Error;
+    { A generic class overriding an abstract method of its non-generic
+      parent: the instance's slot holds the override.  It kept the parent's
+      _AbstractMethodError stub, so TBase(TWork<Int>.Create()).Wait() ended
+      in "abstract method called". }
+    procedure TestCodegen_GenericOverrideOfAbstract_FillsSlot;
     { Abstract class that also declares an interface — itab slots for
       the abstract methods must reference $_AbstractMethodError so the
       IR links even though the methods have no body on the abstract
@@ -468,6 +473,31 @@ begin
     A.Free(); Pr.Free(); P.Free(); L.Free();
   end;
   AssertTrue('missing override of abstract raises error', GotError);
+end;
+
+procedure TVTableTests.TestCodegen_GenericOverrideOfAbstract_FillsSlot;
+const
+  Src =
+    '''
+        program Prg;
+        type
+          TBase = class
+            procedure Wait; virtual; abstract;
+          end;
+          TWork<T> = class(TBase)
+            procedure Wait; override;
+          end;
+        procedure TWork<T>.Wait; begin end;
+        var B: TBase;
+        begin
+          B := TWork<Int>.Create();
+          B.Wait()
+        end.
+        ''';
+begin
+  AssertEquals('the instance vtable holds the override', '',
+    AsmMissing(Src, 'TObject_ToString' + #10#9 + '.quad TWork_Int64_Wait',
+      'TObject_ToString' + #10#9 + '.quad _TWork_Int64_Wait'));
 end;
 
 initialization
