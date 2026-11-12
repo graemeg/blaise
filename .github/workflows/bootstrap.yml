@@ -638,3 +638,80 @@ jobs:
           path: target/freebsd-blaise/blaise
           retention-days: 30
           if-no-files-found: error
+
+  # ----------------------------------------------------------------------
+  # Windows x86_64 (docs/windows-x86_64-backend-design.adoc, "Layer 2").
+  # The Linux runner cross-builds blaise.exe, the fixtures and the Layer 3
+  # C DLL (mingw-w64, an independent compiler); windows-latest runs them on
+  # real x64 hardware and applies the self-hosting gate: blaise.exe rebuilds
+  # itself, byte-identical to the cross-built one.
+  # ----------------------------------------------------------------------
+  windows-build:
+    needs: bootstrap
+    runs-on: ubuntu-24.04   # pinned; ubuntu-latest moves to Ubuntu 26 from 2026-10-19
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download -pre binary
+        uses: actions/download-artifact@v7
+        with:
+          name: blaise-pre-${{ github.sha }}
+          path: .pre
+
+      - name: Install mingw-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+
+      - name: Cross-compile windows-x86_64 binaries (Linux host)
+        run: |
+          set -euo pipefail
+          chmod +x .pre/blaise
+          mkdir -p target/windows
+          xbuild() {
+            .pre/blaise --source "$1" --backend native --target windows-x86_64 \
+              --rtl-src compiler/src/main/pascal \
+              --unit-path compiler/src/main/pascal \
+              --unit-path stdlib/src/main/pascal \
+              --output "target/windows/$2"
+          }
+          xbuild compiler/src/main/pascal/Blaise.pas blaise
+          xbuild compiler/src/it/windows/m3rtl.pas m3rtl
+          xbuild compiler/src/it/windows/m3fault.pas m3fault
+          xbuild compiler/src/it/windows/l3ffi.pas l3ffi
+          x86_64-w64-mingw32-gcc -O2 -Wall -shared -o target/windows/l3ffi.dll \
+            compiler/src/it/windows/l3ffi.c
+          ls -l target/windows
+
+      - name: Upload windows-x86_64 binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: blaise-windows-x86_64-${{ github.sha }}
+          path: target/windows
+          retention-days: 30
+          if-no-files-found: error
+
+  windows-check:
+    needs: windows-build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      # The self-built blaise.exe must match one cross-built from LF sources:
+      # check out the tree byte for byte.
+      - name: Keep line endings
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download windows-x86_64 binaries
+        uses: actions/download-artifact@v7
+        with:
+          name: blaise-windows-x86_64-${{ github.sha }}
+          path: target/windows
+
+      - name: Fixtures and the self-hosting gate (windows-x86_64)
+        shell: pwsh
+        run: scripts/windows-ci-check.ps1 -Bin target/windows
