@@ -1217,6 +1217,7 @@ begin
     procedural pointer — anon-method arguments then fail overload scoring
     and the 16-byte fat-value ABI is lost (BUG-043 follow-on). }
   ProcDesc.IsReference := Def.IsReference;
+  ProcDesc.CallingConv := Def.CallingConv;
   for K := 0 to Def.Params.Count - 1 do
   begin
     MParam := TMethodParam(Def.Params.Items[K]);

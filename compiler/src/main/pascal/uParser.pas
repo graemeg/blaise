@@ -156,6 +156,8 @@ type
     function  ParseSetDef: TSetTypeDef;
     function  ParseRecordDef: TRecordTypeDef;
     function  ParseProceduralTypeDef: TProceduralTypeDef;
+    procedure ParseProcTypeConvention(ADef: TProceduralTypeDef);
+    procedure RejectCdeclReference(ADef: TProceduralTypeDef);
     { An inline procedural type in a type position, as its encoded name }
     function  ParseInlineProcTypeName: string;
     function  ParseGenericName: string;  { reads IDENT optionally followed by '<' TypeArgs '>' }
@@ -1433,6 +1435,7 @@ begin
                 'at line %d col %d in %s',
                 [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
             GPD.ProcDef.IsReference := True;
+            Self.RejectCdeclReference(GPD.ProcDef);
           end
           else
             GPD.ProcDef := ParseProceduralTypeDef();
@@ -1527,6 +1530,7 @@ begin
             'at line %d col %d in %s',
             [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
         TProceduralTypeDef(TD.Def).IsReference := True;
+        Self.RejectCdeclReference(TProceduralTypeDef(TD.Def));
       end
       else if (Check(tkIntLit) or Check(tkMinus)) and SubrangeAhead() then
       begin
@@ -2439,7 +2443,8 @@ begin
       <kind>(<param>;<param>...)[:<return type>]
 
     <kind> is 'procedure' / 'function', optionally followed by ' of object' or
-    preceded by 'reference to ', so the flags sit before the parameter list
+    ' cdecl', or preceded by 'reference to ', so the flags sit before the
+    parameter list
     (a trailing ' of object' would be ambiguous when the return type is
     itself a procedural type).  Each <param> is
     [var |const |out ]<name>:[array of ]<type name>, with 'array of ' marking
@@ -2465,6 +2470,11 @@ begin
         '''reference to'' and ''of object'' are mutually exclusive ' +
         'at line %d col %d in %s',
         [Line, Col, FLexer.Filename]));
+    if IsRef then
+    begin
+      Def.IsReference := True;
+      Self.RejectCdeclReference(Def);
+    end;
     if Def.IsFunction then
       Result := 'function'
     else
@@ -2472,7 +2482,9 @@ begin
     if IsRef then
       Result := 'reference to ' + Result
     else if Def.IsMethodPtr then
-      Result := Result + ' of object';
+      Result := Result + ' of object'
+    else if Def.CallingConv = 'cdecl' then
+      Result := Result + ' cdecl';
     Result := Result + '(';
     for I := 0 to Def.Params.Count - 1 do
     begin
@@ -2550,9 +2562,56 @@ begin
       Advance();  { consume 'object' }
       Result.IsMethodPtr := True;
     end;
+    Self.ParseProcTypeConvention(Result);
   except
     Result.Free();
     raise;
+  end;
+end;
+
+{ A 'reference to' value is a code pointer and an environment; a C caller
+  supplies no environment, so such a type cannot be cdecl. }
+procedure TParser.RejectCdeclReference(ADef: TProceduralTypeDef);
+begin
+  if ADef.CallingConv = 'cdecl' then
+    raise EParseError.Create(Format('A ''reference to'' type cannot be ' +
+      'cdecl: a C caller passes no environment at line %d col %d in %s',
+      [ADef.Line, ADef.Col, FLexer.Filename]));
+end;
+
+{ The calling convention of a procedural type: cdecl after the signature,
+  with or without the semicolon FPC and Delphi both accept --
+    function(X: Int32): Int32; cdecl
+    function(X: Int32): Int32 cdecl
+  The semicolon is consumed only when a directive follows it, so the caller
+  still finds the one that ends the declaration.  A name that is followed by
+  ':' or ',' is the next field or variable, not a directive. }
+procedure TParser.ParseProcTypeConvention(ADef: TProceduralTypeDef);
+var
+  Word: string;
+begin
+  if Check(tkSemicolon) and (PeekKind() = tkIdent) and
+     not (PeekKindAt(2) in [tkColon, tkComma]) then
+  begin
+    Word := PeekValueAt(1);
+    if SameText(Word, 'cdecl') or SameText(Word, 'stdcall') or
+       SameText(Word, 'safecall') or SameText(Word, 'register') or
+       SameText(Word, 'pascal') then
+      Advance();  { the ';' before the directive }
+  end;
+  if Self.IsRemovedCallingConvention() and
+     not (PeekKind() in [tkColon, tkComma]) then
+    Self.RejectCallingConvention();
+  if Check(tkIdent) and SameText(FCurrent.Value, 'cdecl') and
+     not (PeekKind() in [tkColon, tkComma]) then
+  begin
+    { a C caller passes no receiver and no environment }
+    if ADef.IsMethodPtr then
+      raise EParseError.Create(Format('An ''of object'' method pointer ' +
+        'cannot be cdecl: a C caller passes no object at line %d col %d in %s',
+        [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+    ADef.CallingConv := 'cdecl';
+    Advance();
   end;
 end;
 

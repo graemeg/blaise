@@ -54,7 +54,11 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 35; { v35: the GENROUT block also carries the generic
+  IFACE_VERSION = 36; { v36: a procedural type's PROC and generic-proc
+                          payloads carry its CallingConv after IsReference
+                          ('cdecl' or ''), so the C convention survives a
+                          cached import.
+                        v35: the GENROUT block also carries the generic
                           methods (method-level <T>) of non-generic classes
                           and records, named 'Owner.Method', with their
                           bodies, so a consumer can instantiate them from a
@@ -967,6 +971,7 @@ begin
             EncodeBool (Def.ProcDef.IsFunction) +
             EncodeBool (Def.ProcDef.IsMethodPtr) +
             EncodeBool (Def.ProcDef.IsReference) +
+            EncodeLpstr(Def.ProcDef.CallingConv) +
             EncodeLpstr(Def.ProcDef.ReturnTypeName) +
             EncodeCount(Def.ProcDef.Params.Count);
   for J := 0 to Def.ProcDef.Params.Count - 1 do
@@ -990,6 +995,7 @@ begin
     EncodeBool (Def.IsFunction) +
     EncodeBool (Def.IsMethodPtr) +
     EncodeBool (Def.IsReference) +
+    EncodeLpstr(Def.CallingConv) +
     EncodeLpstr(Def.ReturnTypeName) +
     EncodeCount(Def.Params.Count);
   for J := 0 to Def.Params.Count - 1 do
@@ -2989,6 +2995,7 @@ begin
   Def.ProcDef.IsFunction     := DecodeBool(AText, APos);
   Def.ProcDef.IsMethodPtr    := DecodeBool(AText, APos);
   Def.ProcDef.IsReference    := DecodeBool(AText, APos);
+  Def.ProcDef.CallingConv    := ReadLpstrAt(AText, APos);
   Def.ProcDef.ReturnTypeName := ReadLpstrAt(AText, APos);
   Pc := DecodeCount(AText, APos);
   for J := 1 to Pc do
@@ -3015,6 +3022,7 @@ begin
   Def.IsFunction     := DecodeBool(AText, APos);
   Def.IsMethodPtr    := DecodeBool(AText, APos);
   Def.IsReference    := DecodeBool(AText, APos);
+  Def.CallingConv    := ReadLpstrAt(AText, APos);
   Def.ReturnTypeName := ReadLpstrAt(AText, APos);
   Pc := DecodeCount(AText, APos);
   for J := 1 to Pc do

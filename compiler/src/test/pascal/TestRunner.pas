@@ -19,6 +19,7 @@ uses
   cp.test.sizeof,
   cp.test.charcast,
   cp.test.varargs,
+  cp.test.callconv,
   cp.test.smallint_word,
   cp.test.lexer,
   cp.test.parser,

@@ -94,6 +94,16 @@ function RTLOSSuffix(AOS: TTargetOS): string;
 
 function PlatformLayoutInitSym(const ATarget: TTargetDesc): string;
 
+{ True when the C calling convention differs from the Blaise one on ATarget,
+  so a value of one convention cannot stand in for the other: Win64 on
+  windows-x86_64.  Everywhere else the two coincide, and the mismatch is a
+  portability warning (windows-x86_64-backend-design.adoc, "Language rule"). }
+function TargetForeignConventionDiffers(const ATarget: TTargetDesc): Boolean;
+
+{ The targets on which TargetForeignConventionDiffers holds, for the
+  portability warning. }
+function ForeignConventionDifferingTargets: string;
+
 { Platform constants derived from the target OS. }
 function TargetLineEnding(const ATarget: TTargetDesc): string;
 function TargetDirectorySeparator(const ATarget: TTargetDesc): string;
@@ -281,6 +291,16 @@ begin
   else
     Result := '';
   end;
+end;
+
+function TargetForeignConventionDiffers(const ATarget: TTargetDesc): Boolean;
+begin
+  Result := (ATarget.OS = osWindows) and (ATarget.CPU = cpuX86_64);
+end;
+
+function ForeignConventionDifferingTargets: string;
+begin
+  Result := 'windows-x86_64';
 end;
 
 initialization

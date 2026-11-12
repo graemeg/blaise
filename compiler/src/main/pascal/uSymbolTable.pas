@@ -251,6 +251,12 @@ type
                                  whose Data half is an ARC-managed
                                  environment record (nil when capture-free).
                                  Mutually exclusive with IsMethodPtr. }
+    CallingConv: string;       { 'cdecl' for the C convention, '' for the
+                                 Blaise one.  Not part of IsCompatibleWith:
+                                 a mismatch is an error only where the two
+                                 conventions differ (CheckConventionsAgree). }
+    RoutineName: string;       { the routine an '@Routine' value names, for
+                                 diagnostics; '' for a declared type }
     constructor Create(const AName: string);
     destructor  Destroy; override;
     { Two procedural types are compatible iff their return types match

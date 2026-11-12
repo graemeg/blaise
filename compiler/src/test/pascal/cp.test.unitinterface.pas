@@ -271,6 +271,8 @@ type
     procedure TestRoundTrip_Interface_WithProperty;
     procedure TestRoundTrip_ProceduralType;
     procedure TestRoundTrip_ReferenceToType;
+    { the C convention is part of a procedural type, named or generic }
+    procedure TestRoundTrip_CdeclProcType;
     procedure TestRoundTrip_Metadata_UsedUnits_SourceFile;
     procedure TestRoundTrip_GenericClass_TemplateParams;
     procedure TestRoundTrip_GenericInterface_TemplateParams;
@@ -3044,7 +3046,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 35', Buf) = 0);
+      Pos('BLAISE-IFACE 36', Buf) = 0);
   finally
     Iface.Free();
   end;
@@ -3767,6 +3769,45 @@ begin
       AssertEquals('1 param', 1, Def.Params.Count);
       AssertEquals('param name', 'N',
         TMethodParam(Def.Params.Items[0]).ParamName);
+    finally
+      Round.Free();
+    end;
+  finally
+    Iface.Free();
+  end;
+end;
+
+procedure TIfaceIOTests.TestRoundTrip_CdeclProcType;
+const
+  SRC =
+    'unit U;' + #10 +
+    'interface' + #10 +
+    'type TCb = function(N: Int32): Int32; cdecl;' + #10 +
+    '  TPlain = procedure(N: Int32);' + #10 +
+    '  TGen<T> = function(N: T): T; cdecl;' + #10 +
+    'implementation end.' + #10;
+var
+  Iface, Round: TUnitInterface;
+  Buf:          string;
+  E:            TTypeEntry;
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  try
+    Buf   := WriteUnitInterface(Iface);
+    Round := ReadUnitInterface(Buf);
+    try
+      E := Round.FindType('TCb');
+      AssertTrue('TCb present', (E <> nil) and (E.Def is TProceduralTypeDef));
+      AssertEquals('cdecl survives the round-trip', 'cdecl',
+        TProceduralTypeDef(E.Def).CallingConv);
+      E := Round.FindType('TPlain');
+      AssertTrue('TPlain present', (E <> nil) and (E.Def is TProceduralTypeDef));
+      AssertEquals('the default stays the default', '',
+        TProceduralTypeDef(E.Def).CallingConv);
+      E := Round.FindType('TGen');
+      AssertTrue('TGen present', (E <> nil) and (E.Def is TGenericProcDef));
+      AssertEquals('a generic keeps cdecl', 'cdecl',
+        TGenericProcDef(E.Def).ProcDef.CallingConv);
     finally
       Round.Free();
     end;

@@ -78,6 +78,12 @@ type
     { a C routine returning the bitmap of a jumbo set (a 25-byte struct for
       set of 0..199): the members it sets are the members Blaise sees }
     procedure TestRun_ExternalJumboSetResult;
+    { The calling convention is part of a procedural type: cdecl routines
+      written in Blaise and in C are called through a cdecl type, and the
+      C library calls a Blaise cdecl comparator back (qsort). }
+    procedure TestRun_CdeclProcType_CallsBlaiseRoutines;
+    procedure TestRun_CdeclProcType_CallsCRoutine;
+    procedure TestRun_CdeclCallback_FromCLibrary;
   end;
 
 implementation
@@ -539,6 +545,110 @@ begin
   AssertEquals('exit code: ' + Output, 0, RCode);
   AssertEquals('output', 'True True False False' + #10 + 'True True' + #10,
     Output);
+end;
+
+procedure TE2EExternalTests.TestRun_CdeclProcType_CallsBlaiseRoutines;
+const Src = '''
+    program T;
+    type
+      TBin = function(A, B: Int64): Int64; cdecl;
+      TSix = function(A: Int32; B: Float64; C: Int32; D: Float64; E: Int32;
+        F: Float64): Float64; cdecl;
+      TPair = record X, Y: Int32; end;
+      TTake = function(R: TPair; K: Int64): Int64; cdecl;
+      TNote = procedure(B: Byte; W: Int16; S: Float32) cdecl;
+    function Combine(A, B: Int64): Int64; cdecl;
+    begin
+      Result := A * 100 + B;
+    end;
+    function Six(A: Int32; B: Float64; C: Int32; D: Float64; E: Int32;
+      F: Float64): Float64; cdecl;
+    begin
+      Result := A + B * 10 + C * 100 + D * 1000 + E * 10000 + F * 100000;
+    end;
+    function Take(R: TPair; K: Int64): Int64; cdecl;
+    begin
+      Result := R.X * 1000 + R.Y + K;
+    end;
+    procedure Note(B: Byte; W: Int16; S: Float32); cdecl;
+    begin
+      WriteLn(B, ' ', W, ' ', Trunc(S * 4));
+    end;
+    var
+      F: TBin;
+      G: TSix;
+      H: TTake;
+      N: TNote;
+      R: TPair;
+      I: function(A, B: Int64): Int64; cdecl;
+    begin
+      F := @Combine;
+      WriteLn(F(7, -9));
+      G := @Six;
+      WriteLn(Trunc(G(1, 2.5, 3, 4.5, 5, 6.5)));
+      R.X := 3;
+      R.Y := 4;
+      H := @Take;
+      WriteLn(H(R, 5));
+      N := @Note;
+      N(255, -32768, 2.75);
+      I := F;
+      WriteLn(I(High(Int32), Low(Int32)));
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '691' + Chr(10) + '704826' + Chr(10) + '3009' +
+    Chr(10) + '255 -32768 11' + Chr(10) + '212600881052' + Chr(10), 0);
+end;
+
+procedure TE2EExternalTests.TestRun_CdeclProcType_CallsCRoutine;
+const Src = '''
+    program T;
+    type
+      TLen = function(S: PChar): UInt64; cdecl;
+    function c_strlen(S: PChar): UInt64; external 'c' name 'strlen';
+    var
+      L: TLen;
+    begin
+      L := @c_strlen;
+      WriteLn(L(PChar('hello, world')))
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '12' + Chr(10), 0);
+end;
+
+procedure TE2EExternalTests.TestRun_CdeclCallback_FromCLibrary;
+const Src = '''
+    program T;
+    type
+      PInt32 = ^Int32;
+      TCompare = function(A, B: Pointer): Int32; cdecl;
+    procedure c_qsort(Base: Pointer; N, Size: UInt64; Cmp: TCompare);
+      external 'c' name 'qsort';
+    function Descending(A, B: Pointer): Int32; cdecl;
+    begin
+      if PInt32(A)^ > PInt32(B)^ then
+        Result := -1
+      else if PInt32(A)^ < PInt32(B)^ then
+        Result := 1
+      else
+        Result := 0;
+    end;
+    var
+      V: array[0..5] of Int32;
+      I: Int32;
+    begin
+      V[0] := 3; V[1] := Low(Int32); V[2] := 7; V[3] := High(Int32);
+      V[4] := -1; V[5] := 0;
+      c_qsort(@V[0], 6, 4, @Descending);
+      for I := 0 to 5 do
+        Write(V[I], ' ');
+      WriteLn();
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '2147483647 7 3 0 -1 -2147483648 ' + Chr(10), 0);
 end;
 
 initialization

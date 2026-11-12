@@ -1119,6 +1119,10 @@ type
       AActual: TTypeDesc): Boolean;
     procedure CheckValueMatches(AExpected: TTypeDesc; AExpr: TASTExpr;
       AActual: TTypeDesc; const AContext: string; ALine, ACol: Int);
+    procedure CheckConventionsAgree(AExpected, AActual: TProceduralTypeDesc;
+      const AContext: string; ALine, ACol: Int);
+    procedure CheckArgConventions(ACand: TMethodDecl; AArgs: TObjectList;
+      const AName: string; ALine, ACol: Int);
     procedure CheckTypesMatch(AExpected, AActual: TTypeDesc;
       const AContext: string; ALine, ACol: Int);
     { Returns True if AActual is AExpected or a subclass of AExpected. }
@@ -1512,7 +1516,19 @@ var
 implementation
 
 uses
-  blaise.codegen;
+  blaise.codegen, blaise.codegen.target;
+
+{ The convention a routine is called with: the C one when it is declared
+  cdecl or binds a named library (external '<lib>', D6), else the Blaise
+  one.  A library-less 'external name' keeps the Blaise convention. }
+function RoutineConvention(AMD: TMethodDecl): string;
+begin
+  if (AMD.CallingConv = 'cdecl') or
+     (AMD.IsExternal and (AMD.ExternalLib <> '')) then
+    Result := 'cdecl'
+  else
+    Result := '';
+end;
 
 type
   { Raised inside an ArrowBodyFits trial when the body cannot be checked
@@ -2846,7 +2862,15 @@ begin
   begin
     if TProceduralTypeDesc(AExpected).IsCompatibleWith(
          TProceduralTypeDesc(AActual)) then
+    begin
+      { an empty context is a probe (overload scoring, an arrow trial):
+        the chosen candidate's arguments are checked again with one, so the
+        convention is reported once, for the call that is made }
+      if AContext <> '' then
+        Self.CheckConventionsAgree(TProceduralTypeDesc(AExpected),
+          TProceduralTypeDesc(AActual), AContext, ALine, ACol);
       Exit;
+    end;
     { an 'of object' value becomes a 'reference to' closure whose Env is
       the receiver, which the target retains -- into any target, not only
       a variable }
@@ -2869,6 +2893,79 @@ begin
     Format('Type mismatch in %s: expected ''%s'' but got ''%s''',
       [AContext, AExpected.Name, AActual.Name]),
     ALine, ACol);
+end;
+
+{ A procedural value of one calling convention given to a type of the other
+  (windows-x86_64-backend-design.adoc, "Language rule: calling convention is
+  part of the type").  Where the conventions differ the call would pass its
+  arguments in the wrong registers, so it is an error; elsewhere they
+  coincide today, and the warning says the code will not port. }
+procedure TSemanticAnalyser.CheckConventionsAgree(AExpected,
+  AActual: TProceduralTypeDesc; const AContext: string; ALine, ACol: Int);
+
+  function Who(AT: TProceduralTypeDesc): string;
+  begin
+    if AT.RoutineName <> '' then
+      Result := Format('routine ''%s''', [AT.RoutineName])
+    else if AT.Name <> '' then
+      Result := Format('''%s''', [AT.Name])
+    else
+      Result := 'the value';
+  end;
+
+  function Conv(AT: TProceduralTypeDesc): string;
+  begin
+    if AT.CallingConv = 'cdecl' then
+      Result := 'C (cdecl)'
+    else
+      Result := 'Blaise';
+  end;
+
+var
+  What, Advice: string;
+begin
+  if AExpected.CallingConv = AActual.CallingConv then Exit;
+  { a closure or method pointer target is called the Blaise way; a routine
+    of either convention reaches it through an adapter or its own entry }
+  if AExpected.IsReference or AExpected.IsMethodPtr then Exit;
+  What := Format('%s uses the %s calling convention but %s expects the %s ' +
+    'one', [Who(AActual), Conv(AActual), Who(AExpected), Conv(AExpected)]);
+  if AExpected.CallingConv = 'cdecl' then
+    Advice := 'declare the routine cdecl to hand it to foreign code'
+  else
+    Advice := 'declare the procedural type cdecl to call a C-convention ' +
+      'routine through it';
+  if TargetForeignConventionDiffers(GTarget) then
+    SemanticError(Format('Type mismatch in %s: %s; on %s the two ' +
+      'conventions differ (%s)', [AContext, What, TargetName(GTarget),
+      Advice]), ALine, ACol)
+  else
+    SemanticWarning(Format('portability: in %s, %s; the two conventions ' +
+      'coincide on %s but differ on %s, where this is an error (%s)',
+      [AContext, What, TargetName(GTarget),
+       ForeignConventionDifferingTargets(), Advice]), ALine, ACol);
+end;
+
+{ Overload scoring is the only check a call's arguments get, and it probes
+  without a context; once the candidate is chosen, its procedural arguments
+  are held to the convention rule. }
+procedure TSemanticAnalyser.CheckArgConventions(ACand: TMethodDecl;
+  AArgs: TObjectList; const AName: string; ALine, ACol: Int);
+var
+  J: Int;
+  ParT, ArgT: TTypeDesc;
+begin
+  if (ACand = nil) or (AArgs = nil) then Exit;
+  for J := 0 to AArgs.Count - 1 do
+  begin
+    if J >= ACand.Params.Count then Break;
+    ParT := TMethodParam(ACand.Params.Items[J]).ResolvedType;
+    ArgT := TASTExpr(AArgs.Items[J]).ResolvedType;
+    if (ParT is TProceduralTypeDesc) and (ArgT is TProceduralTypeDesc) then
+      Self.CheckConventionsAgree(TProceduralTypeDesc(ParT),
+        TProceduralTypeDesc(ArgT), Format('argument %d of ''%s''',
+        [J + 1, AName]), ALine, ACol);
+  end;
 end;
 
 function TSemanticAnalyser.CurrentUnitPrefix: string;
@@ -5585,9 +5682,9 @@ end;
 function TSemanticAnalyser.SplitInlineProcType(const AName: string;
   out AKind: string; AHeads, ATypes: TStringList; out ARet: string): Boolean;
 const
-  Kinds: array[0..5] of string = ('reference to procedure',
+  Kinds: array[0..7] of string = ('reference to procedure',
     'reference to function', 'procedure of object', 'function of object',
-    'procedure', 'function');
+    'procedure cdecl', 'function cdecl', 'procedure', 'function');
 var
   I, K, Depth, SegStart, ColonPos, CloseParen: Int;
   C: Int;
@@ -5703,6 +5800,8 @@ begin
             (StrHead(AName, 9) = 'function(') or
             (StrHead(AName, 20) = 'procedure of object(') or
             (StrHead(AName, 19) = 'function of object(') or
+            (StrHead(AName, 16) = 'procedure cdecl(') or
+            (StrHead(AName, 15) = 'function cdecl(') or
             (StrHead(AName, 13) = 'reference to ');
 end;
 
@@ -5739,6 +5838,8 @@ begin
     Def.IsFunction := StrPos('function', Kind) >= 0;
     Def.IsMethodPtr := StrPos('of object', Kind) >= 0;
     Def.IsReference := StrPos('reference to', Kind) >= 0;
+    if StrPos(' cdecl', Kind) >= 0 then
+      Def.CallingConv := 'cdecl';
     Def.ReturnTypeName := Ret;
     { the canonical name: the kind, then each parameter's mode and resolved
       type (names do not take part in compatibility), then the return type }
@@ -7278,6 +7379,7 @@ begin
     ProcDesc := FTable.NewProceduralType(ATypeName);
     ProcDesc.IsMethodPtr := Templ.ProcDef.IsMethodPtr;
     ProcDesc.IsReference := Templ.ProcDef.IsReference;
+    ProcDesc.CallingConv := Templ.ProcDef.CallingConv;
     for K := 0 to Templ.ProcDef.Params.Count - 1 do
     begin
       MParam    := TMethodParam(Templ.ProcDef.Params.Items[K]);
@@ -11634,6 +11736,8 @@ begin
         Format('Ambiguous overload of ''%s.%s'' — multiple candidates match equally',
           [ATypeName, AMethodName]),
         ALine, ACol);
+    Self.CheckArgConventions(Best, AArgs, ATypeName + '.' + AMethodName,
+      ALine, ACol);
     Result := Best;
   finally
     ArityMatch.Free();
@@ -18413,6 +18517,7 @@ begin
         Format('Ambiguous overload of ''%s'' — multiple candidates match equally',
           [AName]),
         ALine, ACol);
+    Self.CheckArgConventions(Best, AArgs, AName, ALine, ACol);
     Result := Best;
   finally
     ArityMatch.Free();
@@ -25031,6 +25136,8 @@ begin
         ProcDesc.Params.Add(ProcParam);
       end;
       ProcDesc.ReturnType := MD.ResolvedReturnType;  { nil for procedure }
+      ProcDesc.CallingConv := RoutineConvention(MD);
+      ProcDesc.RoutineName := MD.Name;
       Result := ProcDesc;
       IdentExpr.ResolvedType := ProcDesc;
       { Stash the resolved decl on the address-of node so codegen can
@@ -25220,6 +25327,7 @@ var
 begin
   ADesc.IsMethodPtr := ADef.IsMethodPtr;
   ADesc.IsReference := ADef.IsReference;
+  ADesc.CallingConv := ADef.CallingConv;
   { Parameter and return types go through FindTypeOrInstantiate, as a
     routine's own signature does, so an inline form (^T, set of T, array of
     T, class of T) is built on demand rather than looked up by name only

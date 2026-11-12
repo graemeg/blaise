@@ -1045,6 +1045,12 @@ ProceduralType
     = [ "reference" TO ]
       ( ( FUNCTION  [ LPAREN ParamList RPAREN ] COLON TypeName [ OF "object" ] )
       | ( PROCEDURE [ LPAREN ParamList RPAREN ]                 [ OF "object" ] ) )
+      [ [ SEMICOLON ] "cdecl" ]           (* the C calling convention, part of
+                                             the type; not with OF "object" or
+                                             "reference" TO.  The semicolon is
+                                             taken only when "cdecl" follows
+                                             and is not itself a name (next
+                                             token ':' or ','). *)
     ;
 
 (* Anonymous procedure/function literal — reachable only from expression

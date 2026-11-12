@@ -1439,6 +1439,58 @@ The directive is recorded on the declaration (`TMethodDecl.CallingConv`),
 carried into the exported interface signature (`TRoutineSig.CallingConv`) and
 persisted in the `.bif` interface metadata.
 
+==== Procedural types
+
+The calling convention is part of a procedural type.  `cdecl` follows the
+signature, with or without the semicolon, as in FPC and Delphi:
+
+[source,pascal]
+----
+type
+  TCompare = function(A, B: Pointer): Int32; cdecl;
+  TVisit = procedure(Node: Pointer) cdecl;
+var
+  OnDone: procedure(Code: Int32); cdecl;   { inline form }
+----
+
+A routine is of the C convention when it is declared `cdecl` or names its
+library (`external '<lib>'`).  A procedural value of one convention given to a
+procedural type of the other -- `@Routine`, another procedural variable, an
+argument -- is:
+
+* a *compile error* on a target where the two conventions differ
+  (`windows-x86_64`), because the call would pass its arguments in the wrong
+  registers;
+* a *portability warning* on every other target, where they coincide today
+  and the program works, but would not on Windows.
+
+`of object` and `reference to` types cannot be `cdecl`: a C caller supplies
+neither a receiver nor a closure environment.  A routine of either convention
+can still become a `reference to` value, because the adapter that wraps it
+calls it in its own convention.
+
+Rationale: a callback is the one place where the convention is not visible
+at the call.  The C library calls the routine, through a pointer whose type
+says how; if the type did not carry the convention, a Blaise-convention
+routine handed to Windows would be entered with its arguments in the wrong
+registers, and nothing would report it until the program crashed.  Making the
+convention part of the type turns that crash into a compile error at the
+assignment.  The warning on the other targets is the valuable half: it tells
+a Linux or macOS developer that a callback will not work on Windows before
+anyone tries it there.
+
+Alternatives rejected:
+
+* _Convention outside the type_ (FPC and Delphi on 64-bit targets, where
+  the directive is ignored).  A mismatch is then undetectable.
+* _A mismatch is an error on every target._  Correct in principle, but it
+  would break, at once, code that is correct on every target it runs on
+  today; the warning gives the same information without the break.
+* _Silently convert by generating an adapter._  Converting `@Routine` into a
+  `cdecl` value would need a thunk per routine and target, and hides which
+  routines are entered from foreign code -- something a reader of a binding
+  should see in the declaration.
+
 ==== Rationale
 
 The distinctions these directives draw — who pops the arguments, in which
@@ -2092,11 +2144,11 @@ signatures are *not* compatible.  Parameter names do not participate.
 - *`reference to function/procedure`* (anonymous methods / closures) —
   now IMPLEMENTED (Phases 0-2); see the dedicated *Anonymous Methods and
   Closures* section below.
-- *The `cdecl` marker* on procedural types — *deferred* to the Windows
-  target's callback milestone (`windows-x86_64-backend-design.adoc`, M5).
-  `cdecl` is the only calling-convention directive (see "Calling-Convention
-  Directives: `cdecl` Only"); on the targets supported today the C and Blaise
-  conventions coincide, so procedural pointers need no marker yet.
+- *The `cdecl` marker* on procedural types — now IMPLEMENTED: the calling
+  convention is part of a procedural type
+  (`type TCallback = function(X: Int32): Int32; cdecl;`), and a value of the
+  other convention does not convert to it.  See "Calling-Convention
+  Directives: `cdecl` Only", _Procedural types_.
 
 ==== Rationale
 

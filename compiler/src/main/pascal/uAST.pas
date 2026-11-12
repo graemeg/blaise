@@ -1061,6 +1061,10 @@ type
     IsReference:    Boolean;       { True iff declared with the 'reference to'
                                      prefix.  Mutually exclusive with
                                      IsMethodPtr. }
+    CallingConv:    string;        { 'cdecl' when the directive follows the
+                                     signature, '' for the Blaise convention.
+                                     Part of the type: a value of the other
+                                     convention does not convert to it. }
     constructor Create;
     destructor Destroy; override;
   end;
@@ -3497,6 +3501,7 @@ begin
   Result.IsFunction     := ASrc.IsFunction;
   Result.IsMethodPtr    := ASrc.IsMethodPtr;
   Result.IsReference    := ASrc.IsReference;
+  Result.CallingConv    := ASrc.CallingConv;
   for I := 0 to ASrc.Params.Count - 1 do
     Result.Params.Add(CloneMethodParam(TMethodParam(ASrc.Params.Items[I])));
 end;

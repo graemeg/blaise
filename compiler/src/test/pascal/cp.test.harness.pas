@@ -44,10 +44,16 @@ const
   TargetX86_64 = 'linux-x86_64';
   TargetArm64 = 'macos-arm64';
 
+{ The parsed (not analysed) program; raises EParseError. }
+function ParseProgram(const ASrc: string): TProgram;
 function Analyse(const ASrc: string): TProgram;
 function SemanticError(const ASrc: string): string;
 { The semantic warnings ASrc raises, one per line ('' for none). }
 function SemanticWarnings(const ASrc: string): string;
+{ As SemanticError and SemanticWarnings, analysed for ATarget (a rule that
+  depends on the target, such as the calling-convention rule). }
+function SemanticErrorOn(const ASrc, ATarget: string): string;
+function SemanticWarningsOn(const ASrc, ATarget: string): string;
 function GenAsm(const ASrc, ATarget: string): string;
 { As GenAsm, with OPDF debug-fact collection on (per-statement line labels). }
 function GenAsmDebug(const ASrc, ATarget: string): string;
@@ -149,8 +155,53 @@ begin
   end;
 end;
 
+function SemanticErrorOn(const ASrc, ATarget: string): string;
+var
+  Saved: TTargetDesc;
+begin
+  Saved := GTarget;
+  GTarget := TargetByName(ATarget);
+  try
+    Result := SemanticError(ASrc);
+  finally
+    GTarget := Saved;
+  end;
+end;
+
+function SemanticWarningsOn(const ASrc, ATarget: string): string;
+var
+  Saved: TTargetDesc;
+begin
+  Saved := GTarget;
+  GTarget := TargetByName(ATarget);
+  try
+    Result := SemanticWarnings(ASrc);
+  finally
+    GTarget := Saved;
+  end;
+end;
+
+function GenerateAsmFor(const AUnitSrc, ASrc, ATarget: string;
+  AOpdf: Boolean): string; forward;
+
 { AUnitSrc = '' generates the program alone. }
 function GenerateAsm(const AUnitSrc, ASrc, ATarget: string;
+  AOpdf: Boolean): string;
+var
+  Saved: TTargetDesc;
+begin
+  { the program is analysed for the target it is generated for, as the
+    driver does: target constants and target-dependent rules follow it }
+  Saved := GTarget;
+  GTarget := TargetByName(ATarget);
+  try
+    Result := GenerateAsmFor(AUnitSrc, ASrc, ATarget, AOpdf);
+  finally
+    GTarget := Saved;
+  end;
+end;
+
+function GenerateAsmFor(const AUnitSrc, ASrc, ATarget: string;
   AOpdf: Boolean): string;
 var
   U: TUnit;
