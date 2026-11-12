@@ -834,8 +834,20 @@ begin
 end;
 
 function TRtlPlatformPosix.Exec(const ACmd: string): Int32;
+var
+  Status: Int32;
 begin
-  Result := libc_system(StrData(Pointer(ACmd)));
+  { system() -- libc's, or the static leaves' fork/execve/wait4 -- returns
+    a wait status; Exec returns the command's exit code, as on Windows: the
+    code of a normal exit, 128 + the signal of one that was killed (the
+    shell's convention), -1 when no shell could be started }
+  Status := libc_system(StrData(Pointer(ACmd)));
+  if Status = -1 then
+    Result := -1
+  else if (Status and $7F) = 0 then
+    Result := (Status shr 8) and $FF
+  else
+    Result := 128 + (Status and $7F);
 end;
 
 function TRtlPlatformPosix.ParamCount: Int32;

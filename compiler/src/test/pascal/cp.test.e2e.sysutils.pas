@@ -24,6 +24,9 @@ type
   published
     procedure TestRun_ListDir_ReturnsWholeNames;
     procedure TestRun_FileOps_MadeByTheProgram;
+    { Exec returns the command's exit code on every target (POSIX returned
+      system()'s raw wait status, 768 for 'exit 3') }
+    procedure TestRun_Exec_ReturnsExitCode;
     procedure TestRun_ParamStr_PrintsArg;
     procedure TestRun_ParamCount_WithArgs;
     procedure TestRun_ReadWriteFile_RoundTrip;
@@ -332,6 +335,20 @@ const
           WriteLn(IntToStr(RunChild('0')), ' ', IntToStr(RunChild('7')))
         end.
         ''';
+
+procedure TE2ESysUtilsTests.TestRun_Exec_ReturnsExitCode;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    begin
+      WriteLn(Exec('exit 0'), ' ', Exec('exit 3'), ' ', Exec('exit 255'));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src, '0 3 255' + LineEnding, 0);
+end;
 
 procedure TE2ESysUtilsTests.TestRun_FileOps_MadeByTheProgram;
 const
