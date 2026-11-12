@@ -15,7 +15,7 @@ unit cp.test.e2e.external;
 interface
 
 uses
-  Classes, SysUtils, blaise.testing, cp.test.e2e.base;
+  Classes, SysUtils, blaise.testing, blaise.codegen.target, cp.test.e2e.base;
 
 type
   [Threaded]
@@ -151,6 +151,11 @@ const Src = '''
     end.
     ''';
 begin
+  if not E2ELibraryLessReachesLibc() then
+  begin
+    Ignore('binds the C library without naming it, which only a POSIX target allows');
+    Exit
+  end;
   AssertRunsOnAll(Src, '-7' + Chr(10), 0);
 end;
 
@@ -165,6 +170,11 @@ const Src = '''
     end.
     ''';
 begin
+  if not E2ELibraryLessReachesLibc() then
+  begin
+    Ignore('binds the C library without naming it, which only a POSIX target allows');
+    Exit
+  end;
   AssertRunsOnAll(Src, '1000000' + Chr(10), 0);
 end;
 
@@ -240,6 +250,11 @@ const Src = '''
     end.
     ''';
 begin
+  if not E2ELibraryLessReachesLibc() then
+  begin
+    Ignore('binds the C library without naming it, which only a POSIX target allows');
+    Exit
+  end;
   AssertRunsOnAll(Src, '42' + Chr(10), 0);
 end;
 
@@ -265,6 +280,11 @@ const Src = '''
     end.
     ''';
 begin
+  if not E2ELibraryLessReachesLibc() then
+  begin
+    Ignore('binds the C library without naming it, which only a POSIX target allows');
+    Exit
+  end;
   AssertRunsOnAll(Src, '10.2.3.4' + Chr(10) + '192.168.1.254' + Chr(10), 0);
 end;
 
@@ -289,6 +309,11 @@ const
     end.
     ''';
 begin
+  if not E2ELibraryLessReachesLibc() then
+  begin
+    Ignore('binds the C library without naming it, which only a POSIX target allows');
+    Exit
+  end;
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '3 2' + #10 + '14 2' + #10 + '1 6' + #10 + 'show 3 2' + #10, 0);
 end;
@@ -314,6 +339,11 @@ const
 begin
 {$IFDEF CPUARM64}
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if E2ETargetDesc().OS <> osMacOS then
+  begin
+    Ignore('__sincos_stret is an Apple arm64 symbol');
+    Exit
+  end;
   AssertRunsOnAll(Src, '0.00 1.00' + #10 + '0.00 1.00' + #10 + '1.00' + #10, 0);
 {$ELSE}
   Ignore('__sincos_stret is an Apple arm64 symbol');

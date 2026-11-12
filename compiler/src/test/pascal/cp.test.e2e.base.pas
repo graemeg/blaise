@@ -216,6 +216,11 @@ function E2ETargetDesc: TTargetDesc;
   the program then runs on another machine and cannot see files the test
   makes, nor can the test run host tools through RunProc. }
 function E2ERunsOnHost: Boolean;
+{ Whether a library-less `external name 'f'` reaches the C library on the
+  e2e target.  It does on the POSIX targets; on Windows such a routine must
+  be defined by the link (design decision D6), so a program binding atoi
+  that way is not a Windows program. }
+function E2ELibraryLessReachesLibc: Boolean;
 
 implementation
 
@@ -244,6 +249,11 @@ end;
 function E2ERunsOnHost: Boolean;
 begin
   Result := E2ERunner() = '';
+end;
+
+function E2ELibraryLessReachesLibc: Boolean;
+begin
+  Result := E2ETargetDesc().OS <> osWindows;
 end;
 
 { The name the compiler gives the executable for output path ABin: the

@@ -415,12 +415,18 @@ const Src = '''
         property Items[Key: K]: V read GetItem write SetItem; default;
       end;
     procedure TMap<K, V>.Grow;
-    var NewCap: Int;
+    var NewCap: Int; B: ^Byte;
     begin
       if Self.FCapacity = 0 then NewCap := 8
       else NewCap := Self.FCapacity * 2;
       Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(K));
       Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(V));
+      { ReallocMem leaves the new part as it found it; a managed K or V
+        stored there releases what it overwrites, so it starts zeroed }
+      B := Pointer(Self.FKeys) + Self.FCapacity * SizeOf(K);
+      FillByte(B^, (NewCap - Self.FCapacity) * SizeOf(K), 0);
+      B := Pointer(Self.FValues) + Self.FCapacity * SizeOf(V);
+      FillByte(B^, (NewCap - Self.FCapacity) * SizeOf(V), 0);
       Self.FCapacity := NewCap
     end;
     function TMap<K, V>.FindKey(Key: K): Int;
@@ -490,12 +496,18 @@ const Src = '''
         property Items[Key: K]: V read GetItem write SetItem; default;
       end;
     procedure TMap<K, V>.Grow;
-    var NewCap: Int;
+    var NewCap: Int; B: ^Byte;
     begin
       if Self.FCapacity = 0 then NewCap := 8
       else NewCap := Self.FCapacity * 2;
       Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(K));
       Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(V));
+      { ReallocMem leaves the new part as it found it; a managed K or V
+        stored there releases what it overwrites, so it starts zeroed }
+      B := Pointer(Self.FKeys) + Self.FCapacity * SizeOf(K);
+      FillByte(B^, (NewCap - Self.FCapacity) * SizeOf(K), 0);
+      B := Pointer(Self.FValues) + Self.FCapacity * SizeOf(V);
+      FillByte(B^, (NewCap - Self.FCapacity) * SizeOf(V), 0);
       Self.FCapacity := NewCap
     end;
     function TMap<K, V>.FindKey(Key: K): Int;
@@ -565,12 +577,18 @@ const Src = '''
         property Items[Key: K]: V read GetItem write SetItem; default;
       end;
     procedure TMap<K, V>.Grow;
-    var NewCap: Int;
+    var NewCap: Int; B: ^Byte;
     begin
       if Self.FCapacity = 0 then NewCap := 8
       else NewCap := Self.FCapacity * 2;
       Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(K));
       Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(V));
+      { ReallocMem leaves the new part as it found it; a managed K or V
+        stored there releases what it overwrites, so it starts zeroed }
+      B := Pointer(Self.FKeys) + Self.FCapacity * SizeOf(K);
+      FillByte(B^, (NewCap - Self.FCapacity) * SizeOf(K), 0);
+      B := Pointer(Self.FValues) + Self.FCapacity * SizeOf(V);
+      FillByte(B^, (NewCap - Self.FCapacity) * SizeOf(V), 0);
       Self.FCapacity := NewCap
     end;
     function TMap<K, V>.FindKey(Key: K): Int;
