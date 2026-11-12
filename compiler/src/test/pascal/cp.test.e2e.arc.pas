@@ -199,6 +199,11 @@ type
       segmentation fault, or "_StringRelease corrupted header (bad
       capacity)" later, depending on the heap's layout. }
     procedure TestRun_HandlerClearsItsOwner_StringsInCaseInTry;
+    { A receiver held for a call in a LOOP CONDITION (while G.Next() do,
+      repeat ... until not G.Next(), a getter, an interface call) is released
+      every iteration: x86-64 took the fused compare-and-branch, which has no
+      flush, and kept one reference per iteration. }
+    procedure TestRun_HeldReceiver_InLoopCondition_NoLeak;
   end;
 
 implementation
@@ -2716,6 +2721,82 @@ begin
   AssertRunsOnAll(Src,
     '400 Create Shortcut: Created a shortcut to this instance in your ' +
     'applications folder!' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_HeldReceiver_InLoopCondition_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TEvent = procedure of object;
+      IStep = interface
+        function More: Boolean;
+      end;
+      TCounter = class(TObject, IStep)
+        N: Int;
+        OnTick: TEvent;
+        function Next: Boolean;
+        function More: Boolean;
+        function GetLeft: Int;
+        procedure Tick;
+        property Left: Int read GetLeft;
+      end;
+    var
+      G: TCounter;
+      S: IStep;
+      Ticks: Int;
+    function TCounter.Next: Boolean;
+    begin
+      N := N - 1;
+      Result := N >= 0;
+    end;
+    function TCounter.More: Boolean;
+    begin
+      Result := Next();
+    end;
+    function TCounter.GetLeft: Int;
+    begin
+      Result := N;
+    end;
+    procedure TCounter.Tick;
+    begin
+      Ticks := Ticks + 1;
+    end;
+    procedure Run;
+    var
+      K: Int;
+    begin
+      G.N := 3;
+      K := 0;
+      while G.Next() do K := K + 1;
+      G.N := 3;
+      repeat K := K + 1 until not G.Next();
+      G.N := 3;
+      while G.Left > 0 do begin G.N := G.N - 1; K := K + 1 end;
+      G.N := 3;
+      while S.More() do K := K + 1;
+      for K := 1 to G.Left + 2 do G.OnTick();
+      WriteLn(K);
+    end;
+    begin
+      G := TCounter.Create();
+      S := G;
+      G.OnTick := @G.Tick;
+      G.N := 3;
+      while G.Next() do Ticks := Ticks + 1;
+      G.N := 3;
+      while S.More() do Ticks := Ticks + 1;
+      Run();
+      WriteLn(Ticks);
+      G.OnTick := nil;
+      S := nil;
+      G := nil;
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, '7' + LineEnding + 'done');
 end;
 
 initialization

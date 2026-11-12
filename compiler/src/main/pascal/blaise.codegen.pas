@@ -309,9 +309,11 @@ function UnitBlockHasManagedGlobals(ABlock: TBlock): Boolean;
   NO fini and no call — binaries do not grow. }
 function UnitNeedsFini(AUnit: TUnit): Boolean;
 
-{ True if evaluating AExpr MIGHT defer a class-field-on-owned-transient base
-  release (a retained class/interface field read whose base is an owned
-  transient — MakeObj().ClassField).  The three backends use this to decide
+{ True if evaluating AExpr MIGHT defer a release to the statement end: a
+  retained class/interface field read whose base is an owned transient
+  (MakeObj().ClassField), or a call that holds its receiver for the call (a
+  method, getter or interface call on a receiver the caller does not own, a
+  call through a method pointer or closure).  The backends use this to decide
   whether a condition/branch site needs the flush-and-materialise path
   (BUG-049): when it returns False the fast fused compare-branch is safe (no
   deferred base to leak).  Conservative — a false positive only costs the
@@ -869,34 +871,66 @@ var
 begin
   Result := False;
   if AExpr = nil then Exit;
-  { the deferring shape: a retained class/interface field read whose base is an
-    owned transient (MakeObj().ClassField).  Interface fields defer on x86-64
-    too, so include tyInterface. }
+  if (AExpr is TIntLiteral) or (AExpr is TFloatLiteral) or
+     (AExpr is TStringLiteral) or (AExpr is TNilLiteral) then
+    Exit;
+  if AExpr is TIdentExpr then
+    { a bare name; a bare property read is lowered to Self.Prop }
+    Exit(ExprMayDeferTransientBase(TIdentExpr(AExpr).LoweredExpr));
   if AExpr is TFieldAccessExpr then
   begin
     FA := TFieldAccessExpr(AExpr);
+    { a retained class/interface field read whose base is an owned transient
+      (MakeObj().ClassField).  Interface fields defer on x86-64 too, so
+      include tyInterface. }
     if (FA.Base <> nil) and FA.IsClassAccess and (FA.FieldInfo <> nil) and
        (FA.FieldInfo.TypeDesc <> nil) and
        (FA.FieldInfo.TypeDesc.Kind in [tyClass, tyInterface]) and
        (not FA.IsConstant) and ArcExprOwnsRef(FA.Base) then
       Exit(True);
-    if ExprMayDeferTransientBase(FA.Base) then Exit(True);
-    Exit;
+    { a getter or a parenless method call holds its receiver unless that is
+      Self itself (a bare Prop inside a method) }
+    if FA.IsMethodCall or
+       ((FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> '') and
+        not (FA.IsImplicitSelf and (FA.Base = nil) and
+             (FA.ImplicitBaseInfo = nil))) then
+      Exit(True);
+    Exit(ExprMayDeferTransientBase(FA.Base) or
+         ExprMayDeferTransientBase(FA.PropIndexExpr));
   end;
   { recurse through every subexpression EmitExpr descends into }
   if AExpr is TBinaryExpr then
+  begin
+    if TBinaryExpr(AExpr).LoweredCall <> nil then
+      Exit(ExprMayDeferTransientBase(TBinaryExpr(AExpr).LoweredCall));
     Result := ExprMayDeferTransientBase(TBinaryExpr(AExpr).Left) or
-              ExprMayDeferTransientBase(TBinaryExpr(AExpr).Right)
+              ExprMayDeferTransientBase(TBinaryExpr(AExpr).Right);
+  end
   else if AExpr is TNotExpr then
     Result := ExprMayDeferTransientBase(TNotExpr(AExpr).Expr)
   else if AExpr is TNegExpr then
-    Result := ExprMayDeferTransientBase(TNegExpr(AExpr).Expr)
+  begin
+    if TNegExpr(AExpr).LoweredCall <> nil then
+      Exit(ExprMayDeferTransientBase(TNegExpr(AExpr).LoweredCall));
+    Result := ExprMayDeferTransientBase(TNegExpr(AExpr).Expr);
+  end
   else if AExpr is TIsExpr then
     Result := ExprMayDeferTransientBase(TIsExpr(AExpr).Obj)
   else if AExpr is TAsExpr then
     Result := ExprMayDeferTransientBase(TAsExpr(AExpr).Obj)
+  else if AExpr is TStringSubscriptExpr then
+    Result := ExprMayDeferTransientBase(TStringSubscriptExpr(AExpr).StrExpr) or
+              ExprMayDeferTransientBase(TStringSubscriptExpr(AExpr).IndexExpr)
+  else if AExpr is TDerefExpr then
+    Result := ExprMayDeferTransientBase(TDerefExpr(AExpr).Expr)
   else if AExpr is TMethodCallExpr then
   begin
+    { a call on an instance, an interface or through a procedural field
+      holds its receiver for the call; a static call or a constructor has
+      none to hold }
+    if not (TMethodCallExpr(AExpr).IsStaticCall or
+            TMethodCallExpr(AExpr).IsConstructorCall) then
+      Exit(True);
     Result := ExprMayDeferTransientBase(TMethodCallExpr(AExpr).ObjExpr);
     if not Result and (TMethodCallExpr(AExpr).Args <> nil) then
       for I := 0 to TMethodCallExpr(AExpr).Args.Count - 1 do
@@ -906,12 +940,21 @@ begin
   end
   else if AExpr is TFuncCallExpr then
   begin
+    { a call through a procedural variable or field holds the closure's
+      environment / the method pointer's receiver }
+    if TFuncCallExpr(AExpr).IsIndirectCall or
+       TFuncCallExpr(AExpr).IsProcFieldCall then
+      Exit(True);
     if TFuncCallExpr(AExpr).Args <> nil then
       for I := 0 to TFuncCallExpr(AExpr).Args.Count - 1 do
         if ExprMayDeferTransientBase(
              TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])) then
           Exit(True);
-  end;
+  end
+  else
+    { anything else (an indirect call, a cast, a set or array literal, ...):
+      assume it may }
+    Result := True;
 end;
 
 function ArcExprIsUnownedStrTransient(AExpr: TASTExpr): Boolean;
