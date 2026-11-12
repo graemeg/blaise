@@ -415,6 +415,98 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
+{ A worker that frees its own large blocks keeps them on its cache of  }
+{ freed large blocks; the thread-exit hook must unmap that cache, or   }
+{ every short-lived thread leaks up to LARGE_CACHE_MAX mappings.       }
+{ ------------------------------------------------------------------ }
+
+procedure LargeCacheWorker(Arg: Pointer);
+var
+  I: Int;
+  Ptrs: array[0..3] of Pointer;
+begin
+  { Large only: this thread makes no small allocation of its own. }
+  for I := 0 to 3 do
+    Ptrs[I] := _BlaiseGetMem(1500000);
+  for I := 0 to 3 do
+    _BlaiseFreeMem(Ptrs[I]);
+end;
+
+function Test_LargeCache_UnmappedAtWorkerExit: string;
+var
+  M0, M1: Int64;
+  H: Int64;
+  Rc, RcJoin: Int;
+  Fn: TThreadProc;
+begin
+  M0 := _MemLargeMappingCount();
+  Fn := @LargeCacheWorker;
+  H := 0;
+  Rc := pthread_create(@H, nil, Pointer(Fn), nil);
+  RcJoin := pthread_join(H, nil);
+  M1 := _MemLargeMappingCount();
+
+  AssertEquals('pthread_create', 0, Rc);
+  AssertEquals('pthread_join', 0, RcJoin);
+  AssertEquals('the worker''s cached large blocks are unmapped at its exit',
+               M0, M1);
+  Result := '';
+end;
+
+{ ------------------------------------------------------------------ }
+{ The cache of freed large blocks is bounded by bytes, not only by     }
+{ count: 32 freed window buffers of 10 MB each must not stay mapped.   }
+{ ------------------------------------------------------------------ }
+
+var
+  GBigBefore, GBigAfter: Int64;
+
+{ On a fresh thread, so that the cache starts empty. }
+procedure BigBlockWorker(Arg: Pointer);
+var
+  P: Pointer;
+begin
+  GBigBefore := _MemLargeMappingCount();
+  P := _BlaiseGetMem(10 * 1024 * 1024);
+  _BlaiseFreeMem(P);
+  GBigAfter := _MemLargeMappingCount();
+end;
+
+function Test_LargeCache_DoesNotKeepBigBlocks: string;
+var
+  H: Int64;
+  Rc, RcJoin: Int;
+  Fn: TThreadProc;
+begin
+  Fn := @BigBlockWorker;
+  H := 0;
+  Rc := pthread_create(@H, nil, Pointer(Fn), nil);
+  RcJoin := pthread_join(H, nil);
+  AssertEquals('pthread_create', 0, Rc);
+  AssertEquals('pthread_join', 0, RcJoin);
+  AssertEquals('a freed 10 MB block is unmapped, not cached', GBigBefore, GBigAfter);
+  Result := '';
+end;
+
+function Test_LargeCache_IsBoundedInBytes: string;
+var
+  M0, M1: Int64;
+  Ptrs: array[0..31] of Pointer;
+  I: Int;
+begin
+  { Settle the cache: whatever earlier tests left is counted in M0. }
+  M0 := _MemLargeMappingCount();
+  for I := 0 to 31 do
+    Ptrs[I] := _BlaiseGetMem(900 * 1024);
+  for I := 0 to 31 do
+    _BlaiseFreeMem(Ptrs[I]);
+  M1 := _MemLargeMappingCount();
+  { 32 blocks of 900 KB: at most 4 MB of them (4 blocks) stay cached. }
+  AssertTrue('at most four 900 KB blocks cached', M1 - M0 <= 4);
+  Result := '';
+end;
+
+{ ------------------------------------------------------------------ }
 { Phase 5: abandonment + adoption + unmap-when-empty-and-abandoned.    }
 { A worker exits while its blocks are still live: its arenas must be   }
 { abandoned (not unmapped).  The main thread's frees are foreign       }
@@ -508,6 +600,10 @@ begin
           'blaise_mem_mt');
   AddTest('Registry_WorkerExitReclaim', @Test_Registry_WorkerExitReclaim,
           'blaise_mem_mt');
+  AddTest('LargeCache_UnmappedAtWorkerExit', @Test_LargeCache_UnmappedAtWorkerExit,
+    'blaise_mem_mt');
+  AddTest('LargeCache_DoesNotKeepBigBlocks', @Test_LargeCache_DoesNotKeepBigBlocks, 'blaise_mem_mt');
+  AddTest('LargeCache_IsBoundedInBytes', @Test_LargeCache_IsBoundedInBytes, 'blaise_mem_mt');
   AddTest('Abandoned_AdoptAndReclaim', @Test_Abandoned_AdoptAndReclaim,
           'blaise_mem_mt');
   AddTest('Stress_WorkerChurn', @Test_Stress_WorkerChurn, 'blaise_mem_mt');

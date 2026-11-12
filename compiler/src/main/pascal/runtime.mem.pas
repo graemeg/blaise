@@ -29,7 +29,8 @@
   Large allocations (above LARGE_THRESHOLD):
     Each gets its own mmap region with a 24-byte header.  Freed large
     blocks are cached on a LIFO freelist for O(1) reuse.  The cache
-    holds up to LARGE_CACHE_MAX entries; excess blocks are munmap-ed
+    holds up to LARGE_CACHE_MAX entries of at most LARGE_CACHE_BLOCK_MAX
+    bytes each, LARGE_CACHE_BYTES_MAX in all; other blocks are munmap-ed
     immediately.  A large realloc that fits the existing mapping resizes
     in place; one that must move allocates a new region with geometric
     headroom (half again the old size), copies, and frees the old one,
@@ -123,6 +124,11 @@ procedure _MemDrainRemoteFrees;
   mapped.  Returns the number of arenas unmapped. }
 function _MemReclaimAbandoned: Int32;
 
+{ Number of large-block mappings currently mapped, in every thread, cached
+  ones included: a thread's cache of freed large blocks must be unmapped when
+  the thread exits. }
+function _MemLargeMappingCount: Int64;
+
 implementation
 
 function  _libc_mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
@@ -199,6 +205,13 @@ const
   HEADER_SIZE     = 16;
   LARGE_HEADER    = 32;
   LARGE_CACHE_MAX = 32;
+  { The cache is for the churn of middling blocks (strings and arrays that
+    grow).  A bigger block is unmapped when it is freed: mapping it again
+    costs little beside filling it, and a cache of 32 window-sized buffers
+    per thread kept hundreds of megabytes resident. }
+  LARGE_CACHE_BLOCK_MAX = 1024 * 1024;
+  { Bytes of mappings one thread's cache may keep. }
+  LARGE_CACHE_BYTES_MAX = 4 * 1024 * 1024;
 
 { CROSS-LAYOUT INVARIANT (concurrent-allocator-design.adoc, §Data
   structures): IsLarge and GetAllocSize classify a block by reading Flags
@@ -306,6 +319,7 @@ threadvar
   ArenaHead: PArena;
   LargeFreeHead: PLargeFreeNode;
   LargeFreeCount: Int;
+  LargeFreeBytes: Int64;
   { Cross-thread free path state.  TidAnchor exists only for its per-thread
     TLS address (see MyTid); FreeDrainCounter and DrainCursor implement the
     periodic rotating free-side drain. }
@@ -333,6 +347,7 @@ var
   GAbandonedCount: Int64;      { registered arenas with OwnerTid = 0 }
   GHooksReady: Int;        { main-thread atexit sweep registered once }
   GThreadVarNodes: PThreadVarNode;  { registered threadvar finalisers }
+  GLargeMapped: Int64;         { large mappings mapped (atomic; diagnostic) }
 
 { Registry spinlock — CAS built on the allocator's own atomic leaves,
   deliberately NOT a pthread_mutex, so runtime.mem stays free of libc
@@ -527,6 +542,13 @@ begin
   RegLockRelease();
 end;
 
+{ Unmaps one large block's mapping (in use, or from a cache). }
+procedure LargeUnmap(Base: Pointer; Size: Int64);
+begin
+  _libc_munmap(Base, Size);
+  _AtomicAddInt64(@GLargeMapped, -1);
+end;
+
 { Thread-exit sweep: run for a worker thread by its thread-exit hook
   (ThreadExitHook) and for the main thread by the __cxa_atexit handler
   (§Teardown).  Both run ON the owning thread, so its threadvars are
@@ -540,6 +562,9 @@ end;
       arena abandoned (OwnerTid := 0, atomically — unlocked free-path
       readers).  It stays on the registry for adoption/reclamation.
 
+  The thread's cache of freed large blocks is unmapped too: nothing else
+  can reach it once the thread has gone.
+
   Afterwards the thread's allocator threadvars are reset: freelist
   entries pointing into unmapped or abandoned arenas must not survive.
   Blocks that sat on the local freelists of a NOW-ABANDONED arena lie
@@ -552,7 +577,18 @@ var
   N: Int64;
   OldHead: Pointer;
   I: Int;
+  Large, NextLarge: PLargeFreeNode;
 begin
+  Large := LargeFreeHead;
+  while Large <> nil do
+  begin
+    NextLarge := Large^.Next;
+    LargeUnmap(Pointer(Large), Large^.TotalMapped);
+    Large := NextLarge;
+  end;
+  LargeFreeHead := nil;
+  LargeFreeCount := 0;
+  LargeFreeBytes := 0;
   if ArenaHead <> nil then
   begin
     RegLockAcquire();
@@ -943,6 +979,7 @@ begin
     CachedSize := Node^.TotalMapped;
     LargeFreeHead := Node^.Next;
     Dec(LargeFreeCount);
+    LargeFreeBytes := LargeFreeBytes - CachedSize;
     if CachedSize >= Needed then
     begin
       Hdr := PLargeHeader(Pointer(Node));
@@ -953,7 +990,7 @@ begin
       Exit(Pointer(UInt(Hdr) + LARGE_HEADER));
     end;
     { Cached block too small — free it and fall through to a fresh mmap. }
-    _libc_munmap(Pointer(Node), CachedSize);
+    LargeUnmap(Pointer(Node), CachedSize);
   end;
 
   Total := Needed;
@@ -962,6 +999,7 @@ begin
   begin
     Exit(nil);
   end;
+  _AtomicAddInt64(@GLargeMapped, 1);
   Hdr := PLargeHeader(Base);
   Hdr^.TotalMapped := Total;
   Hdr^.AllocSize := Size;
@@ -983,19 +1021,24 @@ begin
     threadvar LIFO cache and be handed out from there. }
   if Hdr^.OwnerTid <> MyTid() then
   begin
-    _libc_munmap(Pointer(Hdr), Hdr^.TotalMapped);
+    LargeUnmap(Pointer(Hdr), Hdr^.TotalMapped);
     Exit;
   end;
-  if LargeFreeCount < LARGE_CACHE_MAX then
+  if (LargeFreeCount < LARGE_CACHE_MAX) and (Hdr^.TotalMapped <= LARGE_CACHE_BLOCK_MAX)
+    and (LargeFreeBytes + Hdr^.TotalMapped <= LARGE_CACHE_BYTES_MAX) then
   begin
+    { The cache is this thread's: its exit hook must run to unmap it, also
+      in a thread that has made no small allocation. }
+    EnsureExitHooks();
     Node := PLargeFreeNode(Pointer(Hdr));
     Node^.TotalMapped := Hdr^.TotalMapped;
     Node^.Next := LargeFreeHead;
     LargeFreeHead := Node;
     Inc(LargeFreeCount);
+    LargeFreeBytes := LargeFreeBytes + Node^.TotalMapped;
   end
   else
-    _libc_munmap(Pointer(Hdr), Hdr^.TotalMapped);
+    LargeUnmap(Pointer(Hdr), Hdr^.TotalMapped);
 end;
 
 function IsLarge(Ptr: Pointer): Boolean;
@@ -1038,6 +1081,11 @@ begin
     A := A^.RemoteList;
   end;
   RegLockRelease();
+end;
+
+function _MemLargeMappingCount: Int64;
+begin
+  Result := _AtomicAddInt64(@GLargeMapped, 0);
 end;
 
 function _MemAbandonedArenaCount: Int32;
