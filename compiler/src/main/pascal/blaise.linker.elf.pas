@@ -689,15 +689,14 @@ begin
   ATab := ATab + AStr + Chr(0);
 end;
 
-{ ---- chmod binding ----------------------------------------------------- }
+{ ---- the executable bit, through the platform adapter ------------------ }
 
-function _lk_chmod(APath: PChar; AMode: Int): Int;
-  external name 'chmod';
+function _MakeExecutable(const APath: string): Int32;
+  external name '_MakeExecutable';
 
 procedure MakeFileExecutable(const APath: string);
 begin
-  { 0o755 = rwxr-xr-x }
-  _lk_chmod(PChar(APath), 493);
+  _MakeExecutable(APath);
 end;
 
 { ---- TLinkTarget ------------------------------------------------------- }

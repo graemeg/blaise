@@ -61,6 +61,8 @@ type
     function GetTempDir: string; override;
     function GetTempFileName(const ADir, APrefix: string): string; override;
     function GetProcessID: Int32; override;
+    function ReadLink(const APath: string): string; override;
+    function MakeExecutable(const APath: string): Boolean; override;
     function GetEnvVar(const AName: string): string; override;
     procedure Sleep(AMilliseconds: Int32); override;
     procedure Halt(AExitCode: Int32); override;
@@ -186,6 +188,8 @@ function  libc_stat(Path: PChar; Buf: Pointer): Int32;                    extern
 function  libc_lstat(Path: PChar; Buf: Pointer): Int32;                   external name 'lstat';
 function  libc_mkdir(Path: PChar; Mode: Int32): Int32;                   external name 'mkdir';
 function  libc_rmdir(Path: PChar): Int32;                                  external name 'rmdir';
+function  libc_readlink(Path: PChar; Buf: PChar; Size: Int64): Int64; external name 'readlink';
+function  libc_chmod(Path: PChar; Mode: Int32): Int32; external name 'chmod';
 function  libc_unlink(Path: PChar): Int32;                                 external name 'unlink';
 function  libc_rename(OldPath, NewPath: PChar): Int32;                     external name 'rename';
 function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       external name 'getcwd';
@@ -808,6 +812,25 @@ end;
 function TRtlPlatformPosix.GetProcessID: Int32;
 begin
   Result := libc_getpid();
+end;
+
+function TRtlPlatformPosix.ReadLink(const APath: string): string;
+var
+  Buf: array[0..4095] of Byte;
+  N: Int64;
+begin
+  Result := '';
+  N := libc_readlink(StrData(Pointer(APath)), PChar(@Buf[0]), 4095);
+  if N <= 0 then
+    Exit;
+  Buf[N] := 0;
+  Result := string(PChar(@Buf[0]));
+end;
+
+function TRtlPlatformPosix.MakeExecutable(const APath: string): Boolean;
+begin
+  { 0o755: rwxr-xr-x }
+  Result := libc_chmod(StrData(Pointer(APath)), 493) = 0;
 end;
 
 function TRtlPlatformPosix.GetEnvVar(const AName: string): string;

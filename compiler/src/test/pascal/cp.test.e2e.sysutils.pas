@@ -24,6 +24,10 @@ type
   published
     procedure TestRun_ListDir_ReturnsWholeNames;
     procedure TestRun_FileOps_MadeByTheProgram;
+    { the platform operations the compiler itself needs (M6): the target of
+      a symbolic link, and the executable bit an ELF link sets.  On Windows
+      neither exists: no link target, and marking succeeds as a no-op. }
+    procedure TestRun_ReadLinkAndMakeExecutable;
     { Exec returns the command's exit code on every target (POSIX returned
       system()'s raw wait status, 768 for 'exit 3') }
     procedure TestRun_Exec_ReturnsExitCode;
@@ -348,6 +352,51 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRTLRunsOnAll(Src, '0 3 255' + LineEnding, 0);
+end;
+
+procedure TE2ESysUtilsTests.TestRun_ReadLinkAndMakeExecutable;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    function _ReadLink(const Path: string): string; external name '_ReadLink';
+    function _MakeExecutable(const Path: string): Int32;
+      external name '_MakeExecutable';
+    var
+      D, F, L: string;
+      Posix: Boolean;
+    begin
+      Posix := DirectorySeparator = '/';
+      D := GetTempDir() + 'blaise_rlmx_' + IntToStr(GetProcessID());
+      ForceDirectories(D);
+      F := D + DirectorySeparator + 'run.sh';
+      WriteFile(F, '#!/bin/sh' + #10 + 'exit 7' + #10);
+      WriteLn('[', _ReadLink(F), '] ', _MakeExecutable(F));
+      WriteLn(_MakeExecutable(D + DirectorySeparator + 'missing') = 0);
+      if Posix then
+      begin
+        WriteLn(Exec(F));
+        L := D + '/link';
+        Exec('ln -s run.sh ' + L);
+        WriteLn('[', _ReadLink(L), ']');
+        DeleteFile(L);
+      end
+      else
+      begin
+        WriteLn(7);
+        WriteLn('[run.sh]');
+      end;
+      DeleteFile(F);
+      RemoveDir(D);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src,
+    '[] 1' + LineEnding +
+    'True' + LineEnding +
+    '7' + LineEnding +
+    '[run.sh]' + LineEnding, 0);
 end;
 
 procedure TE2ESysUtilsTests.TestRun_FileOps_MadeByTheProgram;

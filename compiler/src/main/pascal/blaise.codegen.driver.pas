@@ -395,13 +395,6 @@ uses
   uToolchain,
   uUnitInterfaceIO;   { EffectiveCompilerId / ContentHashFnv1a64 — RTL cache key }
 
-{ Process id + directory removal, for the per-process private RTL build
-  directory.  Declared directly rather than via GRtlPlatform to avoid a
-  unit-initialisation-order dependency (this unit may run before the platform
-  layer assigns GRtlPlatform). }
-function _driver_getpid: Int32; external name 'getpid';
-function _driver_rmdir(APath: PChar): Int32; external name 'rmdir';
-
 { Short key identifying the COMPILER that produced a cached RTL object.
 
   BUG-20260726: the RTL object cache used to be keyed on --target alone and
@@ -465,7 +458,7 @@ begin
   ForceDirectories(Dir);
   if not DirectoryExists(Dir) then
     Exit;
-  Probe := Dir + '/.probe-' + IntToStr(_driver_getpid());
+  Probe := Dir + '/.probe-' + IntToStr(GetProcessID());
   try
     WriteFile(Probe, '');
     Result := True;
@@ -866,7 +859,7 @@ begin
     Exit('cannot create the RTL object cache directory ' + CacheDir +
       '; pass --rtl-cache DIR or set $BLAISE_RTL_CACHE to a writable directory');
   BuildDir := IncludeTrailingPathDelimiter(CacheDir) + 'build-' +
-              IntToStr(_driver_getpid());
+              IntToStr(GetProcessID());
   ForceDirectories(BuildDir);
   BlaiseBin := ExecutablePath();
 
@@ -955,7 +948,7 @@ begin
     DeleteFile(IncludeTrailingPathDelimiter(BuildDir) + Units.Strings[I] + '.o');
     DeleteFile(IncludeTrailingPathDelimiter(BuildDir) + Units.Strings[I] + '.bif');
   end;
-  _driver_rmdir(PChar(ExcludeTrailingPathDelimiter(BuildDir)));
+  RemoveDir(ExcludeTrailingPathDelimiter(BuildDir));
   Units.Free();
   finally
     ProvidedSyms.Free();

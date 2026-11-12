@@ -66,6 +66,13 @@ type
     function GetTempDir: string; virtual; abstract;
     function GetTempFileName(const ADir, APrefix: string): string; virtual; abstract;
     function GetProcessID: Int32; virtual; abstract;
+    { The target of the symbolic link APath, as stored (it may be relative);
+      '' when APath is not a symbolic link. }
+    function ReadLink(const APath: string): string; virtual; abstract;
+    { Mark APath executable (mode 0755 where files carry one); True on
+      success.  Where files have no executable bit it only checks that
+      APath exists. }
+    function MakeExecutable(const APath: string): Boolean; virtual; abstract;
     function GetEnvVar(const AName: string): string; virtual; abstract;
     procedure Sleep(AMilliseconds: Int32); virtual; abstract;
     procedure Halt(AExitCode: Int32); virtual; abstract;

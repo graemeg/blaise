@@ -341,7 +341,7 @@ end;
 { Install-relative paths                                               }
 { ------------------------------------------------------------------ }
 
-function _tc_readlink(APath, ABuf: PChar; ASize: Int64): Int64; external name 'readlink';
+function _ReadLink(const APath: string): string; external name '_ReadLink';
 
 var
   GExecutablePath: string = '';
@@ -349,16 +349,8 @@ var
 { The target of the symlink APath, as stored (possibly relative); '' when
   APath is not a symlink. }
 function ReadLinkTarget(const APath: string): string;
-var
-  Buf: array[0..4095] of Byte;
-  N:   Int64;
 begin
-  Result := '';
-  N := _tc_readlink(PChar(APath), PChar(@Buf[0]), 4095);
-  if N <= 0 then
-    Exit;
-  Buf[N] := 0;
-  Result := string(PChar(@Buf[0]));
+  Result := _ReadLink(APath);
 end;
 
 { APath made absolute against ACwd, with '.' and '..' folded. }

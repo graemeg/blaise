@@ -51,6 +51,10 @@ function  _ListDir(const Path: string): Pointer;
 function  _GetTempDir: Pointer;
 function  _GetTempFileName(const Dir, Prefix: string): Pointer;
 function  _GetProcessID: Int32;
+{ Not compiler builtins: the compiler's own units import them via
+  `external name`. }
+function  _ReadLink(const Path: string): string;
+function  _MakeExecutable(const Path: string): Int32;
 function  _GetEnvVar(const Name: string): Pointer;
 procedure _Sleep(Ms: Int32);
 procedure _Halt(Code: Int32);
@@ -191,6 +195,16 @@ end;
 function _GetProcessID: Int32;
 begin
   Result := GRtlPlatform.GetProcessID();
+end;
+
+function _ReadLink(const Path: string): string;
+begin
+  Result := GRtlPlatform.ReadLink(Path);
+end;
+
+function _MakeExecutable(const Path: string): Int32;
+begin
+  if GRtlPlatform.MakeExecutable(Path) then Result := 1 else Result := 0;
 end;
 
 function _GetEnvVar(const Name: string): Pointer;

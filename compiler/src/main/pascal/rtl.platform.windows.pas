@@ -47,6 +47,8 @@ type
     function GetTempDir: string; override;
     function GetTempFileName(const ADir, APrefix: string): string; override;
     function GetProcessID: Int32; override;
+    function ReadLink(const APath: string): string; override;
+    function MakeExecutable(const APath: string): Boolean; override;
     function GetEnvVar(const AName: string): string; override;
     procedure Sleep(AMilliseconds: Int32); override;
     procedure Halt(AExitCode: Int32); override;
@@ -1013,6 +1015,20 @@ end;
 function TRtlPlatformWindows.GetProcessID: Int32;
 begin
   Result := Int32(W32GetCurrentProcessId());
+end;
+
+{ A Windows symbolic link is a reparse point that the file APIs follow; the
+  compiler asks only to find its own installation, which ParamStr(0)
+  already names in full here, so no link target is reported. }
+function TRtlPlatformWindows.ReadLink(const APath: string): string;
+begin
+  Result := '';
+end;
+
+{ A file is executable by its extension; nothing to mark. }
+function TRtlPlatformWindows.MakeExecutable(const APath: string): Boolean;
+begin
+  Result := Self.FileExists(APath);
 end;
 
 function TRtlPlatformWindows.GetEnvVar(const AName: string): string;
