@@ -584,7 +584,12 @@ begin
         if Sym.Sect <> 0 then Continue;              { defined here }
         if FDefIndex.ContainsKey(Sym.Name) then Continue;  { elsewhere }
         Imp := ImportOf(Sym.Name);
-        if (R.RType = ARM64_RELOC_BRANCH26) and (FImpGot.Get(Imp) < 0) then
+        { a branch reaches the import through its stub, and a GOT load
+          (the address of a routine in a dylib) reads the slot itself }
+        if ((R.RType = ARM64_RELOC_BRANCH26) or
+            (R.RType = ARM64_RELOC_GOT_LOAD_PAGE21) or
+            (R.RType = ARM64_RELOC_GOT_LOAD_PAGEOFF12)) and
+           (FImpGot.Get(Imp) < 0) then
         begin
           FImpGot.SetItem(Imp, FNumGot);
           FNumGot := FNumGot + 1;
@@ -838,6 +843,45 @@ begin
                 Sym.Name + ' out of range');
             W := ReadStream(Strm, SiteOff, 4);
             W := W or ((Delta shr 2) and $3FFFFFF);
+            PatchStream(Strm, SiteOff, 4, W);
+          end;
+          ARM64_RELOC_GOT_LOAD_PAGE21:
+          begin
+            { the page of the import's got slot; a symbol this image
+              defines needs no slot, and its PAGEOFF12 half is relaxed to an
+              ADD, as Apple's ld does }
+            if IsImport then
+            begin
+              Imp := ImportOf(Sym.Name);
+              Target := FLayout.DataVm + FGotBase
+                + Int64(FImpGot.Get(Imp)) * 8;
+              Addend := 0;
+            end;
+            PageDelta := ((Target + Addend) shr 12) - (SiteVm shr 12);
+            W := ReadStream(Strm, SiteOff, 4);
+            W := W or ((PageDelta and 3) shl 29)
+              or (((PageDelta shr 2) and $7FFFF) shl 5);
+            PatchStream(Strm, SiteOff, 4, W);
+          end;
+          ARM64_RELOC_GOT_LOAD_PAGEOFF12:
+          begin
+            W := ReadStream(Strm, SiteOff, 4);
+            if (W and $FFC00000) <> $F9400000 then
+              raise EMachOLinker.Create('macho linker: a GOT load of ' +
+                Sym.Name + ' must be a 64-bit LDR (in ' + Obj.SourceName +
+                ')');
+            if IsImport then
+            begin
+              Imp := ImportOf(Sym.Name);
+              Target := FLayout.DataVm + FGotBase
+                + Int64(FImpGot.Get(Imp)) * 8;
+              W := W or (((Target and $FFF) shr 3) shl 10);
+            end
+            else
+              { relaxed: Rn and Rd kept, LDR becomes ADD-immediate of the
+                symbol's own page offset }
+              W := $91000000 or (W and $3FF)
+                or (((Target + Addend) and $FFF) shl 10);
             PatchStream(Strm, SiteOff, 4, W);
           end;
           ARM64_RELOC_PAGE21,

@@ -34,6 +34,9 @@ type
     { last (rightmost) 0-based index of ASub in AStr, or -1 if absent }
     function RPos(const ASub, AStr: string): Int;
   published
+    { @Routine of an external routine reads its address from a GOT slot:
+      the routine may be in a dylib, where only dyld knows the address }
+    procedure TestAddrOfExternalRoutine_LoadsFromGot;
     { records by value to a C routine follow AAPCS64: a mixed int/float
       record of at most 16 bytes is its memory image in x registers (no
       copy, no address), a larger one the address of a private copy
@@ -9953,6 +9956,22 @@ begin
   Seg := Copy(A, P, Q - P);
   AssertTrue('the spilled Float32 HFA is four 4-byte lanes: ' + Seg,
     (Pos('str w9, [sp, #', Seg) >= 0) and (Pos('s0', Seg) < 0));
+end;
+
+procedure TArm64BackendTests.TestAddrOfExternalRoutine_LoadsFromGot;
+const
+  SRC = 'program P; type TLen = function(S: PChar): UInt64; cdecl; ' +
+    'function c_strlen(S: PChar): UInt64; external ''c'' name ''strlen''; ' +
+    'function Own(S: PChar): UInt64; cdecl; begin Result := 0; end; ' +
+    'var L: TLen; begin L := @c_strlen; L := @Own; end.';
+var
+  Code: string;
+begin
+  Code := GenAsm(SRC, TargetArm64);
+  AssertTrue('external via the GOT', Pos('adrp x0, _strlen@GOTPAGE', Code) >= 0);
+  AssertTrue('loaded, not added',
+    Pos('ldr x0, [x0, _strlen@GOTPAGEOFF]', Code) >= 0);
+  AssertTrue('an own routine by its page', Pos('adrp x0, _Own@PAGE', Code) >= 0);
 end;
 
 initialization

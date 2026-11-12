@@ -65,6 +65,10 @@ type
       bracketed by section$start$/section$end$__DATA$__blaise_unw, with their
       absolute words pointing into __text }
     procedure TestLinker_UnwindSectionBounds;
+    { @Routine of a routine in a dylib: the address is read from a dyld-bound
+      got slot; for a symbol the image defines the load is relaxed to an
+      add of the symbol itself }
+    procedure TestLinker_GotLoad_ImportSlotAndLocalRelaxed;
     procedure TestEntry_LCMainNotUnixthread;
     procedure TestDylinkerAndLibSystem;
     procedure TestBuildVersion_PlatformMacOS;
@@ -531,6 +535,62 @@ begin
     AssertEquals('anchor points at _main', SMain.Value, RdU64At(Img, Off));
     AssertEquals('first block body', 287454020, Int64(RdU32At(Img, Off + 8)));
     AssertEquals('second block', 42, RdU64At(Img, Off + 16));
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TMachOExecWriterTests.TestLinker_GotLoad_ImportSlotAndLocalRelaxed;
+var
+  Lk: TMachOLinker;
+  Img: string;
+  F: TMachOFile;
+  SMain, SHelper: TMoSymbol;
+  Text, Data: TMoSection;
+  Off: Int64;
+  Adrp, Ldr, Add: Int64;
+  Page, Slot: Int64;
+begin
+  Lk := TMachOLinker.Create();
+  try
+    Lk.AddObject(ParseMachO(AssembleArm64ToBytes(
+      '.text' + LineEnding + '.globl _main' + LineEnding + '_main:' + LineEnding +
+      'adrp x0, _strlen@GOTPAGE' + LineEnding +
+      'ldr x0, [x0, _strlen@GOTPAGEOFF]' + LineEnding +
+      'adrp x1, _helper@GOTPAGE' + LineEnding +
+      'ldr x1, [x1, _helper@GOTPAGEOFF]' + LineEnding +
+      'ret' + LineEnding +
+      '.globl _helper' + LineEnding + '_helper:' + LineEnding +
+      'ret' + LineEnding), 'a.o'));
+    Img := Lk.Link('_main');
+  finally
+    Lk.Free();
+  end;
+  F := ParseMachO(Img, 'got_exec');
+  try
+    SMain := F.FindSymbol('_main');
+    SHelper := F.FindSymbol('_helper');
+    AssertTrue('symbols', (SMain <> nil) and (SHelper <> nil));
+    Text := F.FindSection('__TEXT', '__text');
+    Data := F.FindSection('__DATA', '__data');
+    AssertTrue('sections', (Text <> nil) and (Data <> nil));
+    Off := Text.Offset + (SMain.Value - Text.Addr);
+    { the import: adrp + ldr address a slot inside __data }
+    Adrp := RdU32At(Img, Off);
+    Ldr := RdU32At(Img, Off + 4);
+    AssertEquals('still a 64-bit LDR', $F9400000, Ldr and $FFC00000);
+    Page := (SMain.Value and (not Int64($FFF))) +
+      (((((Adrp shr 5) and $7FFFF) shl 2) or ((Adrp shr 29) and 3)) shl 12);
+    Slot := Page + ((Ldr shr 10) and $FFF) * 8;
+    AssertTrue('the slot lies in __data',
+      (Slot >= Data.Addr) and (Slot + 8 <= Data.Addr + Data.Size));
+    AssertTrue('the slot is bound to _strlen',
+      Pos('_strlen', Img) >= 0);
+    { the local symbol: the LDR became an ADD of _helper's page offset }
+    Add := RdU32At(Img, Off + 12);
+    AssertEquals('relaxed to ADD x1, x1', $91000021, Add and $FFC003FF);
+    AssertEquals('of _helper''s page offset', SHelper.Value and $FFF,
+      (Add shr 10) and $FFF);
   finally
     F.Free();
   end;

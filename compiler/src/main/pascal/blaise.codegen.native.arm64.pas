@@ -7742,7 +7742,20 @@ begin
   begin
     if TAddrOfExpr(AExpr).ResolvedFreeRoutine <> nil then
     begin
-      { @Routine: the code address of a standalone routine }
+      { @Routine: the code address of a standalone routine.  An external
+        one may live in a dylib, whose address only dyld knows: it is read
+        from a GOT slot (the linker relaxes the load to an add when the
+        image defines the symbol after all). }
+      if TMethodDecl(TAddrOfExpr(AExpr).ResolvedFreeRoutine).IsExternal then
+      begin
+        Self.Emit(Format(#9'adrp x0, %s@GOTPAGE',
+          [RoutineSym(TMethodDecl(TAddrOfExpr(AExpr).ResolvedFreeRoutine),
+            '')]));
+        Self.Emit(Format(#9'ldr x0, [x0, %s@GOTPAGEOFF]',
+          [RoutineSym(TMethodDecl(TAddrOfExpr(AExpr).ResolvedFreeRoutine),
+            '')]));
+        Exit;
+      end;
       Self.Emit(Format(#9'adrp x0, %s@PAGE',
         [RoutineSym(TMethodDecl(TAddrOfExpr(AExpr).ResolvedFreeRoutine),
           '')]));
