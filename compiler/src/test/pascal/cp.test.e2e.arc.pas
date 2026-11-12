@@ -191,6 +191,14 @@ type
       getter's receiver and a closure's environment (a handler that clears
       the field it is stored in). }
     procedure TestRun_CallableReceiver_HeldForTheCall;
+    { The shape Facet's shortcut dialog had: a dialog's result handler (a
+      closure the dialog owns) clears the window's reference to the dialog --
+      the last one -- and then calls a method that assigns strings in a case
+      inside try ... except.  The closure's environment was freed under its
+      own body, and the strings that followed were built over it: a
+      segmentation fault, or "_StringRelease corrupted header (bad
+      capacity)" later, depending on the heap's layout. }
+    procedure TestRun_HandlerClearsItsOwner_StringsInCaseInTry;
   end;
 
 implementation
@@ -2611,6 +2619,103 @@ begin
     'in closure: env of closure' + LineEnding +
     'destroyed closure' + LineEnding +
     'end' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_HandlerClearsItsOwner_StringsInCaseInTry;
+const
+  Src = '''
+    program P;
+    type
+      TTarget = (stDesktop, stApplications, stOther);
+      TResultProc = reference to procedure(AOk: Boolean);
+      TRequest = class
+        Target: TTarget;
+        HasServer: Boolean;
+      end;
+      TDialog = class
+        OnResult: TResultProc;
+        FName: string;
+        function Request: TRequest;
+        procedure Done;
+      end;
+      TWindow = class
+        FDialog: TDialog;
+        FCount: Int;
+        FLast: string;
+        procedure Explain(const ATitle, AText: string);
+        procedure CreateShortcut(const AId: string; ARequest: TRequest);
+        procedure Open(const AId: string);
+      end;
+    function TDialog.Request: TRequest;
+    begin
+      Result := TRequest.Create();
+      Result.Target := stApplications;
+    end;
+    procedure TDialog.Done;
+    begin
+      if Assigned(OnResult) then OnResult(True);
+    end;
+    procedure TWindow.Explain(const ATitle, AText: string);
+    begin
+      FCount := FCount + 1;
+      FLast := ATitle + ': ' + AText;
+    end;
+    procedure TWindow.CreateShortcut(const AId: string; ARequest: TRequest);
+    var
+      What, Where: string;
+    begin
+      if ARequest = nil then Exit;
+      if ARequest.HasServer then What := 'server' else What := 'instance';
+      try
+        Explain('Create', AId);
+        case ARequest.Target of
+          stDesktop: Where := ' on your desktop!';
+          stApplications: Where := ' in your applications folder!';
+        else
+          Where := '!';
+        end;
+        Explain('Create Shortcut', 'Created a shortcut to this ' + What + Where);
+      except
+        Explain('Create Shortcut', 'Failed to create ' + What + ' shortcut');
+      end;
+    end;
+    procedure TWindow.Open(const AId: string);
+    var
+      Self_: TWindow;
+      Dialog: TDialog;
+      Id: string;
+    begin
+      Self_ := Self;
+      Id := AId + '-copy';
+      Dialog := TDialog.Create();
+      Dialog.FName := 'dialog for ' + Id;
+      FDialog := Dialog;
+      Dialog.OnResult := procedure(AOk: Boolean)
+        begin
+          Self_.FDialog := nil;
+          if AOk then
+            Self_.CreateShortcut(Id, Dialog.Request());
+        end;
+      Dialog := nil;
+    end;
+    var
+      W: TWindow;
+      I: Int;
+    begin
+      W := TWindow.Create();
+      for I := 1 to 200 do
+      begin
+        W.Open('inst');
+        W.FDialog.Done();
+      end;
+      WriteLn(W.FCount, ' ', W.FLast);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '400 Create Shortcut: Created a shortcut to this instance in your ' +
+    'applications folder!' + LineEnding, 0);
 end;
 
 initialization
