@@ -22,7 +22,7 @@ unit Scheduler.Tests;
 interface
 
 uses
-  blaise.testing, SysUtils, async.fibers;
+  blaise.testing, SysUtils, Classes, async.fibers;
 
 type
   TTimerHeapTests = class(TTestCase)
@@ -56,6 +56,13 @@ type
     procedure TestRun_FiberSpawnsFiber;
     procedure TestRun_ZeroSleepIsYield;
     procedure TestRun_ResetAllowsFreshRound;
+    { a plain OS thread working while RunScheduler runs on another is off
+      the scheduler: no current fiber, and FiberSleep blocks it as an OS
+      sleep.  It saw the scheduler thread's running fiber as its own, so its
+      blocking I/O parked that fiber and switched to a stack it did not own
+      (THttpClient used from a TThread beside a fiber server crashed in
+      FiberSwitch) }
+    procedure TestRun_PlainThreadBesideSchedulerIsOffScheduler;
   end;
 
   { Root exception frame + cancellation (design [#scheduler-cancellation]):
@@ -506,6 +513,63 @@ begin
     'K P1 Pcancelled ', GLog);
   AssertTrue('victim completed via its handler', GVictim.State = fsDone);
   GVictim := nil;
+  ResetScheduler();
+end;
+
+{ --- a plain thread beside a running scheduler --------------------------- }
+
+type
+  TOffSchedulerThread = class(TThread)
+  public
+    SawFiber: Boolean;
+    Looked: Boolean;
+    SleptNs: Int64;
+    Finished: Boolean;
+    procedure Execute; override;
+  end;
+
+var
+  GOffThread: TOffSchedulerThread;
+
+procedure TOffSchedulerThread.Execute;
+var
+  Started: Int64;
+begin
+  SawFiber := CurrentFiberTask() <> nil;
+  Looked := True;
+  if not SawFiber then
+  begin
+    { safe only off the scheduler: a fiber here would be another thread's }
+    FiberYield();
+    Started := MonotonicNowNs();
+    FiberSleep(20);
+    SleptNs := MonotonicNowNs() - Started;
+  end;
+  Finished := True;
+end;
+
+procedure OffSchedulerHostWorker(AArg: Pointer);
+begin
+  GOffThread := TOffSchedulerThread.Create(True);
+  GOffThread.Start();
+  { stay the running fiber (no suspension) until the thread has looked:
+    that is when another thread could mistake this fiber for its own }
+  while not GOffThread.Looked do
+    ;
+  while not GOffThread.Finished do
+    FiberSleep(2);
+  GOffThread.WaitFor();
+end;
+
+procedure TSchedulerTests.TestRun_PlainThreadBesideSchedulerIsOffScheduler;
+begin
+  GOffThread := nil;
+  SpawnFiber(@OffSchedulerHostWorker, nil);
+  RunScheduler();
+  AssertFalse('the plain thread has no current fiber', GOffThread.SawFiber);
+  AssertTrue('its FiberSleep blocked it for the time asked',
+    GOffThread.SleptNs >= Int64(20000000));
+  GOffThread := nil;
   ResetScheduler();
 end;
 

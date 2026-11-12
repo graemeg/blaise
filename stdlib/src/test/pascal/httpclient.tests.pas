@@ -37,7 +37,7 @@ interface
 
 uses
   blaise.testing, SysUtils, StrUtils,
-  Net.Http.Server, Net.Http.Client, Net.Tcp, Net.Sockets, async.fibers;
+  Classes, Net.Http.Server, Net.Http.Client, Net.Tcp, Net.Sockets, async.fibers;
 
 type
   THttpClientTests = class(TTestCase)
@@ -48,6 +48,11 @@ type
     procedure TestClientKeepAlive;
     procedure TestClientRedirect;
     procedure TestClientConcurrent;
+    { one client shared by several threads, each sending requests that reuse
+      its keep-alive connections: every thread gets its own answers (the
+      unsynchronised pool handed one connection to two threads, which then
+      read each other's responses, or corrupted the pool) }
+    procedure TestClientSharedAcrossThreads;
     procedure TestClientGetByName;
     procedure TestClientReadTimeout;
   end;
@@ -522,6 +527,101 @@ begin
   ResetScheduler();
   GHcHttpServer.Free();
   GHcHandler := nil;
+end;
+
+{ --- one client shared across threads --- }
+
+type
+  TSharedGetter = class(TThread)
+  public
+    Cli: THttpClient;
+    Id: Int;
+    Ok: Int;
+    procedure Execute; override;
+  end;
+
+const
+  SHARED_THREADS = 4;
+  SHARED_REQUESTS = 25;
+
+var
+  GSharedLock: TCriticalSection;
+  GSharedFinished: Int;
+  GSharedOk: Int;
+
+procedure TSharedGetter.Execute;
+var
+  I: Int;
+  Path: string;
+  Resp: THttpClientResponse;
+begin
+  for I := 1 to SHARED_REQUESTS do
+  begin
+    Path := '/t' + IntToStr(Id) + '-' + IntToStr(I);
+    Resp := Cli.Get(BaseUrl() + Path);
+    if Resp <> nil then
+    begin
+      if (Resp.Status = 200) and (Resp.Body = 'path=' + Path) then
+        Ok := Ok + 1;
+      Resp.Free();
+    end;
+  end;
+  GSharedLock.Enter();
+  GSharedOk := GSharedOk + Ok;
+  GSharedFinished := GSharedFinished + 1;
+  GSharedLock.Leave();
+end;
+
+procedure SharedClientFiber(AArg: Pointer);
+var
+  Cli: THttpClient;
+  Threads: array of TSharedGetter;
+  I, Finished: Int;
+begin
+  FiberSleep(3);
+  Cli := THttpClient.Create();
+  SetLength(Threads, SHARED_THREADS);
+  for I := 0 to SHARED_THREADS - 1 do
+  begin
+    Threads[I] := TSharedGetter.Create(True);
+    Threads[I].Cli := Cli;
+    Threads[I].Id := I;
+    Threads[I].Start();
+  end;
+  repeat
+    FiberSleep(5);
+    GSharedLock.Enter();
+    Finished := GSharedFinished;
+    GSharedLock.Leave();
+  until Finished >= SHARED_THREADS;
+  for I := 0 to SHARED_THREADS - 1 do
+    Threads[I].WaitFor();
+  Cli.Free();
+  GHcHttpServer.Stop();
+end;
+
+procedure THttpClientTests.TestClientSharedAcrossThreads;
+const
+  PORT = 29439;
+begin
+  GHcHttpServer := THttpFiberServer.Create(PORT);
+  AssertTrue('server start', GHcHttpServer.Start());
+  GHcHandler := THcPathHandler.Create();
+  GPort := PORT;
+  GSharedLock := TCriticalSection.Create();
+  GSharedFinished := 0;
+  GSharedOk := 0;
+
+  SpawnFiber(@HcHttpServerFiber, nil);
+  SpawnFiber(@SharedClientFiber, nil);
+  RunScheduler();
+
+  AssertEquals('every thread got its own answers',
+    SHARED_THREADS * SHARED_REQUESTS, GSharedOk);
+  ResetScheduler();
+  GHcHttpServer.Free();
+  GHcHandler := nil;
+  GSharedLock.Free();
 end;
 
 { --- GET by host name --- }

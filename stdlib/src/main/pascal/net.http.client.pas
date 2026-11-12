@@ -62,7 +62,7 @@ unit Net.Http.Client;
 interface
 
 uses
-  SysUtils, StrUtils, Generics.Collections, Net.Uri, Net.Tcp;
+  SysUtils, StrUtils, Classes, Generics.Collections, Net.Uri, Net.Tcp;
 
 const
   { Default cap on redirect chasing before Request gives up. }
@@ -158,11 +158,15 @@ type
 
   { An HTTP/1.1 client.  A single THttpClient owns a per-origin keep-alive pool;
     reuse one client for repeated requests to the same host to benefit from
-    connection reuse.  Not safe to share across fibers concurrently (each fiber
-    should own its client, or serialise access). }
+    connection reuse.  Requests may be made from several threads or fibers
+    at once: each takes an idle connection out of the pool (or opens one) for
+    itself and puts it back when done, under a lock held only for that.  The
+    settings (MaxRedirects, timeouts, TLS options) are read by every request,
+    so set them before sharing the client. }
   THttpClient = class
   private
     FPool: TOrderedDictionary<string, THttpConn>;  { scheme:host:port -> idle conn }
+    FPoolLock: TCriticalSection;                   { guards FPool }
     FMaxRedirects: Int;
     FInsecureSkipVerify: Boolean;                  { loud opt-out of TLS verify }
     FTrustCaFile: string;                          { pinned private CA (PEM), or '' }
@@ -736,6 +740,7 @@ end;
 constructor THttpClient.Create;
 begin
   FPool := TOrderedDictionary<string, THttpConn>.Create();
+  FPoolLock := TCriticalSection.Create();
   FMaxRedirects := DEFAULT_MAX_REDIRECTS;
   FInsecureSkipVerify := False;
   FTrustCaFile := '';
@@ -756,6 +761,7 @@ begin
     end;
   end;
   FPool.Free();
+  FPoolLock.Free();
   inherited Destroy();
 end;
 
@@ -774,16 +780,20 @@ var
   Verify: Boolean;
 begin
   Key := Self.PoolKey(AUri);
+  { the idle connection becomes this request's alone: two requests that
+    looked it up together, unlocked, both used it and read each other's
+    responses }
+  FPoolLock.Enter();
+  Conn := nil;
   if FPool.TryGetValue(Key, Conn) then
-  begin
     FPool.Remove(Key);
-    if (Conn <> nil) and (not Conn.IsClosed()) then
-      Exit(Conn);
-    if Conn <> nil then
-    begin
-      Conn.Close();
-      Conn.Free();
-    end;
+  FPoolLock.Leave();
+  if (Conn <> nil) and (not Conn.IsClosed()) then
+    Exit(Conn);
+  if Conn <> nil then
+  begin
+    Conn.Close();
+    Conn.Free();
   end;
 
   if AUri.Scheme = 'https' then
@@ -825,16 +835,19 @@ begin
       AConn.Free();
     Exit;
   end;
+  { one idle connection per origin: another request may have put one back
+    meanwhile, and the one it replaces is closed outside the lock }
+  Old := nil;
+  FPoolLock.Enter();
   if FPool.TryGetValue(AKey, Old) then
-  begin
-    if Old <> nil then
-    begin
-      Old.Close();
-      Old.Free();
-    end;
     FPool.Remove(AKey);
-  end;
   FPool.Add(AKey, AConn);
+  FPoolLock.Leave();
+  if Old <> nil then
+  begin
+    Old.Close();
+    Old.Free();
+  end;
 end;
 
 function THttpClient.DoRequest(const AMethod: string; AUri: TUri;

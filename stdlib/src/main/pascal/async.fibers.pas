@@ -585,6 +585,9 @@ threadvar
     multicore worker thread at start-up; nil off any worker thread.  The single
     -worker RunScheduler path leaves this nil and uses GWorker directly. }
   GTLWorker: TWorker;
+  { True on the OS thread running the single-worker RunScheduler loop: its
+    fibers run on that thread and no other. }
+  GTLSingleRunner: Boolean;
 
 { The worker the fiber-facing calls (SpawnFiber/FiberYield/FiberSleep/
   FiberCancel) act on: this thread's multicore worker if any, else the single
@@ -595,6 +598,23 @@ begin
     Result := GTLWorker
   else
     Result := GWorker;
+end;
+
+{ The worker whose CURRENT fiber, if any, is the caller: this thread's
+  multicore worker, or the single worker when this is the thread running
+  RunScheduler.  nil on any other thread -- a plain thread working while
+  another runs the scheduler is off-scheduler, not in a fiber.  Taking the
+  single worker on every thread made such a thread's blocking I/O park the
+  scheduler thread's running fiber and switch to a stack it does not own
+  (EXC_BAD_ACCESS in FiberSwitch under THttpClient.Get from a TThread). }
+function FiberWorker: TWorker;
+begin
+  if GTLWorker <> nil then
+    Result := GTLWorker
+  else if GTLSingleRunner then
+    Result := GWorker
+  else
+    Result := nil;
 end;
 
 function NeedWorker: TWorker;
@@ -726,6 +746,7 @@ begin
       W.SchedFib := FiberCreateMain();
   end;
   W.Running := True;
+  GTLSingleRunner := True;
   while W.LiveCount > 0 do
   begin
     { Move every due timer to the run queue. }
@@ -760,6 +781,7 @@ begin
         { No ready fiber, no timer, no reactor fd, yet fibers are live: nothing
           can wake them on a single worker.  Guard it loudly. }
         W.Running := False;
+        GTLSingleRunner := False;
         raise Exception.Create('RunScheduler: stalled - live fibers but ' +
           'nothing ready, no timers and no I/O');
       end;
@@ -793,6 +815,7 @@ begin
     end;
   end;
   W.Running := False;
+  GTLSingleRunner := False;
 end;
 
 procedure FiberYield;
@@ -800,7 +823,7 @@ var
   W: TWorker;
   T: TFiberTask;
 begin
-  W := CurrentWorker();
+  W := FiberWorker();
   if W = nil then
     Exit;
   T := W.Current;
@@ -827,7 +850,7 @@ function CurrentFiberTask: TFiberTask;
 var
   W: TWorker;
 begin
-  W := CurrentWorker();
+  W := FiberWorker();
   if W = nil then
     Exit(nil);
   Result := W.Current;
@@ -862,7 +885,7 @@ var
   W: TWorker;
   T: TFiberTask;
 begin
-  W := CurrentWorker();
+  W := FiberWorker();
   if W = nil then
     Exit;                     { off-scheduler: caller handles the blocking path }
   T := W.Current;
@@ -968,7 +991,7 @@ var
   W: TWorker;
   T: TFiberTask;
 begin
-  W := CurrentWorker();
+  W := FiberWorker();
   if W <> nil then
     T := W.Current
   else
