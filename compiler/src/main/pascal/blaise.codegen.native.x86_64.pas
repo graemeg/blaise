@@ -27248,7 +27248,11 @@ begin
 
   Self.Emit('.text');
   if EntrySym <> '' then
-    Self.EmitForeignEntry(ADecl, EntrySym, Sym, AExported)
+  begin
+    Self.EmitForeignEntry(ADecl, EntrySym, Sym, AExported);
+    if AExported then
+      Self.NoteCEntry(EntrySym);
+  end
   else if AExported then
   begin
     { Generic-instance bodies (instance methods, monomorphised generic

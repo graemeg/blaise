@@ -39,7 +39,12 @@ type
     procedure TestLink_LibraryMappedToDll;
     procedure TestLink_CallGoesThroughThunkToIatSlot;
     procedure TestLink_UndefinedWithoutMetadataFails;
-    procedure TestLink_MetadataForDefinedSymbolIgnored;
+    { D6: a reference whose object names a library binds to the DLL even
+      when the link defines the name, unless that definition is a C entry
+      (listed with an empty library). }
+    procedure TestLink_DefinedCEntry_NotImported;
+    procedure TestLink_InternalDefinition_LibraryReferenceImported;
+    procedure TestLink_InternalDefinition_LibraryLessReferenceBindsToIt;
     procedure TestLink_CrossObjectCallResolved;
     procedure TestLink_WeakOverriddenByStrong;
     procedure TestLink_Abs64PointerRebasedWithBaseReloc;
@@ -249,18 +254,62 @@ begin
   AssertContains('external', Msg);
 end;
 
-procedure TPeLinkerTests.TestLink_MetadataForDefinedSymbolIgnored;
+procedure TPeLinkerTests.TestLink_DefinedCEntry_NotImported;
 var
   Img: TPeImage;
 begin
   { runtime.thread binds external 'pthread'; on Windows the runtime defines
-    those symbols itself, so the metadata entry must not import them }
+    those symbols itself, as cdecl routines with foreign entries, so the
+    reference binds to the definition and nothing is imported }
   Img := LinkAsm([StartRet + 'call pthread_self' + NL +
     ImportsAsm('pthread_self', 'pthread'),
     '.text' + NL + '.globl pthread_self' + NL + 'pthread_self:' + NL +
-    'ret' + NL]);
+    'ret' + NL + ImportsAsm('pthread_self', '')]);
   try
     AssertEquals(0, Img.Imports.Count);
+  finally
+    Img.Free();
+  end;
+end;
+
+procedure TPeLinkerTests.TestLink_InternalDefinition_LibraryReferenceImported;
+var
+  Img: TPeImage;
+  Text: string;
+  Target: Int64;
+begin
+  { runtime.cstub's strlen takes the internal convention; a program's
+    external 'c' name 'strlen' calls the C one, so it must reach the DLL }
+  Img := LinkAsm([StartRet + 'call strlen' + NL +
+    ImportsAsm('strlen', 'msvcrt.dll'),
+    '.text' + NL + '.globl strlen' + NL + 'strlen:' + NL + 'ret' + NL]);
+  try
+    AssertEquals('imported', 1, Img.Imports.Count);
+    AssertEquals('msvcrt.dll', LowerCase(Img.Imports[0].Dll));
+    Text := Img.ReadRva(TextRvaOf(Img), Img.Sections[0].VirtualSize);
+    Target := TextRvaOf(Img) + 6 + Rel32(Text, 2);
+    AssertEquals('the call goes to the thunk, jmp *disp32(%rip)',
+      Chr($FF) + Chr($25), Img.ReadRva(Target, 2));
+  finally
+    Img.Free();
+  end;
+end;
+
+procedure TPeLinkerTests.TestLink_InternalDefinition_LibraryLessReferenceBindsToIt;
+var
+  Img: TPeImage;
+  Text: string;
+  Target: Int64;
+begin
+  { the backend's own memset calls name no library: they stay internal }
+  Img := LinkAsm([StartRet + 'call strlen' + NL,
+    '.text' + NL + '.globl strlen' + NL + 'strlen:' + NL + 'ret' + NL]);
+  try
+    AssertEquals('nothing imported', 0, Img.Imports.Count);
+    Text := Img.ReadRva(TextRvaOf(Img), Img.Sections[0].VirtualSize);
+    Target := TextRvaOf(Img) + 6 + Rel32(Text, 2);
+    AssertEquals('the call reaches the definition, a ret', $C3,
+      StrAt(Img.ReadRva(Target, 1), 0));
   finally
     Img.Free();
   end;

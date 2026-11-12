@@ -112,6 +112,10 @@ type
     FImportPairs: TStringList;
     { Record the library-qualified external routines among ADecls. }
     procedure NoteImports(ADecls: TObjectList);
+    { Record ASym as a C entry this buffer defines: a pair with an empty
+      library, so a linker that keeps the internal and C conventions apart
+      lets a library-qualified reference bind to it (blaise.linker.pe). }
+    procedure NoteCEntry(const ASym: string);
     { Emit the recorded pairs, sorted and deduplicated, then forget them.
       Emits nothing when no routine names a library. }
     procedure EmitImportsSection;
@@ -860,6 +864,15 @@ begin
     if FImportPairs.IndexOf(Pair) < 0 then
       FImportPairs.Add(Pair);
   end;
+end;
+
+procedure TNativeBackend.NoteCEntry(const ASym: string);
+var
+  Pair: string;
+begin
+  Pair := ASym + #9;
+  if FImportPairs.IndexOf(Pair) < 0 then
+    FImportPairs.Add(Pair);
 end;
 
 { A string as a gas .ascii operand body: backslash and quote escaped. }

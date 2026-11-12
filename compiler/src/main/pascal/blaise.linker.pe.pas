@@ -19,6 +19,14 @@ unit blaise.linker.pe;
   reached through a jmp thunk, applies the relocations, and writes the image
   with blaise.pewriter.
 
+  A named library says where a routine lives and that it is called the C
+  way (design decision D6).  So a reference from an object that names a
+  library for its symbol binds to the DLL even when the link defines the
+  same name -- runtime.cstub's strlen, say, compiled the internal way --
+  unless that definition is itself a C entry: a cdecl routine with a body,
+  whose object lists it in .blaise.imports with an empty library (the
+  pthread_* routines runtime.thread.windows supplies).
+
   Image sections, in address order, each present only when it has content
   (.text always):
 
@@ -70,6 +78,10 @@ type
     FDefWeak: TList<Boolean>;
     { .blaise.imports pairs, symbol -> library }
     FImportLib: TDictionary<string, string>;
+    { the pairs per object, keyed ObjIdx#0symbol }
+    FObjImports: TDictionary<string, Boolean>;
+    { symbols some object defines as a C entry (an empty library) }
+    FCEntries: TDictionary<string, Boolean>;
     { the imports actually used, in first-reference order }
     FImpNames: TList<string>;
     FImpIndex: TDictionary<string, Int>;
@@ -83,7 +95,12 @@ type
     FImpTableOff: Int64;               { offset of the import tables in .rdata }
     FTextRva, FRdataRva, FDataRva, FTlsRva, FUnwRva, FOpdfRva: Int64;
     procedure PlaceSections;
-    procedure ReadImportPairs(AObj: TElfObjectFile; ASec: TRdSection);
+    procedure ReadImportPairs(AObjIdx: Int; AObj: TElfObjectFile;
+      ASec: TRdSection);
+    { True when object AObjIdx's reference to AName goes to the DLL its
+      import pair names, although the link defines AName. }
+    function ImportOverridesDefinition(AObjIdx: Int;
+      const AName: string): Boolean;
     procedure CollectDefinitions;
     procedure CollectImports;
     procedure Layout;
@@ -194,6 +211,8 @@ begin
   FDefOff := TList<Int64>.Create();
   FDefWeak := TList<Boolean>.Create();
   FImportLib := TDictionary<string, string>.Create();
+  FObjImports := TDictionary<string, Boolean>.Create();
+  FCEntries := TDictionary<string, Boolean>.Create();
   FImpNames := TList<string>.Create();
   FImpIndex := TDictionary<string, Int>.Create();
   FImpTable := TPeImportTableBuilder.Create();
@@ -219,6 +238,8 @@ begin
   FDefOff.Free();
   FDefWeak.Free();
   FImportLib.Free();
+  FObjImports.Free();
+  FCEntries.Free();
   FImpNames.Free();
   FImpIndex.Free();
   FImpTable.Free();
@@ -244,7 +265,8 @@ begin
     Result := ALib;
 end;
 
-procedure TPeLinker.ReadImportPairs(AObj: TElfObjectFile; ASec: TRdSection);
+procedure TPeLinker.ReadImportPairs(AObjIdx: Int; AObj: TElfObjectFile;
+  ASec: TRdSection);
 var
   P, Q: Int;
   Sym, Lib, Prev: string;
@@ -265,6 +287,15 @@ begin
         ': malformed .blaise.imports (unterminated pair)');
     Lib := Copy(ASec.Data, P, Q - P);
     P := Q + 1;
+    if Lib = '' then
+    begin
+      { a C entry this object defines }
+      if not FCEntries.ContainsKey(Sym) then
+        FCEntries.Add(Sym, True);
+      Continue;
+    end;
+    if not FObjImports.ContainsKey(IntToStr(AObjIdx) + #0 + Sym) then
+      FObjImports.Add(IntToStr(AObjIdx) + #0 + Sym, True);
     if FImportLib.TryGetValue(Sym, Prev) then
     begin
       if LowerCase(DllOf(Prev)) <> LowerCase(DllOf(Lib)) then
@@ -296,7 +327,7 @@ begin
          (Sec.ShType = SHT_STRTAB) or (Sec.ShType = SHT_RELA) then
         St := -1
       else if Sec.Name = '.blaise.imports' then
-        ReadImportPairs(Obj, Sec)
+        ReadImportPairs(Oi, Obj, Sec)
       else if (Sec.Flags and SHF_ALLOC) = 0 then
         { .note.GNU-stack, .comment, the embedded unit interface: nothing
           the loaded image needs }
@@ -371,6 +402,13 @@ begin
   end;
 end;
 
+function TPeLinker.ImportOverridesDefinition(AObjIdx: Int;
+  const AName: string): Boolean;
+begin
+  Result := FObjImports.ContainsKey(IntToStr(AObjIdx) + #0 + AName) and
+    not FCEntries.ContainsKey(AName);
+end;
+
 function TPeLinker.IsSynthName(const AName: string): Boolean;
 begin
   Result := (AName = '__start_blaise_unwind') or
@@ -399,7 +437,10 @@ begin
       if Sym.Shndx <> SHN_UNDEF then Continue;
       if Sym.Name = '_tls_index' then
         FWantTlsIndex := True;
-      if FDefIndex.ContainsKey(Sym.Name) or IsSynthName(Sym.Name) then
+      if IsSynthName(Sym.Name) then
+        Continue;
+      if FDefIndex.ContainsKey(Sym.Name) and
+         not ImportOverridesDefinition(Oi, Sym.Name) then
         Continue;
       if FImpIndex.TryGetValue(Sym.Name, D) then Continue;
       if not FImportLib.TryGetValue(Sym.Name, Lib) then
@@ -574,8 +615,11 @@ begin
     Result := FStreamRva[FSecStream[Flat]] + FSecOff[Flat] + Sym.Value;
     Exit;
   end;
-  Result := DefinedRva(Sym.Name, Found);
-  if Found then Exit;
+  if not ImportOverridesDefinition(AObjIdx, Sym.Name) then
+  begin
+    Result := DefinedRva(Sym.Name, Found);
+    if Found then Exit;
+  end;
   if IsSynthName(Sym.Name) then
   begin
     Result := SynthRva(Sym.Name);
