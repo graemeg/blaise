@@ -240,6 +240,10 @@ type
       loop: each execution releases the previous value (x86-64 leaked all
       but the last; arm64 refused the declaration) }
     procedure TestRun_BlockVar_ManagedAggregatesPerIteration;
+    { the per-iteration idiom inside a method of a generic class, at two
+      instantiations: each closure keeps its own iteration's block-scoped
+      variables (the compiler failed in CloneStmt) }
+    procedure TestRun_BlockVar_InGenericMethod_PerIteration;
     { A[I](args); and P^(args); as statements, over a bare procedural type,
       a 'reference to' and a method pointer; a discarded string result is
       released (BUG-20261012-call-element-statement) }
@@ -4467,6 +4471,52 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'a 10 11 7' + LineEnding + 'b 20 21 22 8' +
     LineEnding + 'c 31' + LineEnding + 'd 50 8' + LineEnding);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_BlockVar_InGenericMethod_PerIteration;
+const
+  Src = '''
+    program P;
+    type
+      TProc = reference to procedure;
+      TBox<T> = class
+        Items: array[0..2] of T;
+        Procs: array[0..2] of TProc;
+        procedure Fill;
+        procedure Show;
+      end;
+    procedure TBox<T>.Fill;
+    var
+      I: Int;
+    begin
+      for I := 0 to 2 do
+      begin
+        var N: Int := I * 10;
+        var Twice: Int := N * 2;
+        Procs[I] := procedure begin WriteLn(N, ' ', Twice) end;
+      end;
+    end;
+    procedure TBox<T>.Show;
+    var
+      I: Int;
+    begin
+      for I := 0 to 2 do Procs[I]();
+    end;
+    var
+      B: TBox<Int>;
+      S: TBox<string>;
+    begin
+      B := TBox<Int>.Create();
+      B.Fill(); B.Show();
+      S := TBox<string>.Create();
+      S.Fill(); S.Show();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '0 0' + LineEnding + '10 20' + LineEnding + '20 40' + LineEnding +
+    '0 0' + LineEnding + '10 20' + LineEnding + '20 40' + LineEnding, 0);
 end;
 
 initialization

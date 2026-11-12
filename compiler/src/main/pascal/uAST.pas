@@ -2855,6 +2855,7 @@ end;
 
 function CloneStmt(AStmt: TASTStmt): TASTStmt;
 var
+  VDS_: TVarDeclStmt;
   AS_:  TAssignment;
   IF_:  TIfStmt;
   CS_:  TCompoundStmt;
@@ -3036,6 +3037,17 @@ begin
     for I := 0 to TInheritedCallStmt(AStmt).Args.Count - 1 do
       ICS_.Args.Add(CloneExpr(TASTExpr(TInheritedCallStmt(AStmt).Args.Items[I])));
     Result := ICS_;
+  end
+  else if AStmt is TVarDeclStmt then
+  begin
+    { a block-scoped 'var Name: Type [:= Expr]': the declaration and its
+      initialiser; the semantic outputs are rebuilt when the clone is
+      analysed }
+    VDS_ := TVarDeclStmt.Create();
+    VDS_.Decl := CloneVarDecl(TVarDeclStmt(AStmt).Decl);
+    VDS_.Decl.IsBlockScoped := True;
+    VDS_.InitExpr := CloneExpr(TVarDeclStmt(AStmt).InitExpr);
+    Result := VDS_;
   end
   else
     raise Exception.CreateFmt('CloneStmt: unhandled statement node %s',

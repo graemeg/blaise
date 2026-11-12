@@ -26,6 +26,10 @@ type
     function AnalyseUnit(const ASrc: string): TUnit;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { a block-scoped 'var' statement in a generic method body is cloned with
+      the body ("CloneStmt: unhandled statement node TVarDeclStmt", a
+      compiler error, at the first instantiation) }
+    procedure TestSem_BlockVarInGenericMethod_Instantiates;
     { array-typed fields of a generic class take the type argument: dynamic,
       static and nested }
     procedure TestSem_ArrayOfTypeParamFields_Substituted;
@@ -1598,6 +1602,49 @@ const
 begin
   AssertEquals('nested multi-argument instances resolve', '',
     SemanticError(Src));
+end;
+
+procedure TGenericsTests.TestSem_BlockVarInGenericMethod_Instantiates;
+const
+  Src = '''
+    program P;
+    type
+      TProc = reference to procedure;
+      TBox<T> = class
+        Items: array[0..2] of T;
+        Procs: array[0..2] of TProc;
+        procedure Fill;
+        procedure Show;
+      end;
+    procedure TBox<T>.Fill;
+    var
+      I: Int;
+    begin
+      for I := 0 to 2 do
+      begin
+        var N: Int := I * 10;
+        var Twice: Int := N * 2;
+        Procs[I] := procedure begin WriteLn(N, ' ', Twice) end;
+      end;
+    end;
+    procedure TBox<T>.Show;
+    var
+      I: Int;
+    begin
+      for I := 0 to 2 do Procs[I]();
+    end;
+    var
+      B: TBox<Int>;
+      S: TBox<string>;
+    begin
+      B := TBox<Int>.Create();
+      B.Fill(); B.Show();
+      S := TBox<string>.Create();
+      S.Fill(); S.Show();
+    end.
+    ''';
+begin
+  AssertEquals('instantiated at Int and at string', '', SemanticError(Src));
 end;
 
 initialization
