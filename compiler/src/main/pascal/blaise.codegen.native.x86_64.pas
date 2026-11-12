@@ -24502,6 +24502,12 @@ var
   Loc: TX86ForeignArgLoc;
   Overflow: TList<Int>;     { home offsets of the System V stack arguments }
   RT: TTypeDesc;
+  Rec: TRecordTypeDesc;     { the record result, or nil }
+  RecSize: Int;
+  InRax: Boolean;           { Win64 returns the record in RAX }
+  Shift: Int;               { 1 when Win64 passes the result's address in RCX }
+  BodyClass: TRecReturnClass;
+  Frame: Int;
 
   procedure Line(const AText: string);
   begin
@@ -24510,15 +24516,93 @@ var
     Self.EmitTracked(AText);
   end;
 
+  { ACount bytes, widest moves first, through %r11: from the scratch at
+    -32(%rbp) to (%rcx), or zeros to (%rcx) when AZero }
+  procedure Bytes(ACount: Int; AZero: Boolean);
+  var
+    Off: Int;
+  begin
+    Off := 0;
+    while ACount - Off > 0 do
+    begin
+      if ACount - Off >= 8 then
+      begin
+        if AZero then
+          Line(Format(#9'movq $0, %d(%%rcx)', [Off]))
+        else
+        begin
+          Line(Format(#9'movq %d(%%rbp), %%r11', [Off - 32]));
+          Line(Format(#9'movq %%r11, %d(%%rcx)', [Off]));
+        end;
+        Off := Off + 8;
+      end
+      else if ACount - Off >= 4 then
+      begin
+        if AZero then
+          Line(Format(#9'movl $0, %d(%%rcx)', [Off]))
+        else
+        begin
+          Line(Format(#9'movl %d(%%rbp), %%r11d', [Off - 32]));
+          Line(Format(#9'movl %%r11d, %d(%%rcx)', [Off]));
+        end;
+        Off := Off + 4;
+      end
+      else if ACount - Off >= 2 then
+      begin
+        if AZero then
+          Line(Format(#9'movw $0, %d(%%rcx)', [Off]))
+        else
+        begin
+          Line(Format(#9'movw %d(%%rbp), %%r11w', [Off - 32]));
+          Line(Format(#9'movw %%r11w, %d(%%rcx)', [Off]));
+        end;
+        Off := Off + 2;
+      end
+      else
+      begin
+        if AZero then
+          Line(Format(#9'movb $0, %d(%%rcx)', [Off]))
+        else
+        begin
+          Line(Format(#9'movb %d(%%rbp), %%r11b', [Off - 32]));
+          Line(Format(#9'movb %%r11b, %d(%%rcx)', [Off]));
+        end;
+        Off := Off + 1;
+      end;
+    end;
+  end;
+
 begin
   RT := ADecl.ResolvedReturnType;
   if (ADecl.OwnerTypeName <> '') or
      ((ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0)) or
-     (RT <> nil) and ((AggRetRec(RT) <> nil) or IsJumboSet(RT) or
+     (RT <> nil) and (IsMethodPtrType(RT) or IsJumboSet(RT) or
        (RT.Kind in [tyStaticArray, tyInterface])) then
     raise ENativeCodeGenError.Create(Format('''%s'': a cdecl routine on %s ' +
       'must be a standalone routine without captures that returns no ' +
-      'aggregate', [ADecl.Name, TargetName(Self.Target)]));
+      'aggregate other than a record', [ADecl.Name, TargetName(Self.Target)]));
+  Rec := nil;
+  if (RT <> nil) and (RT.Kind = tyRecord) then
+    Rec := TRecordTypeDesc(RT);
+  { foreign code knows nothing of reference counts }
+  if (Rec <> nil) and not Self.IsRecordManagedClean(Rec) then
+    raise ENativeCodeGenError.Create(Format('''%s'': a record a cdecl ' +
+      'routine returns to foreign code cannot hold strings, dynamic arrays, ' +
+      'classes or interfaces', [ADecl.Name]));
+  RecSize := 0;
+  InRax := False;
+  Shift := 0;
+  BodyClass := rcSret;
+  Frame := 160;
+  if Rec <> nil then
+  begin
+    RecSize := Rec.RawSize();
+    InRax := FBoundaryAbi.ForeignRecordResultInRax(RecSize);
+    if not InRax then
+      Shift := 1;
+    BodyClass := ClassifyRecordReturn(Rec);
+    Frame := 176;             { and a 16-byte scratch at -32(%rbp) }
+  end;
   if AExported then
     Self.Emit('.globl ' + AEntrySym);
   Line(AEntrySym + ':');
@@ -24528,11 +24612,14 @@ begin
     internal way, may use them freely }
   Line(#9'pushq %rdi');
   Line(#9'pushq %rsi');
-  Line(#9'subq $160, %rsp');
+  Line(Format(#9'subq $%d, %%rsp', [Frame]));
   for I := 6 to 15 do
     Line(Format(#9'movdqu %%xmm%d, %d(%%rsp)', [I, (I - 6) * 16]));
   { Spill the register arguments into the caller's home area: then argument
-    I is at 16+8*I(%rbp) for every I, the stack ones included. }
+    I is at 16+8*I(%rbp) for every I, the stack ones included.  The
+    result's address, when Win64 passes one, is argument 0. }
+  if Shift = 1 then
+    Line(#9'movq %rcx, 16(%rbp)');
   N := ADecl.Params.Count;
   for I := 0 to N - 1 do
   begin
@@ -24552,17 +24639,33 @@ begin
       Kind := fakRecord
     else
       Kind := fakInt;
-    Loc := FBoundaryAbi.ForeignArgLoc(I, Kind, 0, False);
+    Loc := FBoundaryAbi.ForeignArgLoc(I + Shift, Kind, 0, False);
     if (Kind = fakRecord) and (Ty <> nil) then
-      Loc := FBoundaryAbi.ForeignArgLoc(I, Kind, Ty.RawSize(), False);
+      Loc := FBoundaryAbi.ForeignArgLoc(I + Shift, Kind, Ty.RawSize(), False);
     if Loc.Reg = '' then Continue;
-    Home := 16 + 8 * I;
+    Home := 16 + 8 * (I + Shift);
     if Kind = fakSingle then
       Line(Format(#9'movss %s, %d(%%rbp)', [Loc.Reg, Home]))
     else if Kind = fakDouble then
       Line(Format(#9'movsd %s, %d(%%rbp)', [Loc.Reg, Home]))
     else
       Line(Format(#9'movq %s, %d(%%rbp)', [Loc.Reg, Home]));
+  end;
+  { A body that returns its record through a hidden pointer writes it where
+    the result goes -- the caller's buffer, or the scratch -- which starts
+    zeroed, as an internal caller leaves it. }
+  if (Rec <> nil) and (BodyClass = rcSret) then
+  begin
+    if Shift = 1 then
+    begin
+      Line(#9'movq 16(%rbp), %rcx');
+      Bytes(RecSize, True);
+    end
+    else
+    begin
+      Line(#9'movq $0, -32(%rbp)');
+      Line(#9'movq $0, -24(%rbp)');
+    end;
   end;
   { Load the internal (System V) homes: integers and floats counted
     separately, the rest on the stack in order.  A record is passed to the
@@ -24572,11 +24675,19 @@ begin
   try
     IntIdx := 0;
     XmmIdx := 0;
+    if (Rec <> nil) and (BodyClass = rcSret) then
+    begin
+      if Shift = 1 then
+        Line(#9'movq 16(%rbp), %rdi')
+      else
+        Line(#9'leaq -32(%rbp), %rdi');
+      IntIdx := 1;
+    end;
     for I := 0 to N - 1 do
     begin
       Par := TMethodParam(ADecl.Params.Items[I]);
       Ty := Par.ResolvedType;
-      Home := 16 + 8 * I;
+      Home := 16 + 8 * (I + Shift);
       if (not Par.IsVarParam) and (Ty <> nil) and
          (Ty.Kind in [tySingle, tyDouble]) then
       begin
@@ -24592,7 +24703,7 @@ begin
           Overflow.Add(Home);
       end
       else if (not Par.IsVarParam) and (Ty <> nil) and (Ty.Kind = tyRecord) and
-              not FBoundaryAbi.ForeignArgLoc(I, fakRecord, Ty.RawSize(),
+              not FBoundaryAbi.ForeignArgLoc(I + Shift, fakRecord, Ty.RawSize(),
                 False).ByRef then
       begin
         if IntIdx < 6 then
@@ -24633,10 +24744,58 @@ begin
   finally
     Overflow.Free();
   end;
-  { the result is where Win64 wants it already: RAX, or XMM0 }
+  { A scalar result is where Win64 wants it already: RAX, or XMM0.  A
+    record the body returned in registers is spilled to the scratch first;
+    then 1, 2, 4 or 8 bytes go back in RAX, any other size is copied to the
+    caller's buffer, whose address Win64 expects back in RAX. }
+  if Rec <> nil then
+  begin
+    case BodyClass of
+      rcInt1:
+        Line(#9'movq %rax, -32(%rbp)');
+      rcInt2:
+        begin
+          Line(#9'movq %rax, -32(%rbp)');
+          Line(#9'movq %rdx, -24(%rbp)');
+        end;
+      rcSSE1:
+        Line(#9'movsd %xmm0, -32(%rbp)');
+      rcSSE2:
+        begin
+          Line(#9'movsd %xmm0, -32(%rbp)');
+          Line(#9'movsd %xmm1, -24(%rbp)');
+        end;
+      rcIntSSE:
+        begin
+          Line(#9'movq %rax, -32(%rbp)');
+          Line(#9'movsd %xmm0, -24(%rbp)');
+        end;
+      rcSSEInt:
+        begin
+          Line(#9'movsd %xmm0, -32(%rbp)');
+          Line(#9'movq %rax, -24(%rbp)');
+        end;
+    end;
+    if InRax then
+      case RecSize of
+        1: Line(#9'movzbl -32(%rbp), %eax');
+        2: Line(#9'movzwl -32(%rbp), %eax');
+        4: Line(#9'movl -32(%rbp), %eax');
+      else
+        Line(#9'movq -32(%rbp), %rax');
+      end
+    else if BodyClass = rcSret then
+      Line(#9'movq 16(%rbp), %rax')
+    else
+    begin
+      Line(#9'movq 16(%rbp), %rcx');
+      Bytes(RecSize, False);
+      Line(#9'movq %rcx, %rax');
+    end;
+  end;
   for I := 6 to 15 do
     Line(Format(#9'movdqu %d(%%rsp), %%xmm%d', [(I - 6) * 16, I]));
-  Line(#9'addq $160, %rsp');
+  Line(Format(#9'addq $%d, %%rsp', [Frame]));
   Line(#9'popq %rsi');
   Line(#9'popq %rdi');
   Line(#9'popq %rbp');

@@ -27,6 +27,28 @@ type
   TS16 = record A, B: Int64; end;
   TSF2 = record X, Y: Float32; end;
   TSD2 = record X, Y: Float64; end;
+  { C function pointers, and Blaise routines C calls back (M5): the C
+    convention is part of each type }
+  TFn2 = function(A, B: Int64): Int64; cdecl;
+  TFn6 = function(A: Int32; B: Float64; C: Int32; D: Float64; E: Int32;
+    F: Float64): Float64; cdecl;
+  TFnU8 = function(V: UInt64): Byte; cdecl;
+  TMkS8 = function(V: Int32): TS8; cdecl;
+  TMkS12 = function(A, B, C: Int32): TS12; cdecl;
+  TMkSD2 = function(X, Y: Float64): TSD2; cdecl;
+  TCbS1 = function(V: Int32): TS1; cdecl;
+  TCbS2 = function(V: Int32): TS2; cdecl;
+  TCbS3 = function(V: Int32): TS3; cdecl;
+  TCbS4 = function(V: Int32): TS4; cdecl;
+  TCbS5 = function(V: Int32): TS5; cdecl;
+  TCbS8 = function(V: Int32): TS8; cdecl;
+  TCbS12 = function(V: Int32): TS12; cdecl;
+  TCbS16 = function(V: Int32): TS16; cdecl;
+  TCbSF2 = function(V: Int32): TSF2; cdecl;
+  TCbSD2 = function(V: Int32): TSD2; cdecl;
+  TCbS12Many = function(A: Int32; B: Int64; C: Float64; D: Int32;
+    E: Int64): TS12; cdecl;
+  TCbTake = function(X: TS8; Y: TS12; K: Int32): Int64; cdecl;
 
 function l3_echo_i8(V: Int8): Int8; external 'l3ffi' name 'l3_echo_i8';
 function l3_echo_u8(V: Byte): Byte; external 'l3ffi' name 'l3_echo_u8';
@@ -76,9 +98,27 @@ function l3_make_s12_many(A, B, C, D, E, F: Int32): TS12;
   external 'l3ffi' name 'l3_make_s12_many';
 function l3_vsum(N: Int32): Int64; varargs; external 'l3ffi' name 'l3_vsum';
 function l3_vdsum(N: Int32): Float64; varargs; external 'l3ffi' name 'l3_vdsum';
-function l3_apply2(F: Pointer; A, B: Int64): Int64;
+function l3_apply2(F: TFn2; A, B: Int64): Int64;
   external 'l3ffi' name 'l3_apply2';
-function l3_apply6(F: Pointer): Float64; external 'l3ffi' name 'l3_apply6';
+function l3_apply6(F: TFn6): Float64; external 'l3ffi' name 'l3_apply6';
+function l3_get_sub2: TFn2; external 'l3ffi' name 'l3_get_sub2';
+function l3_get_narrow_u8: TFnU8; external 'l3ffi' name 'l3_get_narrow_u8';
+function l3_get_make_s8: TMkS8; external 'l3ffi' name 'l3_get_make_s8';
+function l3_get_make_s12: TMkS12; external 'l3ffi' name 'l3_get_make_s12';
+function l3_get_make_sd2: TMkSD2; external 'l3ffi' name 'l3_get_make_sd2';
+function l3_cb_s1(F: TCbS1): Int64; external 'l3ffi' name 'l3_cb_s1';
+function l3_cb_s2(F: TCbS2): Int64; external 'l3ffi' name 'l3_cb_s2';
+function l3_cb_s3(F: TCbS3): Int64; external 'l3ffi' name 'l3_cb_s3';
+function l3_cb_s4(F: TCbS4): Int64; external 'l3ffi' name 'l3_cb_s4';
+function l3_cb_s5(F: TCbS5): Int64; external 'l3ffi' name 'l3_cb_s5';
+function l3_cb_s8(F: TCbS8): Int64; external 'l3ffi' name 'l3_cb_s8';
+function l3_cb_s12(F: TCbS12): Int64; external 'l3ffi' name 'l3_cb_s12';
+function l3_cb_s16(F: TCbS16): Int64; external 'l3ffi' name 'l3_cb_s16';
+function l3_cb_sf2(F: TCbSF2): Float64; external 'l3ffi' name 'l3_cb_sf2';
+function l3_cb_sd2(F: TCbSD2): Float64; external 'l3ffi' name 'l3_cb_sd2';
+function l3_cb_s12_many(F: TCbS12Many): Int64;
+  external 'l3ffi' name 'l3_cb_s12_many';
+function l3_cb_take(F: TCbTake): Int64; external 'l3ffi' name 'l3_cb_take';
 
 { Called from C. }
 function Combine(A, B: Int64): Int64; cdecl;
@@ -92,7 +132,90 @@ begin
   Result := A + B * 10 + C * 100 + D * 1000 + E * 10000 + F * 100000;
 end;
 
+{ Record results handed back to C, one per size class. }
+function MkS1(V: Int32): TS1; cdecl;
+begin
+  Result.A := V * 30;
+end;
+
+function MkS2(V: Int32): TS2; cdecl;
+begin
+  Result.A := V;
+  Result.B := V + 2;
+end;
+
+function MkS3(V: Int32): TS3; cdecl;
+begin
+  Result.A := 1;
+  Result.B := V;
+  Result.C := 200;
+end;
+
+function MkS4(V: Int32): TS4; cdecl;
+begin
+  Result.A := -V;
+  Result.B := 300;
+end;
+
+function MkS5(V: Int32): TS5; cdecl;
+begin
+  Result.A := V;
+  Result.B := V + 1;
+  Result.C := V + 2;
+  Result.D := V + 3;
+  Result.E := V + 4;
+end;
+
+function MkS8(V: Int32): TS8; cdecl;
+begin
+  Result.A := V;
+  Result.B := -1000;
+end;
+
+function MkS12(V: Int32): TS12; cdecl;
+begin
+  Result.A := V;
+  Result.B := 8;
+  Result.C := 9;
+end;
+
+function MkS16(V: Int32): TS16; cdecl;
+begin
+  Result.A := High(Int64) div 4;
+  Result.B := V;
+end;
+
+function MkSF2(V: Int32): TSF2; cdecl;
+begin
+  Result.X := V / 2;
+  Result.Y := 0.25;
+end;
+
+function MkSD2(V: Int32): TSD2; cdecl;
+begin
+  Result.X := V * 1.5;
+  Result.Y := -0.5;
+end;
+
+function MkS12Many(A: Int32; B: Int64; C: Float64; D: Int32;
+  E: Int64): TS12; cdecl;
+begin
+  Result.A := A + D;
+  Result.B := Trunc(C * 2);
+  Result.C := B * 10 + E;
+end;
+
+function TakeRecs(X: TS8; Y: TS12; K: Int32): Int64; cdecl;
+begin
+  Result := X.A * 1000 + X.B * 100 + Y.A * 10 + Y.B + Y.C + K;
+end;
+
 var
+  Sub: TFn2;
+  NarrowU8: TFnU8;
+  MakeS8: TMkS8;
+  MakeS12: TMkS12;
+  MakeSD2: TMkSD2;
   S1: TS1; S2: TS2; S3: TS3; S4: TS4; S5: TS5; S8: TS8; S12: TS12;
   S16: TS16; SF2: TSF2; SD2: TSD2;
 begin
@@ -153,6 +276,26 @@ begin
   WriteLn('field ', l3_make_s12(4, 5, 6).B, ' ', l3_make_s8(9).A);
   WriteLn('vsum ', l3_vsum(5, Int64(1), Int64(2), Int64(3), Int64(4), Int64(High(Int32))));
   WriteLn('vdsum ', l3_vdsum(5, 0.5, 1.5, 2.5, 3.5, 4.5));
-  WriteLn('apply2 ', l3_apply2(Pointer(@Combine), 12, 34));
-  WriteLn('apply6 ', l3_apply6(Pointer(@Six)));
+  WriteLn('apply2 ', l3_apply2(@Combine, 12, 34));
+  WriteLn('apply6 ', l3_apply6(@Six));
+  { C routines through a pointer }
+  Sub := l3_get_sub2();
+  NarrowU8 := l3_get_narrow_u8();
+  WriteLn('ptr ', Sub(100, 58), ' ', NarrowU8($12345678ABCDEFFF), ' ',
+    NarrowU8($12345678ABCDEFFF) + 1);
+  MakeS8 := l3_get_make_s8();
+  MakeS12 := l3_get_make_s12();
+  MakeSD2 := l3_get_make_sd2();
+  S8 := MakeS8(Low(Int32) + 1);
+  S12 := MakeS12(-1, 0, High(Int32));
+  SD2 := MakeSD2(1.25, -2.5);
+  WriteLn('ptrmake ', S8.A, ',', S8.B, ' ', S12.A, ',', S12.B, ',', S12.C, ' ',
+    SD2.X, ',', SD2.Y);
+  { Blaise callbacks returning records }
+  WriteLn('cbrec ', l3_cb_s1(@MkS1), ' ', l3_cb_s2(@MkS2), ' ', l3_cb_s3(@MkS3),
+    ' ', l3_cb_s4(@MkS4), ' ', l3_cb_s5(@MkS5));
+  WriteLn('cbrec ', l3_cb_s8(@MkS8), ' ', l3_cb_s12(@MkS12), ' ',
+    l3_cb_s16(@MkS16));
+  WriteLn('cbrecf ', l3_cb_sf2(@MkSF2), ' ', l3_cb_sd2(@MkSD2));
+  WriteLn('cbmany ', l3_cb_s12_many(@MkS12Many), ' ', l3_cb_take(@TakeRecs));
 end.

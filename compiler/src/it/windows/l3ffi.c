@@ -151,3 +151,58 @@ L3 double l3_apply6(Fn6 f)
 {
   return f(1, 2.5, 3, 4.5, 5, 6.5);
 }
+
+/* ---- C routines called through a pointer (M5) ---- */
+
+typedef uint8_t (*FnU8)(uint64_t);
+typedef S8  (*MkS8)(int32_t);
+typedef S12 (*MkS12)(int32_t, int32_t, int32_t);
+typedef SD2 (*MkSD2)(double, double);
+
+static int64_t sub2(int64_t a, int64_t b) { return a - b; }
+
+L3 Fn2   l3_get_sub2(void)      { return sub2; }
+L3 FnU8  l3_get_narrow_u8(void) { return l3_narrow_u8; }
+L3 MkS8  l3_get_make_s8(void)   { return l3_make_s8; }
+L3 MkS12 l3_get_make_s12(void)  { return l3_make_s12; }
+L3 MkSD2 l3_get_make_sd2(void)  { return l3_make_sd2; }
+
+/* ---- Blaise callbacks that return records (M5) ----
+   Each record is read back through l3_take_*, so a byte out of place
+   changes the result. */
+
+typedef S1  (*CbS1)(int32_t);
+typedef S2  (*CbS2)(int32_t);
+typedef S3  (*CbS3)(int32_t);
+typedef S4  (*CbS4)(int32_t);
+typedef S5  (*CbS5)(int32_t);
+typedef S8  (*CbS8)(int32_t);
+typedef S12 (*CbS12)(int32_t);
+typedef S16 (*CbS16)(int32_t);
+typedef SF2 (*CbSF2)(int32_t);
+typedef SD2 (*CbSD2)(int32_t);
+
+L3 int64_t l3_cb_s1(CbS1 f)   { return l3_take_s1(f(7)); }
+L3 int64_t l3_cb_s2(CbS2 f)   { return l3_take_s2(f(7)); }
+L3 int64_t l3_cb_s3(CbS3 f)   { return l3_take_s3(f(7)); }
+L3 int64_t l3_cb_s4(CbS4 f)   { return l3_take_s4(f(7)); }
+L3 int64_t l3_cb_s5(CbS5 f)   { return l3_take_s5(f(7)); }
+L3 int64_t l3_cb_s8(CbS8 f)   { return l3_take_s8(f(7)); }
+L3 int64_t l3_cb_s12(CbS12 f) { return l3_take_s12(f(7)); }
+L3 int64_t l3_cb_s16(CbS16 f) { return l3_take_s16(f(7)); }
+L3 double  l3_cb_sf2(CbSF2 f) { return l3_take_sf2(f(7)); }
+L3 double  l3_cb_sd2(CbSD2 f) { return l3_take_sd2(f(7)); }
+
+/* A hidden result pointer and five arguments: the last two on the stack. */
+typedef S12 (*CbS12Many)(int32_t, int64_t, double, int32_t, int64_t);
+L3 int64_t l3_cb_s12_many(CbS12Many f) { return l3_take_s12(f(1, 2, 3.5, 4, 5)); }
+
+/* A callback taking records: by value (S8) and as the address of a copy
+   (S12). */
+typedef int64_t (*CbTake)(S8, S12, int32_t);
+L3 int64_t l3_cb_take(CbTake f)
+{
+  S8 a = { 3, -4 };
+  S12 b = { 5, 6, 7 };
+  return f(a, b, 8);
+}

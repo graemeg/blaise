@@ -72,6 +72,16 @@ type
     { M5: a call through a cdecl procedural type is a foreign call -- the
       arguments the Win64 way, the pointer loaded into %r10 last; a record
       result in RAX or through the hidden pointer, as for a named routine }
+    { M5: a foreign entry returns a record the Win64 way.  The body keeps
+      the System V result (registers, or a hidden pointer in RDI); the
+      entry spills a register result to its scratch, then loads 1, 2, 4 or
+      8 bytes into RAX or copies exactly the record into the caller's
+      buffer, whose address came in RCX and goes back in RAX. }
+    procedure TestForeignEntry_Record8Result_InRax;
+    procedure TestForeignEntry_FloatPairResult_InRax;
+    procedure TestForeignEntry_Record12Result_CopiedToCallersBuffer;
+    procedure TestForeignEntry_Record24Result_BodyWritesCallersBuffer;
+    procedure TestForeignEntry_ManagedRecordResult_IsAnError;
     procedure TestCdeclProcTypeCall_Win64Registers;
     procedure TestCdeclProcTypeCall_Record8InRax;
     procedure TestCdeclProcTypeCall_Record12HiddenPointer;
@@ -412,6 +422,92 @@ begin
   { the program's own call goes through the entry, the foreign way }
   AssertHas(A, #9'movq 32(%rsp), %rcx');
   AssertHas(A, #9'callq CB' + NL);
+end;
+
+procedure TWin64CallTests.TestForeignEntry_Record8Result_InRax;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type T2 = record X, Y: Int32; end;' + NL +
+    'function CB(A: Int32): T2; cdecl;' + NL +
+    'begin Result.X := A; Result.Y := -A; end;' + NL +
+    'begin end.');
+  AssertHas(A, #9'movq %rcx, 16(%rbp)');
+  AssertHas(A, #9'movq 16(%rbp), %rdi' + NL + #9'callq CB.cbody' + NL +
+    #9'movq %rax, -32(%rbp)' + NL + #9'movq -32(%rbp), %rax');
+end;
+
+procedure TWin64CallTests.TestForeignEntry_FloatPairResult_InRax;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type TF2 = record X, Y: Float32; end;' + NL +
+    'function CB(A: Float32): TF2; cdecl;' + NL +
+    'begin Result.X := A; Result.Y := A; end;' + NL +
+    'begin end.');
+  { System V returns the pair in XMM0; Win64 wants the 8 bytes in RAX }
+  AssertHas(A, #9'callq CB.cbody' + NL + #9'movsd %xmm0, -32(%rbp)' + NL +
+    #9'movq -32(%rbp), %rax');
+end;
+
+procedure TWin64CallTests.TestForeignEntry_Record12Result_CopiedToCallersBuffer;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type T3 = record X, Y, Z: Int32; end;' + NL +
+    'function CB(A: Int32; B: Int64): T3; cdecl;' + NL +
+    'begin Result.X := A; end;' + NL +
+    'begin end.');
+  { the buffer's address arrives in RCX, so the arguments move up one }
+  AssertHas(A, #9'movq %rcx, 16(%rbp)');
+  AssertHas(A, #9'movq %rdx, 24(%rbp)');
+  AssertHas(A, #9'movq %r8, 32(%rbp)');
+  AssertHas(A, #9'movq 24(%rbp), %rdi' + NL + #9'movq 32(%rbp), %rsi' + NL +
+    #9'callq CB.cbody');
+  { RAX:RDX spilled, then exactly 12 bytes copied; RAX is the buffer }
+  AssertHas(A, #9'movq %rax, -32(%rbp)' + NL + #9'movq %rdx, -24(%rbp)');
+  AssertHas(A, #9'movq 16(%rbp), %rcx' + NL +
+    #9'movq -32(%rbp), %r11' + NL + #9'movq %r11, 0(%rcx)' + NL +
+    #9'movl -24(%rbp), %r11d' + NL + #9'movl %r11d, 8(%rcx)' + NL +
+    #9'movq %rcx, %rax');
+end;
+
+procedure TWin64CallTests.TestForeignEntry_Record24Result_BodyWritesCallersBuffer;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type T6 = record A, B, C: Int64; end;' + NL +
+    'function CB(A: Int64): T6; cdecl;' + NL +
+    'begin Result.B := A; end;' + NL +
+    'begin end.');
+  { the caller's buffer is zeroed, as an internal caller does, and is the
+    body's own hidden result pointer }
+  AssertHas(A, #9'movq 16(%rbp), %rcx' + NL + #9'movq $0, 0(%rcx)' + NL +
+    #9'movq $0, 8(%rcx)' + NL + #9'movq $0, 16(%rcx)');
+  AssertHas(A, #9'movq 16(%rbp), %rdi' + NL + #9'movq 24(%rbp), %rsi' + NL +
+    #9'callq CB.cbody' + NL + #9'movq 16(%rbp), %rax');
+end;
+
+procedure TWin64CallTests.TestForeignEntry_ManagedRecordResult_IsAnError;
+var
+  Msg: string;
+begin
+  Msg := WinError(
+    'program p;' + NL +
+    'type TS = record N: string; end;' + NL +
+    'function CB(A: Int64): TS; cdecl;' + NL +
+    'begin Result.N := ''x''; end;' + NL +
+    'begin end.');
+  AssertTrue('names the routine, got: ' + Msg, Pos('''CB''', Msg) >= 0);
+  AssertTrue('says why, got: ' + Msg, Pos('foreign', Msg) >= 0);
 end;
 
 procedure TWin64CallTests.TestCdeclProcTypeCall_Win64Registers;
