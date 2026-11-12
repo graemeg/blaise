@@ -55,8 +55,14 @@ type
     procedure TestLibraryLessExternal_KeepsInternalConvention;
     procedure TestCdeclExternal_IsForeign;
     procedure TestLinux_ExternalLibCall_StaysSystemV;
-    { Not lowered yet: an aggregate result from a foreign routine. }
-    procedure TestRecordResult_FromForeignRoutine_IsAnError;
+    { Record results from a foreign routine: 1, 2, 4 or 8 bytes in RAX,
+      any other size through a hidden pointer in RCX that shifts the
+      declared arguments one place. }
+    procedure TestRecord8Result_InRax;
+    procedure TestRecord4Result_StoresFourBytes;
+    procedure TestRecord12Result_HiddenPointerInRcx;
+    procedure TestRecord3Result_HiddenPointer;
+    procedure TestManagedRecordResult_IsAnError;
     { A cdecl routine with a body: the body keeps the internal convention
       under <sym>.cbody, and a foreign entry under the public name
       translates from Win64. }
@@ -297,18 +303,81 @@ begin
   AssertLacks(A, #9'movq 32(%rsp), %rcx');
 end;
 
-procedure TWin64CallTests.TestRecordResult_FromForeignRoutine_IsAnError;
+procedure TWin64CallTests.TestRecord8Result_InRax;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type TPt = record X, Y: Int32; end;' + NL +
+    'function R(A: Int32): TPt; external ''k32'' name ''R'';' + NL +
+    'var V: TPt;' + NL +
+    'begin V := R(5); end.');
+  AssertHas(A, #9'movq 32(%rsp), %rcx');
+  AssertHas(A, #9'callq R');
+  AssertHas(A, #9'movq %rax, (%rcx)');
+end;
+
+procedure TWin64CallTests.TestRecord4Result_StoresFourBytes;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type TW = record Lo, Hi: Int16; end;' + NL +
+    'function R: TW; external ''k32'' name ''R'';' + NL +
+    'var V: TW;' + NL +
+    'begin V := R(); end.');
+  AssertHas(A, #9'callq R');
+  AssertHas(A, #9'movl %eax, (%rcx)');
+  AssertLacks(A, #9'movq %rax, (%rcx)');
+end;
+
+procedure TWin64CallTests.TestRecord12Result_HiddenPointerInRcx;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type T3 = record X, Y, Z: Int32; end;' + NL +
+    'function R(A, B: Int64): T3; external ''k32'' name ''R'';' + NL +
+    'var V: T3;' + NL +
+    'begin V := R(11, 22); end.');
+  { the arguments move up one register; the saved address, above the
+    padded block, is the first }
+  AssertHas(A, #9'pushq %rax');
+  AssertHas(A, #9'movq 32(%rsp), %rdx');
+  AssertHas(A, #9'movq 40(%rsp), %r8');
+  AssertHas(A, #9'movq 56(%rsp), %rcx' + NL + #9'callq R');
+  AssertLacks(A, #9'callq memset');
+end;
+
+procedure TWin64CallTests.TestRecord3Result_HiddenPointer;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type TB3 = record A, B, C: Byte; end;' + NL +
+    'function R: TB3; external ''k32'' name ''R'';' + NL +
+    'var V: TB3;' + NL +
+    'begin V := R(); end.');
+  AssertHas(A, #9'pushq %rax');
+  AssertHas(A, #9'movq 40(%rsp), %rcx' + NL + #9'callq R');
+end;
+
+procedure TWin64CallTests.TestManagedRecordResult_IsAnError;
 var
   Msg: string;
 begin
   Msg := WinError(
     'program p;' + NL +
-    'type TPt = record X, Y: Int32; end;' + NL +
-    'function R: TPt; external ''k32'' name ''R'';' + NL +
-    'var V: TPt;' + NL +
+    'type TS = record S: string; end;' + NL +
+    'function R: TS; external ''k32'' name ''R'';' + NL +
+    'var V: TS;' + NL +
     'begin V := R(); end.');
   AssertTrue('names the routine and the restriction: ' + Msg,
-    (Pos('R', Msg) >= 0) and (Pos('foreign routine', Msg) >= 0));
+    (Pos('''R''', Msg) >= 0) and (Pos('cannot hold strings', Msg) >= 0));
 end;
 
 procedure TWin64CallTests.TestCdeclRoutineWithBody_GetsForeignEntry;

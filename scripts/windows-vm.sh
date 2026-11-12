@@ -9,11 +9,13 @@
 #   scripts/windows-vm.sh stop        shut Windows down, then power off
 #   scripts/windows-vm.sh status      is it running, does ssh answer
 #   scripts/windows-vm.sh ssh [cmd]   shell (or one cmd.exe command) in the VM
-#   scripts/windows-vm.sh run <exe> [args]
+#   scripts/windows-vm.sh run [--with <file>]... <exe> [args]
 #                                     copy a local executable in and run it;
 #                                     exits with the executable's exit code
 #                                     (its low 8 bits; the full code is on
-#                                     stderr when it is not 0)
+#                                     stderr when it is not 0); each --with
+#                                     file (a DLL it imports) is copied
+#                                     beside it
 #   scripts/windows-vm.sh e2e-run <exe> [args]
 #                                     as run, for the e2e harness
 #                                     (BLAISE_E2E_RUNNER): LF line ends, no
@@ -22,7 +24,9 @@
 #                                     compiler/src/it/windows/ programs (the
 #                                     TPeLinkerTests and TWin64FixtureTests
 #                                     fixture tests) and check their exit
-#                                     codes and output in the VM
+#                                     codes and output in the VM; with
+#                                     mingw-w64 ($MINGW_CC), the Layer 3
+#                                     fixture against its C DLL too
 #
 # stdlib-test and selfhost arrive with the milestones that make them
 # possible (design: windows-x86_64-backend-design.adoc, M3 and M7).
@@ -59,6 +63,8 @@ RUN_QUIET=
 # standard output, so the two keep their order, as the harness's one pipe
 # does on the host.  Over ssh they are separate streams and arrive apart.
 RUN_JOIN=
+# Files copied beside the executable before it runs (a DLL it imports).
+RUN_WITH=()
 
 die() { echo "$*" >&2; exit 1; }
 [ -x "$UTMCTL" ] || die "utmctl not found at $UTMCTL: brew install --cask utm"
@@ -140,7 +146,7 @@ run_in_vm() {
   for a in "$@"; do q+="$(win_quote "$a") "; done
   printf '%s' "$q" > "$tmp/args.txt"
   vm_ssh "mkdir $dir" >/dev/null
-  vm_scp "$exe" "$tmp/args.txt" scripts/windows-run.ps1 \
+  vm_scp "$exe" "$tmp/args.txt" scripts/windows-run.ps1 ${RUN_WITH[@]+"${RUN_WITH[@]}"} \
     "$GUEST_USER@127.0.0.1:${dir//\\//}/"
   rm -rf "$tmp"
   local rc=0
@@ -171,7 +177,12 @@ case "$cmd" in
     if [ $# -eq 0 ]; then vm_ssh; else vm_ssh "$*"; fi
     ;;
   run)
-    [ $# -ge 1 ] || die "usage: scripts/windows-vm.sh run <local-exe> [args]"
+    while [ "${1:-}" = --with ]; do
+      [ $# -ge 2 ] || die "usage: scripts/windows-vm.sh run [--with <file>]... <local-exe> [args]"
+      [ -f "$2" ] || die "no such file: $2"
+      RUN_WITH+=("$2"); shift 2
+    done
+    [ $# -ge 1 ] || die "usage: scripts/windows-vm.sh run [--with <file>]... <local-exe> [args]"
     run_in_vm "$@"
     ;;
   e2e-run)
@@ -210,6 +221,16 @@ case "$cmd" in
     }
     xbuild compiler/src/it/windows/m3rtl.pas "$OUT/m3rtl"
     xbuild compiler/src/it/windows/m3fault.pas "$OUT/m3fault"
+    # Layer 3: a C DLL from an independent compiler, mingw-w64
+    MINGW_CC=${MINGW_CC:-x86_64-w64-mingw32-gcc}
+    have_mingw=
+    if command -v "$MINGW_CC" >/dev/null 2>&1; then
+      have_mingw=1
+      echo ">> building $OUT/l3ffi.dll ($MINGW_CC)"
+      "$MINGW_CC" -O2 -Wall -shared -o "$OUT/l3ffi.dll" \
+        compiler/src/it/windows/l3ffi.c || die "l3ffi.dll build failed"
+      xbuild compiler/src/it/windows/l3ffi.pas "$OUT/l3ffi"
+    fi
     fail=0
     echo "=== exit42 ==="
     rc=0
@@ -232,6 +253,19 @@ case "$cmd" in
     echo "$got"
     if [ $rc -ne 0 ] || [ "$got" != "$(cat compiler/src/it/windows/m3rtl.expected)" ]; then
       echo "FAIL: m3rtl.exe exit $rc, output differs from m3rtl.expected"; fail=1
+    fi
+    echo "=== l3ffi ==="
+    if [ -n "$have_mingw" ]; then
+      rc=0
+      RUN_WITH=("$OUT/l3ffi.dll")
+      got=$(run_in_vm "$OUT/l3ffi.exe" | tr -d '\r') || rc=$?
+      RUN_WITH=()
+      echo "$got"
+      if [ $rc -ne 0 ] || [ "$got" != "$(cat compiler/src/it/windows/l3ffi.expected)" ]; then
+        echo "FAIL: l3ffi.exe exit $rc, output differs from l3ffi.expected"; fail=1
+      fi
+    else
+      echo "SKIPPED: no $MINGW_CC (brew install mingw-w64) -- the Layer 3 fixture did not run"
     fi
     # D7: a fault is reported and its NTSTATUS code is the exit code
     for f in "nil:access violation:0xC0000005" \

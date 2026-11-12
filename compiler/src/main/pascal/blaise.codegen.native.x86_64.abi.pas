@@ -69,6 +69,10 @@ type
       marks an argument in the variadic part of the call. }
     function ForeignArgLoc(AIndex: Int; AKind: TX86ForeignArgKind;
       ASize: Int; AVariadic: Boolean): TX86ForeignArgLoc; virtual; abstract;
+    { True when a foreign routine returns a record of ASize bytes in RAX;
+      False when the caller passes the address of the result as a hidden
+      argument 0, ahead of the declared ones. }
+    function ForeignRecordResultInRax(ASize: Int): Boolean; virtual; abstract;
   end;
 
   { System V AMD64: the C convention IS the internal convention, and the
@@ -81,6 +85,7 @@ type
     function ForeignOutgoingBytes(AArgCount: Int): Int; override;
     function ForeignArgLoc(AIndex: Int; AKind: TX86ForeignArgKind;
       ASize: Int; AVariadic: Boolean): TX86ForeignArgLoc; override;
+    function ForeignRecordResultInRax(ASize: Int): Boolean; override;
   end;
 
   { The Microsoft x64 convention (windows-x86_64-backend-design.adoc,
@@ -88,7 +93,9 @@ type
     R8, R9 or XMM0-XMM3 by type, the rest in 8-byte stack slots above 32
     bytes of home space; a record of 1, 2, 4 or 8 bytes travels as its bytes,
     any other as the address of a copy; a variadic float in the first four
-    is also copied to the matching integer register.  Windows grows a
+    is also copied to the matching integer register.  A record result of 1,
+    2, 4 or 8 bytes comes back in RAX; any other is written through a hidden
+    pointer argument in RCX, the callee returning it in RAX.  Windows grows a
     thread's stack one guard page at a time, so large frames are probed. }
   TWin64BoundaryAbi = class(TX86BoundaryAbi)
   public
@@ -97,6 +104,7 @@ type
     function ForeignOutgoingBytes(AArgCount: Int): Int; override;
     function ForeignArgLoc(AIndex: Int; AKind: TX86ForeignArgKind;
       ASize: Int; AVariadic: Boolean): TX86ForeignArgLoc; override;
+    function ForeignRecordResultInRax(ASize: Int): Boolean; override;
   end;
 
   { Threadvar addressing.  ASym is the final assembler symbol of the TLS slot
@@ -183,6 +191,12 @@ begin
     'internal call');
 end;
 
+function TSysVBoundaryAbi.ForeignRecordResultInRax(ASize: Int): Boolean;
+begin
+  raise Exception.Create('internal: a System V foreign call is an ' +
+    'internal call');
+end;
+
 { TWin64BoundaryAbi }
 
 const
@@ -230,6 +244,11 @@ begin
   end
   else
     Result.Reg := Win64IntArgRegs[AIndex];
+end;
+
+function TWin64BoundaryAbi.ForeignRecordResultInRax(ASize: Int): Boolean;
+begin
+  Result := (ASize = 1) or (ASize = 2) or (ASize = 4) or (ASize = 8);
 end;
 
 { TElfLocalExecTls }

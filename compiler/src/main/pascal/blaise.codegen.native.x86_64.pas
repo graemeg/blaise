@@ -943,9 +943,20 @@ type
       cdecl, or named in a library (design decisions D5 and D6). }
     function IsForeignCall(ADecl: TMethodDecl): Boolean;
     { Lower a call to a foreign routine: evaluate every argument into a
-      temporary, then move each where the boundary strategy says. }
+      temporary, then move each where the boundary strategy says.
+      ARecordResult: the caller handles the routine's record result (see
+      EmitForeignRecordCall); with AHiddenResult the result's address was
+      pushed just before this and travels as argument 0. }
     procedure EmitForeignCall(const AFuncSym: string; ADecl: TMethodDecl;
-                              AArgs: TObjectList);
+                              AArgs: TObjectList;
+                              ARecordResult: Boolean = False;
+                              AHiddenResult: Boolean = False);
+    { A foreign routine's record result into the buffer at ASretAddr (a
+      pointer to it when ASretIsIndirect): from RAX, or written by the
+      callee through a hidden argument, as the boundary strategy says. }
+    procedure EmitForeignRecordCall(const AFuncSym: string;
+      ADecl: TMethodDecl; AArgs: TObjectList; const ASretAddr: string;
+      ASretIsIndirect: Boolean);
     { The foreign entry of a cdecl routine with a body, where the C
       convention differs from the internal one: a thunk under AEntrySym
       that takes the arguments the foreign way and calls the body, compiled
@@ -24161,9 +24172,10 @@ begin
 end;
 
 procedure TX86_64Backend.EmitForeignCall(const AFuncSym: string;
-  ADecl: TMethodDecl; AArgs: TObjectList);
+  ADecl: TMethodDecl; AArgs: TObjectList; ARecordResult: Boolean;
+  AHiddenResult: Boolean);
 var
-  N, I, Outgoing, TempBase, CopyOff, Total, Rem, Temp: Int;
+  N, I, Outgoing, TempBase, CopyOff, Total, Rem, Temp, Shift: Int;
   Arg: TASTExpr;
   Par: TMethodParam;
   ParamType: TTypeDesc;
@@ -24179,11 +24191,15 @@ begin
   { What the convention lowering does not cover yet is an error naming the
     routine, never a silently mismatched call. }
   RT := ADecl.ResolvedReturnType;
-  if (RT <> nil) and ((AggRetRec(RT) <> nil) or IsJumboSet(RT) or
-     (RT.Kind in [tyStaticArray, tyInterface])) then
-    raise ENativeCodeGenError.Create(Format('''%s'': returning a record or ' +
-      'other aggregate from a foreign routine is not supported on %s yet',
+  if (RT <> nil) and (not ARecordResult) and ((AggRetRec(RT) <> nil) or
+     IsJumboSet(RT) or (RT.Kind in [tyStaticArray, tyInterface])) then
+    raise ENativeCodeGenError.Create(Format('''%s'': a foreign routine ' +
+      'cannot return this type on %s; a record result can',
       [ADecl.Name, TargetName(Self.Target)]));
+  { the hidden result address, when there is one, is argument 0 }
+  Shift := 0;
+  if AHiddenResult then
+    Shift := 1;
   if (ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0) then
     raise ENativeCodeGenError.Create(Format('''%s'': a foreign routine ' +
       'cannot capture variables', [ADecl.Name]));
@@ -24197,7 +24213,7 @@ begin
   OALD := TList<Int>.Create();
   OALK := TList<Int>.Create();
   try
-    Outgoing := FBoundaryAbi.ForeignOutgoingBytes(N);
+    Outgoing := FBoundaryAbi.ForeignOutgoingBytes(N + Shift);
     TempBase := Outgoing;
     CopyOff := TempBase + 8 * N;
     for I := 0 to N - 1 do
@@ -24232,8 +24248,8 @@ begin
       begin
         Kinds.Add(Ord(fakRecord));
         Sizes.SetItem(I, ParamType.RawSize());
-        Loc := FBoundaryAbi.ForeignArgLoc(I, fakRecord, ParamType.RawSize(),
-          Par = nil);
+        Loc := FBoundaryAbi.ForeignArgLoc(I + Shift, fakRecord,
+          ParamType.RawSize(), Par = nil);
         if Loc.ByRef then
         begin
           CopyAt.SetItem(I, CopyOff);
@@ -24320,8 +24336,8 @@ begin
     for I := 0 to N - 1 do
     begin
       Variadic := I >= ADecl.Params.Count;
-      Loc := FBoundaryAbi.ForeignArgLoc(I, TX86ForeignArgKind(Kinds.Get(I)),
-        Sizes.Get(I), Variadic);
+      Loc := FBoundaryAbi.ForeignArgLoc(I + Shift,
+        TX86ForeignArgKind(Kinds.Get(I)), Sizes.Get(I), Variadic);
       if Loc.Reg = '' then
       begin
         Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [TempBase + 8 * I]));
@@ -24331,8 +24347,8 @@ begin
     for I := 0 to N - 1 do
     begin
       Variadic := I >= ADecl.Params.Count;
-      Loc := FBoundaryAbi.ForeignArgLoc(I, TX86ForeignArgKind(Kinds.Get(I)),
-        Sizes.Get(I), Variadic);
+      Loc := FBoundaryAbi.ForeignArgLoc(I + Shift,
+        TX86ForeignArgKind(Kinds.Get(I)), Sizes.Get(I), Variadic);
       if Loc.Reg = '' then Continue;
       Temp := TempBase + 8 * I;
       if Kinds.Get(I) = Ord(fakSingle) then
@@ -24344,6 +24360,15 @@ begin
       if Loc.MirrorReg <> '' then
         Self.Emit(Format(#9'movq %d(%%rsp), %s', [Temp, Loc.MirrorReg]));
     end;
+    if AHiddenResult then
+    begin
+      { the address the caller pushed sits above the hoist region }
+      Loc := FBoundaryAbi.ForeignArgLoc(0, fakInt, 0, False);
+      if Loc.Reg = '' then
+        raise ENativeCodeGenError.Create('internal: a hidden result ' +
+          'address must travel in a register');
+      Self.Emit(Format(#9'movq %d(%%rsp), %s', [Total + OALTotal, Loc.Reg]));
+    end;
 
     Self.Emit(#9'callq ' + AFuncSym);
     Self.EmitHoistEpilogue(AArgs, OALD, OALK, OALTotal, Total, True);
@@ -24354,6 +24379,51 @@ begin
     OALD.Free();
     OALK.Free();
   end;
+end;
+
+procedure TX86_64Backend.EmitForeignRecordCall(const AFuncSym: string;
+  ADecl: TMethodDecl; AArgs: TObjectList; const ASretAddr: string;
+  ASretIsIndirect: Boolean);
+var
+  RT: TTypeDesc;
+  Size: Int;
+begin
+  RT := ADecl.ResolvedReturnType;
+  if (RT = nil) or (RT.Kind <> tyRecord) then
+    raise ENativeCodeGenError.Create(Format('''%s'': a foreign routine ' +
+      'cannot return this type on %s; a record result can',
+      [ADecl.Name, TargetName(Self.Target)]));
+  { foreign code knows nothing of reference counts }
+  if not Self.IsRecordManagedClean(TRecordTypeDesc(RT)) then
+    raise ENativeCodeGenError.Create(Format('''%s'': a record a foreign ' +
+      'routine returns cannot hold strings, dynamic arrays, classes or ' +
+      'interfaces', [ADecl.Name]));
+  Size := RT.RawSize();
+  if FBoundaryAbi.ForeignRecordResultInRax(Size) then
+  begin
+    Self.EmitForeignCall(AFuncSym, ADecl, AArgs, True, False);
+    if ASretIsIndirect then
+      Self.Emit(Format(#9'movq %s, %%rcx', [ASretAddr]))
+    else
+      Self.Emit(Format(#9'leaq %s, %%rcx', [ASretAddr]));
+    case Size of
+      1: Self.Emit(#9'movb %al, (%rcx)');
+      2: Self.Emit(#9'movw %ax, (%rcx)');
+      4: Self.Emit(#9'movl %eax, (%rcx)');
+    else
+      Self.Emit(#9'movq %rax, (%rcx)');
+    end;
+    Exit;
+  end;
+  { the result's address is saved below the arguments, as for an internal
+    sret call; the callee writes the whole record, so it is not zeroed }
+  if ASretIsIndirect then
+    Self.Emit(Format(#9'movq %s, %%rax', [ASretAddr]))
+  else
+    Self.Emit(Format(#9'leaq %s, %%rax', [ASretAddr]));
+  Self.Emit(#9'pushq %rax');
+  Self.EmitForeignCall(AFuncSym, ADecl, AArgs, True, True);
+  Self.Emit(#9'addq $8, %rsp');
 end;
 
 procedure TX86_64Backend.EmitForeignEntry(ADecl: TMethodDecl;
@@ -25308,6 +25378,12 @@ var
 begin
   { Check if the callee returns a small POD record (or method pointer) via
     registers.  RetRec is the real record or the canonical method-ptr record. }
+  if (ADecl <> nil) and Self.IsForeignCall(ADecl) then
+  begin
+    Self.EmitForeignRecordCall(AFuncSym, ADecl, AArgs, ASretAddr,
+      ASretIsIndirect);
+    Exit;
+  end;
   RC := rcSret;
   RetRec := nil;
   if ADecl <> nil then RetRec := AggRetRec(ADecl.ResolvedReturnType);
