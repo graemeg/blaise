@@ -779,8 +779,12 @@ const
     ''';
 begin
   AssertEquals('static-array getter as a subscript base', '',
-    AsmMissing(Src, 'movq O(%rip), %rax' + #10#9 + 'movq %rax, %rsi',
-      'ldr x0, [x9, _g_O@PAGEOFF]' + #10#9 + 'sub x8, x29, #'));
+    AsmMissing(Src, 'movq O(%rip), %rax' + #10#9 + 'pushq %rax',
+      'ldr x0, [x9, _g_O@PAGEOFF]' + #10#9 + 'str x0, [sp, #-16]!'));
+  { the receiver, held for the getter call, is still its Self }
+  AssertEquals('static-array getter: receiver and result buffer', '',
+    AsmMissing(Src, 'movq %rax, %rsi' + #10#9 + 'movq 0(%rsp), %rdi',
+      'sub x8, x29, #'));
 end;
 
 const

@@ -1121,6 +1121,51 @@ moves the handler's reference back out and re-raises the exception that
 handler caught, even after a nested `try ... except` in its body has
 handled an exception of its own.
 
+==== A receiver stays alive for the call
+
+A method runs on its receiver, and nothing stops it dropping the last
+reference to that receiver: a dialog's button closing the dialog, a handler
+that disconnects itself, `Holder.Close()` where `Close` does `Holder := nil`.
+The rest of the method must still run on a live object, so the *caller*
+keeps the receiver alive for the length of the call, as Swift does.
+
+A reference of the caller's own already does that for `Self` (the caller's
+caller holds it), for `Result`, and for a strong local or by-value parameter,
+which the frame releases at scope exit.  Every other receiver is retained
+before the call and released at the end of the statement:
+
+* a global, a field (`FChild.Run()`, `A.B.Run()`), an array element;
+* a `[Weak]` or `[Unretained]` variable -- a weak reference read as a
+  receiver is strong for the call;
+* a `var`, `out` or `const` parameter (the caller's variable may be cleared);
+* a variable captured by a closure or a nested routine.
+
+The same holds for the calls that take a hidden receiver: a property getter,
+an interface method (the backing instance is held), a method pointer
+(`procedure of object`, whose receiver it does not own), and a closure, whose
+environment is held while its body runs -- so a handler may clear the field
+it is stored in.
+
+[source,pascal]
+----
+procedure TPanel.CloseAndReport;
+begin
+  Holder := nil;                 { the last strong reference }
+  WriteLn('still alive: ', Name) { safe: the caller holds Self }
+end;
+----
+
+The hold costs one retain and one release per such call.  Calls on `Self`
+and on strong locals -- the common case inside a method -- pay nothing.  A
+`raise` operand is the one exception: `raise Factory.MakeError()` does not
+hold `Factory`, because nothing runs after the `raise` to release it.
+
+An instance that is being destroyed is never destroyed twice.  Its destructor
+and field cleanup may reach code that retains and releases it through a
+reference that does not own it (an `[Unretained]` back-pointer from a child
+it is freeing); the reference count is parked away from zero for the length
+of the destruction, so such a pair has no effect.
+
 ==== Known limitation: reference cycles
 
 ARC cannot automatically collect reference cycles. Blaise provides two

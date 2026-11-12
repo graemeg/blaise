@@ -272,8 +272,8 @@ const
     procedure SC(const S: string); begin WriteLn(Length(S)) end;
     procedure SV(var S: string); begin WriteLn(Length(S)) end;
     procedure DC(const A: TArr); begin WriteLn(Length(A)) end;
-    procedure IC(const I: IFoo); begin WriteLn(I.Val()) end;
-    procedure IV(var I: IFoo); begin WriteLn(I.Val()) end;
+    procedure IC(const I: IFoo); begin if I <> nil then WriteLn(1) end;
+    procedure IV(var I: IFoo); begin if I <> nil then WriteLn(1) end;
     procedure SB(S: string); begin WriteLn(Length(S)) end;
     begin end.
     ''';
@@ -284,7 +284,9 @@ var
 begin
   { A const or var parameter is borrowed: an extra retain/release pair in the
     callee would balance, so a running program cannot see it.  SB, a by-value
-    string, is the control -- it does take its own reference. }
+    string, is the control -- it does take its own reference.  (The bodies
+    call no method on the parameter: a borrowed receiver IS held for a call,
+    see TNativeArcTests.TestRecv_NotOwnedByCaller_HeldForTheCall.) }
   Names[0] := 'SC'; Names[1] := 'SV'; Names[2] := 'DC';
   Names[3] := 'IC'; Names[4] := 'IV'; Names[5] := 'SB';
   for I := 0 to 1 do

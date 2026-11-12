@@ -270,6 +270,11 @@ type
       front; a statement that defers more grows the pool (the frame, or
       $main's .bss block). }
     FPendingRelCount: Int;
+    FNoRecvHold: Boolean;      { a raise operand is being lowered: its
+                                 deferred releases are never flushed, so no
+                                 receiver is held there }
+    [Unretained] FRecvDecl: TMethodDecl;  { the routine being emitted (nil: the
+                                 program body), for RecvNameIsHeld }
     FPendingRelSyms: array of string;
     { non-nil: the slot holds the ADDRESS of an aggregate of this type (a
       static-array call result's scratch buffer) whose managed content the
@@ -1066,6 +1071,16 @@ type
     procedure EmitMethodSretRecvCleanup(ABytes: Int; ARecvExpr: TASTExpr);
     procedure EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);
     procedure DeferOwnedClassRecv(ARecv: TASTExpr);
+    { A method-call receiver the caller does not own for the length of the
+      call is retained before it and released at the statement end. }
+    function  RecvNameIsHeld(const AName: string; AIsVarParam: Boolean): Boolean;
+    function  RecvExprIsHeld(AExpr: TASTExpr): Boolean;
+    function  RecvCallHolds(AMethod: TMethodDecl; ARecvType: TTypeDesc): Boolean;
+    function  RecvMethodHolds(AMethod: TMethodDecl): Boolean;
+    function  CallRecvHolds(AMethod: TMethodDecl; AObjExpr: TASTExpr;
+      const AObjectName: string; AIsVarParam: Boolean;
+      AImplicitBase: TFieldInfo; AClassType: TTypeDesc): Boolean;
+    procedure EmitHoldRecvReg(const AReg: string);
     procedure EmitRecCallBufFieldReadCleanup(ARecType, AFieldType: TTypeDesc;
       AFloat: Boolean);
     { Emit the base ADDRESS of a NAMED LOCAL record into AReg (e.g.
@@ -1325,7 +1340,7 @@ type
     { A scratch slot holding a threadvar's address: an indirect sret destination. }
     function TlsSretDest(const AName: string): string;
     function NewScratchOperand(ASize: Int): string;
-    function PreEvalCallRecv(AObjExpr: TASTExpr; const AObjectName: string;
+    function PreEvalCallRecv(AMethod: TMethodDecl; AObjExpr: TASTExpr; const AObjectName: string;
       AArgs: TObjectList): string;
     procedure EmitStaticArrayCallToRax(AExpr: TASTExpr);
     procedure CheckForwardedOpenArrayArg(AArg: TASTExpr);
@@ -4878,7 +4893,20 @@ begin
     Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Pushed + HTotal + DiscSz + 8]));
   end
   else
+  begin
     Self.EmitIntfRecvPair(AObjExpr, AObjName, AIsGlobal, AIsVarParam, AIntf);
+    { the backing instance of a receiver the caller does not own is held
+      for the call, as a class receiver is (see RecvNameIsHeld): only a
+      strong interface local or by-value parameter of this frame is exempt }
+    if not FNoRecvHold and
+       not ((AObjExpr = nil) and not AIsGlobal and
+            Self.RecvNameIsHeld(AObjName, AIsVarParam)) then
+    begin
+      Self.Emit(#9'pushq %rax');
+      Self.EmitHoldRecvReg('%r10');
+      Self.Emit(#9'popq %rax');
+    end;
+  end;
   SlotOff := AIntf.MethodIndex(AMethName) * Ps;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')
@@ -9144,6 +9172,7 @@ end;
 
 procedure TX86_64Backend.EmitExprToEax(AExpr: TASTExpr);
 var
+  RecvHeld: Boolean;
   UnwH: Int;
   UnwH2: Int;
   UnwLbl: string;
@@ -11451,6 +11480,22 @@ begin
         Self.Emit(Format(#9'addq $%d, %%rdi', [FAE.FieldInfo.Offset]));
       Self.Emit(#9'movq (%rdi), %rdi');
     end;
+    { the getter runs on the receiver like any method: hold one the caller
+      does not own (see RecvNameIsHeld) }
+    if not FNoRecvHold and (FAE.PropOwnerDesc <> nil) and
+       (FAE.PropOwnerDesc.Kind = tyClass) then
+    begin
+      if FAE.FieldInfo <> nil then
+        RecvHeld := False
+      else if FAE.Base <> nil then
+        RecvHeld := NativeExprOwnsRef(FAE.Base) or Self.RecvExprIsHeld(FAE.Base)
+      else if FAE.IsImplicitSelf then
+        RecvHeld := FAE.ImplicitBaseInfo = nil
+      else
+        RecvHeld := Self.RecvNameIsHeld(FAE.RecordName, FAE.IsVarParam);
+      if not RecvHeld then
+        Self.EmitHoldRecvReg('%rdi');
+    end;
     if FAE.PropIndexExpr <> nil then
     begin
       Self.Emit(#9'pushq %rdi');
@@ -12816,7 +12861,7 @@ begin
 
   UserSlots  := Self.CountArgSlots(MD.Params);
   TotalSlots := UserSlots + 1;
-  RecvSave := Self.PreEvalCallRecv(ACall.ObjExpr, ACall.ObjectName, ACall.Args);
+  RecvSave := Self.PreEvalCallRecv(MD, ACall.ObjExpr, ACall.ObjectName, ACall.Args);
 
   if TotalSlots <= 6 then
   begin
@@ -12885,6 +12930,9 @@ begin
     end
     else
       Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Self')]));
+    if (RecvSave = '') and Self.CallRecvHolds(MD, ACall.ObjExpr,
+         ACall.ObjectName, ACall.IsVarParam, nil, ACall.ResolvedClassType) then
+      Self.EmitHoldRecvReg('%r10');
 
     Self.EmitPopMethodArgsToRegs(MD.Params, ACall.Args, 1);
     Self.Emit(#9'movq %r10, %rdi');
@@ -12962,6 +13010,9 @@ begin
     end
     else
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
+    if (RecvSave = '') and Self.CallRecvHolds(MD, ACall.ObjExpr,
+         ACall.ObjectName, ACall.IsVarParam, nil, ACall.ResolvedClassType) then
+      Self.EmitHoldRecvReg('%rax');
     Self.Emit(Format(#9'movq %%rax, 0(%%rsp)', []));
 
     CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz, 1);
@@ -13719,7 +13770,7 @@ end;
   effects) is evaluated here, ahead of the arguments, into a scratch slot the
   dispatch reads back.  Returns that slot, or '' when the receiver is loaded
   at dispatch as before (a name, a plain designator, no arguments). }
-function TX86_64Backend.PreEvalCallRecv(AObjExpr: TASTExpr;
+function TX86_64Backend.PreEvalCallRecv(AMethod: TMethodDecl; AObjExpr: TASTExpr;
   const AObjectName: string; AArgs: TObjectList): string;
 begin
   Result := '';
@@ -13730,6 +13781,8 @@ begin
     Exit;
   Self.EmitExprToEax(AObjExpr);
   Self.DeferOwnedClassRecv(AObjExpr);
+  if Self.CallRecvHolds(AMethod, AObjExpr, '', False, nil, nil) then
+    Self.EmitHoldRecvReg('%rax');
   Result := Self.NewScratchOperand(8);
   Self.Emit(Format(#9'movq %%rax, %s', [Result]));
 end;
@@ -14643,6 +14696,7 @@ var
   SretShim:      TMethodCallExpr;
   RecvIdent:     TIdentExpr;
   RecvSave:      string;
+  IB:            TFieldInfo;
 begin
   { Metaclass-var constructor dispatch in statement position: C.Create(args)
     where C is a 'class of' variable and the result is discarded.  Only the
@@ -15069,7 +15123,11 @@ begin
 
   UserSlots  := Self.CountArgSlots(MD.Params);
   TotalSlots := UserSlots + 1;
-  RecvSave := Self.PreEvalCallRecv(ACall.ObjExpr, ACall.ObjectName, ACall.Args);
+  RecvSave := Self.PreEvalCallRecv(MD, ACall.ObjExpr, ACall.ObjectName, ACall.Args);
+  { the field of Self the receiver is read from, when that is its form }
+  IB := nil;
+  if ACall.IsImplicitSelf then
+    IB := ACall.ImplicitBaseInfo;
 
   if TotalSlots <= 6 then
   begin
@@ -15142,6 +15200,9 @@ begin
     end
     else
       Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Self')]));
+    if (RecvSave = '') and Self.CallRecvHolds(MD, ACall.ObjExpr,
+         ACall.ObjectName, ACall.IsVarParam, IB, ACall.ResolvedClassType) then
+      Self.EmitHoldRecvReg('%r10');
 
     if IsSretDiscard then
     begin
@@ -15207,6 +15268,9 @@ begin
     end
     else
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
+    if (RecvSave = '') and Self.CallRecvHolds(MD, ACall.ObjExpr,
+         ACall.ObjectName, ACall.IsVarParam, IB, ACall.ResolvedClassType) then
+      Self.EmitHoldRecvReg('%rax');
     Self.Emit(Format(#9'movq %%rax, 0(%%rsp)', []));
 
     CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz, 1);
@@ -17250,8 +17314,12 @@ begin
       which is out of scope here.  The deferred base simply stays in its
       _pendrel slot (leaked, as before this fix) — never a UAF.  This exotic
       shape is the sole residual of BUG-049; the common contexts (conditions,
-      loops, call arguments) are all flushed and leak-free. }
+      loops, call arguments) are all flushed and leak-free.  For the same
+      reason no receiver is held while the operand is lowered (raise
+      Factory.MakeError()): the hold's release would never run. }
+    FNoRecvHold := True;
     Self.EmitExprToEax(AStmt.Expr);
+    FNoRecvHold := False;
     { the in-flight exception owns one reference: an owned operand (a
       constructor or a call) hands its +1 over, a borrowed one (a variable,
       a field) is retained for it }
@@ -25035,6 +25103,16 @@ begin
     end;
     Slot := Slot + 1;
   end;
+  { the closure's Env, or the method pointer's receiver, is held for the
+    call: the callee may clear the variable the value was read from (a
+    handler that disconnects itself), which would free the Env it is
+    running in.  Taken here, while the argument registers are still free. }
+  if AFatPtr and not FNoRecvHold then
+  begin
+    Self.Emit(Format(#9'leaq %s, %%r11', [APtrOperand]));
+    Self.Emit(#9'movq 8(%r11), %rax');
+    Self.EmitHoldRecvReg('%rax');
+  end;
   { Register assignment in flat-slot order; int and xmm sequences advance
     independently per SysV.  A fat pointer's Data half owns %rdi. }
   IntIdx := 0;
@@ -25779,6 +25857,114 @@ begin
     Self.DeferNativeRelease(RelSym);     { stores %rax }
 end;
 
+{ A method that runs on the receiver can drop the last reference to it -- a
+  dialog's button closing the dialog, Holder.Close() doing Holder := nil --
+  and would then run on freed memory.  The caller therefore keeps the
+  receiver alive for the call unless a reference of its own already does:
+  Self (the caller's caller holds it), Result, and a strong local or by-value
+  parameter this frame releases at scope exit.  Anything else -- a global, a
+  field, an array element, a [Weak] or [Unretained] variable, a var or const
+  parameter, a captured variable -- is retained before the call and released
+  at the statement end through a _pendrel slot (so an exception releases it
+  too). }
+function TX86_64Backend.RecvNameIsHeld(const AName: string;
+  AIsVarParam: Boolean): Boolean;
+var
+  I: Int;
+  VD: TVarDecl;
+  P: TMethodParam;
+begin
+  Result := False;
+  if AIsVarParam or FInlineActive or (FRecvDecl = nil) or
+     Self.IsCaptured(AName) or not Self.IsLocal(AName) then
+    Exit;
+  if SameText(AName, 'Self') or SameText(AName, 'Result') then
+    Exit(True);
+  if FRecvDecl.Body <> nil then
+    for I := 0 to FRecvDecl.Body.Decls.Count - 1 do
+    begin
+      VD := TVarDecl(FRecvDecl.Body.Decls.Items[I]);
+      if VD.Names.IndexOf(AName) >= 0 then
+        Exit(not VD.IsWeak and not VD.IsUnretained);
+    end;
+  for I := 0 to FRecvDecl.Params.Count - 1 do
+  begin
+    P := TMethodParam(FRecvDecl.Params.Items[I]);
+    if SameText(P.ParamName, AName) then
+      Exit(not (P.IsVarParam or P.IsOpenArray or P.IsConstParam));
+  end;
+end;
+
+function TX86_64Backend.RecvExprIsHeld(AExpr: TASTExpr): Boolean;
+var
+  IE: TIdentExpr;
+begin
+  Result := False;
+  if not (AExpr is TIdentExpr) then Exit;
+  IE := TIdentExpr(AExpr);
+  if IE.IsGlobal or IE.IsThreadVar or IE.IsImplicitSelf or
+     IE.IsImplicitSelfMethod or IE.IsMetaclassRef or IE.IsConstant or
+     (IE.LoweredExpr <> nil) then
+    Exit;
+  Result := Self.RecvNameIsHeld(IE.Name, IE.ParamMode = pmVar);
+end;
+
+function TX86_64Backend.RecvCallHolds(AMethod: TMethodDecl;
+  ARecvType: TTypeDesc): Boolean;
+begin
+  { only an INSTANCE receiver is reference counted: a record method's Self
+    is an address, a static method has none, and a constructor or destructor
+    is called on an instance whose count is not the caller's to touch }
+  Result := Self.RecvMethodHolds(AMethod) and (ARecvType <> nil) and
+            (ARecvType.Kind = tyClass);
+end;
+
+function TX86_64Backend.RecvMethodHolds(AMethod: TMethodDecl): Boolean;
+begin
+  Result := not FNoRecvHold and (AMethod <> nil) and
+            not AMethod.IsRecordMethod and not AMethod.IsStatic and
+            not AMethod.IsConstructor and
+            not SameText(AMethod.Name, 'Destroy');
+end;
+
+function TX86_64Backend.CallRecvHolds(AMethod: TMethodDecl;
+  AObjExpr: TASTExpr; const AObjectName: string; AIsVarParam: Boolean;
+  AImplicitBase: TFieldInfo; AClassType: TTypeDesc): Boolean;
+begin
+  { the receiver forms of a method call, in the order the emitters test
+    them: a field of Self, a named variable, an expression, else Self }
+  if AImplicitBase <> nil then
+    Result := Self.RecvCallHolds(AMethod, AImplicitBase.TypeDesc)
+  else if AObjectName <> '' then
+  begin
+    { a getter call synthesised from a property read carries no receiver
+      type: an instance method that is not a record's runs on an instance }
+    Result := Self.RecvMethodHolds(AMethod) and
+              ((AClassType = nil) or (AClassType.Kind = tyClass)) and
+              not Self.RecvNameIsHeld(AObjectName, AIsVarParam);
+  end
+  else if AObjExpr <> nil then
+    Result := Self.RecvCallHolds(AMethod, AObjExpr.ResolvedType) and
+              not NativeExprOwnsRef(AObjExpr) and
+              not Self.RecvExprIsHeld(AObjExpr)
+  else
+    Result := False;
+end;
+
+{ AReg = the receiver: retain it and hand the reference to a _pendrel slot.
+  AReg is kept; %rax and %rdi are not. }
+procedure TX86_64Backend.EmitHoldRecvReg(const AReg: string);
+begin
+  Self.Emit(#9'pushq ' + AReg);
+  if AReg <> '%rdi' then
+    Self.Emit(Format(#9'movq %s, %%rdi', [AReg]));
+  Self.Emit(#9'callq _ClassAddRef');
+  Self.Emit(#9'popq ' + AReg);
+  if AReg <> '%rax' then
+    Self.Emit(Format(#9'movq %s, %%rax', [AReg]));
+  Self.DeferNativeClassRelease();
+end;
+
 procedure TX86_64Backend.DeferOwnedClassRecv(ARecv: TASTExpr);
 begin
   { MakeL().Hello() / WriteLn(MakeL().Num()): the method receiver just
@@ -25870,6 +26056,9 @@ begin
   end
   else
     Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
+  if Self.CallRecvHolds(MD, ACall.ObjExpr, ACall.ObjectName, ACall.IsVarParam,
+       nil, ACall.ResolvedClassType) then
+    Self.EmitHoldRecvReg('%rax');
 end;
 
 procedure TX86_64Backend.EmitMethodSretSlotCall(ACall: TMethodCallExpr;
@@ -26637,6 +26826,9 @@ begin
   end
   else
     Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Self')]));
+  if Self.CallRecvHolds(MD, ACall.ObjExpr, ACall.ObjectName, ACall.IsVarParam,
+       nil, ACall.ResolvedClassType) then
+    Self.EmitHoldRecvReg('%r10');
   { Consume args into registers (shifted by 2: %rdi = sret buffer,
     %rsi = receiver); slots beyond the 4 remaining registers spill. }
   OverflowBytes := Self.EmitSretRegArgs(UserSlots, 2);
@@ -27493,7 +27685,10 @@ var
   SavedArmNodes: TStringList;
   SavedArmPos: Int;
   EntrySym: string;
+  SavedRecvDecl: TMethodDecl;
 begin
+  SavedRecvDecl := FRecvDecl;
+  FRecvDecl := ADecl;
   Sym := FuncSymbolFromDecl(ADecl);
   { A routine with a body declared cdecl is one foreign code may call.
     Where the C convention differs, the body is compiled the internal way
@@ -27564,6 +27759,7 @@ begin
     FCapturedVars := nil;
     FEnvVarNames  := nil;
     FBlockEnvVarNames := nil;
+    FRecvDecl := SavedRecvDecl;
     Exit;
   end;
   if FUnw <> nil then
@@ -28109,6 +28305,7 @@ begin
   Self.Emit('.type ' + Sym + ', @function');
 
   FExitLabel := '';
+  FRecvDecl := SavedRecvDecl;
 end;
 
 { Emit the program entry function.

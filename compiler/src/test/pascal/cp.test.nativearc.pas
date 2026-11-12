@@ -142,6 +142,12 @@ type
     { L := MkObj().GetI() / MkObj().FIntf: the owned receiver is released at
       the statement end (x86-64 leaked it) }
     procedure TestIntfFromOwnedReceiver_Released;
+    { G.Go() with G a global: the receiver is retained before the call and
+      its release deferred to the statement end }
+    procedure TestRecv_NotOwnedByCaller_HeldForTheCall;
+    { Self.Go() / Go() inside a method: Self is the caller's to rely on --
+      no retain }
+    procedure TestRecv_Self_NotHeld;
   end;
 
 implementation
@@ -1078,7 +1084,7 @@ begin
   AssertEquals('GetP(0) = nil: sret call, obj deferred for release', '',
     AsmMissing(Src,
       #9'movq %rsp, %rdi'#10#9'callq TObj_GetP'#10#9'movq (%rsp), %rax'#10 +
-        #9'addq $16, %rsp'#10#9'movq %rax, _pendrel_0(%rip)',
+        #9'addq $16, %rsp'#10#9'movq %rax, _pendrel_1(%rip)',
       #9'bl _TObj_GetP'#10#9'sub x9, x29, #16'#10#9'ldp x0, x1, [x9]'#10 +
         #9'stur x0, [x29, #'));
 end;
@@ -1138,6 +1144,61 @@ begin
   AssertTrue('x86-64: a tenth slot', Pos('_pendrel_9(%rip)', A) >= 0);
   AssertTrue('x86-64: no eleventh', Pos('_pendrel_10', A) < 0);
   AssertTrue('arm64 lowers it', Pos(#9'bl _MkObj', GenAsm(Src, TargetArm64)) >= 0);
+end;
+
+procedure TNativeArcTests.TestRecv_NotOwnedByCaller_HeldForTheCall;
+const
+  Src = '''
+    program P;
+    type
+      TP = class
+        procedure Go;
+      end;
+    var G: TP;
+    procedure TP.Go; begin end;
+    procedure Run;
+    begin
+      G.Go()
+    end;
+    begin
+      Run()
+    end.
+    ''';
+begin
+  AssertEquals('G.Go(): retained, the reference handed to a _pendrel slot', '',
+    AsmMissing(Src,
+      #9'callq _ClassAddRef'#10#9'addq $8, %rsp'#10#9'popq %r10'#10 +
+        #9'movq %r10, %rax'#10#9'movq %rax, -',
+      #9'bl __ClassAddRef'#10#9'ldr x0, [sp], #16'#10#9'stur x0, [x29, #-'));
+  AssertEquals('released after the call', '',
+    AsmMissing(Src,
+      #9'callq TP_Go'#10#9'movq -',
+      #9'bl _TP_Go'#10#9'ldur x0, [x29, #-'));
+end;
+
+procedure TNativeArcTests.TestRecv_Self_NotHeld;
+const
+  Src = '''
+    program P;
+    type
+      TP = class
+        procedure Go;
+        procedure Twice;
+      end;
+    procedure TP.Go; begin end;
+    procedure TP.Twice;
+    begin
+      Self.Go();
+      Go()
+    end;
+    begin
+    end.
+    ''';
+begin
+  AssertTrue('x86-64: no retain of Self',
+    Pos('_ClassAddRef', GenAsm(Src, TargetX86_64)) < 0);
+  AssertTrue('arm64: no retain of Self',
+    Pos('_ClassAddRef', GenAsm(Src, TargetArm64)) < 0);
 end;
 
 initialization

@@ -2134,8 +2134,12 @@ const
 begin
   AssertEquals('the getter receiver is the value behind the _cap_ slot', '',
     AsmMissing(Src,
-      #9'movq (%rdi), %rdi'#10#9'callq TFoo_GetCount',
-      #9'ldr x0, [x0]'#10#9'bl _TFoo_GetCount'));
+      #9'movq (%rdi), %rdi'#10#9'pushq %rdi',
+      #9'ldr x0, [x0]'#10#9'str x0, [sp, #-16]!'#10#9'bl __ClassAddRef'));
+  { ... held for the call (a captured variable is not the frame's own
+    reference), and still the getter's Self }
+  AssertEquals('the getter is called on it', '',
+    AsmMissing(Src, #9'callq TFoo_GetCount', #9'bl _TFoo_GetCount'));
 end;
 
 initialization

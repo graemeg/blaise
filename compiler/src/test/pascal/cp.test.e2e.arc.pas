@@ -180,6 +180,17 @@ type
       a handler without one releases it; re-raise and finally pass it on --
       every exception freed exactly once }
     procedure TestRun_ExceptionOwnership_EveryPath;
+    { A method's receiver stays alive for the call when the caller does not
+      own it: a global, a [Weak] variable, a var or const parameter, a field,
+      an array element -- the method may drop the last reference to it
+      (Holder.Close() doing Holder := nil) and used to run on freed memory.
+      Also: an instance being destroyed is not destroyed again by a
+      retain/release pair made through an [Unretained] back-pointer. }
+    procedure TestRun_MethodReceiver_HeldForTheCall;
+    { The same for an interface receiver, a method pointer's receiver, a
+      getter's receiver and a closure's environment (a handler that clears
+      the field it is stored in). }
+    procedure TestRun_CallableReceiver_HeldForTheCall;
   end;
 
 implementation
@@ -2358,6 +2369,248 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'freed 1' + LineEnding + 'freed 2' + LineEnding +
     'freed 3' + LineEnding + 'end' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_MethodReceiver_HeldForTheCall;
+const
+  Src = '''
+    program P;
+    type
+      TPanel = class
+        Name: string;
+        Child: TPanel;
+        [Unretained] Owner: TPanel;
+        procedure Close;
+        procedure DropChild;
+        function Value: Int;
+        function Half: Float64;
+        function Text: string;
+        procedure Bye;
+        destructor Destroy; override;
+      end;
+    var
+      Holder: TPanel;
+      [Weak] W: TPanel;
+      Arr: array of TPanel;
+    destructor TPanel.Destroy;
+    begin
+      WriteLn('destroyed ', Name);
+      if Child <> nil then Child.Bye();
+      inherited Destroy();
+    end;
+    procedure TPanel.Bye;
+    begin
+      { called from the owner's destructor: Owner is being destroyed }
+      if Owner <> nil then WriteLn('bye from ', Owner.Text());
+    end;
+    procedure TPanel.Close;
+    begin
+      Holder := nil;
+      if Length(Arr) > 0 then Arr[0] := nil;
+      WriteLn('in method: ', Name);
+    end;
+    procedure TPanel.DropChild;
+    begin
+      Owner.Child := nil;
+      WriteLn('in child: ', Name);
+    end;
+    function TPanel.Value: Int;
+    begin
+      Holder := nil;
+      WriteLn('in value: ', Name);
+      Result := 7;
+    end;
+    function TPanel.Half: Float64;
+    begin
+      Holder := nil;
+      WriteLn('in half: ', Name);
+      Result := 0.5;
+    end;
+    function TPanel.Text: string;
+    begin
+      Holder := nil;
+      Result := 'text of ' + Name;
+    end;
+    function Make(const N: string): TPanel;
+    begin
+      Result := TPanel.Create();
+      Result.Name := N;
+    end;
+    procedure ViaWeakLocal;
+    var [Weak] L: TPanel;
+    begin
+      Holder := Make('weaklocal');
+      L := Holder;
+      L.Close();
+    end;
+    procedure ViaVar(var P: TPanel);
+    begin
+      P.Close();
+    end;
+    procedure ViaConst(const P: TPanel);
+    begin
+      P.Close();
+    end;
+    procedure ViaValue(P: TPanel);
+    begin
+      P.Close();
+    end;
+    var
+      D: Float64;
+      I, K: Int;
+    begin
+      K := 0;
+      Holder := Make('global'); Holder.Close();
+      Holder := Make('weak'); W := Holder; W.Close();
+      ViaWeakLocal();
+      Holder := Make('var'); ViaVar(Holder);
+      Holder := Make('const'); ViaConst(Holder);
+      Holder := Make('value'); ViaValue(Holder);
+      Holder := Make('parent'); Holder.Child := Make('child'); Holder.Child.Owner := Holder;
+      Holder.Child.DropChild();
+      Holder := nil;
+      SetLength(Arr, 1); Arr[0] := Make('elem'); Arr[0].Close(); SetLength(Arr, 0);
+      Holder := Make('int'); WriteLn(Holder.Value());
+      Holder := Make('float'); D := Holder.Half(); if D = 0.5 then WriteLn('half ok');
+      Holder := Make('str'); WriteLn(Holder.Text());
+      for I := 1 to 3 do
+      begin
+        Holder := Make('loop');
+        if (I > 1) and (Holder.Value() = 7) then K := K + 1;
+        Holder := nil;
+      end;
+      Holder := Make('dying'); Holder.Child := Make('kid'); Holder.Child.Owner := Holder;
+      Holder := nil;
+      WriteLn('end ', K);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'in method: global' + LineEnding +
+    'destroyed global' + LineEnding +
+    'in method: weak' + LineEnding +
+    'destroyed weak' + LineEnding +
+    'in method: weaklocal' + LineEnding +
+    'destroyed weaklocal' + LineEnding +
+    'in method: var' + LineEnding +
+    'destroyed var' + LineEnding +
+    'in method: const' + LineEnding +
+    'destroyed const' + LineEnding +
+    'in method: value' + LineEnding +
+    'destroyed value' + LineEnding +
+    'in child: child' + LineEnding +
+    'destroyed child' + LineEnding +
+    'destroyed parent' + LineEnding +
+    'in method: elem' + LineEnding +
+    'destroyed elem' + LineEnding +
+    'in value: int' + LineEnding +
+    '7' + LineEnding +
+    'destroyed int' + LineEnding +
+    'in half: float' + LineEnding +
+    'destroyed float' + LineEnding +
+    'half ok' + LineEnding +
+    'text of str' + LineEnding +
+    'destroyed str' + LineEnding +
+    'destroyed loop' + LineEnding +
+    'in value: loop' + LineEnding +
+    'destroyed loop' + LineEnding +
+    'in value: loop' + LineEnding +
+    'destroyed loop' + LineEnding +
+    'destroyed dying' + LineEnding +
+    'bye from text of dying' + LineEnding +
+    'destroyed kid' + LineEnding +
+    'end 2' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_CallableReceiver_HeldForTheCall;
+const
+  Src = '''
+    program P;
+    type
+      TEvent = procedure of object;
+      TProc = reference to procedure;
+      IThing = interface
+        procedure Close;
+      end;
+      TPanel = class(TObject, IThing)
+        Name: string;
+        FVisible: Boolean;
+        OnClick: TEvent;
+        Handler: TProc;
+        procedure Close;
+        procedure SetVisible(V: Boolean);
+        function GetTitle: string;
+        procedure Wire;
+        property Visible: Boolean read FVisible write SetVisible;
+        property Title: string read GetTitle;
+        destructor Destroy; override;
+      end;
+    var
+      Holder: TPanel;
+      Thing: IThing;
+      E: TEvent;
+      H: TProc;
+    destructor TPanel.Destroy;
+    begin
+      WriteLn('destroyed ', Name);
+      inherited Destroy();
+    end;
+    procedure TPanel.Close;
+    begin
+      Holder := nil;
+      Thing := nil;
+      WriteLn('in method: ', Name);
+    end;
+    procedure TPanel.SetVisible(V: Boolean);
+    begin
+      FVisible := V;
+      Holder := nil;
+      WriteLn('in setter: ', Name);
+    end;
+    function TPanel.GetTitle: string;
+    begin
+      Holder := nil;
+      Result := 'title ' + Name;
+    end;
+    procedure TPanel.Wire;
+    var S: string;
+    begin
+      S := 'env of ' + Name;
+      Handler := procedure begin Holder.Handler := nil; WriteLn('in closure: ', S) end;
+    end;
+    function Make(const N: string): TPanel;
+    begin
+      Result := TPanel.Create();
+      Result.Name := N;
+    end;
+    begin
+      Thing := Make('intf'); Thing.Close();
+      Holder := Make('methptr'); E := @Holder.Close; E();
+      Holder := Make('procfield'); Holder.OnClick := @Holder.Close; Holder.OnClick();
+      Holder := Make('setter'); Holder.Visible := False;
+      Holder := Make('getter'); WriteLn(Holder.Title);
+      Holder := Make('closure'); Holder.Wire(); Holder.Handler();
+      Holder := nil;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'in method: intf' + LineEnding +
+    'destroyed intf' + LineEnding +
+    'in method: methptr' + LineEnding +
+    'destroyed methptr' + LineEnding +
+    'in method: procfield' + LineEnding +
+    'destroyed procfield' + LineEnding +
+    'in setter: setter' + LineEnding +
+    'destroyed setter' + LineEnding +
+    'title getter' + LineEnding +
+    'destroyed getter' + LineEnding +
+    'in closure: env of closure' + LineEnding +
+    'destroyed closure' + LineEnding +
+    'end' + LineEnding, 0);
 end;
 
 initialization

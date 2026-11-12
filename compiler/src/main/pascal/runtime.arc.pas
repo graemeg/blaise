@@ -140,6 +140,7 @@ type
 const
   IMMORTAL  = -1;
   CLASS_HDR = 16;   { class header:  RefCount + pad + cleanup ptr }
+  CLASS_DYING = $40000000;  { the RefCount of an instance being destroyed }
   STDERR_FD = 2;
   { a length or capacity beyond any address space: a corrupted header }
   MAX_STR_LEN = Int64(1) shl 48;
@@ -505,6 +506,13 @@ begin
     if GLTEnabled then
       LTDelete(UserPtr);
     _WeakZeroSlots(UserPtr);
+    { The instance is going: its destructor and field cleanup run next, and
+      code they reach may still retain and release it through a reference
+      that does not own it (an [Unretained] back-pointer, a method pointer,
+      a receiver held for a call).  At a count of 0 such a pair would pass
+      through 1 -> 0 again and destroy the instance a second time, so the
+      count is parked far from zero until the block is freed. }
+    PInteger(Base)^ := CLASS_DYING;
     CleanupSlot := PPointer(Base + 8);
     if CleanupSlot^ <> nil then
     begin

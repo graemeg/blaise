@@ -206,6 +206,9 @@ type
     FGlobalSize:  TDictionary<string, Int>;  { bss size per global }
     FFloatNames:  TStringList;   { program-level float globals (parallel
                                    subset of FGlobalNames' world) }
+    FNoRecvHold: Boolean;    { a raise operand is being lowered: its
+                               deferred releases are never flushed, so no
+                               receiver is held there }
     FPendingRelCount: Int;   { live statement-scoped deferred class
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
@@ -820,6 +823,14 @@ type
       AArgs: TObjectList);
     function EmitBuiltinReceiverToX0(AExpr: TMethodCallExpr): Boolean;
     procedure EmitReleaseParkedReceiver;
+    { A method-call receiver the caller does not own for the length of the
+      call is retained before it and released at the statement end. }
+    function  RecvNameIsHeld(const AName: string; AIsVarParam: Boolean): Boolean;
+    function  RecvExprIsHeld(AExpr: TASTExpr): Boolean;
+    function  RecvCallHolds(AMethod: TMethodDecl; ARecvType: TTypeDesc): Boolean;
+    procedure EmitHoldRecv;
+    procedure EmitHoldNamedRecv(AMethod: TMethodDecl; ARecvType: TTypeDesc;
+      const AName: string; AIsVarParam: Boolean);
     procedure EmitMethodCallOnExpr(AMethod: TMethodDecl; const AName: string;
       AArgs: TObjectList; AObjExpr: TASTExpr);
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
@@ -3529,13 +3540,20 @@ begin
       if not FFrame.ContainsKey(OwnSlot) then
         AddLocal(OwnSlot, 8);
       EmitStoreSlot('x0', OwnSlot);
-    end;
+    end
+    else if RecvCallHolds(MD, MC.ObjExpr.ResolvedType) and
+            not RecvExprIsHeld(MC.ObjExpr) then
+      EmitHoldRecv();
   end
-  else if not EmitCapturedBase('x0', MC.ObjectName, True, MC.IsVarParam) then
+  else
   begin
-    EmitLoadSlot('x0', MC.ObjectName);
-    if MC.IsVarParam then
-      Self.Emit(#9'ldr x0, [x0]');
+    if not EmitCapturedBase('x0', MC.ObjectName, True, MC.IsVarParam) then
+    begin
+      EmitLoadSlot('x0', MC.ObjectName);
+      if MC.IsVarParam then
+        Self.Emit(#9'ldr x0, [x0]');
+    end;
+    EmitHoldNamedRecv(MD, MC.ResolvedClassType, MC.ObjectName, MC.IsVarParam);
   end;
   EmitPushX0();
   ATmp := '__fret_' + IntToStr(FFretN);
@@ -4420,6 +4438,12 @@ begin
     begin
       EmitLoadSlot('x10', Slot);
       Self.Emit(#9'ldr x0, [x10, #8]');       { Env / Self -> hidden first arg }
+      { the closure's Env, or the method pointer's receiver, is held for the
+        call: the callee may clear the variable the value was read from (a
+        handler that disconnects itself), which would free the Env it is
+        running in }
+      if not FNoRecvHold then
+        EmitHoldRecv();
       EmitPushX0();
     end;
     FIndirectSlot := Slot;
@@ -9183,6 +9207,8 @@ end;
 
 procedure TArm64Backend.EmitPropReadCall(AFld: TFieldAccessExpr;
   const ASret: string);
+var
+  Held: Boolean;
 begin
   { method-backed property read: a getter call on the receiver.  The value
     lands wherever the getter's return convention puts it (x0 for scalars,
@@ -9273,6 +9299,22 @@ begin
     EmitImplicitBaseStep('x0', AFld.ImplicitBaseInfo)
   else
     EmitImplicitBaseStep('x0', AFld.FieldInfo);
+  { the getter runs on the receiver like any method: hold one the caller
+    does not own (see RecvNameIsHeld) }
+  if not FNoRecvHold and (AFld.PropOwnerDesc <> nil) and
+     (AFld.PropOwnerDesc.Kind = tyClass) then
+  begin
+    if AFld.IsImplicitSelf and (AFld.Base = nil) then
+      Held := AFld.ImplicitBaseInfo = nil
+    else if AFld.FieldInfo <> nil then
+      Held := False
+    else if AFld.Base <> nil then
+      Held := ArcExprOwnsRef(AFld.Base) or RecvExprIsHeld(AFld.Base)
+    else
+      Held := RecvNameIsHeld(AFld.RecordName, AFld.IsVarParam);
+    if not Held then
+      EmitHoldRecv();
+  end;
   if AFld.PropIndexExpr <> nil then
     EmitPopTo('x1');
   { a large record getter writes its Result through x8 }
@@ -11695,8 +11737,12 @@ begin
     (UAF), and AddRef-pinning to compensate leaks it after the handler.  The
     deferred base stays in its _pendrel slot (leaked, never a UAF) — the sole
     residual of BUG-049; the common contexts are all flushed and leak-free.
-    Mirrors the x86-64 backend. }
+    Mirrors the x86-64 backend.  For the same reason no receiver is held
+    while the operand is lowered (raise Factory.MakeError()): the hold's
+    release would never run. }
+  FNoRecvHold := True;
   Self.EmitExprToX0(AStmt.Expr);
+  FNoRecvHold := False;
   { the in-flight exception owns one reference: an owned operand (a
     constructor or a call) hands its +1 over, a borrowed one (a variable,
     a field) is retained for it }
@@ -12823,16 +12869,24 @@ begin
         if not FFrame.ContainsKey(OwnedRecv) then
           AddLocal(OwnedRecv, 8);
         EmitStoreSlot('x0', OwnedRecv);
-      end;
+      end
+      else if RecvCallHolds(MD, ME.ObjExpr.ResolvedType) and
+              not RecvExprIsHeld(ME.ObjExpr) then
+        EmitHoldRecv();
     end
-    else if not EmitCapturedBase('x0', ME.ObjectName, True, ME.IsVarParam) then
+    else
     begin
-      { (a captured receiver is reached through its '_cap_' slot: loading
-        the name inside a closure failed, "neither a frame slot nor a
-        global", as AOnDone(True, D.Colour()) did) }
-      EmitLoadSlot('x0', ME.ObjectName);
-      if ME.IsVarParam then
-        Self.Emit(#9'ldr x0, [x0]');
+      if not EmitCapturedBase('x0', ME.ObjectName, True, ME.IsVarParam) then
+      begin
+        { (a captured receiver is reached through its '_cap_' slot: loading
+          the name inside a closure failed, "neither a frame slot nor a
+          global", as AOnDone(True, D.Colour()) did) }
+        EmitLoadSlot('x0', ME.ObjectName);
+        if ME.IsVarParam then
+          Self.Emit(#9'ldr x0, [x0]');
+      end;
+      EmitHoldNamedRecv(MD, ME.ResolvedClassType, ME.ObjectName,
+        ME.IsVarParam);
     end;
     EmitPushX0();
     { No adjustment for the receiver push: EmitCall's pop walk consumes it
@@ -18404,6 +18458,19 @@ begin
       'an unresolved type', AObjExpr);
   Owned := EmitIntfRecvPair(AVarName, AObjExpr, AVarParam, AImplicitBase,
     AObjExpr, AIntf);
+  { the backing instance of a receiver the caller does not own is held for
+    the call, as a class receiver is (see RecvNameIsHeld): only a strong
+    interface local or by-value parameter of this frame is exempt }
+  if not Owned and not FNoRecvHold and
+     not ((AObjExpr = nil) and (AImplicitBase = nil) and not AVarParam and
+          not IsCaptured(AVarName) and IsLocal(AVarName) and
+          (FIntfLocals.IndexOf(AVarName) >= 0)) then
+  begin
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    EmitCallSym('_ClassAddRef');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    DeferNativeClassRelease();
+  end;
   Slot := '__icall_' + IntToStr(FJArgN);
   FJArgN := FJArgN + 1;
   if not FFrame.ContainsKey(Slot) then
@@ -18976,6 +19043,69 @@ begin
   Self.Emit(#9'add sp, sp, #16');   { drop the receiver copy }
 end;
 
+{ A method that runs on the receiver can drop the last reference to it -- a
+  dialog's button closing the dialog, Holder.Close() doing Holder := nil --
+  and would then run on freed memory.  The caller therefore keeps the
+  receiver alive for the call unless a reference of its own already does:
+  Self (the caller's caller holds it), Result, and a strong local or by-value
+  parameter this frame releases at scope exit.  Anything else -- a global, a
+  field, an array element, a [Weak] or [Unretained] variable, a var or const
+  parameter, a captured variable -- is retained before the call and released
+  at the statement end through a _pendrel slot (so an exception releases it
+  too). }
+function TArm64Backend.RecvNameIsHeld(const AName: string;
+  AIsVarParam: Boolean): Boolean;
+begin
+  Result := False;
+  if AIsVarParam or IsCaptured(AName) or not IsLocal(AName) then Exit;
+  Result := SameText(AName, 'Self') or SameText(AName, 'Result') or
+            (FObjLocals.IndexOf(AName) >= 0);
+end;
+
+function TArm64Backend.RecvExprIsHeld(AExpr: TASTExpr): Boolean;
+var
+  IE: TIdentExpr;
+begin
+  Result := False;
+  if not (AExpr is TIdentExpr) then Exit;
+  IE := TIdentExpr(AExpr);
+  if IE.IsGlobal or IE.IsThreadVar or IE.IsImplicitSelf or
+     IE.IsImplicitSelfMethod or IE.IsMetaclassRef or IE.IsConstant or
+     (IE.LoweredExpr <> nil) then
+    Exit;
+  Result := RecvNameIsHeld(IE.Name, IE.ParamMode = pmVar);
+end;
+
+function TArm64Backend.RecvCallHolds(AMethod: TMethodDecl;
+  ARecvType: TTypeDesc): Boolean;
+begin
+  { only an INSTANCE receiver is reference counted: a record method's Self
+    is an address, a static method has none, and a constructor or destructor
+    is called on an instance whose count is not the caller's to touch }
+  Result := not FNoRecvHold and (AMethod <> nil) and (ARecvType <> nil) and
+            (ARecvType.Kind = tyClass) and not AMethod.IsRecordMethod and
+            not AMethod.IsStatic and not AMethod.IsConstructor and
+            not SameText(AMethod.Name, 'Destroy');
+end;
+
+{ x0 = the receiver: retain it and hand the reference to a _pendrel slot;
+  x0 is kept. }
+procedure TArm64Backend.EmitHoldRecv;
+begin
+  EmitPushX0();
+  EmitCallSym('_ClassAddRef');
+  EmitPopTo('x0');
+  DeferNativeClassRelease();
+end;
+
+procedure TArm64Backend.EmitHoldNamedRecv(AMethod: TMethodDecl;
+  ARecvType: TTypeDesc; const AName: string; AIsVarParam: Boolean);
+begin
+  if RecvCallHolds(AMethod, ARecvType) and
+     not RecvNameIsHeld(AName, AIsVarParam) then
+    EmitHoldRecv();
+end;
+
 procedure TArm64Backend.EmitMethodCallOnExpr(AMethod: TMethodDecl;
   const AName: string; AArgs: TObjectList; AObjExpr: TASTExpr);
 var
@@ -19026,7 +19156,12 @@ begin
       of Self passed R's first word as the pointer (a segfault) }
     EmitRecAddrToX0(AObjExpr)
   else
+  begin
     Self.EmitExprToX0(AObjExpr);
+    if not Owned and RecvCallHolds(AMethod, AObjExpr.ResolvedType) and
+       not RecvExprIsHeld(AObjExpr) then
+      EmitHoldRecv();
+  end;
   SaveTop := FOpndTop;
   RecvSlot := '';
   RecvH := -1;
@@ -19116,12 +19251,18 @@ begin
     begin
       EmitLoadSlot('x0', 'Self');
       EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
+      if RecvCallHolds(TMethodDecl(AStmt.ResolvedMethod),
+           AStmt.ImplicitBaseInfo.TypeDesc) then
+        EmitHoldRecv();
       EmitDiscardedRecMethodCall(TMethodDecl(AStmt.ResolvedMethod), AStmt.Name,
         AStmt.Args, AStmt.ResolvedReturnTypeDesc, AStmt);
       Exit;
     end;
     EmitLoadSlot('x0', 'Self');
     EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
+    if RecvCallHolds(TMethodDecl(AStmt.ResolvedMethod),
+         AStmt.ImplicitBaseInfo.TypeDesc) then
+      EmitHoldRecv();
     EmitMethodCallCommon(TMethodDecl(AStmt.ResolvedMethod), AStmt.Name,
       AStmt.Args);
     if AStmt.ResolvedReturnTypeDesc <> nil then
@@ -19426,6 +19567,8 @@ begin
       if AStmt.IsVarParam then
         Self.Emit(#9'ldr x0, [x0]');
     end;
+    EmitHoldNamedRecv(MD, AStmt.ResolvedClassType, AStmt.ObjectName,
+      AStmt.IsVarParam);
     if IsAgg then
     begin
       EmitDiscardedRecMethodCall(MD, AStmt.Name, AStmt.Args,
@@ -19707,6 +19850,8 @@ begin
     if AExpr.IsVarParam then
       Self.Emit(#9'ldr x0, [x0]');
   end;
+  EmitHoldNamedRecv(MD, AExpr.ResolvedClassType, AExpr.ObjectName,
+    AExpr.IsVarParam);
   EmitMethodCallCommon(MD, AExpr.Name, AExpr.Args);
 end;
 
