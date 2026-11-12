@@ -764,6 +764,7 @@ begin
     Result.Add('runtime.cstub');
     Result.Add('runtime.libc.' + OS);
     Result.Add('runtime.libc2.' + OS);
+    Result.Add('runtime.civil');
     Result.Add('runtime.thread.static.' + OS);
   end;
 end;
