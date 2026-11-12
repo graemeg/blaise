@@ -69,6 +69,15 @@ type
     procedure TestCdeclRoutineWithBody_GetsForeignEntry;
     procedure TestForeignEntry_StackAndFloatArgs;
     procedure TestLinux_CdeclRoutineWithBody_NoEntry;
+    { M5: a call through a cdecl procedural type is a foreign call -- the
+      arguments the Win64 way, the pointer loaded into %r10 last; a record
+      result in RAX or through the hidden pointer, as for a named routine }
+    procedure TestCdeclProcTypeCall_Win64Registers;
+    procedure TestCdeclProcTypeCall_Record8InRax;
+    procedure TestCdeclProcTypeCall_Record12HiddenPointer;
+    procedure TestCdeclProcTypeCall_ThroughAField;
+    procedure TestDefaultProcTypeCall_StaysSystemV;
+    procedure TestLinux_CdeclProcTypeCall_StaysSystemV;
     { D1: a Blaise routine keeps the System V convention on Windows, record
       results included -- a 16-byte record comes back in RAX:RDX. }
     procedure TestInternalRecordResult_IsSystemV;
@@ -403,6 +412,99 @@ begin
   { the program's own call goes through the entry, the foreign way }
   AssertHas(A, #9'movq 32(%rsp), %rcx');
   AssertHas(A, #9'callq CB' + NL);
+end;
+
+procedure TWin64CallTests.TestCdeclProcTypeCall_Win64Registers;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type TF = function(A, B, C, D: Int64): Int64; cdecl;' + NL +
+    'function G(A, B, C, D: Int64): Int64; cdecl; begin Result := A; end;' + NL +
+    'var F: TF; R: Int64;' + NL +
+    'begin F := @G; R := F(11, 22, 33, 44); end.');
+  AssertHas(A, #9'subq $64, %rsp');
+  AssertHas(A, #9'movq 32(%rsp), %rcx');
+  AssertHas(A, #9'movq 40(%rsp), %rdx');
+  AssertHas(A, #9'movq 48(%rsp), %r8');
+  AssertHas(A, #9'movq 56(%rsp), %r9' + NL + #9'movq F(%rip), %r10' + NL +
+    #9'callq *%r10');
+  AssertLacks(A, '%rax, %rdi');
+end;
+
+procedure TWin64CallTests.TestCdeclProcTypeCall_Record8InRax;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type T2 = record X, Y: Int32; end;' + NL +
+    '  TF = function(A: Int64): T2; cdecl;' + NL +
+    'var F: TF; V: T2;' + NL +
+    'begin V := F(7); end.');
+  AssertHas(A, #9'movq 32(%rsp), %rcx' + NL + #9'movq F(%rip), %r10' + NL +
+    #9'callq *%r10');
+  AssertHas(A, #9'movq %rax, (%rcx)');
+end;
+
+procedure TWin64CallTests.TestCdeclProcTypeCall_Record12HiddenPointer;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type T3 = record X, Y, Z: Int32; end;' + NL +
+    '  TF = function(A, B: Int64): T3; cdecl;' + NL +
+    'var F: TF; V: T3;' + NL +
+    'begin V := F(11, 22); end.');
+  { as for a named routine: the arguments move up one register and the
+    saved address is the first }
+  AssertHas(A, #9'movq 32(%rsp), %rdx');
+  AssertHas(A, #9'movq 40(%rsp), %r8');
+  AssertHas(A, #9'movq 56(%rsp), %rcx' + NL + #9'movq F(%rip), %r10' + NL +
+    #9'callq *%r10');
+end;
+
+procedure TWin64CallTests.TestCdeclProcTypeCall_ThroughAField;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type TF = function(A: Int64): Int64; cdecl;' + NL +
+    '  TC = class F: TF; end;' + NL +
+    'var C: TC; R: Int64;' + NL +
+    'begin C := TC.Create(); R := C.F(5); end.');
+  AssertHas(A, #9'movq 32(%rsp), %rcx' + NL + #9'movq (%rbx), %r10' + NL +
+    #9'callq *%r10');
+end;
+
+procedure TWin64CallTests.TestDefaultProcTypeCall_StaysSystemV;
+var
+  A: string;
+begin
+  A := WinAsm(
+    'program p;' + NL +
+    'type TF = function(A, B: Int64): Int64;' + NL +
+    'var F: TF; R: Int64;' + NL +
+    'begin R := F(11, 22); end.');
+  AssertHas(A, '%rdi');
+  AssertLacks(A, #9'movq 32(%rsp), %rcx');
+end;
+
+procedure TWin64CallTests.TestLinux_CdeclProcTypeCall_StaysSystemV;
+var
+  A: string;
+begin
+  A := GenAsm(
+    'program p;' + NL +
+    'type TF = function(A, B: Int64): Int64; cdecl;' + NL +
+    'var F: TF; R: Int64;' + NL +
+    'begin R := F(11, 22); end.', 'linux-x86_64');
+  AssertHas(A, '%rdi');
+  AssertLacks(A, #9'callq *%r10' + NL + #9'movq');
+  AssertLacks(A, #9'movq 32(%rsp), %rcx');
 end;
 
 procedure TWin64CallTests.TestForeignEntry_StackAndFloatArgs;

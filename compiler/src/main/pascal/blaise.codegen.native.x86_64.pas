@@ -946,17 +946,26 @@ type
       temporary, then move each where the boundary strategy says.
       ARecordResult: the caller handles the routine's record result (see
       EmitForeignRecordCall); with AHiddenResult the result's address was
-      pushed just before this and travels as argument 0. }
+      pushed just before this and travels as argument 0.  APtrOperand, for
+      a call through a procedural value, is the operand holding the code
+      pointer (rbp- or rip-relative, or %rbx-based); it is loaded into %r10
+      after every argument is in place, and AFuncSym is not used. }
     procedure EmitForeignCall(const AFuncSym: string; ADecl: TMethodDecl;
                               AArgs: TObjectList;
                               ARecordResult: Boolean = False;
-                              AHiddenResult: Boolean = False);
+                              AHiddenResult: Boolean = False;
+                              const APtrOperand: string = '');
     { A foreign routine's record result into the buffer at ASretAddr (a
       pointer to it when ASretIsIndirect): from RAX, or written by the
       callee through a hidden argument, as the boundary strategy says. }
     procedure EmitForeignRecordCall(const AFuncSym: string;
       ADecl: TMethodDecl; AArgs: TObjectList; const ASretAddr: string;
-      ASretIsIndirect: Boolean);
+      ASretIsIndirect: Boolean; const APtrOperand: string = '');
+    { A call through a cdecl procedural value where the C convention
+      differs: a transient declaration describes the signature to the
+      foreign lowering.  The caller frees it. }
+    function ForeignDeclOfProcType(AProcType: TProceduralTypeDesc): TMethodDecl;
+    function IsForeignProcType(AProcType: TProceduralTypeDesc): Boolean;
     { The foreign entry of a cdecl routine with a body, where the C
       convention differs from the internal one: a thunk under AEntrySym
       that takes the arguments the foreign way and calls the body, compiled
@@ -24187,7 +24196,7 @@ end;
 
 procedure TX86_64Backend.EmitForeignCall(const AFuncSym: string;
   ADecl: TMethodDecl; AArgs: TObjectList; ARecordResult: Boolean;
-  AHiddenResult: Boolean);
+  AHiddenResult: Boolean; const APtrOperand: string);
 var
   N, I, Outgoing, TempBase, CopyOff, Total, Rem, Temp, Shift: Int;
   Arg: TASTExpr;
@@ -24384,7 +24393,15 @@ begin
       Self.Emit(Format(#9'movq %d(%%rsp), %s', [Total + OALTotal, Loc.Reg]));
     end;
 
-    Self.Emit(#9'callq ' + AFuncSym);
+    if APtrOperand <> '' then
+    begin
+      { %r10 carries no Win64 argument, and nothing runs between this and
+        the call }
+      Self.Emit(Format(#9'movq %s, %%r10', [APtrOperand]));
+      Self.Emit(#9'callq *%r10');
+    end
+    else
+      Self.Emit(#9'callq ' + AFuncSym);
     Self.EmitHoistEpilogue(AArgs, OALD, OALK, OALTotal, Total, True);
   finally
     Kinds.Free();
@@ -24397,7 +24414,7 @@ end;
 
 procedure TX86_64Backend.EmitForeignRecordCall(const AFuncSym: string;
   ADecl: TMethodDecl; AArgs: TObjectList; const ASretAddr: string;
-  ASretIsIndirect: Boolean);
+  ASretIsIndirect: Boolean; const APtrOperand: string);
 var
   RT: TTypeDesc;
   Size: Int;
@@ -24415,7 +24432,7 @@ begin
   Size := RT.RawSize();
   if FBoundaryAbi.ForeignRecordResultInRax(Size) then
   begin
-    Self.EmitForeignCall(AFuncSym, ADecl, AArgs, True, False);
+    Self.EmitForeignCall(AFuncSym, ADecl, AArgs, True, False, APtrOperand);
     if ASretIsIndirect then
       Self.Emit(Format(#9'movq %s, %%rcx', [ASretAddr]))
     else
@@ -24436,8 +24453,43 @@ begin
   else
     Self.Emit(Format(#9'leaq %s, %%rax', [ASretAddr]));
   Self.Emit(#9'pushq %rax');
-  Self.EmitForeignCall(AFuncSym, ADecl, AArgs, True, True);
+  Self.EmitForeignCall(AFuncSym, ADecl, AArgs, True, True, APtrOperand);
   Self.Emit(#9'addq $8, %rsp');
+end;
+
+function TX86_64Backend.IsForeignProcType(AProcType: TProceduralTypeDesc): Boolean;
+begin
+  Result := (AProcType <> nil) and (AProcType.CallingConv = 'cdecl') and
+    not (AProcType.IsMethodPtr or AProcType.IsReference) and
+    (FBoundaryAbi <> nil) and FBoundaryAbi.ForeignDiffers();
+end;
+
+function TX86_64Backend.ForeignDeclOfProcType(
+  AProcType: TProceduralTypeDesc): TMethodDecl;
+var
+  I: Int;
+  Info: TProcParamInfo;
+  Par: TMethodParam;
+begin
+  Result := TMethodDecl.Create();
+  if AProcType.Name <> '' then
+    Result.Name := AProcType.Name
+  else
+    Result.Name := 'a cdecl procedural value';
+  Result.CallingConv := 'cdecl';
+  Result.ResolvedReturnType := AProcType.ReturnType;
+  for I := 0 to AProcType.Params.Count - 1 do
+  begin
+    Info := TProcParamInfo(AProcType.Params.Items[I]);
+    Par := TMethodParam.Create();
+    Par.ParamName := Info.Name;
+    Par.ResolvedType := Info.TypeDesc;
+    Par.IsVarParam := Info.IsVarParam;
+    Par.IsConstParam := Info.IsConstParam;
+    Par.IsOpenArray := (Info.TypeDesc <> nil) and
+      (Info.TypeDesc.Kind = tyOpenArray);
+    Result.Params.Add(Par);
+  end;
 end;
 
 procedure TX86_64Backend.EmitForeignEntry(ADecl: TMethodDecl;
@@ -24690,7 +24742,20 @@ var
   IntIdx, XmmIdx: Int;
   NSlots:   Int;
   Slot:     Int;
+  Decl:     TMethodDecl;
 begin
+  if (not AFatPtr) and Self.IsForeignProcType(AProcType) then
+  begin
+    { a record result reaches EmitCallIndirectRec, never this with the
+      result's address saved }
+    Decl := Self.ForeignDeclOfProcType(AProcType);
+    try
+      Self.EmitForeignCall('', Decl, AArgs, False, False, APtrOperand);
+    finally
+      Decl.Free();
+    end;
+    Exit;
+  end;
   PParams := nil;
   if AProcType <> nil then
     PParams := AProcType.Params;
@@ -24926,6 +24991,7 @@ var
   RetRec:  TRecordTypeDesc;
   IsIntf:  Boolean;
   RetSize: Int;
+  Decl:    TMethodDecl;
 begin
   RetRec := nil;
   IsIntf := False;
@@ -24938,6 +25004,17 @@ begin
   if (RetRec = nil) and not IsIntf then
   begin
     Self.EmitCallIndirectEx(APtrOperand, AProcType, AArgs, AFatPtr, False);
+    Exit;
+  end;
+  if (not AFatPtr) and Self.IsForeignProcType(AProcType) then
+  begin
+    Decl := Self.ForeignDeclOfProcType(AProcType);
+    try
+      Self.EmitForeignRecordCall('', Decl, AArgs, ASretAddr, ASretIsIndirect,
+        APtrOperand);
+    finally
+      Decl.Free();
+    end;
     Exit;
   end;
   { an interface is a 16-byte (obj, itab) pair returned through the hidden
