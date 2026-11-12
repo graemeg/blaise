@@ -28,6 +28,11 @@ type
       a nested call and through a default-property setter (x86-64 evaluated
       the arguments first) }
     procedure TestRun_CallReceiverEvaluatedBeforeArgs;
+    { methods named Write and WriteLn (and a static Write overload) called
+      bare inside their class run the methods, beside the built-ins called
+      as System.Write and bare outside (an internal error: "Write/WriteLn
+      argument of a type with no text form") }
+    procedure TestRun_MethodNamedWrite_CallsTheMethod;
     { metaclass values in static- and dynamic-array elements, written by
       element store and by a literal, read back and compared }
     procedure TestRun_MetaclassArrayElements;
@@ -4204,6 +4209,60 @@ begin
   AssertRunsOnAll(Src,
     'stmt 1' + LE + 'expr 1' + LE + 'stmt7 1' + LE + 'nested 2' + LE +
     'setter 1' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodNamedWrite_CallsTheMethod;
+const
+  Src = '''
+    program P;
+    type
+      TJ = class
+      public
+        N: Int;
+      end;
+      TStore = class
+      private
+        procedure Write(ARoot: TJ); overload;
+        procedure WriteLn(const A: string; B: Int);
+        static procedure Write(A, B: TJ); overload;
+      public
+        procedure Save();
+      end;
+    procedure TStore.Write(ARoot: TJ);
+    begin
+      System.WriteLn('own write ', ARoot.N)
+    end;
+    procedure TStore.WriteLn(const A: string; B: Int);
+    begin
+      System.WriteLn('own writeln ', A, B)
+    end;
+    static procedure TStore.Write(A, B: TJ);
+    begin
+      System.WriteLn('static write ', A.N + B.N)
+    end;
+    procedure TStore.Save();
+    var
+      R: TJ;
+    begin
+      R := TJ.Create();
+      R.N := 7;
+      Write(R);
+      WriteLn('x', 3);
+      Write(R, R)
+    end;
+    begin
+      TStore.Create().Save();
+      Write('builtin ');
+      WriteLn(1)
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  AssertRunsOnAll(Src,
+    'own write 7' + LE + 'own writeln x3' + LE + 'static write 14' + LE +
+    'builtin 1' + LE, 0);
 end;
 
 initialization

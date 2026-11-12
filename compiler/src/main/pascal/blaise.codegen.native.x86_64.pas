@@ -18681,12 +18681,16 @@ begin
   if AStmt is TProcCall then
   begin
     PC := TProcCall(AStmt);
-    if SameText(PC.Name, 'WriteLn') then
+    { Write/WriteLn the built-ins -- not a method of that name called on the
+      implicit Self, nor a routine of the program's own: those were taken for
+      the built-in and failed with "Write/WriteLn argument of a type with no
+      text form" }
+    if IsBuiltinWrite(PC) and SameText(PC.Name, 'WriteLn') then
     begin
       Self.EmitWrite(PC, True);
       Exit;
     end;
-    if SameText(PC.Name, 'Write') then
+    if IsBuiltinWrite(PC) and SameText(PC.Name, 'Write') then
     begin
       Self.EmitWrite(PC, False);
       Exit;

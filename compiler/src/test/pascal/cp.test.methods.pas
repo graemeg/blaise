@@ -25,6 +25,11 @@ type
       in MkH().Put(N) the receiver call comes first and N is loaded after it
       (x86-64 pushed the arguments first and loaded the receiver last) }
     procedure TestCodegen_CallReceiverEvaluatedBeforeArgs;
+    { a method named Write or WriteLn, called bare inside the class, calls
+      the method: the backends took any statement call of that name for the
+      built-in and stopped with "Write/WriteLn argument of a type with no
+      text form" }
+    procedure TestCodegen_MethodNamedWrite_CallsTheMethod;
     { ------------------------------------------------------------------ }
     { Lexer                                                                }
     { ------------------------------------------------------------------ }
@@ -484,6 +489,40 @@ begin
       'callq TH_Get', 'N(%rip)'));
   AssertTrue('arm64 statement: N loaded after the receiver call',
     LoadBetween(A, 'bl _MkH', 'bl _TH_Put', '_g_N@PAGEOFF'));
+end;
+
+procedure TMethodTests.TestCodegen_MethodNamedWrite_CallsTheMethod;
+const
+  Src = '''
+    program P;
+    type
+      TJ = class
+      public
+        N: Int;
+      end;
+      TStore = class
+      private
+        procedure Write(ARoot: TJ);
+        procedure WriteLn(const A: string; B: Int);
+      public
+        procedure Save();
+      end;
+    procedure TStore.Write(ARoot: TJ); begin end;
+    procedure TStore.WriteLn(const A: string; B: Int); begin end;
+    procedure TStore.Save();
+    begin
+      Write(TJ.Create());
+      WriteLn('x', 3)
+    end;
+    begin
+      TStore.Create().Save()
+    end.
+    ''';
+begin
+  AssertEquals('Write calls the method', '',
+    AsmMissing(Src, 'callq TStore_Write' + #10, 'bl _TStore_Write' + #10));
+  AssertEquals('WriteLn calls the method', '',
+    AsmMissing(Src, 'callq TStore_WriteLn', 'bl _TStore_WriteLn'));
 end;
 
 initialization

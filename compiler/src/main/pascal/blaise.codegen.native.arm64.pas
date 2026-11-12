@@ -10308,12 +10308,16 @@ begin
       EmitDiscardedProcResult(TProceduralTypeDesc(ACall.ProcFieldInfo.TypeDesc));
     Exit;
   end;
-  if SameText(ACall.Name, 'WriteLn') then
+  { Write/WriteLn the built-ins -- not a method of that name called on the
+    implicit Self, nor a routine of the program's own: those were taken for
+    the built-in and failed with "Write/WriteLn argument of a type with no
+    text form" }
+  if IsBuiltinWrite(ACall) and SameText(ACall.Name, 'WriteLn') then
   begin
     EmitWrite(ACall, True);
     Exit;
   end;
-  if SameText(ACall.Name, 'Write') then
+  if IsBuiltinWrite(ACall) and SameText(ACall.Name, 'Write') then
   begin
     EmitWrite(ACall, False);
     Exit;

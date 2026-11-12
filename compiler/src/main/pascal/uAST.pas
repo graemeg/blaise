@@ -1655,6 +1655,12 @@ function CloneClassTypeDef(ASrc: TClassTypeDef): TClassTypeDef;
 function CloneAttributeUse(ASrc: TAttributeUse): TAttributeUse;
 function ClonePropertyDecl(ASrc: TPropertyDecl): TPropertyDecl;
 
+{ True when a call statement named Write or WriteLn is the built-in: not a
+  method of that name on the implicit Self, a routine the program declares,
+  or a call through a procedural value.  Code generation asks this before
+  lowering the call as text output. }
+function IsBuiltinWrite(ACall: TProcCall): Boolean;
+
 implementation
 
 function BinaryOpName(AOp: TBinaryOp): string;
@@ -3525,6 +3531,12 @@ begin
     Result.ProcDecls.Add(CloneMethodDecl(TMethodDecl(ABlock.ProcDecls.Items[I])));
   for I := 0 to ABlock.Stmts.Count - 1 do
     Result.Stmts.Add(CloneStmt(TASTStmt(ABlock.Stmts.Items[I])));
+end;
+
+function IsBuiltinWrite(ACall: TProcCall): Boolean;
+begin
+  Result := (ACall.ResolvedDecl = nil) and not ACall.IsImplicitSelfMethod and
+    not ACall.IsIndirectCall and not ACall.IsProcFieldCall;
 end;
 
 end.
