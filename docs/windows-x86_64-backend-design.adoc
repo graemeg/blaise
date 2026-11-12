@@ -1492,7 +1492,7 @@ the way:
   target supplies only its `TRtlPlatform` subclass.
 * *`rtl.platform.windows`* has the console writes, parameters, `Halt`,
   process id and `Sleep`; its file, directory, time and process operations
-  (M4) report themselves by name until then.
+  (M4) reported themselves by name until then.
 * *Fixes found by running in the guest:* the linker's TLS zero fill (the
   loader ignores `SizeOfZeroFill`); a leftover Windows branch in record-
   return classification that broke every register-sized record result (and
@@ -1507,6 +1507,55 @@ M4 — Platform adapter::
 `rtl.platform.windows`.
 +
 _Exit:_ file, directory, time and child-process e2e tests pass in the guest.
++
+_As delivered:_ every `TRtlPlatform` operation is implemented over the W
+APIs in the table above, with UTF-8 converted to and from NUL-terminated
+UTF-16 at the boundary.  Of the 76 e2e suites run in the guest, 65 pass
+-- sysutils, streams, dateutils, misc, stringops and strutils among them,
+and the threading and threadvar suites ahead of M5.  The other 11 need M7:
+networking, async I/O, fibres and the scheduler (`async.fibers` binds
+`mprotect`; one arc test reads its clock through it), and the errno
+suite's `pipe`.  In detail:
++
+* *Descriptors.*  A file or pipe the adapter opens is entered in a table in
+  `runtime.syscall.windows` (descriptors from 3, under an SRW lock), so
+  `FdRead`, `FdWrite`, `FdSeek` and the streams keep their `Int32`
+  descriptors and `write` reaches files as well as the standard handles.
+* *Processes.*  `CreateProcessW` with standard output and error in one
+  inherited pipe, arguments quoted so `CommandLineToArgvW` gives them back;
+  a program that cannot be started exits 127, as from `execvp`.  `Exec` runs
+  `cmd.exe /d /s /c`.  A child ended by an exception reports its NTSTATUS
+  code (D7).
+* *Calendar.*  The day arithmetic is `runtime.civil`, shared with the
+  `--static` POSIX leaves, which carried a copy each.
+* *Paths.*  `runtime.str`'s path helpers split on `/` and on the target's
+  `DirectorySeparator`, and `IncludeTrailingPathDelimiter` adds the
+  target's own; on a POSIX target the two are the same character, so
+  nothing changes there.
+* *Aggregate results* (from M3).  A record result of 1, 2, 4 or 8 bytes
+  comes back in RAX; any other size through a hidden pointer in RCX
+  (`TX86BoundaryAbi.ForeignRecordResultInRax`).  A record with managed
+  fields cannot come from foreign code and is reported; other aggregate
+  results stay an error.
+* *Layer 3* (from M3).  `l3ffi.c`, built into a DLL by mingw-w64, and
+  `l3ffi.pas`, which calls it across the cases listed under Layer 3, run in
+  `windows-vm.sh crosscheck` when mingw-w64 is installed.
+* *Fixes found by the guest sweep:* a reference that names a library binds
+  to the DLL even when the link defines the same name, unless that
+  definition is a C entry, which the backend lists in `.blaise.imports`
+  with an empty library (`external 'c' name 'strlen'` had reached
+  `runtime.cstub`'s internal-convention `strlen`); and `IsNaN` /
+  `IsInfinite` lower inline on x86-64, as on arm64, instead of calling the
+  C library's `__isnan` and `__isinf`.
+* *Tests that assumed POSIX* ask the target instead: `GetTempDir` for
+  `/tmp`, the target's line ending and separators (`E2ETargetDesc`),
+  `exit N` for `true` and `false`, and a process test that starts the
+  program itself.  Tests that hand the program files the test made, or run
+  host tools, are skipped when the program runs on another machine
+  (`E2ERunsOnHost`); `TestRun_FileOps_MadeByTheProgram` covers those
+  operations on paths the program makes.  Tests that bind the C library
+  without naming it are ignored where that is not allowed
+  (`E2ELibraryLessReachesLibc`).
 
 M5 — Threads and callbacks::
 `runtime.thread.windows`; foreign entries; the procedural-type compatibility
