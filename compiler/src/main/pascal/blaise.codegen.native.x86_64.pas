@@ -10317,14 +10317,22 @@ begin
       end;
       Exit;
     end;
+    { Float classification, inline as on arm64: the C library's __isnan and
+      __isinf are absent from a freestanding link and from Windows.  A
+      Single operand is widened first; the widening keeps NaN and infinity,
+      so one double test serves both widths.
+        IsNaN:      NaN is the only value unordered with itself (PF set).
+        IsInfinite: shift the sign bit out; +/-inf is then exactly the
+                    all-ones exponent over a zero mantissa, $FFE0... }
     if SameText(FC.Name, 'IsNaN') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
          (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-        Self.Emit(#9'callq __isnanf')
-      else
-        Self.Emit(#9'callq __isnan');
+        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
+      Self.Emit(#9'ucomisd %xmm0, %xmm0');
+      Self.Emit(#9'setp %al');
+      Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
     if SameText(FC.Name, 'IsInfinite') and (FC.Args.Count = 1) then
@@ -10332,9 +10340,13 @@ begin
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
          (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-        Self.Emit(#9'callq __isinff')
-      else
-        Self.Emit(#9'callq __isinf');
+        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
+      Self.Emit(#9'movq %xmm0, %rax');
+      Self.Emit(#9'shlq $1, %rax');
+      Self.Emit(#9'movabsq $-9007199254740992, %rcx');
+      Self.Emit(#9'cmpq %rcx, %rax');
+      Self.Emit(#9'sete %al');
+      Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
     { Unqualified call to a procedural-typed field of the current class

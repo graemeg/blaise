@@ -124,6 +124,9 @@ type
     { IsNaN / IsInfinite → Boolean }
     procedure TestSemantic_IsNaN_OK;
     procedure TestSemantic_IsNaN_ReturnsBoolean;
+    { x86-64 lowers both inline, as arm64 does: the C library's __isnan and
+      __isinf exist neither in a freestanding link nor on Windows. }
+    procedure TestX86_IsNaNIsInfinite_Inline;
     procedure TestSemantic_IsInfinite_OK;
     procedure TestSemantic_IsInfinite_ReturnsBoolean;
 
@@ -956,6 +959,27 @@ end;
 { ------------------------------------------------------------------ }
 { IsNaN / IsInfinite                                                   }
 { ------------------------------------------------------------------ }
+
+procedure TMathTests.TestX86_IsNaNIsInfinite_Inline;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    var X: Float64; S: Float32;
+    begin
+      WriteLn(IsNaN(X));
+      WriteLn(IsInfinite(S))
+    end.
+    ''', TargetX86_64);
+  AssertTrue('IsNaN compares the value with itself',
+    Pos(#9'ucomisd %xmm0, %xmm0' + #10 + #9'setp %al', AsmT) >= 0);
+  AssertTrue('IsInfinite widens a Single and works on the raw bits',
+    Pos(#9'cvtss2sd %xmm0, %xmm0' + #10 + #9'movq %xmm0, %rax' + #10 +
+      #9'shlq $1, %rax', AsmT) >= 0);
+  AssertTrue('no C library call', Pos('__isnan', AsmT) + Pos('__isinf', AsmT) = -2);
+end;
 
 procedure TMathTests.TestSemantic_IsNaN_OK;
 begin
