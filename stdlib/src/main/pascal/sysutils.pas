@@ -98,10 +98,17 @@ function _StrToInt64Checked(const S: string): Int64;
 { BoolToStr — not a compiler built-in; pure Pascal implementation }
 function BoolToStr(B: Boolean; AUseBoolStrs: Boolean = False): string;
 
+{ ExtractFileDrive — the drive part of APath: 'C:' for 'C:\dir' or 'C:dir',
+  '\\server\share' for a UNC path, '' otherwise.  Only where the target's
+  DirectorySeparator is '\' (Windows): elsewhere 'C:' is an ordinary file
+  name and the result is always ''. }
+function ExtractFileDrive(const APath: string): string;
+
 { ExpandFileName — resolve a relative path to an absolute path.
-  If APath is already absolute (starts with '/') it is returned unchanged
-  after normalising redundant separators and '.' components.
-  Otherwise it is resolved relative to GetCurrentDir().
+  If APath is already absolute (starts with a separator, or a drive and a
+  separator on Windows) it is returned unchanged after normalising redundant
+  separators and '.' components, and with the target's DirectorySeparator
+  between components.  Otherwise it is resolved relative to GetCurrentDir().
   Note: '..' segments are removed by simple text processing; symlinks are
   not resolved (unlike POSIX realpath).  This matches Delphi/FPC behaviour
   on paths that do not traverse symlinks. }
@@ -262,41 +269,107 @@ begin
     Result := 'False'
 end;
 
+{ Whether byte I of S separates path components: '/' on every target, and
+  the target's DirectorySeparator (so '\' too on Windows). }
+function IsPathSepAt(const S: string; I: Int): Boolean;
+begin
+  Result := (I >= 0) and (I < Length(S)) and
+    ((Copy(S, I, 1) = '/') or (Copy(S, I, 1) = DirectorySeparator));
+end;
+
+function ExtractFileDrive(const APath: string): string;
+var
+  I, N: Int;
+  C: string;
+begin
+  Result := '';
+  if DirectorySeparator <> '\' then
+    Exit;
+  if (Length(APath) >= 2) and (Copy(APath, 1, 1) = ':') then
+  begin
+    C := UpperCase(Copy(APath, 0, 1));
+    if (C >= 'A') and (C <= 'Z') then
+      Exit(Copy(APath, 0, 2));
+  end;
+  if IsPathSepAt(APath, 0) and IsPathSepAt(APath, 1) then
+  begin
+    { \\server\share: up to the separator after the share }
+    I := 2;
+    N := 0;
+    while I < Length(APath) do
+    begin
+      if IsPathSepAt(APath, I) then
+      begin
+        Inc(N);
+        if N = 2 then
+          Break;
+      end;
+      Inc(I);
+    end;
+    Result := Copy(APath, 0, I);
+  end;
+end;
+
 { ExpandFileName — pure Pascal path normaliser.
-  Resolves '..' and '.' components without a local string array.
-  The algorithm builds the result as a string, treating it as a stack:
-  appending '/' + segment to push, trimming the last segment to pop. }
+  Resolves '..' and '.' components without a local string array.  The
+  drive (Windows) is split off first; the rest is built as a string treated
+  as a stack: appending a separator + segment to push, trimming the last
+  segment to pop. }
 function ExpandFileName(const APath: string): string;
 var
-  Base: string;
-  Len, I, SegStart, LastSlash: Int;
-  SP: PChar;
+  Base, Drive, Rest, Cwd, Sep: string;
+  Len, I, SegStart, LastSep: Int;
   Seg: string;
 begin
   if APath = '' then
   begin
     Exit(GetCurrentDir());
   end;
+  Sep := DirectorySeparator;
 
-  { Determine base: absolute or relative }
-  if APath[0] = 47 then  { '/' }
-    Base := APath
+  { Determine the drive and the base: absolute or relative }
+  Drive := ExtractFileDrive(APath);
+  if Drive <> '' then
+  begin
+    Rest := Copy(APath, Length(Drive), Length(APath) - Length(Drive));
+    if IsPathSepAt(Rest, 0) or IsPathSepAt(Drive, 0) then
+      Base := Rest
+    else
+    begin
+      { drive-relative ('C:dir'): against the current directory when it is
+        on that drive, else the drive's root }
+      Cwd := GetCurrentDir();
+      if SameText(ExtractFileDrive(Cwd), Drive) then
+        Base := Copy(Cwd, Length(Drive), Length(Cwd) - Length(Drive)) +
+          '/' + Rest
+      else
+        Base := '/' + Rest;
+    end;
+  end
+  else if IsPathSepAt(APath, 0) then
+  begin
+    Base := APath;
+    Drive := ExtractFileDrive(GetCurrentDir());
+  end
   else
-    Base := GetCurrentDir() + '/' + APath;
+  begin
+    Cwd := GetCurrentDir();
+    Drive := ExtractFileDrive(Cwd);
+    Base := Copy(Cwd, Length(Drive), Length(Cwd) - Length(Drive)) + '/' + APath;
+  end;
 
   Len    := Length(Base);
-  SP     := PChar(Base);
   Result := '';
   I      := 0;
 
-  { Skip leading slash }
-  if (Len > 0) and (SP[0] = 47) then
+  { Skip a leading separator }
+  if IsPathSepAt(Base, 0) then
     I := 1;
 
   while I <= Len do
   begin
     SegStart := I;
-    while (I < Len) and (SP[I] <> 47) do
+    while (I < Len) and not IsPathSepAt(Base, I) do
       I := I + 1;
     if I > SegStart then
       Seg := Copy(Base, SegStart, I - SegStart)
@@ -306,21 +379,23 @@ begin
     begin
       if Seg = '..' then
       begin
-        { Pop the last segment from Result: find the last '/' and truncate }
-        LastSlash := Length(Result) - 1;
-        while (LastSlash > 0) and (Result[LastSlash] <> 47) do
-          LastSlash := LastSlash - 1;
-        if LastSlash >= 0 then
-          Result := Copy(Result, 0, LastSlash);
+        { Pop the last segment from Result: find the last separator and
+          truncate }
+        LastSep := Length(Result) - 1;
+        while (LastSep > 0) and (Copy(Result, LastSep, 1) <> Sep) do
+          LastSep := LastSep - 1;
+        if LastSep >= 0 then
+          Result := Copy(Result, 0, LastSep);
       end
       else
-        Result := Result + '/' + Seg;
+        Result := Result + Sep + Seg;
     end;
-    I := I + 1;  { skip '/' }
+    I := I + 1;  { skip the separator }
   end;
 
   if Result = '' then
-    Result := '/';
+    Result := Sep;
+  Result := Drive + Result;
 end;
 
 { PARTIAL STUB — exact compare only; see the interface note.  Correct on

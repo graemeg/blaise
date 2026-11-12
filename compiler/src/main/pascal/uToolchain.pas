@@ -126,14 +126,14 @@ function ResolveSpec(const ASpec: TToolSpec; const ATarget: TTargetDesc): string
 implementation
 
 uses
-  SysUtils;
+  SysUtils, uStrCompat;
 
-{ Host path conventions.  The Blaise compiler currently runs only on POSIX
-  hosts (linux/freebsd/macos), so the host directory delimiter is '/' and the
-  PATH list separator is ':'.  These describe the HOST the compiler runs on,
-  not the --target it generates code for (cross-compilation does not change how
-  we probe the local $PATH).  When a Windows host build lands, switch these to
-  query the active platform RTL. }
+{ Host path conventions.  The compiler is itself compiled for the host it
+  runs on, so the predefined DirectorySeparator and PathSeparator are the
+  HOST's -- '\' and ';' in blaise.exe -- not those of the --target it
+  generates code for (cross-compilation does not change how we probe the
+  local PATH).  An absolute path is recognised by IsAbsolutePath, which knows
+  drives and UNC paths on a Windows host. }
 
 { ------------------------------------------------------------------ }
 { PATH walker                                                          }
@@ -207,7 +207,7 @@ begin
       Path  := '';
     end;
     if Entry = '' then Continue;
-    if Copy(Entry, 0, 1) <> '/' then
+    if not IsAbsolutePath(Entry) then
       Entry := IncludeTrailingPathDelimiter(ACwd) + Entry;
     Hit := TrySingleName(Entry, ABaseName);
     if Hit <> '' then
@@ -356,7 +356,7 @@ end;
 { APath made absolute against ACwd, with '.' and '..' folded. }
 function AbsoluteFrom(const APath, ACwd: string): string;
 begin
-  if Copy(APath, 0, 1) = '/' then
+  if IsAbsolutePath(APath) then
     Result := ExpandFileName(APath)
   else
     Result := ExpandFileName(IncludeTrailingPathDelimiter(ACwd) + APath);
@@ -427,7 +427,7 @@ begin
     Exit(IncludeTrailingPathDelimiter(ABinDir) + 'rtl');
   { The XDG base-directory spec: a relative $XDG_CACHE_HOME is invalid and
     must be ignored. }
-  if Copy(AXdgCache, 0, 1) = '/' then
+  if IsAbsolutePath(AXdgCache) then
     Exit(IncludeTrailingPathDelimiter(AXdgCache) + 'blaise/rtl');
   if AHome <> '' then
     Exit(IncludeTrailingPathDelimiter(AHome) + '.cache/blaise/rtl');

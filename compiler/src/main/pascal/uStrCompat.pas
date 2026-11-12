@@ -38,6 +38,12 @@ function StrHead(const S: string; N: Int): string;
 { StrPos: find sub in s, return 0-based index; -1 if not found }
 function StrPos(const Sub, S: string): Int;
 
+{ IsAbsolutePath: APath names its location from a root -- it starts with a
+  separator ('/', or the target's DirectorySeparator), or, on Windows, with
+  a drive and a separator ('C:\dir') or is a UNC path.  A drive-relative
+  'C:dir' is not absolute. }
+function IsAbsolutePath(const APath: string): Boolean;
+
 { StripUnderscores: return S with all '_' characters removed }
 function StripUnderscores(const S: string): string;
 
@@ -56,7 +62,19 @@ procedure ParseIntOrUInt64Literal(const S: string;
 implementation
 
 uses
-  SysUtils;   { EConvertError }
+  SysUtils;   { EConvertError, ExtractFileDrive }
+
+function IsAbsolutePath(const APath: string): Boolean;
+var
+  Drive: string;
+  C: string;
+begin
+  Drive := ExtractFileDrive(APath);
+  if Length(Drive) > 2 then
+    Exit(True);                                { \\server\share }
+  C := Copy(APath, Length(Drive), 1);
+  Result := (C = '/') or (C = DirectorySeparator);
+end;
 
 function StrAt(const S: string; I: Int): Int32;
 begin

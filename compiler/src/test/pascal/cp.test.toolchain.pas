@@ -28,7 +28,7 @@ interface
 
 uses
   blaise.testing, sysutils, process,
-  blaise.codegen.target, uToolchain;
+  blaise.codegen.target, uToolchain, uStrCompat;
 
 type
   TToolchainTests = class(TTestCase)
@@ -46,6 +46,10 @@ type
     procedure Run(const AExe: string; const AArgs: array of string);
   published
     { ---- pure helpers ---- }
+    { a path from a root: a leading separator; on a Windows host also a
+      drive and a separator, or a UNC path.  This host is POSIX, where
+      'C:\x' is a relative file name. }
+    procedure TestIsAbsolutePath;
     procedure TestExecutableExtension_Windows_IsExe;
     procedure TestExecutableExtension_Linux_IsEmpty;
     procedure TestHostTarget_OnThisHost_MatchesUname;
@@ -124,6 +128,16 @@ begin
 end;
 
 { ---- pure helpers ---- }
+
+procedure TToolchainTests.TestIsAbsolutePath;
+begin
+  AssertTrue('/usr', IsAbsolutePath('/usr/lib'));
+  AssertTrue('root', IsAbsolutePath('/'));
+  AssertFalse('relative', IsAbsolutePath('lib/x'));
+  AssertFalse('empty', IsAbsolutePath(''));
+  AssertFalse('a drive is a name on POSIX', IsAbsolutePath('C:\x'));
+  AssertFalse('dot', IsAbsolutePath('./x'));
+end;
 
 procedure TToolchainTests.TestExecutableExtension_Windows_IsExe;
 begin

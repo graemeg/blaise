@@ -31,6 +31,8 @@ type
     { Exec returns the command's exit code on every target (POSIX returned
       system()'s raw wait status, 768 for 'exit 3') }
     procedure TestRun_Exec_ReturnsExitCode;
+    { drives and UNC paths on Windows; on POSIX 'C:' is a file name }
+    procedure TestRun_ExtractFileDrive_ExpandFileName;
     procedure TestRun_ParamStr_PrintsArg;
     procedure TestRun_ParamCount_WithArgs;
     procedure TestRun_ReadWriteFile_RoundTrip;
@@ -339,6 +341,53 @@ const
           WriteLn(IntToStr(RunChild('0')), ' ', IntToStr(RunChild('7')))
         end.
         ''';
+
+procedure TE2ESysUtilsTests.TestRun_ExtractFileDrive_ExpandFileName;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    var
+      Cwd: string;
+    begin
+      WriteLn('[', ExtractFileDrive('C:\a\b'), '] [',
+        ExtractFileDrive('\\srv\share\x'), '] [',
+        ExtractFileDrive('/usr/lib'), ']');
+      Cwd := GetCurrentDir();
+      WriteLn(ExpandFileName('/a/b/../c/./d') =
+        ExtractFileDrive(Cwd) + DirectorySeparator + 'a' +
+        DirectorySeparator + 'c' + DirectorySeparator + 'd');
+      WriteLn(ExpandFileName('x/../y') = ExpandFileName(Cwd) +
+        DirectorySeparator + 'y');
+      if DirectorySeparator = '\' then
+      begin
+        WriteLn(ExpandFileName('C:\a\..\b/c'));
+        WriteLn(ExpandFileName('\\srv\share\p\..\q'));
+      end
+      else
+      begin
+        WriteLn(ExpandFileName('/'));
+        WriteLn(ExpandFileName('/x/../../y'));
+      end;
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  if E2ETargetDesc().OS = osWindows then
+    AssertRTLRunsOnAll(Src,
+      '[C:] [\\srv\share] []' + LineEnding +
+      'True' + LineEnding +
+      'True' + LineEnding +
+      'C:\b\c' + LineEnding +
+      '\\srv\share\q' + LineEnding, 0)
+  else
+    AssertRTLRunsOnAll(Src,
+      '[] [] []' + LineEnding +
+      'True' + LineEnding +
+      'True' + LineEnding +
+      '/' + LineEnding +
+      '/y' + LineEnding, 0);
+end;
 
 procedure TE2ESysUtilsTests.TestRun_Exec_ReturnsExitCode;
 const

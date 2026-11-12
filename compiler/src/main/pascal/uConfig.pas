@@ -43,7 +43,8 @@ procedure LoadConfigPaths(APaths: TStringList; var ARtlSrc, ARtlCache: string);
 implementation
 
 uses
-  uToolchain;   { CompilerBinDir }
+  uToolchain,   { CompilerBinDir }
+  uStrCompat;   { IsAbsolutePath }
 
 function FindConfigFile: string;
 var
@@ -89,7 +90,7 @@ begin
     { No $HOME — leave '~' untouched rather than mis-resolving. }
     Exit(AValue);
   end;
-  if Copy(AValue, 0, 1) = '/' then
+  if IsAbsolutePath(AValue) then
     Exit(AValue);
   Result := IncludeTrailingPathDelimiter(ABaseDir) + AValue;
 end;

@@ -735,7 +735,7 @@ function TLexer.ResolveEmbedPath(const APath: string): string;
 var
   Dir: string;
 begin
-  if (Length(APath) > 0) and (OrdAt(APath, 0) = Ord('/')) then
+  if IsAbsolutePath(APath) then
   begin
     Result := APath;
     Exit;
