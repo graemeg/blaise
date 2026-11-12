@@ -27,9 +27,14 @@
 #                                     codes and output in the VM; with
 #                                     mingw-w64 ($MINGW_CC), the Layer 3
 #                                     fixture against its C DLL too
+#   scripts/windows-vm.sh selfhost    the self-hosting gate: cross-build
+#                                     blaise.exe, have it compile a program
+#                                     and then itself in the VM, and require
+#                                     the result byte-identical to the
+#                                     cross-built one
 #
-# stdlib-test and selfhost arrive with the milestones that make them
-# possible (design: windows-x86_64-backend-design.adoc, M3 and M7).
+# stdlib-test arrives with the milestone that makes it possible (design:
+# windows-x86_64-backend-design.adoc, M7).
 #
 # The guest is installed once by hand (design, "Development-host setup"):
 # a UTM VM running Windows 11 ARM64 with the UTM guest tools, the OpenSSH
@@ -283,6 +288,53 @@ case "$cmd" in
     [ $fail -eq 0 ] || exit 1
     echo "WINDOWS_CROSSCHECK_OK"
     ;;
+  selfhost)
+    # The design's self-hosting gate: the cross-built blaise.exe rebuilds
+    # itself on Windows, byte-identical -- the criterion the release process
+    # applies to the Linux binary.
+    [ -x compiler/target/blaise ] || die "build compiler/target/blaise first"
+    ssh_up || die "VM not reachable: scripts/windows-vm.sh start"
+    SH=$OUT/selfhost
+    rm -rf "$SH"; mkdir -p "$SH"
+    echo ">> cross-compiling blaise.exe (windows-x86_64)"
+    compiler/target/blaise --source compiler/src/main/pascal/Blaise.pas \
+      --target windows-x86_64 --output "$SH/blaise" \
+      --unit-path compiler/src/main/pascal --unit-path stdlib/src/main/pascal \
+      --rtl-src compiler/src/main/pascal > "$SH/xbuild.log" 2>&1 \
+      || { grep -v 'note:' "$SH/xbuild.log" | head -20; die "CROSS BUILD FAILED: blaise.exe"; }
+    tar -cf "$SH/src.tar" compiler/src/main/pascal stdlib/src/main/pascal
+    printf 'program hello;\nbegin\n  WriteLn(%sHello from blaise.exe%s);\nend.\n' "'" "'" \
+      > "$SH/hello.pas"
+    # the guest's steps, as one batch file: no quoting crosses ssh
+    printf '%s\r\n' '@echo off' 'cd /d %~dp0' 'tar -xf src.tar || exit /b 2' \
+      'blaise.exe --source hello.pas --output hello --rtl-src compiler\src\main\pascal > hello.log 2>&1' \
+      'if errorlevel 1 (type hello.log & exit /b 3)' \
+      'hello.exe || exit /b 4' \
+      'mkdir s2' \
+      'blaise.exe --source compiler\src\main\pascal\Blaise.pas --unit-path compiler\src\main\pascal --unit-path stdlib\src\main\pascal --rtl-src compiler\src\main\pascal --output s2\blaise > s2\build.log 2>&1' \
+      'if errorlevel 1 (type s2\build.log & exit /b 5)' \
+      'fc /b blaise.exe s2\blaise.exe > nul || exit /b 6' \
+      > "$SH/selfhost.cmd"
+    dir="$GUEST_DIR\\selfhost-$$"
+    vm_ssh "mkdir $dir" >/dev/null
+    vm_scp "$SH/blaise.exe" "$SH/src.tar" "$SH/hello.pas" "$SH/selfhost.cmd" \
+      "$GUEST_USER@127.0.0.1:${dir//\\//}/"
+    echo ">> in the VM: blaise.exe compiles hello.pas, then itself"
+    t0=$SECONDS
+    rc=0
+    vm_ssh "$dir\\selfhost.cmd" | tr -d '\r' || rc=$?
+    vm_ssh "cd /d $GUEST_DIR && rmdir /s /q $dir" >/dev/null 2>&1 || true
+    case $rc in
+      0) ;;
+      3) die "FAIL: blaise.exe could not compile hello.pas" ;;
+      4) die "FAIL: hello.exe did not run" ;;
+      5) die "FAIL: blaise.exe could not compile itself" ;;
+      6) die "FAIL: the self-built blaise.exe differs from the cross-built one" ;;
+      *) die "FAIL: selfhost step exited $rc" ;;
+    esac
+    echo ">> self-built blaise.exe is byte-identical ($((SECONDS - t0))s in the VM)"
+    echo "WINDOWS_SELFHOST_OK"
+    ;;
   *)
-    sed -n '2,42p' "$0"; exit 1 ;;
+    sed -n '2,47p' "$0"; exit 1 ;;
 esac
