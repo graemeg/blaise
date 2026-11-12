@@ -456,7 +456,8 @@ type
 ----
 
 The inbound side -- the prologue and epilogue of a routine foreign code
-calls -- is added in M5.
+calls -- needs no further query: the thunk asks `ForeignArgLoc` and
+`ForeignRecordResultInRax` as the outbound path does (see _Inbound calls_).
 
 Two adapters:
 
@@ -1563,6 +1564,45 @@ rule (<<abi-language-rule>>) with its rationale and grammar updates.
 +
 _Exit:_ thread e2e tests and the Layer 3 callback cases pass; the new
 semantic error and warning have unit tests.
++
+_As delivered:_ the thread e2e suites already passed in M4
+(`runtime.thread.windows` and the foreign entries arrived in M3).  M5 adds:
++
+* *The language rule.*  `cdecl` follows a procedural type's signature
+  (`type TCompare = function(A, B: Pointer): Int32; cdecl;`, with or
+  without the semicolon) and is carried by named, generic and inline types
+  and in the `.bif` (v36).  A value of one convention given to a type of
+  the other is an error where `TargetForeignConventionDiffers` holds and a
+  portability warning elsewhere; `of object` and `reference to` types
+  cannot be `cdecl`.  Recorded in `language-rationale.adoc` and
+  `grammar.ebnf`.
+* *Calls through a `cdecl` procedural value* take the outbound path: the
+  backend describes the signature to `EmitForeignCall` and
+  `EmitForeignRecordCall` with a transient declaration and loads the code
+  pointer into `R10` after the arguments.
+* *Record results from foreign entries.*  The body keeps its System V
+  result -- registers, or a hidden pointer in `RDI`.  The entry gives the
+  body either the caller's buffer (Win64 hidden pointer in `RCX`, the
+  arguments one place up) or a 16-byte scratch, zeroes what the body
+  writes through a hidden pointer, and afterwards loads 1, 2, 4 or 8 bytes
+  into `RAX` or copies exactly the record into the caller's buffer, whose
+  address goes back in `RAX`.  Records with managed fields are reported.
+* *Layer 3* calls C routines through `cdecl` pointers (narrow and record
+  results included) and has C call Blaise callbacks returning records of
+  every size class, with stack arguments, and taking records by value and
+  by copy.
+* *The bindgen tool* emits `cdecl` on the procedural types it synthesises
+  for C function pointers.
+* *Fixes found on the way:* `@Routine` of an external routine named the
+  Pascal identifier instead of the external symbol on x86-64 (`@c_strlen`
+  referred to `c_strlen`); on macOS arm64 the address of a routine in a
+  dylib was formed with a page reference the linker cannot resolve -- it
+  is now loaded from a GOT slot, which the Mach-O linker binds or, for a
+  symbol the image defines, relaxes to an `add`.
++
+Still to do in M7: library-less `external name` bindings to C routines in
+the standard library (sockets, `fcntl`), and POSIX-only callbacks such as
+signal handlers, which pass routines to C as untyped pointers.
 
 M6 — Self-hosting::
 Resolve the compiler's remaining direct libc bindings; host-side path
@@ -1630,7 +1670,8 @@ No question for the project owner remains open; the decisions are recorded as
 * `docs/native-target-architecture.adoc` — the two new strategy objects.
 * `docs/bif-format.adoc` — the PE/COFF row, which D2 makes moot.
 * `uDebugOPDF.pas` review, per the project rule, if the calling-convention
-  rule adds anything to procedural type descriptions.
+  rule adds anything to procedural type descriptions.  (M5: it does not; a
+  debugger displays a procedural value the same in either convention.)
 
 [appendix]
 == What the compiler provides for a future pdr port
