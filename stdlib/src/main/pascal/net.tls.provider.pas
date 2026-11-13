@@ -31,12 +31,14 @@ unit Net.Tls.Provider;
 // symbols, a program that (transitively) uses it binds libssl and libcrypto.
 // The internal linker handles that on Linux (AUTO link mode flips to dynamic
 // and records each library as DT_NEEDED) and on macOS (one LC_LOAD_DYLIB per
-// library; Homebrew's /opt/homebrew/lib is searched, or pass --lib-path).  TLS
-// is therefore unavailable only in the static/libc-free build, until a
-// pure-Pascal provider exists.
+// library; Homebrew's /opt/homebrew/lib is searched, or pass --lib-path).  On
+// Windows the names map to OpenSSL 3's libssl-3-x64.dll and
+// libcrypto-3-x64.dll (blaise.codegen.toolkit), which must be on the DLL
+// search path when the program starts.  TLS is therefore unavailable only in
+// the static/libc-free build, until a pure-Pascal provider exists.
 //
 // NATIVE BACKEND ONLY (the pump uses async.io -> async.fibers, an inline-asm
-// context leaf the QBE backend rejects).  Linux + OpenSSL 3.x for now.
+// context leaf the QBE backend rejects).  OpenSSL 3.x.
 
 interface
 

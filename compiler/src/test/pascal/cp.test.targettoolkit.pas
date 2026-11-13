@@ -421,6 +421,10 @@ begin
       Tk.LibraryImageName('m'));
     AssertEquals('kernel32.dll', Tk.LibraryImageName('kernel32'));
     AssertEquals('ws2_32.dll', Tk.LibraryImageName('ws2_32'));
+    { OpenSSL 3's Windows builds name their DLLs by version and CPU, so
+      Net.Tls.Provider's external 'ssl' and 'crypto' load them }
+    AssertEquals('libssl-3-x64.dll', Tk.LibraryImageName('ssl'));
+    AssertEquals('libcrypto-3-x64.dll', Tk.LibraryImageName('crypto'));
     AssertEquals('a DLL name is used verbatim', 'user32.dll',
       Tk.LibraryImageName('user32.dll'));
     AssertEquals('whatever its case', 'GDI32.DLL',

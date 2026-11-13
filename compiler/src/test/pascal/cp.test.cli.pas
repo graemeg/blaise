@@ -77,6 +77,7 @@ type
       refused. }
     procedure TestWindows_OutputGetsExeAndIsPe;
     procedure TestWindows_PthreadBindings_ImportNoDll;
+    procedure TestWindows_OpenSSLBindings_ImportVersionedDlls;
     procedure TestWindows_StaticRefused;
     procedure TestWindows_ExternalToolsRefused;
     { --check: parse and analyse only (no output file, no toolchain);
@@ -414,6 +415,44 @@ begin
     for I := 0 to Img.Imports.Count - 1 do
       AssertEquals('only kernel32 is imported', 'kernel32.dll',
         LowerCase(Img.Imports[I].Dll));
+  finally
+    Img.Free();
+  end;
+end;
+
+{ Net.Tls.Provider binds OpenSSL as external 'ssl' and 'crypto'.  OpenSSL
+  3's Windows builds name their DLLs by version and CPU, so those are what
+  the image must import -- ssl.dll and crypto.dll exist nowhere. }
+procedure TCLIContractTests.TestWindows_OpenSSLBindings_ImportVersionedDlls;
+var
+  Src, Out_, Exe: string;
+  EC, I: Int;
+  Img: TPeImage;
+  Dlls: string;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program winssl;' + LineEnding +
+    'function SSL_new(C: Pointer): Pointer;' + LineEnding +
+    '  external ''ssl'' name ''SSL_new'';' + LineEnding +
+    'function BIO_s_mem: Pointer;' + LineEnding +
+    '  external ''crypto'' name ''BIO_s_mem'';' + LineEnding +
+    'begin' + LineEnding +
+    '  if ParamCount() > 5 then' + LineEnding +
+    '    SSL_new(BIO_s_mem());' + LineEnding +
+    'end.');
+  Exe := FScratch + 'winssl';
+  DeleteFile(Exe + '.exe');
+  EC := RunCompiler(['--source', Src, '--target', 'windows-x86_64',
+    '--output', Exe, '--rtl-src', FRTLPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  Img := ReadPeImageFile(Exe + '.exe');
+  try
+    Dlls := '';
+    for I := 0 to Img.Imports.Count - 1 do
+      Dlls := Dlls + ' ' + LowerCase(Img.Imports[I].Dll);
+    AssertTrue('libssl-3-x64.dll:' + Dlls, Pos(' libssl-3-x64.dll', Dlls) >= 0);
+    AssertTrue('libcrypto-3-x64.dll:' + Dlls,
+      Pos(' libcrypto-3-x64.dll', Dlls) >= 0);
   finally
     Img.Free();
   end;

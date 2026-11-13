@@ -123,8 +123,9 @@ type
     function MakeLinkTarget: TLinkTarget; override;
     function ImageFormat: TImageFormat; override;
     { The DLL that exports a library's routines: the C runtime for c and m,
-      a name already ending in .dll verbatim, otherwise the name with .dll
-      appended. }
+      OpenSSL 3's libssl-3-x64.dll and libcrypto-3-x64.dll for ssl and
+      crypto, a name already ending in .dll verbatim, otherwise the name with
+      .dll appended. }
     function LibraryImageName(const ALibName: string): string; override;
     { Nothing on a cross host: the linker cannot read the DLLs, so a cross
       link trusts the import names.  A native Windows host adds its system
@@ -325,6 +326,10 @@ begin
   Lower := LowerCase(ALibName);
   if (Lower = 'c') or (Lower = 'm') then
     Result := 'msvcrt.dll'
+  else if Lower = 'ssl' then
+    Result := 'libssl-3-x64.dll'
+  else if Lower = 'crypto' then
+    Result := 'libcrypto-3-x64.dll'
   else if (Length(Lower) > 4) and
           (Copy(Lower, Length(Lower) - 4, 4) = '.dll') then
     Result := ALibName
