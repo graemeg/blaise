@@ -17849,7 +17849,7 @@ end;
 
 procedure TArm64Backend.EmitArrayConstData(ABlock: TBlock);
 var
-  I, J, K: Int;
+  I, J: Int;
   CD: TConstDecl;
   Decl: TMethodDecl;
   Lbl, Dir: string;
@@ -17920,6 +17920,30 @@ var
       Self.Emit(Dir + ACD.ArrayElements.Strings[E]);
   end;
 
+  { The local consts of routine body ABody, and of the routines nested in
+    it, however deep: each is referenced by its own mangled label
+    (NewArrayConstLabel) and must be defined. }
+  procedure EmitBodyConsts(ABody: TBlock);
+  var
+    N: Int;
+    BCD: TConstDecl;
+  begin
+    if ABody = nil then
+      Exit;
+    for N := 0 to ABody.ConstDecls.Count - 1 do
+    begin
+      BCD := TConstDecl(ABody.ConstDecls.Items[N]);
+      if BCD.ResolvedEmitName <> '' then
+        EmitOne(BCD, CodegenMangle(BCD.ResolvedEmitName))
+      else if BCD.ResolvedSetEmitName <> '' then
+        EmitOne(BCD, CodegenMangle(BCD.ResolvedSetEmitName))
+      else
+        EmitOne(BCD, CodegenMangle(BCD.Name));
+    end;
+    for N := 0 to ABody.ProcDecls.Count - 1 do
+      EmitBodyConsts(TMethodDecl(ABody.ProcDecls.Items[N]).Body);
+  end;
+
 begin
   { array-typed (and jumbo-set) constants become .rodata blobs so subscripts
     resolve their ConstArraySymbol labels.  Covers block-level consts and
@@ -17937,21 +17961,7 @@ begin
     EmitOne(CD, Lbl);
   end;
   for I := 0 to ABlock.ProcDecls.Count - 1 do
-  begin
-    Decl := TMethodDecl(ABlock.ProcDecls.Items[I]);
-    if Decl.Body = nil then Continue;
-    for J := 0 to Decl.Body.ConstDecls.Count - 1 do
-    begin
-      CD := TConstDecl(Decl.Body.ConstDecls.Items[J]);
-      if CD.ResolvedEmitName <> '' then
-        Lbl := CodegenMangle(CD.ResolvedEmitName)
-      else if CD.ResolvedSetEmitName <> '' then
-        Lbl := CodegenMangle(CD.ResolvedSetEmitName)
-      else
-        Lbl := CodegenMangle(CD.Name);
-      EmitOne(CD, Lbl);
-    end;
-  end;
+    EmitBodyConsts(TMethodDecl(ABlock.ProcDecls.Items[I]).Body);
   { MEMBER const arrays of this block's classes and records: the semantic
     pass mints every reference as <TypeName>_<ConstName> (ConstArraySymbol on
     the field-access node).  Always exported, as on x86-64 -- a unit's class
@@ -17988,18 +17998,7 @@ begin
     begin
       Decl := TMethodDecl(TClassTypeDef(
         TTypeDecl(ABlock.TypeDecls.Items[I]).Def).Methods.Items[J]);
-      if Decl.Body = nil then Continue;
-      for K := 0 to Decl.Body.ConstDecls.Count - 1 do
-      begin
-        CD := TConstDecl(Decl.Body.ConstDecls.Items[K]);
-        if CD.ResolvedEmitName <> '' then
-          Lbl := CodegenMangle(CD.ResolvedEmitName)
-        else if CD.ResolvedSetEmitName <> '' then
-          Lbl := CodegenMangle(CD.ResolvedSetEmitName)
-        else
-          Lbl := CodegenMangle(CD.Name);
-        EmitOne(CD, Lbl);
-      end;
+      EmitBodyConsts(Decl.Body);
     end;
   end;
 end;

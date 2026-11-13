@@ -27,6 +27,9 @@ type
     procedure TestCodegen_ConstArray_AliasElementWidths;
     { a routine-local array const is a private data item }
     procedure TestCodegen_LocalArrayConst_PrivateDataLabel;
+    { an array const local to a NESTED routine -- in a procedure or in a
+      method -- is defined too, not only referenced }
+    procedure TestCodegen_NestedRoutineArrayConst_Defined;
     { Exported interface constant is visible in importing program }
     procedure TestExportedConstVisibleInProgram;
     { Integer constant in program scope }
@@ -581,6 +584,59 @@ begin
     AssertTrue(T + ': mangled local label', Pos('__bac_', AsmText) >= 0);
     AssertTrue(T + ': local array const not exported',
       Pos('.globl __bac_', AsmText) < 0);
+  end;
+end;
+
+procedure TConstTests.TestCodegen_NestedRoutineArrayConst_Defined;
+const
+  Src = '''
+    program P;
+    type
+      TC = class
+        procedure M;
+      end;
+    procedure Outer;
+      procedure Inner;
+      const Names: array[0..1] of string = ('a', 'b');
+        procedure Deeper;
+        const Codes: array[0..1] of Int32 = (7, 9);
+        begin
+          WriteLn(Codes[1])
+        end;
+      begin
+        WriteLn(Names[1]);
+        Deeper()
+      end;
+    begin
+      Inner()
+    end;
+    procedure TC.M;
+      procedure Helper;
+      const Words: array[0..1] of string = ('x', 'y');
+      begin
+        WriteLn(Words[0])
+      end;
+    begin
+      Helper()
+    end;
+    begin
+      Outer();
+      TC.Create().M()
+    end.
+    ''';
+var
+  I: Int;
+  T, AsmText: string;
+begin
+  { The labels were referenced and never defined, so the link failed with
+    an undefined __bac_<n>_<Name>. }
+  for I := 0 to 1 do
+  begin
+    if I = 0 then T := TargetX86_64 else T := TargetArm64;
+    AsmText := GenAsm(Src, T);
+    AssertTrue(T + ': Names defined', Pos('_Names:', AsmText) >= 0);
+    AssertTrue(T + ': Codes defined', Pos('_Codes:', AsmText) >= 0);
+    AssertTrue(T + ': Words defined', Pos('_Words:', AsmText) >= 0);
   end;
 end;
 

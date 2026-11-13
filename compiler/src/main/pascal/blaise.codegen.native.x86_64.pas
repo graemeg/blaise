@@ -3244,13 +3244,59 @@ end;
 procedure TX86_64Backend.EmitArrayConstData(ABlock: TBlock;
   const APrefix: string);
 var
-  I, J, K, M: Int;
+  I, J: Int;
   CD:   TConstDecl;
   TD:   TTypeDecl;
   Decl: TMethodDecl;
   Lbl:  string;
   Idx:  Int;
   IsStr: Boolean;
+
+  { The local array consts of routine body ABody, and of the routines
+    nested in it, however deep: each is referenced by its own mangled label
+    (NewArrayConstLabel) and must be defined. }
+  procedure EmitBodyConsts(ABody: TBlock);
+  var
+    N, E: Int;
+    BCD: TConstDecl;
+    BLbl: string;
+    Nested: TMethodDecl;
+  begin
+    if ABody = nil then
+      Exit;
+    for N := 0 to ABody.ConstDecls.Count - 1 do
+    begin
+      BCD := TConstDecl(ABody.ConstDecls.Items[N]);
+      if not BCD.IsArrayConst then Continue;
+      if (BCD.ArrayElements = nil) or (BCD.ArrayElements.Count = 0) then Continue;
+      if BCD.ResolvedEmitName <> '' then
+        BLbl := NativeMangle(BCD.ResolvedEmitName)
+      else
+        BLbl := BCD.Name;
+      Self.Emit('.data');
+      Self.Emit('.balign 8');
+      Self.Emit(BLbl + ':');
+      if SameText(BCD.ArrayElemType, 'string') then
+      begin
+        for E := 0 to BCD.ArrayElements.Count - 1 do
+          if FStrLits.IndexOf(BCD.ArrayElements[E]) < 0 then
+            FStrLits.Add(BCD.ArrayElements[E]);
+        for E := 0 to BCD.ArrayElements.Count - 1 do
+          Self.Emit(Format(#9'.quad __s%d + %d',
+            [FStrLits.IndexOf(BCD.ArrayElements[E]), STR_LIT_HDR]));
+      end
+      else
+        for E := 0 to BCD.ArrayElements.Count - 1 do
+          Self.Emit(Format('%s %s',
+            [Self.ConstElemAsmDir(BCD.ArrayElemType), BCD.ArrayElements[E]]));
+    end;
+    for N := 0 to ABody.ProcDecls.Count - 1 do
+    begin
+      Nested := TMethodDecl(ABody.ProcDecls.Items[N]);
+      EmitBodyConsts(Nested.Body);
+    end;
+  end;
+
 begin
   if ABlock = nil then Exit;
   for I := 0 to ABlock.ConstDecls.Count - 1 do
@@ -3319,44 +3365,7 @@ begin
     end;
   end;
   for I := 0 to ABlock.ProcDecls.Count - 1 do
-  begin
-    Decl := TMethodDecl(ABlock.ProcDecls.Items[I]);
-    if Decl.Body = nil then Continue;
-    for J := 0 to Decl.Body.ConstDecls.Count - 1 do
-    begin
-      CD := TConstDecl(Decl.Body.ConstDecls.Items[J]);
-      if not CD.IsArrayConst then Continue;
-      if (CD.ArrayElements = nil) or (CD.ArrayElements.Count = 0) then Continue;
-      if CD.ResolvedEmitName <> '' then
-        Lbl := NativeMangle(CD.ResolvedEmitName)
-      else
-        Lbl := CD.Name;
-      IsStr := SameText(CD.ArrayElemType, 'string');
-      if IsStr then
-      begin
-        for K := 0 to CD.ArrayElements.Count - 1 do
-          if FStrLits.IndexOf(CD.ArrayElements[K]) < 0 then
-            FStrLits.Add(CD.ArrayElements[K]);
-        Self.Emit('.data');
-        Self.Emit('.balign 8');
-        Self.Emit(Lbl + ':');
-        for K := 0 to CD.ArrayElements.Count - 1 do
-        begin
-          Idx := FStrLits.IndexOf(CD.ArrayElements[K]);
-          Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
-        end;
-      end
-      else
-      begin
-        Self.Emit('.data');
-        Self.Emit('.balign 8');
-        Self.Emit(Lbl + ':');
-        for K := 0 to CD.ArrayElements.Count - 1 do
-          Self.Emit(Format('%s %s',
-            [Self.ConstElemAsmDir(CD.ArrayElemType), CD.ArrayElements[K]]));
-      end;
-    end;
-  end;
+    EmitBodyConsts(TMethodDecl(ABlock.ProcDecls.Items[I]).Body);
   { Static (class-level) variables: register one shared global per IsClassVar
     field so EmitDataSection emits a zero-initialised slot under the mangled
     label (ClassVarEmitName).  Done for BOTH class and record types, and
@@ -3385,41 +3394,7 @@ begin
     for J := 0 to TClassTypeDef(TD.Def).Methods.Count - 1 do
     begin
       Decl := TMethodDecl(TClassTypeDef(TD.Def).Methods.Items[J]);
-      if Decl.Body = nil then Continue;
-      for K := 0 to Decl.Body.ConstDecls.Count - 1 do
-      begin
-        CD := TConstDecl(Decl.Body.ConstDecls.Items[K]);
-        if not CD.IsArrayConst then Continue;
-        if (CD.ArrayElements = nil) or (CD.ArrayElements.Count = 0) then Continue;
-        if CD.ResolvedEmitName <> '' then
-          Lbl := NativeMangle(CD.ResolvedEmitName)
-        else
-          Lbl := CD.Name;
-        IsStr := SameText(CD.ArrayElemType, 'string');
-        if IsStr then
-        begin
-          for M := 0 to CD.ArrayElements.Count - 1 do
-            if FStrLits.IndexOf(CD.ArrayElements[M]) < 0 then
-              FStrLits.Add(CD.ArrayElements[M]);
-          Self.Emit('.data');
-          Self.Emit('.balign 8');
-          Self.Emit(Lbl + ':');
-          for M := 0 to CD.ArrayElements.Count - 1 do
-          begin
-            Idx := FStrLits.IndexOf(CD.ArrayElements[M]);
-            Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
-          end;
-        end
-        else
-        begin
-          Self.Emit('.data');
-          Self.Emit('.balign 8');
-          Self.Emit(Lbl + ':');
-          for M := 0 to CD.ArrayElements.Count - 1 do
-            Self.Emit(Format('%s %s',
-              [Self.ConstElemAsmDir(CD.ArrayElemType), CD.ArrayElements[M]]));
-        end;
-      end;
+      EmitBodyConsts(Decl.Body);
     end;
   end;
 end;

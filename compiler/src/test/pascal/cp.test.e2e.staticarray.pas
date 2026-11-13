@@ -56,6 +56,9 @@ type
     procedure TestRun_FloatElements_DynAndOpenArrays;
     procedure TestRun_DynArray_ManagedElementOverwrite_Releases;
     procedure TestRun_StaticArrays_Combined;
+    { array consts local to nested routines, in a procedure and in a
+      method: they were referenced and never defined, so the link failed }
+    procedure TestRun_NestedRoutineArrayConsts;
     { Inline anonymous declaration (regression: ensure existing behaviour holds) }
     procedure TestRun_AnonymousDecl_ReadWrite;
     procedure TestRun_AnonymousDecl_NonZeroBase;
@@ -367,6 +370,61 @@ end;
 { ------------------------------------------------------------------ }
 { Tests — anonymous inline declarations                                }
 { ------------------------------------------------------------------ }
+
+procedure TE2EStaticArrayTests.TestRun_NestedRoutineArrayConsts;
+const
+  Src = '''
+    program P;
+    type
+      TC = class
+        procedure M;
+      end;
+    procedure Outer;
+      procedure Inner;
+      const Names: array[0..1] of string = ('a', 'b');
+        procedure Deeper;
+        const Codes: array[0..1] of Int32 = (7, 9);
+        begin
+          WriteLn(Codes[1])
+        end;
+      begin
+        WriteLn(Names[1]);
+        Deeper()
+      end;
+    begin
+      Inner()
+    end;
+    procedure TC.M;
+      procedure Helper;
+      const Words: array[0..1] of string = ('x', 'y');
+      var
+        I: Int;
+      begin
+        for I := 0 to High(Words) do
+          WriteLn(Words[I])
+      end;
+    begin
+      Helper()
+    end;
+    var
+      C: TC;
+    begin
+      Outer();
+      C := TC.Create();
+      C.M();
+      C.Free()
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('b' + LineEnding + '9' + LineEnding + 'x' + LineEnding + 'y',
+    Trim(Output));
+end;
 
 procedure TE2EStaticArrayTests.TestRun_AnonymousDecl_ReadWrite;
 var Output: string; RCode: Int;
