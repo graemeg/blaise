@@ -147,6 +147,41 @@ type
     procedure ProcessWaitOnExit(Proc: Pointer); virtual; abstract;
     function ProcessExitCode(Proc: Pointer): Int32; virtual; abstract;
     procedure ProcessFree(Proc: Pointer); virtual; abstract;
+
+    { Child processes with their own stdin, stdout and stderr pipes, for the
+      stdlib's IO.Process.  AArgs holds the arguments after the program
+      name, each one ended by #0.  AEnv, used only when AUseEnv <> 0, is the
+      child's whole environment as NAME=VALUE entries, each ended by #0, and
+      a program named without a directory is then looked up on that
+      environment's PATH.  ACwd '' keeps the current directory.  On success
+      ProcSpawn returns 0, puts the parent's ends of the pipes in the three
+      Int32s at AFds (stdin to write, then stdout and stderr to read) and the
+      child in the Int64 at AChild.  Otherwise it returns the POSIX errno of
+      the failure -- ENOENT for a missing program or working directory --
+      and leaves nothing open. }
+    function ProcSpawn(const AExe, AArgs, AEnv, ACwd: string; AUseEnv: Int32;
+      AFds, AChild: Pointer): Int32; virtual; abstract;
+    { 1 once AChild has ended, with its exit code in the Int32 at AExitCode
+      (128 + the signal for a child a signal ended, as a shell reports it);
+      0 while it runs, which only ABlock = 0 can return; -1 on failure. }
+    function ProcWait(AChild: Int64; ABlock: Int32; AExitCode: Pointer): Int32;
+      virtual; abstract;
+    { Ask AChild to end (SIGTERM), or with AForce <> 0 end it at once
+      (SIGKILL).  A Windows child ended this way exits with 143 or 137, the
+      codes a POSIX one reports.  0, or -1 on failure. }
+    function ProcSignal(AChild: Int64; AForce: Int32): Int32; virtual; abstract;
+    function ProcPid(AChild: Int64): Int32; virtual; abstract;
+    { Let go of AChild once it is no longer needed (its handle, on Windows);
+      a child still running is left running. }
+    procedure ProcRelease(AChild: Int64); virtual; abstract;
+    { Wait up to ATimeoutMs (-1: no limit) until one of the ACount pipe
+      descriptors in the Int32 array at AFds can be read without blocking --
+      data, or the end of the data.  The Int32 array at AReady gets 1 for
+      each such descriptor and 0 for the others.  Returns how many are
+      ready, 0 when the time ran out, or -1 on failure (an interrupted wait
+      included: the caller waits again). }
+    function ProcPollRead(AFds: Pointer; ACount, ATimeoutMs: Int32;
+      AReady: Pointer): Int32; virtual; abstract;
   end;
 
   { Per-target struct layouts and OS constant values.

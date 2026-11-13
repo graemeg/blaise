@@ -97,6 +97,14 @@ type
     procedure ProcessWaitOnExit(Proc: Pointer); override;
     function ProcessExitCode(Proc: Pointer): Int32; override;
     procedure ProcessFree(Proc: Pointer); override;
+    function ProcSpawn(const AExe, AArgs, AEnv, ACwd: string; AUseEnv: Int32;
+      AFds, AChild: Pointer): Int32; override;
+    function ProcWait(AChild: Int64; ABlock: Int32; AExitCode: Pointer): Int32; override;
+    function ProcSignal(AChild: Int64; AForce: Int32): Int32; override;
+    function ProcPid(AChild: Int64): Int32; override;
+    procedure ProcRelease(AChild: Int64); override;
+    function ProcPollRead(AFds: Pointer; ACount, ATimeoutMs: Int32;
+      AReady: Pointer): Int32; override;
   end;
 
 { argc/argv as runtime.start.windows built them, UTF-8; creates the platform
@@ -104,7 +112,9 @@ type
 procedure _SetArgs(Argc: Int32; Argv: Pointer);
 { The environment as a nil-terminated array of 'NAME=VALUE' UTF-8 C strings,
   built from GetEnvironmentStringsW on first use.  The per-drive entries
-  Windows keeps (their names start with '=') are left out. }
+  Windows keeps (their names start with '=') are left out.  Names are
+  upper-cased: Windows compares them regardless of case, and a program
+  written for POSIX looks up PATH where Windows may keep Path. }
 function _EnvVector: Pointer;
 { stdlib's IO.Files stat, filled as rtl.platform.posix fills it.  Mode is
   0755 for a directory, 0444 for a read-only file and 0644 otherwise. }
@@ -237,6 +247,26 @@ function W32WaitForSingleObject(AHandle: Pointer; AMilliseconds: UInt32): UInt32
 function W32GetExitCodeProcess(AProcess: Pointer; ACode: Pointer): Int32;
   external 'kernel32' name 'GetExitCodeProcess';
 procedure W32SetLastError(ACode: UInt32); external 'kernel32' name 'SetLastError';
+function W32TerminateProcess(AProcess: Pointer; ACode: UInt32): Int32;
+  external 'kernel32' name 'TerminateProcess';
+function W32GetProcessId(AProcess: Pointer): UInt32;
+  external 'kernel32' name 'GetProcessId';
+function W32PeekNamedPipe(APipe: Pointer; ABuffer: Pointer; ASize: UInt32;
+  ARead, AAvailable, ALeft: Pointer): Int32;
+  external 'kernel32' name 'PeekNamedPipe';
+function W32GetTickCount64: Int64; external 'kernel32' name 'GetTickCount64';
+function W32InitializeProcThreadAttributeList(AList: Pointer; ACount: UInt32;
+  AFlags: UInt32; ASize: Pointer): Int32;
+  external 'kernel32' name 'InitializeProcThreadAttributeList';
+function W32UpdateProcThreadAttribute(AList: Pointer; AFlags: UInt32;
+  AAttribute: UInt64; AValue: Pointer; ASize: UInt64; APrevious: Pointer;
+  AReturnSize: Pointer): Int32;
+  external 'kernel32' name 'UpdateProcThreadAttribute';
+procedure W32DeleteProcThreadAttributeList(AList: Pointer);
+  external 'kernel32' name 'DeleteProcThreadAttributeList';
+{ The POSIX errno of a failed call (-1) from the thread's last error
+  (runtime.errno.windows). }
+function OsErrorOf(N: Int64): Int; external name 'OsErrorOf';
 function W32SetFileAttributesW(AName: Pointer; AAttrs: UInt32): Int32;
   external 'kernel32' name 'SetFileAttributesW';
 { Returns a BOOLEAN (one byte), not a BOOL. }
@@ -333,6 +363,18 @@ const
   { SECURITY_ATTRIBUTES. }
   SA_SIZE = 24;
   SA_INHERIT = 16;
+  { STARTUPINFOEXW: STARTUPINFOW, then the attribute list. }
+  SIEX_SIZE = 112;
+  SIEX_ATTRIBUTE_LIST = 104;
+  EXTENDED_STARTUPINFO_PRESENT = $00080000;
+  CREATE_UNICODE_ENVIRONMENT = $00000400;
+  PROC_THREAD_ATTRIBUTE_HANDLE_LIST = $00020002;
+  { The exit codes of a child ended by ProcSignal: 128 + SIGTERM or SIGKILL,
+    as a POSIX child ended by the signal reports. }
+  EXIT_TERMINATED = 143;
+  EXIT_KILLED = 137;
+  SPAWN_ENOENT = 2;
+  SPAWN_EMFILE = 24;
 
   { String header layout, as every RTL unit that builds strings declares it
     (see rtl.platform.posix).  Offsets are from the data pointer. }
@@ -1887,6 +1929,371 @@ begin
 end;
 
 { ================================================================== }
+{ Child processes with three pipes (IO.Process)                        }
+{ ================================================================== }
+
+{ The ALen bytes at P as a string. }
+function BytesToStr(P: PChar; ALen: Int): string;
+var
+  R: PChar;
+  I: Int;
+begin
+  if ALen <= 0 then
+    Exit('');
+  R := StrAlloc(ALen);
+  for I := 0 to ALen - 1 do
+    R[I] := P[I];
+  Result := StrAdopt(R);
+end;
+
+{ Whether A and B are the same ASCII text, case aside. }
+function SameTextAscii(A: PChar; B: PChar; ALen: Int): Boolean;
+var
+  I: Int;
+  X, Y: Byte;
+begin
+  for I := 0 to ALen - 1 do
+  begin
+    X := Ord(A[I]);
+    Y := Ord(B[I]);
+    if (X >= Ord('a')) and (X <= Ord('z')) then
+      X := X - 32;
+    if (Y >= Ord('a')) and (Y <= Ord('z')) then
+      Y := Y - 32;
+    if X <> Y then
+      Exit(False);
+  end;
+  Result := True;
+end;
+
+{ The PATH entry of AEnv (#0-ended NAME=VALUE entries; the name compared
+  regardless of case, as Windows compares it), and whether there is one. }
+function EnvBlockPath(const AEnv: string; out APath: string): Boolean;
+var
+  P: PChar;
+  I, Start, Len: Int;
+  Name: string;
+begin
+  APath := '';
+  Name := 'PATH';
+  P := PChar(AEnv);
+  Len := Length(AEnv);
+  Start := 0;
+  for I := 0 to Len - 1 do
+    if P[I] = #0 then
+    begin
+      if (I - Start >= 5) and (P[Start + 4] = '=') and
+         SameTextAscii(P + Start, PChar(Name), 4) then
+      begin
+        APath := BytesToStr(P + Start + 5, I - Start - 5);
+        Exit(True);
+      end;
+      Start := I + 1;
+    end;
+  Result := False;
+end;
+
+function IsPlainFile(const APath: string): Boolean;
+var
+  Attrs: UInt32;
+begin
+  Attrs := PathAttributes(APath);
+  Result := (Attrs <> INVALID_FILE_ATTRIBUTES)
+    and ((Attrs and FILE_ATTRIBUTE_DIRECTORY) = 0);
+end;
+
+{ The program a child given the environment AEnv runs for AExe: AExe
+  itself when it names a directory or a drive, else the first of AExe,
+  AExe.exe and AExe.com in a directory of AEnv's PATH, which is ';'
+  separated; '' when it is in none of them.  With no PATH in AEnv, AExe,
+  for CreateProcessW to search for as it would without an environment. }
+function FindOnEnvPath(const AExe, AEnv: string): string;
+var
+  PathVal, Dir, Cand: string;
+  P: PChar;
+  I, Start: Int;
+begin
+  P := PChar(AExe);
+  for I := 0 to Length(AExe) - 1 do
+    if IsSeparator(P, I) or (P[I] = ':') then
+      Exit(AExe);
+  if not EnvBlockPath(AEnv, PathVal) then
+    Exit(AExe);
+  P := PChar(PathVal);
+  Start := 0;
+  for I := 0 to Length(PathVal) do
+    if (I = Length(PathVal)) or (P[I] = ';') then
+    begin
+      Dir := BytesToStr(P + Start, I - Start);
+      Start := I + 1;
+      if Length(Dir) = 0 then
+        Continue;
+      Cand := JoinPath(Dir, AExe);
+      if IsPlainFile(Cand) then
+        Exit(Cand);
+      if IsPlainFile(Cand + '.exe') then
+        Exit(Cand + '.exe');
+      if IsPlainFile(Cand + '.com') then
+        Exit(Cand + '.com');
+    end;
+  Result := '';
+end;
+
+{ The command line for program AExe and the #0-ended arguments AArgs, each
+  quoted as CommandLineToArgvW splits them. }
+function SpawnCommandLine(const AExe, AArgs: string): string;
+var
+  P: PChar;
+  I, Start: Int;
+begin
+  Result := QuoteArg(AExe);
+  P := PChar(AArgs);
+  Start := 0;
+  for I := 0 to Length(AArgs) - 1 do
+    if P[I] = #0 then
+    begin
+      Result := Result + ' ' + QuoteArg(BytesToStr(P + Start, I - Start));
+      Start := I + 1;
+    end;
+end;
+
+procedure CloseIfOpen(H: Pointer);
+begin
+  if IsValidHandle(H) then
+    W32CloseHandle(H);
+end;
+
+{ Each pipe is made inheritable and the parent's end then made not to be,
+  and the child is given exactly its three ends through a handle list, so
+  a child started at the same time on another thread inherits none of
+  them: a stdin write end leaked into another child would keep this one
+  from ever seeing the end of its input. }
+function TRtlPlatformWindows.ProcSpawn(const AExe, AArgs, AEnv, ACwd: string;
+  AUseEnv: Int32; AFds, AChild: Pointer): Int32;
+var
+  Security: array[0..SA_SIZE - 1] of Byte;
+  Startup: array[0..SIEX_SIZE - 1] of Byte;
+  Info: array[0..PI_SIZE - 1] of Byte;
+  Ends: array[0..5] of Pointer;
+  Inherit: array[0..2] of Pointer;
+  Parent: array[0..2] of Pointer;
+  Fds: array[0..2] of Int32;
+  Exe, EnvText: string;
+  AttrList, CmdW, EnvW, CwdW: Pointer;
+  AttrSize: UInt64;
+  I: Int;
+  Flags: UInt32;
+  Ok: Int32;
+begin
+  if (Length(ACwd) > 0) and not Self.DirectoryExists(ACwd) then
+    Exit(SPAWN_ENOENT);
+  Exe := AExe;
+  if AUseEnv <> 0 then
+  begin
+    Exe := FindOnEnvPath(AExe, AEnv);
+    if Length(Exe) = 0 then
+      Exit(SPAWN_ENOENT);
+  end;
+  for I := 0 to SA_SIZE - 1 do
+    Security[I] := 0;
+  PUInt32(@Security[0])^ := SA_SIZE;
+  PInt32(@Security[SA_INHERIT])^ := 1;
+  { Ends: stdin read, stdin write, stdout read, stdout write, stderr read,
+    stderr write }
+  for I := 0 to 5 do
+    Ends[I] := nil;
+  for I := 0 to 2 do
+    if W32CreatePipe(@Ends[I * 2], @Ends[I * 2 + 1], @Security[0], 0) = 0 then
+    begin
+      Result := OsErrorOf(-1);
+      for I := 0 to 5 do
+        CloseIfOpen(Ends[I]);
+      Exit;
+    end;
+  W32SetHandleInformation(Ends[1], HANDLE_FLAG_INHERIT, 0);
+  W32SetHandleInformation(Ends[2], HANDLE_FLAG_INHERIT, 0);
+  W32SetHandleInformation(Ends[4], HANDLE_FLAG_INHERIT, 0);
+  Inherit[0] := Ends[0];
+  Inherit[1] := Ends[3];
+  Inherit[2] := Ends[5];
+
+  AttrSize := 0;
+  W32InitializeProcThreadAttributeList(nil, 1, 0, @AttrSize);
+  AttrList := _BlaiseGetMem(Int64(AttrSize));
+  Ok := W32InitializeProcThreadAttributeList(AttrList, 1, 0, @AttrSize);
+  if Ok <> 0 then
+    Ok := W32UpdateProcThreadAttribute(AttrList, 0,
+      PROC_THREAD_ATTRIBUTE_HANDLE_LIST, @Inherit[0], UInt64(3 * SizeOf(Pointer)),
+      nil, nil);
+  for I := 0 to SIEX_SIZE - 1 do
+    Startup[I] := 0;
+  for I := 0 to PI_SIZE - 1 do
+    Info[I] := 0;
+  PUInt32(@Startup[0])^ := SIEX_SIZE;
+  PUInt32(@Startup[SI_FLAGS])^ := STARTF_USESTDHANDLES;
+  PPointer(@Startup[SI_STD_INPUT])^ := Ends[0];
+  PPointer(@Startup[SI_STD_OUTPUT])^ := Ends[3];
+  PPointer(@Startup[SI_STD_ERROR])^ := Ends[5];
+  PPointer(@Startup[SIEX_ATTRIBUTE_LIST])^ := AttrList;
+  Flags := EXTENDED_STARTUPINFO_PRESENT or CREATE_UNICODE_ENVIRONMENT;
+  CmdW := WideZ(SpawnCommandLine(Exe, AArgs));
+  EnvW := nil;
+  if AUseEnv <> 0 then
+  begin
+    { entries each end with a NUL and WideZ adds the block's final one; an
+      empty block is two NULs }
+    EnvText := AEnv;
+    if Length(EnvText) = 0 then
+      EnvText := #0;
+    EnvW := WideZ(EnvText);
+  end;
+  CwdW := nil;
+  if Length(ACwd) > 0 then
+    CwdW := WideZ(ACwd);
+  if Ok <> 0 then
+    Ok := W32CreateProcessW(nil, CmdW, nil, nil, 1, Flags, EnvW, CwdW,
+      @Startup[0], @Info[0]);
+  if Ok = 0 then
+    Result := OsErrorOf(-1)
+  else
+    Result := 0;
+  W32DeleteProcThreadAttributeList(AttrList);
+  _BlaiseFreeMem(AttrList);
+  _BlaiseFreeMem(CmdW);
+  if EnvW <> nil then
+    _BlaiseFreeMem(EnvW);
+  if CwdW <> nil then
+    _BlaiseFreeMem(CwdW);
+  W32CloseHandle(Ends[0]);
+  W32CloseHandle(Ends[3]);
+  W32CloseHandle(Ends[5]);
+  if Result = 0 then
+  begin
+    W32CloseHandle(PPointer(@Info[PI_THREAD])^);
+    Parent[0] := Ends[1];
+    Parent[1] := Ends[2];
+    Parent[2] := Ends[4];
+    for I := 0 to 2 do
+      Fds[I] := _WinFdAdd(Parent[I]);
+    if (Fds[0] < 0) or (Fds[1] < 0) or (Fds[2] < 0) then
+    begin
+      { the table is full: the child cannot be talked to, so end it }
+      W32TerminateProcess(PPointer(@Info[PI_PROCESS])^, EXIT_KILLED);
+      W32CloseHandle(PPointer(@Info[PI_PROCESS])^);
+      for I := 0 to 2 do
+        if Fds[I] >= 0 then
+          _WinFdClose(Fds[I])
+        else
+          W32CloseHandle(Parent[I]);
+      Exit(SPAWN_EMFILE);
+    end;
+    PInt32(AFds)^ := Fds[0];
+    PInt32(AFds + 4)^ := Fds[1];
+    PInt32(AFds + 8)^ := Fds[2];
+    PInt64(AChild)^ := Int64(PPointer(@Info[PI_PROCESS])^);
+  end
+  else
+  begin
+    W32CloseHandle(Ends[1]);
+    W32CloseHandle(Ends[2]);
+    W32CloseHandle(Ends[4]);
+  end;
+end;
+
+function TRtlPlatformWindows.ProcWait(AChild: Int64; ABlock: Int32;
+  AExitCode: Pointer): Int32;
+var
+  Wait, R: UInt32;
+begin
+  Wait := 0;
+  if ABlock <> 0 then
+    Wait := INFINITE;
+  R := W32WaitForSingleObject(Pointer(AChild), Wait);
+  if R = WAIT_TIMEOUT then
+    Exit(0);
+  if R <> 0 then
+    Exit(-1);
+  PInt32(AExitCode)^ := ExitCodeOf(Pointer(AChild));
+  Result := 1;
+end;
+
+function TRtlPlatformWindows.ProcSignal(AChild: Int64; AForce: Int32): Int32;
+var
+  Code: UInt32;
+begin
+  Code := EXIT_TERMINATED;
+  if AForce <> 0 then
+    Code := EXIT_KILLED;
+  if W32TerminateProcess(Pointer(AChild), Code) <> 0 then
+    Result := 0
+  else
+    Result := -1;
+end;
+
+function TRtlPlatformWindows.ProcPid(AChild: Int64): Int32;
+begin
+  Result := Int32(W32GetProcessId(Pointer(AChild)));
+end;
+
+procedure TRtlPlatformWindows.ProcRelease(AChild: Int64);
+begin
+  if AChild <> 0 then
+    W32CloseHandle(Pointer(AChild));
+end;
+
+{ Neither WSAPoll nor WaitForMultipleObjects waits on an anonymous pipe, so
+  each pipe is asked with PeekNamedPipe and, while none is ready, the
+  thread sleeps between rounds, 1 ms at first and at most 16 ms.  A pipe
+  whose writer has gone fails the peek, and counts as ready: its read
+  gives the end of the data. }
+function TRtlPlatformWindows.ProcPollRead(AFds: Pointer; ACount,
+  ATimeoutMs: Int32; AReady: Pointer): Int32;
+var
+  Deadline, Now: Int64;
+  Delay: Int64;
+  I: Int;
+  H: Pointer;
+  Avail: UInt32;
+  Ready: Boolean;
+begin
+  Deadline := 0;
+  if ATimeoutMs >= 0 then
+    Deadline := W32GetTickCount64() + ATimeoutMs;
+  Delay := 1;
+  while True do
+  begin
+    Result := 0;
+    for I := 0 to ACount - 1 do
+    begin
+      H := _WinHandleOfFd(PInt32(AFds + I * 4)^);
+      Avail := 0;
+      Ready := (H = nil) or
+        (W32PeekNamedPipe(H, nil, 0, nil, @Avail, nil) = 0) or (Avail > 0);
+      if Ready then
+      begin
+        PInt32(AReady + I * 4)^ := 1;
+        Result := Result + 1;
+      end
+      else
+        PInt32(AReady + I * 4)^ := 0;
+    end;
+    if Result > 0 then
+      Exit;
+    if ATimeoutMs >= 0 then
+    begin
+      Now := W32GetTickCount64();
+      if Now >= Deadline then
+        Exit(0);
+      if Delay > Deadline - Now then
+        Delay := Deadline - Now;
+    end;
+    W32Sleep(UInt32(Delay));
+    if Delay < 16 then
+      Delay := Delay * 2;
+  end;
+end;
+
+{ ================================================================== }
 { Flat functions                                                       }
 { ================================================================== }
 
@@ -1912,9 +2319,10 @@ end;
 function _EnvVector: Pointer;
 var
   Block, Entry: Pointer;
-  Count, I, N: Int;
+  Count, I, J, N: Int;
   Units: Int32;
   Vec: Pointer;
+  C: PChar;
 begin
   if GEnvVector <> nil then
     Exit(GEnvVector);
@@ -1937,7 +2345,15 @@ begin
     Units := WideLen(Entry);
     if PUInt16(Entry)^ <> Ord('=') then
     begin
-      PPointer(Vec + N * SizeOf(Pointer))^ := LastingCStr(FromWide(Entry, Units));
+      C := LastingCStr(FromWide(Entry, Units));
+      J := 0;
+      while (C[J] <> #0) and (C[J] <> '=') do
+      begin
+        if (C[J] >= 'a') and (C[J] <= 'z') then
+          C[J] := Chr(Ord(C[J]) - 32);
+        J := J + 1;
+      end;
+      PPointer(Vec + N * SizeOf(Pointer))^ := C;
       N := N + 1;
     end;
     Entry := Entry + (Int64(Units) + 1) * 2;

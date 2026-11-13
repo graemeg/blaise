@@ -8,7 +8,8 @@
 
 { Tests for IO.Process: separate stdout/stderr pipes, stdin, the working
   directory, exit codes and signals, start failures, and reading both pipes
-  without deadlock.  Children are /bin/sh scripts.
+  without deadlock.  Children are /bin/sh scripts, or cmd.exe ones on
+  Windows; output is compared with its line ends made LF.
 
   Self-registers via the initialization section. }
 
@@ -17,12 +18,15 @@ unit IOProcess.Tests;
 interface
 
 uses
-  blaise.testing, SysUtils, Generics.Collections, IO.Process;
+  blaise.testing, SysUtils, StrUtils, Generics.Collections, IO.Process;
 
 type
   TIOProcessTests = class(TTestCase)
   private
-    function Shell(const AScript: string): TSubprocess;
+    { a shell running AScript: /bin/sh -c, or cmd.exe /d /c on Windows }
+    function Shell(const APosix, AWindows: string): TSubprocess;
+    { a child that stays running for about 30 seconds }
+    function Sleeper: TSubprocess;
   published
     procedure TestSeparateOutputAndError;
     procedure TestExitCode;
@@ -43,11 +47,50 @@ type
 
 implementation
 
-function TIOProcessTests.Shell(const AScript: string): TSubprocess;
+function OnWindows: Boolean;
 begin
-  Result := TSubprocess.Create('/bin/sh');
-  Result.Args.Add('-c');
-  Result.Args.Add(AScript);
+  Result := DirectorySeparator = '\';
+end;
+
+{ S with each CR LF made LF, as a Windows child ends its lines. }
+function LF(const S: string): string;
+begin
+  Result := ReplaceAll(S, #13#10, #10);
+end;
+
+function CmdExe: string;
+begin
+  Result := GetEnvironmentVariable('ComSpec');
+end;
+
+function TIOProcessTests.Shell(const APosix, AWindows: string): TSubprocess;
+begin
+  if OnWindows() then
+  begin
+    Result := TSubprocess.Create(CmdExe());
+    Result.Args.Add('/d');
+    Result.Args.Add('/c');
+    Result.Args.Add(AWindows);
+  end
+  else
+  begin
+    Result := TSubprocess.Create('/bin/sh');
+    Result.Args.Add('-c');
+    Result.Args.Add(APosix);
+  end;
+end;
+
+function TIOProcessTests.Sleeper: TSubprocess;
+begin
+  if OnWindows() then
+  begin
+    Result := TSubprocess.Create('ping');
+    Result.Args.Add('-n');
+    Result.Args.Add('31');
+    Result.Args.Add('127.0.0.1');
+  end
+  else
+    Result := Shell('sleep 30', '');
 end;
 
 procedure TIOProcessTests.TestSeparateOutputAndError;
@@ -55,11 +98,11 @@ var
   P: TSubprocess;
   Out_, Err: string;
 begin
-  P := Shell('echo out; echo err 1>&2');
+  P := Shell('echo out; echo err 1>&2', 'echo out& 1>&2 echo err');
   P.Start();
   P.ReadToEnd(Out_, Err);
-  AssertEquals('out' + #10, Out_);
-  AssertEquals('err' + #10, Err);
+  AssertEquals('out' + #10, LF(Out_));
+  AssertEquals('err' + #10, LF(Err));
   AssertEquals(0, P.WaitForExit());
 end;
 
@@ -67,7 +110,7 @@ procedure TIOProcessTests.TestExitCode;
 var
   P: TSubprocess;
 begin
-  P := Shell('exit 3');
+  P := Shell('exit 3', 'exit 3');
   P.Start();
   AssertEquals(3, P.WaitForExit());
   AssertEquals(3, P.ExitCode);
@@ -79,13 +122,20 @@ var
   P: TSubprocess;
   Out_, Err: string;
 begin
-  P := TSubprocess.Create('cat');
+  if OnWindows() then
+  begin
+    { every line matches the start of a line }
+    P := TSubprocess.Create('findstr');
+    P.Args.Add('^');
+  end
+  else
+    P := TSubprocess.Create('cat');
   P.Start();
   AssertTrue(P.WriteInput('hello' + #10));
   AssertTrue(P.WriteInput('world' + #10));
   P.CloseInput();
   P.ReadToEnd(Out_, Err);
-  AssertEquals('hello' + #10 + 'world' + #10, Out_);
+  AssertEquals('hello' + #10 + 'world' + #10, LF(Out_));
   AssertEquals(0, P.WaitForExit());
 end;
 
@@ -94,11 +144,16 @@ var
   P: TSubprocess;
   Out_, Err: string;
 begin
-  P := Shell('pwd');
-  P.WorkingDirectory := '/';
+  P := Shell('pwd', 'cd');
+  if OnWindows() then
+    P.WorkingDirectory := GetEnvironmentVariable('SystemRoot')
+  else
+    P.WorkingDirectory := '/';
   P.Start();
   P.ReadToEnd(Out_, Err);
-  AssertEquals('/' + #10, Out_);
+  { Windows keeps a directory's case as it was made, whatever the path
+    that named it }
+  AssertEquals(UpperCase(P.WorkingDirectory + #10), UpperCase(LF(Out_)));
 end;
 
 procedure TIOProcessTests.TestStartFailureRaises;
@@ -118,7 +173,7 @@ begin
     end;
   end;
   AssertTrue('a missing program raises', Raised);
-  P := Shell('true');
+  P := Shell('true', 'exit 0');
   P.WorkingDirectory := '/no/such/dir-xyz';
   Raised := False;
   try
@@ -134,7 +189,7 @@ procedure TIOProcessTests.TestTerminate;
 var
   P: TSubprocess;
 begin
-  P := Shell('sleep 30');
+  P := Sleeper();
   P.Start();
   AssertTrue(P.Running());
   P.Terminate();
@@ -151,11 +206,14 @@ begin
   P := Shell('i=0; while [ $i -lt 2000 ]; do ' +
     'echo 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789; ' +
     'echo 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 1>&2; ' +
-    'i=$((i+1)); done');
+    'i=$((i+1)); done',
+    'for /l %i in (1,1,2000) do @(' +
+    'echo 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789& ' +
+    '1>&2 echo 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789)');
   P.Start();
   P.ReadToEnd(Out_, Err);
-  AssertEquals(2000 * 101, Length(Out_));
-  AssertEquals(2000 * 101, Length(Err));
+  AssertEquals(2000 * 101, Length(LF(Out_)));
+  AssertEquals(2000 * 101, Length(LF(Err)));
   AssertEquals(0, P.WaitForExit());
 end;
 
@@ -164,8 +222,12 @@ var
   P: TSubprocess;
   Out_, Err: string;
 begin
-  P := Shell('sleep 30');
+  P := Sleeper();
   P.Start();
+  { ping reports at once that it has started; what matters is that a
+    quiet pipe gives up after the timeout }
+  if OnWindows() then
+    P.Read(-1, Out_, Err);
   AssertTrue('still open', P.Read(50, Out_, Err));
   AssertEquals('', Out_);
   AssertEquals('', Err);
@@ -180,6 +242,18 @@ var
   P: TSubprocess;
   Out_, Err: string;
 begin
+  if OnWindows() then
+  begin
+    { cmd.exe leaves an undefined variable's reference as it is }
+    P := Shell('', 'echo %FACET_TEST%+%OS%');
+    P.Environment.Clear();
+    P.Environment['FACET_TEST'] := 'one two';
+    P.Start();
+    P.ReadToEnd(Out_, Err);
+    AssertEquals(0, P.WaitForExit());
+    AssertEquals('one two+%OS%' + #10, LF(Out_));
+    Exit;
+  end;
   P := TSubprocess.Create('/usr/bin/env');
   P.Environment.Clear();
   P.Environment['FACET_TEST'] := 'one two';
@@ -198,12 +272,15 @@ var
 begin
   AssertEquals('copied PATH', GetEnvironmentVariable('PATH'),
     TSubprocess.Create('x').Environment['PATH']);
-  P := Shell('echo "$HOME|$EXTRA"');
+  P := Shell('echo "$HOME+$EXTRA"', 'echo %OS%+%EXTRA%');
   P.Environment['EXTRA'] := 'added';
   P.Start();
   P.ReadToEnd(Out_, Err);
   AssertEquals(0, P.WaitForExit());
-  AssertEquals(GetEnvironmentVariable('HOME') + '|added' + #10, Out_);
+  if OnWindows() then
+    AssertEquals(GetEnvironmentVariable('OS') + '+added' + #10, LF(Out_))
+  else
+    AssertEquals(GetEnvironmentVariable('HOME') + '+added' + #10, Out_);
 end;
 
 { A bare program name is found on the PATH of the child's environment. }
@@ -212,16 +289,29 @@ var
   P: TSubprocess;
   Out_, Err: string;
 begin
-  P := TSubprocess.Create('sh');
-  P.Args.Add('-c');
-  P.Args.Add('echo "$X"');
-  P.Environment.Clear();
-  P.Environment['PATH'] := '/nonexistent:/bin:/usr/bin';
+  if OnWindows() then
+  begin
+    P := TSubprocess.Create('cmd');
+    P.Args.Add('/d');
+    P.Args.Add('/c');
+    P.Args.Add('echo %X%');
+    P.Environment.Clear();
+    P.Environment['PATH'] := 'C:\nonexistent;' +
+      GetEnvironmentVariable('SystemRoot') + '\System32';
+  end
+  else
+  begin
+    P := TSubprocess.Create('sh');
+    P.Args.Add('-c');
+    P.Args.Add('echo "$X"');
+    P.Environment.Clear();
+    P.Environment['PATH'] := '/nonexistent:/bin:/usr/bin';
+  end;
   P.Environment['X'] := 'found';
   P.Start();
   P.ReadToEnd(Out_, Err);
   AssertEquals(0, P.WaitForExit());
-  AssertEquals('found' + #10, Out_);
+  AssertEquals('found' + #10, LF(Out_));
 end;
 
 { A program not on that PATH cannot start, as without Environment. }
@@ -230,7 +320,10 @@ var
   P: TSubprocess;
   Raised: Boolean;
 begin
-  P := TSubprocess.Create('sh');
+  if OnWindows() then
+    P := TSubprocess.Create('cmd')
+  else
+    P := TSubprocess.Create('sh');
   P.Environment.Clear();
   P.Environment['PATH'] := '/nonexistent';
   Raised := False;
@@ -274,9 +367,18 @@ procedure TIOProcessTests.TestRunHelper;
 var
   R: TProcessOutput;
 begin
-  R := RunProcess('/bin/sh', ['-c', 'printf x; printf y 1>&2; exit 4'], '');
-  AssertEquals('x', R.Output);
-  AssertEquals('y', R.Error);
+  if OnWindows() then
+  begin
+    R := RunProcess(CmdExe(), ['/d', '/c', 'echo x& 1>&2 echo y& exit 4'], '');
+    AssertEquals('x' + #10, LF(R.Output));
+    AssertEquals('y' + #10, LF(R.Error));
+  end
+  else
+  begin
+    R := RunProcess('/bin/sh', ['-c', 'printf x; printf y 1>&2; exit 4'], '');
+    AssertEquals('x', R.Output);
+    AssertEquals('y', R.Error);
+  end;
   AssertEquals(4, R.ExitCode);
 end;
 

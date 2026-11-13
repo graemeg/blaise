@@ -94,6 +94,7 @@ begin
     80, 183: Result := 17;               { EEXIST }
     87, 123, 4390: Result := 22;         { EINVAL; bad name; not a link }
     145: Result := 39;                   { ENOTEMPTY }
+    193: Result := 8;                    { ENOEXEC: ERROR_BAD_EXE_FORMAT }
     206: Result := 36;                   { ENAMETOOLONG }
     267: Result := 20;                   { ENOTDIR: ERROR_DIRECTORY }
     1314: Result := 1;                   { EPERM: privilege not held }

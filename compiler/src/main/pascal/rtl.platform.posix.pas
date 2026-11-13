@@ -125,6 +125,14 @@ type
     procedure ProcessWaitOnExit(Proc: Pointer); override;
     function ProcessExitCode(Proc: Pointer): Int32; override;
     procedure ProcessFree(Proc: Pointer); override;
+    function ProcSpawn(const AExe, AArgs, AEnv, ACwd: string; AUseEnv: Int32;
+      AFds, AChild: Pointer): Int32; override;
+    function ProcWait(AChild: Int64; ABlock: Int32; AExitCode: Pointer): Int32; override;
+    function ProcSignal(AChild: Int64; AForce: Int32): Int32; override;
+    function ProcPid(AChild: Int64): Int32; override;
+    procedure ProcRelease(AChild: Int64); override;
+    function ProcPollRead(AFds: Pointer; ACount, ATimeoutMs: Int32;
+      AReady: Pointer): Int32; override;
   end;
 
 { ------------------------------------------------------------------ }
@@ -253,6 +261,16 @@ procedure libc__exit(Code: Int32);                       external name '_exit';
 function  libc_waitpid(Pid: Int32; Status: Pointer; Options: Int32): Int32; external name 'waitpid';
 function  libc_pipe(Fds: Pointer): Int32;                external name 'pipe';
 function  libc_dup2(OldFd, NewFd: Int32): Int32;       external name 'dup2';
+function  libc_execve(Path: PChar; Argv, Envp: Pointer): Int32; external name 'execve';
+function  libc_kill(Pid, Sig: Int32): Int32; external name 'kill';
+function  libc_poll(Fds: Pointer; NFds: Int64; Timeout: Int32): Int32; external name 'poll';
+{ fcntl is C-variadic: the third argument must travel the variadic way. }
+function  libc_fcntl(Fd, Cmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
+function  libc_signal(Signum: Int32; Handler: Pointer): Pointer; external name 'signal';
+{ errno, per build profile (runtime.errno.*, chosen at link time): the
+  freestanding profile has no errno variable; its calls return -errno. }
+function  errno_GetOsErrno: Int; external name 'GetOsErrno';
+function  errno_Interrupted(N: Int64): Boolean; external name 'Interrupted';
 
 { ------------------------------------------------------------------ }
 { Underscore ABI stubs                                                 }
@@ -1432,6 +1450,388 @@ begin
     _BlaiseFreeMem(P^.Argv);
   end;
   _BlaiseFreeMem(P);
+end;
+
+{ ================================================================== }
+{ TRtlPlatformPosix — child processes with three pipes (IO.Process)   }
+{ ================================================================== }
+
+{ The child between fork and exec calls only async-signal-safe routines, on
+  data prepared before the fork, so starting a process from a
+  multi-threaded program is safe. }
+
+const
+  { The same numbers on Linux, FreeBSD and macOS. }
+  SPAWN_ENOENT = 2;
+  SPAWN_EIO = 5;
+  SPAWN_EACCES = 13;
+  SPAWN_ENOTDIR = 20;
+  SPAWN_SIGKILL = 9;
+  SPAWN_SIGPIPE = 13;
+  SPAWN_SIGTERM = 15;
+  SPAWN_F_SETFD = 2;
+  SPAWN_FD_CLOEXEC = 1;
+  SPAWN_POLLIN = $0001;
+  SPAWN_POLLERR = $0008;
+  SPAWN_POLLHUP = $0010;
+  SPAWN_POLLNVAL = $0020;
+  SPAWN_POLLFD_SIZE = 8;
+
+type
+  PSpawnInt32 = ^Int32;
+  PSpawnInt16 = ^Int16;
+  PSpawnInt64 = ^Int64;
+
+{ The errno of a call that failed with result R, in either profile. }
+function SpawnErrno(R: Int64): Int32;
+begin
+  Result := Int32(errno_GetOsErrno());
+  if (Result = 0) and (R < 0) then
+    Result := Int32(-R);
+  if Result = 0 then
+    Result := SPAWN_EIO;
+end;
+
+{ A nil-terminated array of C strings, one per #0-ended item of the ALen
+  bytes at AText, in one heap block -- the pointers, then a copy of the
+  text -- which one _BlaiseFreeMem frees. }
+function ZListBlock(AText: PChar; ALen: Int): TPCharArray;
+var
+  N, I, K, Start: Int;
+  Text: PChar;
+begin
+  N := 0;
+  for I := 0 to ALen - 1 do
+    if AText[I] = #0 then
+      N := N + 1;
+  Result := _BlaiseGetMem((N + 1) * SizeOf(Pointer) + ALen + 1);
+  if Result = nil then
+    Exit;
+  Text := PChar(Pointer(Result) + (N + 1) * SizeOf(Pointer));
+  for I := 0 to ALen - 1 do
+    Text[I] := AText[I];
+  Text[ALen] := #0;
+  K := 0;
+  Start := 0;
+  for I := 0 to ALen - 1 do
+    if Text[I] = #0 then
+    begin
+      ArgvSet(Result, K, Text + Start);
+      K := K + 1;
+      Start := I + 1;
+    end;
+  ArgvSet(Result, N, nil);
+end;
+
+{ The paths execve tries in turn for program AExe under the environment
+  AEnv (#0-ended NAME=VALUE entries), as execvp searches: AExe itself when
+  it holds a '/', else AExe in each directory of AEnv's PATH (/usr/bin:/bin
+  when it has none; an empty entry is the current directory).  A block as
+  ZListBlock makes. }
+function ExecCandidates(AExe: PChar; AExeLen: Int; AEnv: PChar;
+  AEnvLen: Int): TPCharArray;
+const
+  DEFAULT_PATH = '/usr/bin:/bin';
+var
+  Def: string;
+  PathP, Text: PChar;
+  PathLen, I, J, Start, Dirs, W: Int;
+  HasSlash, Found: Boolean;
+begin
+  HasSlash := False;
+  for I := 0 to AExeLen - 1 do
+    if AExe[I] = '/' then
+      HasSlash := True;
+  if HasSlash then
+    Exit(ZListBlock(AExe, AExeLen + 1));
+  Def := DEFAULT_PATH;
+  PathP := StrData(Pointer(Def));
+  PathLen := StrLen(Pointer(Def));
+  Found := False;
+  Start := 0;
+  for I := 0 to AEnvLen - 1 do
+    if AEnv[I] = #0 then
+    begin
+      if (not Found) and (I - Start >= 5) and (AEnv[Start] = 'P') and
+         (AEnv[Start + 1] = 'A') and (AEnv[Start + 2] = 'T') and
+         (AEnv[Start + 3] = 'H') and (AEnv[Start + 4] = '=') then
+      begin
+        PathP := AEnv + Start + 5;
+        PathLen := I - Start - 5;
+        Found := True;
+      end;
+      Start := I + 1;
+    end;
+  Dirs := 1;
+  for I := 0 to PathLen - 1 do
+    if PathP[I] = ':' then
+      Dirs := Dirs + 1;
+  { each candidate: the directory (or '.'), '/', the name and its #0 }
+  Text := _BlaiseGetMem(PathLen + Dirs * (AExeLen + 3));
+  if Text = nil then
+    Exit(nil);
+  W := 0;
+  Start := 0;
+  for I := 0 to PathLen do
+    if (I = PathLen) or (PathP[I] = ':') then
+    begin
+      if I = Start then
+      begin
+        Text[W] := '.';
+        W := W + 1;
+      end;
+      for J := Start to I - 1 do
+      begin
+        Text[W] := PathP[J];
+        W := W + 1;
+      end;
+      Text[W] := '/';
+      W := W + 1;
+      for J := 0 to AExeLen - 1 do
+      begin
+        Text[W] := AExe[J];
+        W := W + 1;
+      end;
+      Text[W] := #0;
+      W := W + 1;
+      Start := I + 1;
+    end;
+  Result := ZListBlock(Text, W);
+  _BlaiseFreeMem(Text);
+end;
+
+{ The child between fork and exec.  Never returns.  With AEnvp nil the
+  child keeps the parent's environment and execvp searches the parent's
+  PATH; otherwise AEnvp is its whole environment and APaths the candidate
+  paths, tried in turn as execvp would: a missing file goes on to the next,
+  a permission error is remembered, anything else stops the search.  A
+  failure's errno goes to the parent through the AStatus pipe. }
+procedure SpawnChild(AStdin, AStdout, AStderr, AStatus: Int32;
+  ACwd: PChar; AArgv, AEnvp, APaths: TPCharArray);
+var
+  E, R, Saved: Int32;
+  I: Int;
+  Cand: PChar;
+begin
+  libc_dup2(AStdin, 0);
+  libc_dup2(AStdout, 1);
+  libc_dup2(AStderr, 2);
+  R := 0;
+  if ACwd <> nil then
+    R := libc_chdir(ACwd);
+  if R <> 0 then
+  begin
+    E := SpawnErrno(R);
+    libc_write(AStatus, @E, 4);
+    libc__exit(127);
+  end;
+  if AEnvp = nil then
+  begin
+    R := libc_execvp(ArgvGet(AArgv, 0), AArgv);
+    E := SpawnErrno(R);
+  end
+  else
+  begin
+    Saved := SPAWN_ENOENT;
+    I := 0;
+    while APaths <> nil do
+    begin
+      Cand := ArgvGet(APaths, I);
+      if Cand = nil then
+        Break;
+      R := libc_execve(Cand, AArgv, AEnvp);
+      E := SpawnErrno(R);
+      if E = SPAWN_EACCES then
+        Saved := SPAWN_EACCES
+      else if (E <> SPAWN_ENOENT) and (E <> SPAWN_ENOTDIR) then
+      begin
+        Saved := E;
+        Break;
+      end;
+      I := I + 1;
+    end;
+    E := Saved;
+  end;
+  libc_write(AStatus, @E, 4);
+  libc__exit(127);
+end;
+
+{ Pipes holds the read and write ends of the child's stdin, stdout, stderr
+  and the status pipe, in that order.  The parent's ends, and both ends of
+  the status pipe, are close-on-exec: a stdin write end leaked into another
+  child would keep this one from ever seeing the end of its input, and
+  end-of-file on the status pipe is how the parent learns exec succeeded. }
+function TRtlPlatformPosix.ProcSpawn(const AExe, AArgs, AEnv, ACwd: string;
+  AUseEnv: Int32; AFds, AChild: Pointer): Int32;
+var
+  Pipes: array[0..7] of Int32;
+  I, Opened, ExeLen, ArgsLen, EnvLen: Int;
+  ExeP, ArgsP, EnvData, ArgText, CwdP: PChar;
+  Argv, Envp, Paths: TPCharArray;
+  Pid, E, R, Status: Int32;
+  N: Int64;
+begin
+  { a write to the stdin of a child that has gone must fail, not kill us }
+  libc_signal(SPAWN_SIGPIPE, Pointer(1));
+  Opened := 0;
+  while Opened < 4 do
+  begin
+    R := libc_pipe(@Pipes[Opened * 2]);
+    if R <> 0 then
+    begin
+      E := SpawnErrno(R);
+      for I := 0 to Opened * 2 - 1 do
+        libc_close(Pipes[I]);
+      Exit(E);
+    end;
+    Opened := Opened + 1;
+  end;
+  libc_fcntl(Pipes[1], SPAWN_F_SETFD, SPAWN_FD_CLOEXEC);
+  libc_fcntl(Pipes[2], SPAWN_F_SETFD, SPAWN_FD_CLOEXEC);
+  libc_fcntl(Pipes[4], SPAWN_F_SETFD, SPAWN_FD_CLOEXEC);
+  libc_fcntl(Pipes[6], SPAWN_F_SETFD, SPAWN_FD_CLOEXEC);
+  libc_fcntl(Pipes[7], SPAWN_F_SETFD, SPAWN_FD_CLOEXEC);
+
+  ExeP := StrData(Pointer(AExe));
+  ExeLen := StrLen(Pointer(AExe));
+  ArgsP := StrData(Pointer(AArgs));
+  ArgsLen := StrLen(Pointer(AArgs));
+  ArgText := _BlaiseGetMem(ExeLen + 1 + ArgsLen + 1);
+  for I := 0 to ExeLen - 1 do
+    ArgText[I] := ExeP[I];
+  ArgText[ExeLen] := #0;
+  for I := 0 to ArgsLen - 1 do
+    ArgText[ExeLen + 1 + I] := ArgsP[I];
+  Argv := ZListBlock(ArgText, ExeLen + 1 + ArgsLen);
+  _BlaiseFreeMem(ArgText);
+  CwdP := nil;
+  if StrLen(Pointer(ACwd)) > 0 then
+    CwdP := StrDup(StrData(Pointer(ACwd)));
+  Envp := nil;
+  Paths := nil;
+  if AUseEnv <> 0 then
+  begin
+    EnvData := StrData(Pointer(AEnv));
+    EnvLen := StrLen(Pointer(AEnv));
+    Envp := ZListBlock(EnvData, EnvLen);
+    Paths := ExecCandidates(ExeP, ExeLen, EnvData, EnvLen);
+  end;
+
+  Pid := libc_fork();
+  if Pid = 0 then
+    SpawnChild(Pipes[0], Pipes[3], Pipes[5], Pipes[7], CwdP, Argv, Envp,
+      Paths);
+  E := 0;
+  if Pid < 0 then
+    E := SpawnErrno(Pid);
+  libc_close(Pipes[0]);
+  libc_close(Pipes[3]);
+  libc_close(Pipes[5]);
+  libc_close(Pipes[7]);
+  _BlaiseFreeMem(Argv);
+  if CwdP <> nil then
+    _BlaiseFreeMem(CwdP);
+  if Envp <> nil then
+    _BlaiseFreeMem(Envp);
+  if Paths <> nil then
+    _BlaiseFreeMem(Paths);
+  if Pid > 0 then
+  begin
+    { four bytes on the status pipe are the errno of a failed chdir or
+      exec; the end of it means exec succeeded }
+    repeat
+      N := libc_read(Pipes[6], @E, 4);
+    until not errno_Interrupted(N);
+    if N <> 4 then
+      E := 0
+    else
+      libc_waitpid(Pid, @Status, 0);
+  end;
+  libc_close(Pipes[6]);
+  if E <> 0 then
+  begin
+    libc_close(Pipes[1]);
+    libc_close(Pipes[2]);
+    libc_close(Pipes[4]);
+    Exit(E);
+  end;
+  PSpawnInt32(AFds)^ := Pipes[1];
+  PSpawnInt32(AFds + 4)^ := Pipes[2];
+  PSpawnInt32(AFds + 8)^ := Pipes[4];
+  PSpawnInt64(AChild)^ := Pid;
+  Result := 0;
+end;
+
+function TRtlPlatformPosix.ProcWait(AChild: Int64; ABlock: Int32;
+  AExitCode: Pointer): Int32;
+var
+  Status, R, Options: Int32;
+begin
+  Options := GPlatformLayout.WNOHANG();
+  if ABlock <> 0 then
+    Options := 0;
+  repeat
+    Status := 0;
+    R := libc_waitpid(Int32(AChild), @Status, Options);
+  until (R >= 0) or not errno_Interrupted(R);
+  if R = 0 then
+    Exit(0);
+  if R <> Int32(AChild) then
+    Exit(-1);
+  if (Status and $7F) = 0 then
+    PSpawnInt32(AExitCode)^ := (Status shr 8) and $FF
+  else
+    PSpawnInt32(AExitCode)^ := 128 + (Status and $7F);
+  Result := 1;
+end;
+
+function TRtlPlatformPosix.ProcSignal(AChild: Int64; AForce: Int32): Int32;
+begin
+  if AForce <> 0 then
+    Result := libc_kill(Int32(AChild), SPAWN_SIGKILL)
+  else
+    Result := libc_kill(Int32(AChild), SPAWN_SIGTERM);
+end;
+
+function TRtlPlatformPosix.ProcPid(AChild: Int64): Int32;
+begin
+  Result := Int32(AChild);
+end;
+
+{ A process id holds nothing to let go of. }
+procedure TRtlPlatformPosix.ProcRelease(AChild: Int64);
+begin
+end;
+
+function TRtlPlatformPosix.ProcPollRead(AFds: Pointer; ACount,
+  ATimeoutMs: Int32; AReady: Pointer): Int32;
+var
+  Pfds: Pointer;
+  I: Int;
+  Ev: Int16;
+begin
+  Pfds := _BlaiseGetMem(Int64(ACount) * SPAWN_POLLFD_SIZE + SPAWN_POLLFD_SIZE);
+  if Pfds = nil then
+    Exit(-1);
+  for I := 0 to ACount - 1 do
+  begin
+    PSpawnInt32(Pfds + I * SPAWN_POLLFD_SIZE)^ := PSpawnInt32(AFds + I * 4)^;
+    PSpawnInt16(Pfds + I * SPAWN_POLLFD_SIZE + 4)^ := SPAWN_POLLIN;
+    PSpawnInt16(Pfds + I * SPAWN_POLLFD_SIZE + 6)^ := 0;
+  end;
+  Result := libc_poll(Pfds, ACount, ATimeoutMs);
+  if Result < 0 then
+    Result := -1;
+  for I := 0 to ACount - 1 do
+  begin
+    Ev := PSpawnInt16(Pfds + I * SPAWN_POLLFD_SIZE + 6)^;
+    if (Result > 0) and ((Ev and (SPAWN_POLLIN or SPAWN_POLLERR or
+       SPAWN_POLLHUP or SPAWN_POLLNVAL)) <> 0) then
+      PSpawnInt32(AReady + I * 4)^ := 1
+    else
+      PSpawnInt32(AReady + I * 4)^ := 0;
+  end;
+  _BlaiseFreeMem(Pfds);
 end;
 
 { ================================================================== }

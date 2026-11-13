@@ -13,15 +13,17 @@
   Process.TProcess (one merged output pipe, no stdin) stays for simple
   uses; TSubprocess differs in that:
 
-  * stdout and stderr are separate pipes, and Read polls both, so a child
-    that fills one while the parent waits on the other cannot deadlock;
+  * stdout and stderr are separate pipes, and Read waits on both, so a
+    child that fills one while the parent waits on the other cannot
+    deadlock;
   * stdin is a pipe: WriteInput, then CloseInput for end-of-file;
-  * WorkingDirectory is entered by the child before exec;
+  * WorkingDirectory is the directory the child starts in;
   * a program that cannot be started (missing, not executable, a bad
     working directory) raises EProcessStartError from Start, rather than
-    looking like exit code 127: the child reports exec's errno through a
-    close-on-exec pipe, which the parent reads before Start returns;
-  * a signalled child's exit code is 128 + the signal, as in a shell.
+    looking like exit code 127;
+  * a child a signal ended exits with 128 + the signal, as in a shell.  On
+    Windows, Terminate and Kill end the child with 143 and 137, the codes
+    SIGTERM and SIGKILL give.
 
   Usage:
 
@@ -36,16 +38,18 @@
   The child inherits the parent's environment unless Environment is used:
   its first use fills it with the parent's (start-up) environment, which
   can then be changed, cleared or replaced, and the child gets exactly
-  what it holds.  A program named without a '/' is then looked up on the
-  PATH in that environment (/usr/bin:/bin when it has none), as
-  'env -i NAME=VALUE ... program' does.
+  what it holds.  A program named without a directory is then looked up on
+  the PATH in that environment, as 'env -i NAME=VALUE ... program' does:
+  on POSIX a ':' separated list (/usr/bin:/bin when there is none), on
+  Windows a ';' separated one, where NAME.exe and NAME.com are tried too.
 
     P.Environment.Clear();
     P.Environment['HOME'] := Home;
 
-  Between fork and exec the child calls only async-signal-safe libc
-  routines on data prepared before the fork, so starting a process from a
-  multi-threaded program is safe. }
+  The child is started through the platform port (rtl.platform,
+  TRtlPlatform.ProcSpawn): fork and exec on POSIX, where the child calls
+  only async-signal-safe routines between the two, so starting a process
+  from a multi-threaded program is safe; CreateProcessW on Windows. }
 
 unit IO.Process;
 
@@ -63,11 +67,13 @@ type
     FArgs: TList<string>;
     FWorkingDirectory: string;
     FEnvironment: TDictionary<string, string>;
-    FPid: Int32;
+    FStarted: Boolean;
+    { the platform port's handle on the child: its pid on POSIX, its process
+      handle on Windows }
+    FChild: Int64;
     FIn, FOut, FErr: Int32;
     FExited: Boolean;
     FExitCode: Int32;
-    procedure Reap(AStatus: Int32);
     function GetEnvironment(): TDictionary<string, string>;
   public
     constructor Create(const AExecutable: string);
@@ -88,7 +94,8 @@ type
     function Running(): Boolean;
     { Wait for the child to exit and return its exit code. }
     function WaitForExit(): Int32;
-    { Send SIGTERM (Terminate) or SIGKILL (Kill). }
+    { Send SIGTERM (Terminate) or SIGKILL (Kill); on Windows, end the child
+      with exit code 143 or 137. }
     procedure Terminate();
     procedure Kill();
     function Pid(): Int32;
@@ -115,61 +122,33 @@ function RunProcess(const AExecutable: string; const AArgs: array of string;
 implementation
 
 const
-  SIGKILL = 9;
-  SIGTERM = 15;
-  SIGPIPE = 13;
   ENOENT = 2;
-  EACCES = 13;
-  ENOTDIR = 20;
-  F_SETFD = 2;
-  FD_CLOEXEC = 1;
-  POLLIN = 1;
-  POLLERR = 8;
-  POLLHUP = 16;
   ReadChunk = 65536;
 
 type
-  PInt32 = ^Int32;
   PByte = ^Byte;
-  PPointer = ^Pointer;
 
-  TPollFd = record
-    Fd: Int32;
-    Events: Int16;
-    REvents: Int16;
-  end;
-
-function c_fork(): Int32; external name 'fork';
-function c_execvp(AFile: Pointer; AArgv: Pointer): Int32; external name 'execvp';
-function c_execve(APath: Pointer; AArgv: Pointer; AEnvp: Pointer): Int32; external name 'execve';
-procedure c__exit(ACode: Int32); external name '_exit';
-function c_waitpid(APid: Int32; AStatus: Pointer; AOptions: Int32): Int32; external name 'waitpid';
-function c_pipe(AFds: Pointer): Int32; external name 'pipe';
-function c_dup2(AOld, ANew: Int32): Int32; external name 'dup2';
-function c_close(AFd: Int32): Int32; external name 'close';
-function c_chdir(APath: Pointer): Int32; external name 'chdir';
-function c_read(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64; external name 'read';
-function c_write(AFd: Int32; ABuf: Pointer; ACount: Int64): Int64; external name 'write';
-function c_kill(APid, ASig: Int32): Int32; external name 'kill';
-function c_poll(AFds: Pointer; ANFds: Int64; ATimeout: Int32): Int32; external name 'poll';
-{ fcntl is C-variadic: the third argument must travel the variadic way. }
-function c_fcntl(AFd, ACmd: Int32): Int32; cdecl; varargs; external name 'fcntl';
-function c_signal(ASignum: Int32; AHandler: Pointer): Pointer; external name 'signal';
-{ errno, per build profile (runtime.errno.*, chosen at link time): the
-  static, libc-free profile has no errno variable; its calls return -errno. }
+{ The platform port's child processes and descriptors (rtl.platform.abi). }
+function _ProcSpawn(const AExe, AArgs, AEnv, ACwd: string; AUseEnv: Int32;
+  AFds, AChild: Pointer): Int32; external name '_ProcSpawn';
+function _ProcWait(AChild: Int64; ABlock: Int32; AExitCode: Pointer): Int32;
+  external name '_ProcWait';
+function _ProcSignal(AChild: Int64; AForce: Int32): Int32;
+  external name '_ProcSignal';
+function _ProcPid(AChild: Int64): Int32; external name '_ProcPid';
+procedure _ProcRelease(AChild: Int64); external name '_ProcRelease';
+function _ProcPollRead(AFds: Pointer; ACount, ATimeoutMs: Int32;
+  AReady: Pointer): Int32; external name '_ProcPollRead';
+function _FdRead(AFd: Int32; ABuf: Pointer; ACount: Int): Int;
+  external name '_FdRead';
+function _FdWrite(AFd: Int32; ABuf: Pointer; ACount: Int): Int;
+  external name '_FdWrite';
+function _FsClose(AFd: Int32): Int32; external name '_FsClose';
+{ errno, per build profile (runtime.errno.*, chosen at link time). }
 function Interrupted(N: Int64): Boolean; external name 'Interrupted';
-function GetOsErrno(): Int; external name 'GetOsErrno';
 
-{ The errno of a call that failed with result R, in either profile. }
-function FailureErrno(R: Int64): Int32;
-begin
-  Result := Int32(GetOsErrno());
-  if (Result = 0) and (R < 0) then
-    Result := Int32(-R);
-end;
-
-{ The text of the errors exec and chdir report; the numbers are the same on
-  Linux, FreeBSD and macOS.  strerror is not available without libc. }
+{ The text of the errors a start reports; the numbers are the POSIX ones
+  on every target.  strerror is not available without libc. }
 function ErrorText(AErr: Int32): string;
 begin
   case AErr of
@@ -182,21 +161,11 @@ begin
     13: Result := 'Permission denied';
     20: Result := 'Not a directory';
     21: Result := 'Is a directory';
+    24: Result := 'Too many open files';
     26: Result := 'Text file busy';
   else
     Result := 'error ' + IntToStr(AErr);
   end;
-end;
-
-{ A NUL-terminated copy of S on the heap. }
-function CString(const S: string): Pointer;
-var
-  I: Int;
-begin
-  Result := GetMem(Length(S) + 1);
-  for I := 0 to Length(S) - 1 do
-    PByte(UInt(Result) + UInt(I))^ := S[I];
-  PByte(UInt(Result) + UInt(Length(S)))^ := 0;
 end;
 
 function BufToString(ABuf: Pointer; ACount: Int): string;
@@ -210,139 +179,6 @@ begin
   Result := SB.ToString();
 end;
 
-procedure SetCloseOnExec(AFd: Int32);
-begin
-  c_fcntl(AFd, F_SETFD, FD_CLOEXEC);
-end;
-
-function MakePipe(out ARead, AWrite: Int32): Boolean;
-var
-  Fds: array[0..1] of Int32;
-begin
-  Result := c_pipe(@Fds[0]) = 0;
-  if Result then
-  begin
-    ARead := Fds[0];
-    AWrite := Fds[1];
-  end;
-end;
-
-{ The child between fork and exec: async-signal-safe calls only, on data
-  prepared by the parent.  Never returns.  With AEnvp nil the child keeps
-  the parent's environment and execvp searches the parent's PATH; otherwise
-  AEnvp is its whole environment and APaths the nil-terminated candidate
-  paths, tried in turn as execvp would: a missing file goes on to the next,
-  a permission error is remembered, anything else stops the search. }
-procedure ChildExec(AStdin, AStdout, AStderr, AStatus: Int32;
-  ACwd, AFile, AArgv, AEnvp, APaths: Pointer);
-var
-  E, R, Saved: Int32;
-  I: Int;
-  Cand: Pointer;
-begin
-  c_dup2(AStdin, 0);
-  c_dup2(AStdout, 1);
-  c_dup2(AStderr, 2);
-  R := 0;
-  if ACwd <> nil then
-    R := c_chdir(ACwd);
-  if R <> 0 then
-  begin
-    E := FailureErrno(R);
-    c_write(AStatus, @E, 4);
-    c__exit(127);
-  end;
-  if AEnvp = nil then
-  begin
-    R := c_execvp(AFile, AArgv);
-    E := FailureErrno(R);
-  end
-  else
-  begin
-    Saved := ENOENT;
-    I := 0;
-    while True do
-    begin
-      Cand := PPointer(UInt(APaths) + UInt(I * SizeOf(Pointer)))^;
-      if Cand = nil then
-        Break;
-      R := c_execve(Cand, AArgv, AEnvp);
-      E := FailureErrno(R);
-      if E = EACCES then
-        Saved := EACCES
-      else if (E <> ENOENT) and (E <> ENOTDIR) then
-      begin
-        Saved := E;
-        Break;
-      end;
-      I := I + 1;
-    end;
-    E := Saved;
-  end;
-  c_write(AStatus, @E, 4);
-  c__exit(127);
-end;
-
-{ A nil-terminated array of C strings, one per item. }
-function CStringArray(AItems: TList<string>): Pointer;
-var
-  I: Int;
-begin
-  Result := GetMem((AItems.Count + 1) * SizeOf(Pointer));
-  for I := 0 to AItems.Count - 1 do
-    PPointer(UInt(Result) + UInt(I * SizeOf(Pointer)))^ := CString(AItems[I]);
-  PPointer(UInt(Result) + UInt(AItems.Count * SizeOf(Pointer)))^ := nil;
-end;
-
-procedure FreeCStringArray(AArr: Pointer);
-var
-  I: Int;
-  P: Pointer;
-begin
-  if AArr = nil then
-    Exit;
-  I := 0;
-  while True do
-  begin
-    P := PPointer(UInt(AArr) + UInt(I * SizeOf(Pointer)))^;
-    if P = nil then
-      Break;
-    FreeMem(P);
-    I := I + 1;
-  end;
-  FreeMem(AArr);
-end;
-
-{ Where the child may find AExecutable under environment AEnv: AExecutable
-  itself when it holds a '/', else each directory of AEnv's PATH
-  (/usr/bin:/bin when it has none; an empty entry is the current
-  directory). }
-function ExecCandidates(const AExecutable: string;
-  AEnv: TDictionary<string, string>): TList<string>;
-var
-  PathVal, Dir: string;
-  Start, I: Int;
-begin
-  Result := TList<string>.Create();
-  if Pos('/', AExecutable) >= 0 then
-  begin
-    Result.Add(AExecutable);
-    Exit;
-  end;
-  if not AEnv.TryGetValue('PATH', PathVal) then
-    PathVal := '/usr/bin:/bin';
-  Start := 0;
-  for I := 0 to Length(PathVal) do
-    if (I = Length(PathVal)) or (PathVal[I] = Ord(':')) then
-    begin
-      Dir := Copy(PathVal, Start, I - Start);
-      if Dir = '' then
-        Dir := '.';
-      Result.Add(Dir + '/' + AExecutable);
-      Start := I + 1;
-    end;
-end;
-
 { ---------------------------------------------------------------------------
   TSubprocess
   --------------------------------------------------------------------------- }
@@ -351,7 +187,7 @@ constructor TSubprocess.Create(const AExecutable: string);
 begin
   FExecutable := AExecutable;
   FArgs := TList<string>.Create();
-  FPid := -1;
+  FStarted := False;
   FIn := -1;
   FOut := -1;
   FErr := -1;
@@ -380,112 +216,62 @@ end;
 destructor TSubprocess.Destroy;
 begin
   CloseInput();
-  if FOut >= 0 then c_close(FOut);
-  if FErr >= 0 then c_close(FErr);
+  if FOut >= 0 then _FsClose(FOut);
+  if FErr >= 0 then _FsClose(FErr);
   { Reap a child that has already gone, so it does not linger as a zombie;
     a running child is left running. }
-  if FPid > 0 then
+  if FStarted then
+  begin
     Running();
+    _ProcRelease(FChild);
+  end;
   inherited Destroy();
 end;
 
 procedure TSubprocess.Start();
 var
-  InR, InW, OutR, OutW, ErrR, ErrW, StR, StW: Int32;
-  Argv, FileP, CwdP, Envp, Paths: Pointer;
+  Args, Env: TStringBuilder;
+  Key, Reason: string;
   I: Int;
-  Items: TList<string>;
-  Key: string;
-  Pid, E, Got: Int32;
-  N: Int64;
-  Reason: string;
+  UseEnv, E: Int32;
+  Fds: array[0..2] of Int32;
+  Child: Int64;
 begin
-  if FPid > 0 then
+  if FStarted then
     raise EProcessStartError.Create('process already started');
-  { A write to the stdin of a child that has exited must fail, not kill us. }
-  c_signal(SIGPIPE, Pointer(1));
-  if not MakePipe(InR, InW) then
-    raise EProcessStartError.Create('cannot create a pipe');
-  if not MakePipe(OutR, OutW) then
-    raise EProcessStartError.Create('cannot create a pipe');
-  if not MakePipe(ErrR, ErrW) then
-    raise EProcessStartError.Create('cannot create a pipe');
-  if not MakePipe(StR, StW) then
-    raise EProcessStartError.Create('cannot create a pipe');
-  { The parent's ends must not leak into other children (a leaked stdin
-    write end would keep this child from ever seeing end-of-file). }
-  SetCloseOnExec(InW);
-  SetCloseOnExec(OutR);
-  SetCloseOnExec(ErrR);
-  SetCloseOnExec(StR);
-  SetCloseOnExec(StW);
-
-  FileP := CString(FExecutable);
-  Argv := GetMem((FArgs.Count + 2) * SizeOf(Pointer));
-  PPointer(Argv)^ := FileP;
+  { the arguments, then the environment, as #0-ended items }
+  Args := TStringBuilder.Create();
   for I := 0 to FArgs.Count - 1 do
-    PPointer(UInt(Argv) + UInt((I + 1) * SizeOf(Pointer)))^ := CString(FArgs[I]);
-  PPointer(UInt(Argv) + UInt((FArgs.Count + 1) * SizeOf(Pointer)))^ := nil;
-  CwdP := nil;
-  if FWorkingDirectory <> '' then
-    CwdP := CString(FWorkingDirectory);
-  Envp := nil;
-  Paths := nil;
+  begin
+    Args.Append(FArgs[I]);
+    Args.AppendByte(0);
+  end;
+  Env := TStringBuilder.Create();
+  UseEnv := 0;
   if FEnvironment <> nil then
   begin
-    Items := TList<string>.Create();
+    UseEnv := 1;
     for Key in FEnvironment.Keys() do
-      Items.Add(Key + '=' + FEnvironment[Key]);
-    Envp := CStringArray(Items);
-    Paths := CStringArray(ExecCandidates(FExecutable, FEnvironment));
+    begin
+      Env.Append(Key + '=' + FEnvironment[Key]);
+      Env.AppendByte(0);
+    end;
   end;
-
-  Pid := c_fork();
-  if Pid = 0 then
-    ChildExec(InR, OutW, ErrW, StW, CwdP, FileP, Argv, Envp, Paths);
-
-  c_close(InR);
-  c_close(OutW);
-  c_close(ErrW);
-  c_close(StW);
-  for I := 0 to FArgs.Count do
-    FreeMem(PPointer(UInt(Argv) + UInt(I * SizeOf(Pointer)))^);
-  FreeMem(Argv);
-  if CwdP <> nil then
-    FreeMem(CwdP);
-  FreeCStringArray(Envp);
-  FreeCStringArray(Paths);
-  if Pid < 0 then
+  Child := 0;
+  E := _ProcSpawn(FExecutable, Args.ToString(), Env.ToString(),
+    FWorkingDirectory, UseEnv, @Fds[0], @Child);
+  if E <> 0 then
   begin
-    c_close(InW);
-    c_close(OutR);
-    c_close(ErrR);
-    c_close(StR);
-    raise EProcessStartError.Create('cannot fork to start ' + FExecutable);
-  end;
-
-  { End-of-file on the status pipe means exec succeeded (close-on-exec
-    closed it); four bytes are the errno of a failed chdir or exec. }
-  E := 0;
-  repeat
-    N := c_read(StR, @E, 4);
-  until not Interrupted(N);
-  c_close(StR);
-  if N = 4 then
-  begin
-    c_close(InW);
-    c_close(OutR);
-    c_close(ErrR);
-    c_waitpid(Pid, @Got, 0);
     Reason := ErrorText(E);
-    if (FWorkingDirectory <> '') and (E = 2) then
+    if (FWorkingDirectory <> '') and (E = ENOENT) then
       Reason := Reason + ' (program or working directory ' + FWorkingDirectory + ')';
     raise EProcessStartError.Create('cannot start ' + FExecutable + ': ' + Reason);
   end;
-  FPid := Pid;
-  FIn := InW;
-  FOut := OutR;
-  FErr := ErrR;
+  FStarted := True;
+  FChild := Child;
+  FIn := Fds[0];
+  FOut := Fds[1];
+  FErr := Fds[2];
   FExited := False;
 end;
 
@@ -502,7 +288,7 @@ begin
   P := PChar(AData);
   while Left > 0 do
   begin
-    N := c_write(FIn, P, Left);
+    N := _FdWrite(FIn, P, Left);
     if N > 0 then
     begin
       P := Pointer(UInt(P) + UInt(N));
@@ -518,14 +304,15 @@ procedure TSubprocess.CloseInput();
 begin
   if FIn >= 0 then
   begin
-    c_close(FIn);
+    _FsClose(FIn);
     FIn := -1;
   end;
 end;
 
 function TSubprocess.Read(ATimeoutMs: Int32; out AOutput, AError: string): Boolean;
 var
-  Fds: array[0..1] of TPollFd;
+  Fds: array[0..1] of Int32;
+  Ready: array[0..1] of Int32;
   Map: array[0..1] of Int32;   { 0 = stdout, 1 = stderr }
   Count, I, R: Int32;
   Buf: Pointer;
@@ -536,32 +323,28 @@ begin
   Count := 0;
   if FOut >= 0 then
   begin
-    Fds[Count].Fd := FOut;
-    Fds[Count].Events := POLLIN;
-    Fds[Count].REvents := 0;
+    Fds[Count] := FOut;
     Map[Count] := 0;
     Count := Count + 1;
   end;
   if FErr >= 0 then
   begin
-    Fds[Count].Fd := FErr;
-    Fds[Count].Events := POLLIN;
-    Fds[Count].REvents := 0;
+    Fds[Count] := FErr;
     Map[Count] := 1;
     Count := Count + 1;
   end;
   if Count = 0 then
     Exit(False);
   Result := True;
-  R := c_poll(@Fds[0], Count, ATimeoutMs);
+  R := _ProcPollRead(@Fds[0], Count, ATimeoutMs, @Ready[0]);
   if R <= 0 then
     Exit;   { timeout, or EINTR: the caller polls again }
   Buf := GetMem(ReadChunk);
   for I := 0 to Count - 1 do
-    if (Fds[I].REvents and (POLLIN or POLLHUP or POLLERR)) <> 0 then
+    if Ready[I] <> 0 then
     begin
       repeat
-        N := c_read(Fds[I].Fd, Buf, ReadChunk);
+        N := _FdRead(Fds[I], Buf, ReadChunk);
       until not Interrupted(N);
       if N > 0 then
       begin
@@ -573,7 +356,7 @@ begin
       else
       begin
         { End-of-file (or an error): this pipe is done. }
-        c_close(Fds[I].Fd);
+        _FsClose(Fds[I]);
         if Map[I] = 0 then
           FOut := -1
         else
@@ -600,26 +383,18 @@ begin
   AError := SE.ToString();
 end;
 
-procedure TSubprocess.Reap(AStatus: Int32);
-begin
-  FExited := True;
-  if (AStatus and $7F) = 0 then
-    FExitCode := (AStatus shr 8) and $FF
-  else
-    FExitCode := 128 + (AStatus and $7F);
-end;
-
 function TSubprocess.Running(): Boolean;
 var
-  Status, R: Int32;
+  Code, R: Int32;
 begin
-  if (FPid <= 0) or FExited then
+  if (not FStarted) or FExited then
     Exit(False);
-  Status := 0;
-  R := c_waitpid(FPid, @Status, 1);   { WNOHANG }
-  if R = FPid then
+  Code := 0;
+  R := _ProcWait(FChild, 0, @Code);
+  if R = 1 then
   begin
-    Reap(Status);
+    FExited := True;
+    FExitCode := Code;
     Exit(False);
   end;
   Result := R = 0;
@@ -627,38 +402,36 @@ end;
 
 function TSubprocess.WaitForExit(): Int32;
 var
-  Status, R: Int32;
+  Code: Int32;
 begin
-  if (FPid > 0) and not FExited then
+  if FStarted and not FExited then
   begin
     CloseInput();
-    repeat
-      Status := 0;
-      R := c_waitpid(FPid, @Status, 0);
-    until (R = FPid) or ((R < 0) and not Interrupted(R));
-    if R = FPid then
-      Reap(Status)
-    else
-      FExited := True;
+    Code := 0;
+    if _ProcWait(FChild, 1, @Code) = 1 then
+      FExitCode := Code;
+    FExited := True;
   end;
   Result := FExitCode;
 end;
 
 procedure TSubprocess.Terminate();
 begin
-  if (FPid > 0) and not FExited then
-    c_kill(FPid, SIGTERM);
+  if FStarted and not FExited then
+    _ProcSignal(FChild, 0);
 end;
 
 procedure TSubprocess.Kill();
 begin
-  if (FPid > 0) and not FExited then
-    c_kill(FPid, SIGKILL);
+  if FStarted and not FExited then
+    _ProcSignal(FChild, 1);
 end;
 
 function TSubprocess.Pid(): Int32;
 begin
-  Result := FPid;
+  Result := -1;
+  if FStarted then
+    Result := _ProcPid(FChild);
 end;
 
 function RunProcess(const AExecutable: string; const AArgs: array of string;

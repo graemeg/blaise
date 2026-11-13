@@ -94,6 +94,17 @@ function  _FsReadlink(const Path: string; Buf: Pointer; Size: Int64): Int64;
 function  _FsAccess(const Path: string; Mode: Int32): Int32;
 function  _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
 
+{ Child processes with three pipes (TRtlPlatform.Proc*).  Not compiler
+  builtins: stdlib's IO.Process imports them via `external name`. }
+function  _ProcSpawn(const Exe, Args, Env, Cwd: string; UseEnv: Int32;
+  Fds, Child: Pointer): Int32;
+function  _ProcWait(Child: Int64; Block: Int32; ExitCode: Pointer): Int32;
+function  _ProcSignal(Child: Int64; Force: Int32): Int32;
+function  _ProcPid(Child: Int64): Int32;
+procedure _ProcRelease(Child: Int64);
+function  _ProcPollRead(Fds: Pointer; Count, TimeoutMs: Int32;
+  Ready: Pointer): Int32;
+
 { Date/Time }
 function  _TimeNow: Int64;
 function  _TimeLocalOffsetSecs: Int32;
@@ -377,6 +388,38 @@ end;
 function _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
 begin
   Result := GRtlPlatform.FsSetModified(Path, Sec, NSec);
+end;
+
+function _ProcSpawn(const Exe, Args, Env, Cwd: string; UseEnv: Int32;
+  Fds, Child: Pointer): Int32;
+begin
+  Result := GRtlPlatform.ProcSpawn(Exe, Args, Env, Cwd, UseEnv, Fds, Child);
+end;
+
+function _ProcWait(Child: Int64; Block: Int32; ExitCode: Pointer): Int32;
+begin
+  Result := GRtlPlatform.ProcWait(Child, Block, ExitCode);
+end;
+
+function _ProcSignal(Child: Int64; Force: Int32): Int32;
+begin
+  Result := GRtlPlatform.ProcSignal(Child, Force);
+end;
+
+function _ProcPid(Child: Int64): Int32;
+begin
+  Result := GRtlPlatform.ProcPid(Child);
+end;
+
+procedure _ProcRelease(Child: Int64);
+begin
+  GRtlPlatform.ProcRelease(Child);
+end;
+
+function _ProcPollRead(Fds: Pointer; Count, TimeoutMs: Int32;
+  Ready: Pointer): Int32;
+begin
+  Result := GRtlPlatform.ProcPollRead(Fds, Count, TimeoutMs, Ready);
 end;
 
 function _TimeNow: Int64;
