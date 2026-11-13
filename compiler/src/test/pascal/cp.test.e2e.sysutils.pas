@@ -33,6 +33,9 @@ type
     procedure TestRun_Exec_ReturnsExitCode;
     { drives and UNC paths on Windows; on POSIX 'C:' is a file name }
     procedure TestRun_ExtractFileDrive_ExpandFileName;
+    { the platform's CSPRNG (M7): getentropy on POSIX, BCryptGenRandom on
+      Windows; more than one getentropy call's 256 bytes in one request }
+    procedure TestRun_RandomBytes;
     procedure TestRun_ParamStr_PrintsArg;
     procedure TestRun_ParamCount_WithArgs;
     procedure TestRun_ReadWriteFile_RoundTrip;
@@ -341,6 +344,34 @@ const
           WriteLn(IntToStr(RunChild('0')), ' ', IntToStr(RunChild('7')))
         end.
         ''';
+
+procedure TE2ESysUtilsTests.TestRun_RandomBytes;
+const
+  Src = '''
+    program P;
+    function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
+      external name '_RandomBytes';
+    var
+      A, B: array[0..599] of Byte;
+      I, NonZeroA, Diff: Int;
+    begin
+      WriteLn(_RandomBytes(@A[0], 600), ' ', _RandomBytes(@B[0], 600), ' ',
+        _RandomBytes(@A[0], 0));
+      NonZeroA := 0;
+      Diff := 0;
+      for I := 0 to 599 do
+      begin
+        if A[I] <> 0 then Inc(NonZeroA);
+        if A[I] <> B[I] then Inc(Diff);
+      end;
+      { 600 random bytes: some 2 are zero, and A and B agree in about 2 }
+      WriteLn(NonZeroA > 550, ' ', Diff > 550);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src, '1 1 1' + LineEnding + 'True True' + LineEnding, 0);
+end;
 
 procedure TE2ESysUtilsTests.TestRun_ExtractFileDrive_ExpandFileName;
 const

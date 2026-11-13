@@ -62,7 +62,7 @@ function EncodeFrame(AOpcode: Int; const APayload: string): string;
 { Build a MASKED frame with an explicit opcode (client->server).  RFC 6455 5.3
   requires every client frame to be masked: the MASK bit is set, a fresh 4-byte
   masking key is prepended, and the payload is XORed with it.  The key comes
-  from the kernel CSPRNG (getrandom) so it varies per frame; the value is only
+  from the system CSPRNG (_RandomBytes) so it varies per frame; the value is only
   used for framing, not confidentiality.  DecodeFrame reverses it. }
 function EncodeMaskedFrame(AOpcode: Int; const APayload: string): string;
 
@@ -82,31 +82,14 @@ const
   { the RFC 6455 magic GUID appended to the key before hashing }
   WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
-{ getrandom(buf, buflen, flags): fill buf with buflen random bytes from the
-  kernel CSPRNG.  flags=0 reads from the same pool as /dev/urandom.  Used to
-  pick a per-frame masking key.  PORTING BOUNDARY: getrandom(2) is Linux/
-  FreeBSD; on other targets dispatch a per-platform CSPRNG here. }
-{$IFDEF DARWIN}
-{ macOS has no getrandom(2); getentropy(3) draws from the same kernel CSPRNG
-  for up to 256 bytes per call (every caller here asks for 16 or fewer).
-  Same contract as getrandom: the byte count on success, -1 on failure. }
-function c_getentropy(ABuf: Pointer; ALen: Int64): Int32;
-  external name 'getentropy';
-
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
-begin
-  if c_getentropy(ABuf, ALen) = 0 then
-    Result := ALen
-  else
-    Result := -1;
-end;
-{$ELSE}
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
-  external name 'getrandom';
-{$ENDIF}
+{ The operating system's CSPRNG, through the platform port (getentropy on
+  POSIX, BCryptGenRandom on Windows): 1 on success, 0 on failure.  Used to
+  pick a per-frame masking key. }
+function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
+  external name '_RandomBytes';
 
 { A monotonically-increasing counter mixed into the masking key so that even if
-  getrandom ever short-reads (it should not for 4 bytes), successive frames on a
+  the CSPRNG ever fails (it should not for 4 bytes), successive frames on a
   connection still get distinct keys. }
 var
   GMaskCounter: UInt32 = $9E3779B9;   { golden-ratio seed }
@@ -154,18 +137,18 @@ end;
 
 { Fill AMask[0..3] with a fresh per-frame masking key.  Draws 4 bytes from the
   kernel CSPRNG and mixes in an advancing counter as a belt-and-braces fallback,
-  so the key varies from frame to frame even if getrandom is unavailable. }
+  so the key varies from frame to frame even if the CSPRNG is unavailable. }
 procedure NextMaskKey(var AMask: array of Byte);
 var
   Buf: array[0..3] of Byte;
   I: Int;
-  Got: Int64;
+  Got: Int32;
 begin
-  Got := c_getrandom(@Buf[0], 4, 0);
+  Got := _RandomBytes(@Buf[0], 4);
   GMaskCounter := (GMaskCounter * 1664525) + 1013904223;   { LCG step }
-  if Got <> 4 then
+  if Got <> 1 then
   begin
-    { getrandom failed: derive the key entirely from the counter. }
+    { the CSPRNG failed: derive the key entirely from the counter. }
     Buf[0] := Byte(GMaskCounter and $FF);
     Buf[1] := Byte((GMaskCounter shr 8) and $FF);
     Buf[2] := Byte((GMaskCounter shr 16) and $FF);

@@ -73,6 +73,9 @@ type
       success.  Where files have no executable bit it only checks that
       APath exists. }
     function MakeExecutable(const APath: string): Boolean; virtual; abstract;
+    { Fill ACount bytes at ABuf from the operating system's CSPRNG; True on
+      success.  For keys and identifiers (uuid, the WebSocket mask). }
+    function RandomBytes(ABuf: Pointer; ACount: Int): Boolean; virtual; abstract;
     function GetEnvVar(const AName: string): string; virtual; abstract;
     procedure Sleep(AMilliseconds: Int32); virtual; abstract;
     procedure Halt(AExitCode: Int32); virtual; abstract;

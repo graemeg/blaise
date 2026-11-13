@@ -49,6 +49,7 @@ type
     function GetProcessID: Int32; override;
     function ReadLink(const APath: string): string; override;
     function MakeExecutable(const APath: string): Boolean; override;
+    function RandomBytes(ABuf: Pointer; ACount: Int): Boolean; override;
     function GetEnvVar(const AName: string): string; override;
     procedure Sleep(AMilliseconds: Int32); override;
     procedure Halt(AExitCode: Int32); override;
@@ -121,6 +122,14 @@ function _WinFdRemove(Fd: Int32): Pointer;    external name '_WinFdRemove';
 function _DaysFromCivil(Y, M, D: Int64): Int64; external name '_DaysFromCivil';
 procedure _CivilFromDays(Z: Int64; var Y, M, D: Int64);
   external name '_CivilFromDays';
+
+{ ---- bcrypt ---- }
+
+function W32BCryptGenRandom(AAlgorithm: Pointer; ABuf: Pointer; ACount: UInt32;
+  AFlags: UInt32): Int32; external 'bcrypt' name 'BCryptGenRandom';
+
+const
+  BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
 
 { ---- kernel32 ---- }
 
@@ -1023,6 +1032,26 @@ end;
 function TRtlPlatformWindows.ReadLink(const APath: string): string;
 begin
   Result := '';
+end;
+
+{ The system's preferred RNG (no algorithm handle), in chunks a UInt32 can
+  count. }
+function TRtlPlatformWindows.RandomBytes(ABuf: Pointer; ACount: Int): Boolean;
+var
+  Done, N: Int;
+begin
+  Done := 0;
+  while Done < ACount do
+  begin
+    N := ACount - Done;
+    if N > $40000000 then
+      N := $40000000;
+    if W32BCryptGenRandom(nil, ABuf + Done, UInt32(N),
+       BCRYPT_USE_SYSTEM_PREFERRED_RNG) <> 0 then
+      Exit(False);
+    Done := Done + N;
+  end;
+  Result := True;
 end;
 
 { A file is executable by its extension; nothing to mark. }

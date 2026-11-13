@@ -16,8 +16,9 @@
   hash, defeating the point of a value-type record.  Two Int64 fields are
   genuinely zero-allocation.
 
-  Randomness for RandomUuid comes from the kernel CSPRNG via getrandom(2)
-  (Linux 3.17+, glibc 2.25+); no seeding and no PRNG state.
+  Randomness for RandomUuid comes from the operating system's CSPRNG
+  through the platform port (getentropy, or BCryptGenRandom on Windows); no
+  seeding and no PRNG state.
 
     TUuid.RandomUuid       -> a fresh random (v4) TUuid.
     TUuid.Parse(S)         -> TUuid from a canonical '8-4-4-4-12' string;
@@ -143,33 +144,10 @@ implementation
 uses
   StrUtils;   { TStringBuilder }
 
-{ ponytail: PORTING BOUNDARY — getrandom(2) is LINUX-specific (3.17+, glibc
-  2.25+).  FreeBSD has a compatible getrandom; macOS does NOT (use getentropy(3)
-  or SecRandomCopyBytes); Windows uses BCryptGenRandom.  When a second target
-  lands, dispatch c_getrandom per platform behind TUuid.RandomUuid — the
-  public API stays put.  (/dev/urandom would cover all the Unixes but not
-  Windows, hence the syscall.) }
-
-{ getrandom(buf, buflen, flags): fill buf with buflen random bytes from the
-  kernel CSPRNG.  flags=0 reads from the same pool as /dev/urandom. }
-{$IFDEF DARWIN}
-{ macOS has no getrandom(2); getentropy(3) draws from the same kernel CSPRNG
-  for up to 256 bytes per call (every caller here asks for 16 or fewer).
-  Same contract as getrandom: the byte count on success, -1 on failure. }
-function c_getentropy(ABuf: Pointer; ALen: Int64): Int32;
-  external name 'getentropy';
-
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
-begin
-  if c_getentropy(ABuf, ALen) = 0 then
-    Result := ALen
-  else
-    Result := -1;
-end;
-{$ELSE}
-function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;
-  external name 'getrandom';
-{$ENDIF}
+{ The operating system's CSPRNG, through the platform port (getentropy on
+  POSIX, BCryptGenRandom on Windows): 1 on success, 0 on failure. }
+function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
+  external name '_RandomBytes';
 
 function HexDigit(AValue: Int): Byte;
 begin
@@ -242,9 +220,9 @@ var
   Msb, Lsb: Int64;
   I: Int;
 begin
-  if c_getrandom(@Buf[0], 16, 0) <> 16 then
+  if _RandomBytes(@Buf[0], 16) <> 1 then
     raise EUuidRandomFailure.Create(
-      'TUuid.RandomUuid: getrandom(2) failed to supply 16 random bytes');
+      'TUuid.RandomUuid: the system CSPRNG failed to supply 16 random bytes');
 
   { version 4: high nibble of byte 6 = 0100 }
   Buf[6] := (Buf[6] and $0F) or $40;

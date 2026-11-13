@@ -142,6 +142,10 @@ function sched_getaffinity(Pid: Int32; CpuSetSize: Int64;
 function futex(Uaddr: Pointer; Op, Val: Int32; Timeout: Pointer;
                Uaddr2: Pointer; Val3: Int32): Int32;
 function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
+{ getentropy(buf, len): fill buf with len (at most 256) random bytes from
+  getrandom; 0 on success, -1 on failure -- the libc contract, which the
+  platform adapter binds on every POSIX target. }
+function getentropy(Buf: Pointer; Len: Int64): Int32;
 function arch_prctl(Code: Int32; Addr: Pointer): Int32;
 function kill(Pid, Sig: Int32): Int32;
 { poll(2) over an array of struct pollfd (fd: Int32, events, revents: Int16):
@@ -590,6 +594,25 @@ asm
     movq $202, %rax      { SYS_futex }
     syscall
     ret
+end;
+
+function getentropy(Buf: Pointer; Len: Int64): Int32;
+var
+  Got, N: Int64;
+begin
+  if (Len < 0) or (Len > 256) then
+    Exit(-1);
+  Got := 0;
+  while Got < Len do
+  begin
+    N := getrandom(Buf + Got, Len - Got, 0);
+    if N = -4 then
+      Continue;                     { EINTR }
+    if N <= 0 then
+      Exit(-1);
+    Got := Got + N;
+  end;
+  Result := 0;
 end;
 
 function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;

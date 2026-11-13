@@ -191,6 +191,10 @@ function poll(Fds: Pointer; NFds: Int64; Timeout: Int32): Int32;
 { getrandom(buf, count, flags): fill buf with count random bytes; returns the
   count written or -errno.  Used by mkstemp's random suffix. }
 function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;
+{ getentropy(buf, len): fill buf with len (at most 256) random bytes from
+  getrandom; 0 on success, -1 on failure -- the libc contract, which the
+  platform adapter binds on every POSIX target. }
+function getentropy(Buf: Pointer; Len: Int64): Int32;
 { Raw __getcwd(2): fills Buf (up to Size); returns 0 on success or -errno.  The
   wrapper in the posix layer adapts that to libc's buffer-pointer contract. }
 function sys_getcwd(Buf: PChar; Size: Int64): Int64;
@@ -1011,6 +1015,25 @@ asm
     negq %rax
 .Lok_poll:
     ret
+end;
+
+function getentropy(Buf: Pointer; Len: Int64): Int32;
+var
+  Got, N: Int64;
+begin
+  if (Len < 0) or (Len > 256) then
+    Exit(-1);
+  Got := 0;
+  while Got < Len do
+  begin
+    N := getrandom(Buf + Got, Len - Got, 0);
+    if N = -4 then
+      Continue;                     { EINTR }
+    if N <= 0 then
+      Exit(-1);
+    Got := Got + N;
+  end;
+  Result := 0;
 end;
 
 function getrandom(Buf: Pointer; Count: Int64; Flags: Int32): Int64;

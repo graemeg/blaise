@@ -55,6 +55,7 @@ function  _GetProcessID: Int32;
   `external name`. }
 function  _ReadLink(const Path: string): string;
 function  _MakeExecutable(const Path: string): Int32;
+function  _RandomBytes(Buf: Pointer; Count: Int): Int32;
 function  _GetEnvVar(const Name: string): Pointer;
 procedure _Sleep(Ms: Int32);
 procedure _Halt(Code: Int32);
@@ -205,6 +206,11 @@ end;
 function _MakeExecutable(const Path: string): Int32;
 begin
   if GRtlPlatform.MakeExecutable(Path) then Result := 1 else Result := 0;
+end;
+
+function _RandomBytes(Buf: Pointer; Count: Int): Int32;
+begin
+  if GRtlPlatform.RandomBytes(Buf, Count) then Result := 1 else Result := 0;
 end;
 
 function _GetEnvVar(const Name: string): Pointer;

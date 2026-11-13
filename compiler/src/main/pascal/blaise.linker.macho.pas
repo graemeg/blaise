@@ -462,9 +462,9 @@ end;
   silently bound to libSystem as __UpperCase). }
 function IsKnownLibSystemImport(const AName: string): Boolean;
 const
-  KNOWN: array[0..47] of string = (
+  KNOWN: array[0..48] of string = (
     'abort', 'chdir', 'chmod', 'clock_gettime', 'close', 'dup2',
-    'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getenv',
+    'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getentropy', 'getenv',
     'getpid', 'gmtime_r', 'localtime_r', 'lseek', 'lstat', 'memcmp', 'memcpy',
     'memmove', 'memset', 'mkdir', 'mkstemp', 'mmap', 'munmap',
     'nanosleep', 'open', 'pipe', 'pthread_create', 'pthread_join',

@@ -63,6 +63,7 @@ type
     function GetProcessID: Int32; override;
     function ReadLink(const APath: string): string; override;
     function MakeExecutable(const APath: string): Boolean; override;
+    function RandomBytes(ABuf: Pointer; ACount: Int): Boolean; override;
     function GetEnvVar(const AName: string): string; override;
     procedure Sleep(AMilliseconds: Int32); override;
     procedure Halt(AExitCode: Int32); override;
@@ -190,6 +191,7 @@ function  libc_mkdir(Path: PChar; Mode: Int32): Int32;                   externa
 function  libc_rmdir(Path: PChar): Int32;                                  external name 'rmdir';
 function  libc_readlink(Path: PChar; Buf: PChar; Size: Int64): Int64; external name 'readlink';
 function  libc_chmod(Path: PChar; Mode: Int32): Int32; external name 'chmod';
+function  libc_getentropy(Buf: Pointer; Len: Int64): Int32; external name 'getentropy';
 function  libc_unlink(Path: PChar): Int32;                                 external name 'unlink';
 function  libc_rename(OldPath, NewPath: PChar): Int32;                     external name 'rename';
 function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       external name 'getcwd';
@@ -825,6 +827,26 @@ begin
     Exit;
   Buf[N] := 0;
   Result := string(PChar(@Buf[0]));
+end;
+
+{ getentropy is the one CSPRNG call every POSIX target has (glibc 2.25+,
+  FreeBSD 12+, macOS 10.12+, and the static leaves); it fills at most 256
+  bytes a call. }
+function TRtlPlatformPosix.RandomBytes(ABuf: Pointer; ACount: Int): Boolean;
+var
+  Done, N: Int;
+begin
+  Done := 0;
+  while Done < ACount do
+  begin
+    N := ACount - Done;
+    if N > 256 then
+      N := 256;
+    if libc_getentropy(ABuf + Done, N) <> 0 then
+      Exit(False);
+    Done := Done + N;
+  end;
+  Result := True;
 end;
 
 function TRtlPlatformPosix.MakeExecutable(const APath: string): Boolean;
