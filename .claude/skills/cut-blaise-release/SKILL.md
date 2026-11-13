@@ -6,9 +6,11 @@ description: |
   verifies every self-hosting fixpoint on macOS, runs the full suite on macOS
   and on the Linux x86-64 VM, commits, tags, archives the macOS stage-2 binary
   under releases/vX.Y.Z/ (NOT committed -- releases/ is gitignored), cross-
-  compiles the Linux and FreeBSD x86-64 binaries (the Linux one proven byte-
-  identical to its own Linux self-build), builds self-contained macOS, Linux
-  and FreeBSD release tarballs (binary + blaise.cfg + RTL + stdlib source),
+  compiles the Linux, FreeBSD and Windows x86-64 binaries (the Linux one
+  proven byte-identical to its own Linux self-build, the Windows one to its
+  self-build in the Windows guest), builds self-contained macOS, Linux and
+  FreeBSD release tarballs and a Windows zip (binary + blaise.cfg + RTL +
+  stdlib source),
   renames + refreshes the -pre bootstrap dir, writes the community post +
   changelog into releases/, then bumps to the next -SNAPSHOT version.  Use
   when asked to "cut a release", "release v0.X.Y", "tag a release", or after
@@ -42,9 +44,14 @@ suffix (0.15.0 -> 0.16.0-SNAPSHOT).  Confirm with the user if unsure.
 | `macos-arm64` | native stage-2 from `scripts/macos-dev.sh fixpoint` | all fixpoints + full suite on the Mac |
 | `linux-x86_64` | cross-compiled on the Mac | byte-identical to its own Linux self-build (VM) + full suite on the VM |
 | `freebsd-x86_64` | cross-compiled on the Mac | ELF shape + version string here; the master CI `freebsd-crosscheck` job runs the self-host fixpoint and the full suite in a FreeBSD VM |
+| `windows-x86_64` | cross-compiled on the Mac | `scripts/windows-vm.sh selfhost` (byte-identical self-build in the Windows guest, `WINDOWS_SELFHOST_OK`) + the zip unpacked and used there; the CI `windows-check` job repeats the gate on real x64 hardware |
 
-The compiler also accepts `linux-i386`, `linux-arm64` and `windows-x86_64`.
-They are NOT release targets: no tarball, unless the user asks for one.
+The compiler also accepts `linux-i386` and `linux-arm64`.  They are NOT
+release targets: no tarball, unless the user asks for one.
+
+The Windows guest (a UTM VM, `scripts/windows-vm.sh start`) may be stopped.
+If the user cannot start it, ship the zip only once the master CI
+`windows-check` job is green, and say so in the report.
 
 The Linux tarball name is a **CI contract**: `bootstrap.yml` cold-starts from
 `blaise-${STAGE1_TAG}-linux-x86_64.tar.gz` on the GitHub release and takes the
@@ -249,13 +256,13 @@ Now run the Linux half of Step 3.
 
 ## Step 5 -- archive and cross-compile the release binaries
 
-All three binaries are built while the tree is still at `<X.Y.Z>` --
+All four binaries are built while the tree is still at `<X.Y.Z>` --
 **before** Step 8's dev bump.  A binary built after the bump reports
 `<next>-SNAPSHOT`.
 
 ```bash
 V=<X.Y.Z>
-mkdir -p releases/v$V target/rel/linux target/rel/freebsd
+mkdir -p releases/v$V target/rel/linux target/rel/freebsd target/rel/windows
 cp compiler/target/blaise releases/v$V/blaise.new && mv releases/v$V/blaise.new releases/v$V/blaise
 releases/v$V/blaise --help | head -1         # Blaise Compiler v<X.Y.Z>
 codesign -v releases/v$V/blaise && echo signed
@@ -266,12 +273,12 @@ signed binary's code signature per vnode, so overwriting an existing binary
 in place with different bytes gets every later exec SIGKILLed (exit 137).
 `cp` to a new name and `mv` it over is a new inode.
 
-Cross-compile the two x86-64 binaries with the macOS release binary, using
+Cross-compile the three x86-64 binaries with the macOS release binary, using
 the same flags `fixpoint-binary.sh` uses (the output basename must be
-`blaise`):
+`blaise`; the Windows one gets `.exe` appended):
 
 ```bash
-for T in linux freebsd; do
+for T in linux freebsd windows; do
   UC=$(mktemp -d)
   releases/v$V/blaise --source compiler/src/main/pascal/Blaise.pas \
     --unit-path compiler/src/main/pascal --unit-path stdlib/src/main/pascal \
@@ -281,9 +288,10 @@ for T in linux freebsd; do
 done
 file target/rel/linux/blaise     # ELF 64-bit ... x86-64, version 1 (SYSV), statically linked
 file target/rel/freebsd/blaise   # ELF 64-bit ... x86-64, version 1 (FreeBSD), statically linked
-for T in linux freebsd; do
-  strings target/rel/$T/blaise | grep -q "blaise-$V+" \
-    || { echo "ERROR: $T binary is not v$V"; exit 1; }
+file target/rel/windows/blaise.exe   # PE32+ executable (console) x86-64, for MS Windows
+for B in linux/blaise freebsd/blaise windows/blaise.exe; do
+  strings target/rel/$B | grep -q "blaise-$V+" \
+    || { echo "ERROR: $B is not v$V"; exit 1; }
 done
 ```
 
@@ -306,6 +314,21 @@ It must print `LINUX_SELFHOST_IDENTICAL` (held for the v0.15 cycle,
 checked 2026-10-23).  The Linux binary is freestanding and static -- no glibc
 dependency.  Releases up to v0.14.0 shipped a cc-linked dynamic binary built
 on Linux; say so in the changelog.
+
+**Prove the Windows binary is a Windows fixpoint**: `windows-vm.sh selfhost`
+cross-builds `blaise.exe` with `compiler/target/blaise` -- still the release
+binary at this point -- and has it rebuild itself in the guest:
+
+```bash
+scripts/windows-vm.sh start      # if it is not running
+scripts/windows-vm.sh selfhost   # must print WINDOWS_SELFHOST_OK
+cmp target/rel/windows/blaise.exe compiler/target/it/windows/selfhost/blaise.exe \
+  && echo WINDOWS_RELEASE_BINARY_IS_THE_GATED_ONE
+```
+
+The `cmp` shows the binary going into the zip is the one the gate passed
+(both are built by the same compiler from the same tree, so they must be
+byte-identical; a difference means a nondeterminism to report).
 
 The FreeBSD binary cannot run here.  After the release commit reaches
 master, the `freebsd-crosscheck` job (master tier) runs the self-host
@@ -388,6 +411,33 @@ make_tarball target/rel/linux/blaise    linux   x86_64
 make_tarball target/rel/freebsd/blaise  freebsd x86_64
 ```
 
+Windows gets a zip with the same layout, `blaise.exe` in place of `blaise`
+and CRLF text files, since that is what Windows users unpack:
+
+```bash
+STAGING=$(mktemp -d); DIRNAME="blaise-v$V-windows-x86_64"; D="$STAGING/$DIRNAME"
+mkdir -p "$D/rtl-src" "$D/stdlib-src"
+cp target/rel/windows/blaise.exe "$D/blaise.exe"
+cp compiler/src/main/pascal/*.pas "$D/rtl-src/"
+cp stdlib/src/main/pascal/*.pas   "$D/stdlib-src/"
+cp README.adoc NOTICE LICENSE "$D/"
+printf '%s\r\n' '# Blaise compiler configuration.  Relative paths resolve against this' \
+  "# file's directory, so the compiler finds its RTL + stdlib source." \
+  'rtl-src=rtl-src' 'unit-path=stdlib-src' > "$D/blaise.cfg"
+printf '%s\r\n' 'program Hello;' 'begin' "  WriteLn('Hello from Blaise!');" 'end.' > "$D/hello.pas"
+printf '%s\r\n' 'Blaise -- self-contained toolchain.  From this directory:' \
+  '    blaise.exe --source hello.pas --output hello && hello.exe' \
+  'The bundled blaise.cfg supplies the RTL + stdlib source locations, so no' \
+  'extra flags are needed.  The directory can go on PATH.  If you move' \
+  'blaise.exe itself, keep blaise.cfg, rtl-src\ and stdlib-src\ beside it, or' \
+  'pass --rtl-src DIR --unit-path DIR explicitly.  A program that uses' \
+  'Net.Tls needs OpenSSL 3 (libssl-3-x64.dll, libcrypto-3-x64.dll) on the' \
+  'DLL search path.  See README.adoc.' > "$D/USAGE.txt"
+( cd "$STAGING" && rm -f "$OLDPWD/releases/$DIRNAME.zip" && zip -qr -X "$OLDPWD/releases/$DIRNAME.zip" "$DIRNAME" )
+rm -rf "$STAGING"
+unzip -l releases/$DIRNAME.zip | head -6
+```
+
 `COPYFILE_DISABLE=1` keeps macOS `tar` from adding `._*` AppleDouble files,
 which would otherwise appear in every tarball.
 
@@ -400,6 +450,16 @@ X=$(mktemp -d); tar -xzf releases/blaise-v$V-macos-arm64.tar.gz -C "$X"
 X=$(mktemp -d); tar -xzf releases/blaise-v$V-linux-x86_64.tar.gz -C "$X"
 orb -m "${BLAISE_VM:-blaise-x86}" bash -c "cd '$X/blaise-v$V-linux-x86_64' && ./blaise --source hello.pas --output /tmp/relh && /tmp/relh"
 # each must print: Hello from Blaise!
+```
+
+And the Windows zip, unpacked and used in the guest (`tar` there reads zip):
+
+```bash
+KEY=${BLAISE_WINDOWS_KEY:-$HOME/.ssh/blaise_windows}
+scp -q -i "$KEY" -P 2222 releases/blaise-v$V-windows-x86_64.zip blaise@127.0.0.1:C:/blaise-test/rel.zip
+scripts/windows-vm.sh ssh "cd /d C:\blaise-test && rmdir /s /q relzip 2>nul & mkdir relzip && tar -xf rel.zip -C relzip && cd relzip\blaise-v$V-windows-x86_64 && blaise.exe --source hello.pas --output hello && hello.exe"
+scripts/windows-vm.sh ssh "cd /d C:\blaise-test && rmdir /s /q relzip & del rel.zip"
+# must print: Hello from Blaise!
 ```
 
 **Never `git add` binaries or tarballs.**  `releases/` and `target/` are
@@ -503,15 +563,17 @@ git log $PREV..v<X.Y.Z> --oneline | grep ' feat'   # features; also ' fix', ' pe
 - Tag `v<X.Y.Z>` (local, not pushed); the last 3-4 commits.
 - The OK lines: BINARY_FIXPOINT_OK (macos-dev), NATIVE_FIXPOINT_OK (N lines),
   NATIVE_INTERNAL_OK, WARMCACHE_FIXPOINT_OK, BINARY_FIXPOINT_OK (script),
-  INITORDER_FIXPOINT_OK, LINUX_SELFHOST_IDENTICAL.
+  INITORDER_FIXPOINT_OK, LINUX_SELFHOST_IDENTICAL, WINDOWS_SELFHOST_OK.
 - Test counts: macOS suite + stdlib; Linux VM suite + stdlib (and the Rosetta
   artefact).
 - `releases/v<X.Y.Z>/blaise`; the `-pre` dir renamed and refreshed.
-- The three tarballs to upload:
+- The four archives to upload:
   `releases/blaise-v<X.Y.Z>-macos-arm64.tar.gz`,
   `releases/blaise-v<X.Y.Z>-linux-x86_64.tar.gz` (the CI anchor reads this
   one), `releases/blaise-v<X.Y.Z>-freebsd-x86_64.tar.gz` (verified by the
-  master `freebsd-crosscheck` job, or on a FreeBSD box).
+  master `freebsd-crosscheck` job, or on a FreeBSD box), and
+  `releases/blaise-v<X.Y.Z>-windows-x86_64.zip` (WINDOWS_SELFHOST_OK in the
+  guest, or the master `windows-check` job).
 - The post and changelog paths.
 - What waits on the user: pushing (via `ci-verify-then-master`), pushing the
   tag, publishing the GitHub release, and only then the Step 8b anchor
