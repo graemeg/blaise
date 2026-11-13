@@ -462,15 +462,15 @@ end;
   silently bound to libSystem as __UpperCase). }
 function IsKnownLibSystemImport(const AName: string): Boolean;
 const
-  KNOWN: array[0..48] of string = (
+  KNOWN: array[0..53] of string = (
     'abort', 'chdir', 'chmod', 'clock_gettime', 'close', 'dup2',
-    'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getentropy', 'getenv',
-    'getpid', 'gmtime_r', 'localtime_r', 'lseek', 'lstat', 'memcmp', 'memcpy',
+    'execve', 'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getentropy', 'getenv',
+    'fcntl', 'getpid', 'gmtime_r', 'kill', 'localtime_r', 'lseek', 'lstat', 'memcmp', 'memcpy',
     'memmove', 'memset', 'mkdir', 'mkstemp', 'mmap', 'munmap',
-    'nanosleep', 'open', 'pipe', 'pthread_create', 'pthread_join',
+    'nanosleep', 'open', 'pipe', 'poll', 'pthread_create', 'pthread_join',
     'pthread_key_create', 'pthread_mutex_destroy', 'pthread_mutex_init',
     'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_setspecific',
-    'read', 'readlink', 'rename', 'rmdir', 'stat', 'strlen', 'sysconf', 'system',
+    'read', 'readlink', 'rename', 'rmdir', 'signal', 'stat', 'strlen', 'sysconf', 'system',
     'time', 'unlink', 'waitpid');
 var
   I: Int;
@@ -483,7 +483,7 @@ begin
      (AName = 'pthread_cond_wait') or (AName = 'pthread_cond_broadcast') or
      (AName = 'pthread_cond_timedwait_relative_np') then
     Exit(True);
-  for I := 0 to 46 do
+  for I := 0 to Length(KNOWN) - 1 do
     if AName = KNOWN[I] then
       Exit(True);
   Result := False;
