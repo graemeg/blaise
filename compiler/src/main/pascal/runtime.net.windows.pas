@@ -33,6 +33,16 @@ function socket(ADomain, AType, AProtocol: Int32): Int32;
 function bind(AFd: Int32; AAddr: Pointer; AAddrLen: Int32): Int32;
 function listen(AFd, ABacklog: Int32): Int32;
 function accept(AFd: Int32; AAddr: Pointer; AAddrLen: Pointer): Int32;
+{ accept4: accept, then SOCK_NONBLOCK ($800, rtl.platform.layout.windows'
+  _SockNonBlock) sets the new socket's mode; SOCK_CLOEXEC is what every
+  socket here has already. }
+function accept4(AFd: Int32; AAddr: Pointer; AAddrLen: Pointer;
+  AFlags: Int32): Int32;
+{ pipe(2) as a connected pair of loopback TCP sockets -- AFds[0] the read
+  end, AFds[1] the write end -- because WSAPoll waits only on sockets and
+  the fibre reactor parks on a pipe's read end (async.io's DNS completion).
+  Not for a child process's standard handles. }
+function pipe(AFds: Pointer): Int32;
 function connect(AFd: Int32; AAddr: Pointer; AAddrLen: Int32): Int32;
 function setsockopt(AFd, ALevel, AOptName: Int32; AOptVal: Pointer;
   AOptLen: Int32): Int32;
@@ -70,12 +80,23 @@ function _WinFdAddFlags(AHandle: Pointer; AFlags: Int32): Int32;
 function _WinFdFlags(Fd: Int32): Int32; external name '_WinFdFlags';
 function _WinFdSetFlags(Fd: Int32; AFlags: Int32): Boolean;
   external name '_WinFdSetFlags';
+function _WinFdClose(Fd: Int32): Int32; external name '_WinFdClose';
 type
   { runtime.syscall.windows' TWinSocketCloser }
   TSocketCloser = function(AHandle: Pointer): Int32;
 
 procedure _WinSetSocketCloser(ACloser: TSocketCloser);
   external name '_WinSetSocketCloser';
+
+type
+  { runtime.syscall.windows' TWinSocketSender }
+  TSocketSender = function(AHandle: Pointer; ABuf: Pointer;
+    ACount: Int64): Int64;
+
+procedure _WinSetSocketSender(ASender: TSocketSender);
+  external name '_WinSetSocketSender';
+procedure _WinSetSocketReceiver(AReceiver: TSocketSender);
+  external name '_WinSetSocketReceiver';
 function _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer); external name '_BlaiseFreeMem';
 
@@ -180,6 +201,28 @@ begin
   Result := GWsCloseSocket(UInt64(AHandle));
 end;
 
+{ Winsock counts in an int; a longer request moves part of it, as a short
+  read or write does. }
+function IoLength(ALen: Int64): Int32;
+begin
+  if ALen > $7FFFFFFF then
+    Result := $7FFFFFFF
+  else
+    Result := Int32(ALen);
+end;
+
+{ The sender write(2) uses for a socket descriptor. }
+function WsSendHandle(AHandle: Pointer; ABuf: Pointer; ACount: Int64): Int64;
+begin
+  Result := GWsSend(UInt64(AHandle), ABuf, IoLength(ACount), 0);
+end;
+
+{ The receiver read(2) uses for a socket descriptor. }
+function WsRecvHandle(AHandle: Pointer; ABuf: Pointer; ACount: Int64): Int64;
+begin
+  Result := GWsRecv(UInt64(AHandle), ABuf, IoLength(ACount), 0);
+end;
+
 { Load ws2_32 and start Winsock 2.2; False when that failed. }
 function WsLoad: Boolean;
 var
@@ -221,6 +264,8 @@ begin
   if GWsStartup($0202, @Data[0]) <> 0 then
     Exit;
   _WinSetSocketCloser(@WsCloseHandle);
+  _WinSetSocketSender(@WsSendHandle);
+  _WinSetSocketReceiver(@WsRecvHandle);
   Result := True;
 end;
 
@@ -317,6 +362,73 @@ begin
   Result := DescriptorOfSocket(C, _WinFdFlags(AFd) and WIN_FD_NONBLOCK);
 end;
 
+function accept4(AFd: Int32; AAddr: Pointer; AAddrLen: Pointer;
+  AFlags: Int32): Int32;
+var
+  Mode: UInt32;
+begin
+  Result := accept(AFd, AAddr, AAddrLen);
+  if (Result < 0) or ((AFlags and O_NONBLOCK) = 0) then
+    Exit;
+  Mode := 1;
+  if GWsIoctl(UInt64(_WinHandleOfFd(Result)), FIONBIO, @Mode) <> 0 then
+  begin
+    _WinFdClose(Result);
+    Exit(-1);
+  end;
+  _WinFdSetFlags(Result, _WinFdFlags(Result) or WIN_FD_NONBLOCK);
+end;
+
+function pipe(AFds: Pointer): Int32;
+var
+  L, W, R: UInt64;
+  Addr: array[0..15] of Byte;
+  Len, I: Int32;
+  ReadFd, WriteFd: Int32;
+begin
+  if not WsReady() then
+    Exit(-1);
+  for I := 0 to 15 do
+    Addr[I] := 0;
+  PUInt16(@Addr[0])^ := 2;                 { AF_INET, port 0: any free one }
+  PUInt32(@Addr[4])^ := $0100007F;         { 127.0.0.1, network order }
+  L := GWsSocket(2, 1, 0);
+  if L = INVALID_SOCKET then
+    Exit(-1);
+  W := INVALID_SOCKET;
+  R := INVALID_SOCKET;
+  Len := 16;
+  if (GWsBind(L, @Addr[0], 16) = 0) and (GWsListen(L, 1) = 0) and
+     (GWsGetSockName(L, @Addr[0], @Len) = 0) then
+  begin
+    W := GWsSocket(2, 1, 0);
+    if (W <> INVALID_SOCKET) and (GWsConnect(W, @Addr[0], 16) = 0) then
+      R := GWsAccept(L, nil, nil);
+  end;
+  GWsCloseSocket(L);
+  if R = INVALID_SOCKET then
+  begin
+    if W <> INVALID_SOCKET then
+      GWsCloseSocket(W);
+    Exit(-1);
+  end;
+  ReadFd := DescriptorOfSocket(R, 0);
+  if ReadFd < 0 then
+  begin
+    GWsCloseSocket(W);
+    Exit(-1);
+  end;
+  WriteFd := DescriptorOfSocket(W, 0);
+  if WriteFd < 0 then
+  begin
+    _WinFdClose(ReadFd);
+    Exit(-1);
+  end;
+  PInt32(AFds)^ := ReadFd;
+  PInt32(AFds + 4)^ := WriteFd;
+  Result := 0;
+end;
+
 function connect(AFd: Int32; AAddr: Pointer; AAddrLen: Int32): Int32;
 var
   S: UInt64;
@@ -373,16 +485,6 @@ begin
   if S = INVALID_SOCKET then
     Exit(-1);
   Result := GWsGetPeerName(S, AAddr, AAddrLen);
-end;
-
-{ Winsock counts in an int; a longer request moves part of it, as a short
-  read or write does. }
-function IoLength(ALen: Int64): Int32;
-begin
-  if ALen > $7FFFFFFF then
-    Result := $7FFFFFFF
-  else
-    Result := Int32(ALen);
 end;
 
 function recv(AFd: Int32; ABuf: Pointer; ALen: Int64; AFlags: Int32): Int64;

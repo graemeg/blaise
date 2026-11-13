@@ -86,6 +86,13 @@ procedure _ParkWake(AAddr: Pointer; ACount: Int32);
   (FreeBSD is 4 — its 1 is CLOCK_VIRTUAL.) }
 function _ClockMonotonicId: Int32;
 
+{ The running thread's stack bounds as the OS records them, and setting
+  them, for a fibre switch (async.fibers.context).  Only Windows keeps them
+  (its thread environment block); here they are nil and setting them does
+  nothing. }
+procedure _FiberStackBounds(out ABase, ALimit: Pointer);
+procedure _FiberSetStackBounds(ABase, ALimit: Pointer);
+
 { Socket-layer OS constants (Net.Sockets / async.io) — the per-platform layer
   the Net.Sockets PORTING BOUNDARY note calls for.  Linux x86_64 values. }
 function _SolSocket: Int32;      { SOL_SOCKET   = 1 }
@@ -269,6 +276,16 @@ end;
 function _ClockMonotonicId: Int32;
 begin
   Result := 1;
+end;
+
+procedure _FiberStackBounds(out ABase, ALimit: Pointer);
+begin
+  ABase := nil;
+  ALimit := nil;
+end;
+
+procedure _FiberSetStackBounds(ABase, ALimit: Pointer);
+begin
 end;
 
 function _SolSocket: Int32;    begin Result := 1;    end;

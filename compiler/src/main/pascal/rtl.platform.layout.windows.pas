@@ -54,6 +54,27 @@ type
   memory only and ignores the flags. }
 function _MapAnonFlag: Int32;
 
+{ CLOCK_MONOTONIC for runtime.syscall.windows' clock_gettime: 1, the
+  performance counter. }
+function _ClockMonotonicId: Int32;
+
+{ Park and wake for idle fibre workers (async.fibers): WaitOnAddress and
+  WakeByAddressSingle/All, loaded on first use from the synchronisation API
+  set so a program that never parks does not import it.  _ParkWait blocks
+  while the 32-bit word at AAddr equals AExpected, at most for the relative
+  struct timespec at ATs (never nil); a spurious return is allowed. }
+procedure _ParkWait(AAddr: Pointer; AExpected: Int32; ATs: Pointer);
+procedure _ParkWake(AAddr: Pointer; ACount: Int32);
+
+{ The running thread's stack bounds in its thread environment block
+  (NT_TIB StackBase at %gs:8, StackLimit at %gs:16), and setting them: a
+  fibre switch points them at the incoming fibre's stack, which is the
+  stack Windows then checks a stack address against.  DeallocationStack is
+  left alone: it names the stack the system frees when the thread exits,
+  which is always the thread's own. }
+procedure _FiberStackBounds(out ABase, ALimit: Pointer);
+procedure _FiberSetStackBounds(ABase, ALimit: Pointer);
+
 { Socket-layer constants (Net.Sockets, async.io), as the POSIX-named socket
   leaves in runtime.net.windows take them: Winsock's own values where
   Winsock has the option, and the fcntl vocabulary those leaves define. }
@@ -82,6 +103,26 @@ implementation
 function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   external name 'write';
 procedure _exit(Code: Int32); external name '_exit';
+
+function W32LoadLibraryA(AName: PChar): Pointer;
+  external 'kernel32' name 'LoadLibraryA';
+function W32GetProcAddress(AModule: Pointer; AName: PChar): Pointer;
+  external 'kernel32' name 'GetProcAddress';
+procedure W32Sleep(AMilliseconds: UInt32); external 'kernel32' name 'Sleep';
+
+type
+  TWaitOnAddress = function(AAddr: Pointer; ACompare: Pointer; ASize: UInt64;
+    AMilliseconds: UInt32): Int32; cdecl;
+  TWakeByAddress = procedure(AAddr: Pointer); cdecl;
+
+var
+  { 0 until the first park, then 1 (loaded) or -1 (not available: park
+    falls back to a short sleep).  Racing first calls load the same module
+    and store the same addresses. }
+  GParkState: Int32;
+  GWaitOnAddress: TWaitOnAddress;
+  GWakeByAddressSingle: TWakeByAddress;
+  GWakeByAddressAll: TWakeByAddress;
 
 { Report a POSIX layout accessor reached on Windows, and end the program. }
 procedure NotOnWindows(const AName: string);
@@ -158,6 +199,86 @@ end;
 function _MapAnonFlag: Int32;
 begin
   Result := 0;
+end;
+
+function _ClockMonotonicId: Int32;
+begin
+  Result := 1;
+end;
+
+function ParkReady: Boolean;
+var
+  H: Pointer;
+begin
+  if GParkState = 0 then
+  begin
+    H := W32LoadLibraryA(PChar('api-ms-win-core-synch-l1-2-0.dll'));
+    if H <> nil then
+    begin
+      GWaitOnAddress := TWaitOnAddress(W32GetProcAddress(H,
+        PChar('WaitOnAddress')));
+      GWakeByAddressSingle := TWakeByAddress(W32GetProcAddress(H,
+        PChar('WakeByAddressSingle')));
+      GWakeByAddressAll := TWakeByAddress(W32GetProcAddress(H,
+        PChar('WakeByAddressAll')));
+    end;
+    if (H <> nil) and (Pointer(GWaitOnAddress) <> nil) and
+       (Pointer(GWakeByAddressSingle) <> nil) and
+       (Pointer(GWakeByAddressAll) <> nil) then
+      GParkState := 1
+    else
+      GParkState := -1;
+  end;
+  Result := GParkState = 1;
+end;
+
+procedure _ParkWait(AAddr: Pointer; AExpected: Int32; ATs: Pointer);
+var
+  Ms: Int64;
+  Expected: Int32;
+begin
+  Ms := PInt64(ATs)^ * 1000 + (PInt64(ATs + 8)^ + 999999) div 1000000;
+  if Ms < 0 then
+    Ms := 0;
+  if Ms > $7FFFFFFF then
+    Ms := $7FFFFFFF;
+  if not ParkReady() then
+  begin
+    { no WaitOnAddress: a bounded nap, which the caller treats as a
+      spurious wake }
+    if Ms > 1 then
+      Ms := 1;
+    W32Sleep(UInt32(Ms));
+    Exit;
+  end;
+  Expected := AExpected;
+  GWaitOnAddress(AAddr, @Expected, 4, UInt32(Ms));
+end;
+
+procedure _ParkWake(AAddr: Pointer; ACount: Int32);
+begin
+  if not ParkReady() then
+    Exit;
+  if ACount <= 1 then
+    GWakeByAddressSingle(AAddr)
+  else
+    GWakeByAddressAll(AAddr);
+end;
+
+procedure _FiberStackBounds(out ABase, ALimit: Pointer); assembler; nostackframe;
+asm
+    movq %gs:8, %rax
+    movq %rax, (%rdi)
+    movq %gs:16, %rax
+    movq %rax, (%rsi)
+    ret
+end;
+
+procedure _FiberSetStackBounds(ABase, ALimit: Pointer); assembler; nostackframe;
+asm
+    movq %rdi, %gs:8
+    movq %rsi, %gs:16
+    ret
 end;
 
 function _SolSocket: Int32;

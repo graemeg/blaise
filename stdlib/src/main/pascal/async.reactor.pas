@@ -21,8 +21,9 @@ unit async.reactor;
 // scheduler (async.fibers) pulls in the right adapter unit for the RESOLVED
 // --target via the project's ONE target-driven conditional (OS defines
 // follow --target, not the build host, so cross-compilation selects the
-// right adapter in both directions).  A TIocpReactor (Windows) slots in
-// later as one more unit + one more branch at that seam.
+// right adapter in both directions).  Windows uses async.reactor.poll, over
+// poll(2) as runtime.net.windows supplies it on WSAPoll: the readiness
+// interface here maps onto a poll, where IOCP reports completions.
 
 interface
 

@@ -116,6 +116,8 @@ implementation
 
 function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
   external name 'write';
+function _sys_read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
+  external name 'read';
 procedure _exit_running_handlers(Code: Int32); external name 'exit';
 function _IntToStr(N: Int32): Pointer;   external name '_IntToStr';
 function _Int64ToStr(N: Int64): Pointer;   external name '_Int64ToStr';
@@ -1219,31 +1221,13 @@ begin
     FILE_APPEND_DATA or SYNCHRONIZE, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL));
 end;
 
-{ A pipe whose writer has gone reads as the end of the data, as on POSIX. }
+{ read(2) (runtime.syscall.windows): a pipe whose writer has gone reads as
+  the end of the data, as on POSIX, and a socket reads the Winsock way. }
 function TRtlPlatformWindows.FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int;
-var
-  H: Pointer;
-  Chunk, Done: UInt32;
-  Err: UInt32;
 begin
   if (Fd < 0) or (Count <= 0) then
     Exit(0);
-  H := _WinHandleOfFd(Fd);
-  if H = nil then
-    Exit(-1);
-  if Count > MAX_IO_CHUNK then
-    Chunk := MAX_IO_CHUNK
-  else
-    Chunk := UInt32(Count);
-  Done := 0;
-  if W32ReadFile(H, Buf, Chunk, @Done, nil) = 0 then
-  begin
-    Err := W32GetLastError();
-    if (Err = ERROR_BROKEN_PIPE) or (Err = ERROR_HANDLE_EOF) then
-      Exit(0);
-    Exit(-1);
-  end;
-  Result := Done;
+  Result := _sys_read(Fd, Buf, Count);
 end;
 
 function TRtlPlatformWindows.FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int;

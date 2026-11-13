@@ -95,6 +95,13 @@ procedure _ParkWake(AAddr: Pointer; ACount: Int32);
   (Linux is 1, FreeBSD 4; Darwin's 4 is CLOCK_MONOTONIC_RAW.) }
 function _ClockMonotonicId: Int32;
 
+{ The running thread's stack bounds as the OS records them, and setting
+  them, for a fibre switch (async.fibers.context).  Only Windows keeps them
+  (its thread environment block); here they are nil and setting them does
+  nothing. }
+procedure _FiberStackBounds(out ABase, ALimit: Pointer);
+procedure _FiberSetStackBounds(ABase, ALimit: Pointer);
+
 { Socket-layer OS constants (Net.Sockets / async.io).  Darwin values from
   sys/socket.h / sys/fcntl.h.  _MsgNoSignal and _SockNonBlock are 0 —
   Darwin has neither flag; callers detect 0 and use their portable
@@ -345,6 +352,16 @@ end;
 function _ClockMonotonicId: Int32;
 begin
   Result := 6;
+end;
+
+procedure _FiberStackBounds(out ABase, ALimit: Pointer);
+begin
+  ABase := nil;
+  ALimit := nil;
+end;
+
+procedure _FiberSetStackBounds(ABase, ALimit: Pointer);
+begin
 end;
 
 function _SolSocket: Int32;    begin Result := $FFFF; end;

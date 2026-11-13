@@ -29,7 +29,7 @@ interface
 
 uses
   SysUtils, Classes, contnrs, blaise.testing, uLexer, uParser, uAST,
-  uSemantic, uUnitLoader, cp.test.e2e.base;
+  uSemantic, uUnitLoader, blaise.codegen.target, cp.test.e2e.base;
 
 type
   TFiberE2ETests = class(TE2ETestCase)
@@ -162,6 +162,40 @@ const
         WriteLn('GUARD_OK')
       else
         WriteLn('GUARD_FAIL status=', Status);
+    end.
+    ''';
+
+  { The same property on Windows, which has no fork: the program runs
+    itself again as a child that writes into the guard page, and the child
+    must end with the access-violation code (design decision D7: a fatal
+    fault exits with its NTSTATUS code).  cmd.exe, which Exec runs the
+    command through, passes the child's exit code on whole. }
+  SrcGuardPageWindows =
+    '''
+    program fiberguardw;
+    uses async.fibers.context;
+    function _Exec(const Cmd: string): Int32; external name '_Exec';
+    var
+      F: PFiber;
+      Code: Int32;
+      P: ^Byte;
+    begin
+      F := FiberSpawn(nil, nil, 0);
+      if ParamCount() > 0 then
+      begin
+        P := F^.StackBase + 8;        { inside the guard page }
+        P^ := 1;
+        Halt(0);                      { reached only if the guard is broken }
+      end;
+      P := F^.StackBase + FiberPageSize;
+      P^ := 1;                        { lowest usable byte: must be writable }
+      WriteLn('USABLE_OK');
+      { the child's fault report is not this program's output }
+      Code := _Exec('"' + ParamStr(0) + '" child 2>nul');
+      if UInt32(Code) = $C0000005 then
+        WriteLn('GUARD_OK')
+      else
+        WriteLn('GUARD_FAIL code=', Code);
     end.
     ''';
 
@@ -336,8 +370,12 @@ end;
 procedure TFiberE2ETests.TestFiberStack_GuardPageFaults;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRTLRunsOnOne(beNative, 'fiber-guard', SrcGuardPage,
-    'USABLE_OK' + LE + 'GUARD_OK' + LE, 0)
+  if E2ETargetDesc().OS = osWindows then
+    AssertRTLRunsOnOne(beNative, 'fiber-guard', SrcGuardPageWindows,
+      'USABLE_OK' + LE + 'GUARD_OK' + LE, 0)
+  else
+    AssertRTLRunsOnOne(beNative, 'fiber-guard', SrcGuardPage,
+      'USABLE_OK' + LE + 'GUARD_OK' + LE, 0)
 end;
 
 procedure TFiberE2ETests.TestFiberExc_TryExcept_SurvivesSwap;

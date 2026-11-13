@@ -297,7 +297,11 @@ uses
   {$IFDEF DARWIN}
   async.reactor.kqueue;
   {$ELSE}
+  {$IFDEF WINDOWS}
+  async.reactor.poll;
+  {$ELSE}
   async.reactor.epoll;
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
 

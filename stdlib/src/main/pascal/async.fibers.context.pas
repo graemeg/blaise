@@ -43,7 +43,10 @@ unit async.fibers.context;
 // Adding a CPU is one more {$IFDEF} arm of the three CPU-specific parts;
 // nothing here is OS-specific beyond the anonymous-mmap flag, which comes
 // from the _MapAnonFlag link-time seam (rtl.platform.layout.<os>) -- same as
-// runtime.mem.
+// runtime.mem -- and the OS's record of the thread's stack bounds, which
+// FiberSwitch points at the incoming fiber's stack through the
+// _FiberSetStackBounds seam (Windows keeps them in the thread environment
+// block; the POSIX layouts ignore them).
 
 interface
 
@@ -80,6 +83,12 @@ type
     ReturnTo: PFiber;      { where the trampoline swaps to when EntryProc
                              returns; updated on every switch into the fiber }
     Done: Boolean;
+    { The stack bounds the OS records for the running thread while this
+      fiber runs (top, and lowest usable address); FiberSwitch installs
+      the incoming fiber's.  Only Windows keeps them (its thread
+      environment block); elsewhere the seam ignores them. }
+    OsStackBase: Pointer;
+    OsStackLimit: Pointer;
   end;
 
 const
@@ -146,6 +155,13 @@ procedure _libc_abort; external name 'abort';
   libc profile binds the real libc mmap, so the flag must be OS-correct here
   (the static-profile syscall leaf would translate, but libc does not). }
 function _MapAnonFlag: Int32; external name '_MapAnonFlag';
+
+{ The OS's record of the running thread's stack bounds, and setting it
+  (rtl.platform.layout.<os>; a no-op except on Windows). }
+procedure _FiberStackBounds(out ABase, ALimit: Pointer);
+  external name '_FiberStackBounds';
+procedure _FiberSetStackBounds(ABase, ALimit: Pointer);
+  external name '_FiberSetStackBounds';
 
 { Exception-state snapshot hooks exported by runtime.exc (design P1). }
 function _ExcGetTop: Pointer; external name '_ExcGetTop';
@@ -372,6 +388,8 @@ begin
   F^.EntryArg := AArg;
   F^.ReturnTo := nil;
   F^.Done := False;
+  F^.OsStackBase := Base + Total;
+  F^.OsStackLimit := Base + FiberPageSize;
 
   Top := Base + Total;
   Top := Pointer(UInt(Top) and UInt($FFFFFFFFFFFFFFF0));
@@ -428,6 +446,7 @@ begin
   F^.EntryArg := nil;
   F^.ReturnTo := nil;
   F^.Done := False;
+  _FiberStackBounds(F^.OsStackBase, F^.OsStackLimit);
   GCurrentFiber := F;
   Result := F;
 end;
@@ -444,6 +463,7 @@ begin
   _ExcSetTop(ATo^.Ctx.ExcTop);
   _ExcSetCurrent(ATo^.Ctx.ExcCurrent);
   GCurrentFiber := ATo;
+  _FiberSetStackBounds(ATo^.OsStackBase, ATo^.OsStackLimit);
   FiberSwapAsm(@AFrom^.Ctx, @ATo^.Ctx);
   { Someone switched back into AFrom: it is current again (its resumer's
     FiberSwitch already set GCurrentFiber := AFrom and reinstated AFrom's

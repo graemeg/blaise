@@ -27,6 +27,12 @@ interface
   bare `write` symbol. }
 function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
 
+{ read(2): up to Count bytes from descriptor Fd into Buf.  Returns the
+  bytes read, 0 at the end of the data (a pipe whose writer has gone reads
+  as the end, as on POSIX), or -1.  A socket is read the Winsock way.
+  Published as the bare `read` symbol by an alias, as write is. }
+function _sys_read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
+
 { mmap(2), anonymous mappings only: committed read-write memory.  Returns
   the address, or Pointer(-1) (MAP_FAILED). }
 function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
@@ -34,6 +40,20 @@ function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Int32;
 { munmap(2): runtime.mem only ever releases a whole mapping, which is what
   MEM_RELEASE requires. }
 function munmap(Addr: Pointer; Length: Int64): Int32;
+{ mprotect(2) over VirtualProtect, for pages mmap committed (a fibre stack's
+  guard page).  PROT_NONE, READ, WRITE and EXEC combine as on POSIX. }
+function mprotect(Addr: Pointer; Length: Int64; Prot: Int32): Int32;
+
+{ clock_gettime(2): clock 0 (CLOCK_REALTIME) from the system time, clock 1
+  (CLOCK_MONOTONIC, rtl.platform.layout.windows' _ClockMonotonicId) from the
+  performance counter.  ATs is a struct timespec (Int64 seconds and
+  nanoseconds). }
+function clock_gettime(AClockId: Int32; ATs: Pointer): Int32;
+{ nanosleep(2): sleep for the struct timespec at AReq, to the
+  high-resolution timer's precision where the system has one (Windows 10
+  1803 on), else Sleep's milliseconds, rounded up.  ARem is never written:
+  nothing interrupts the sleep. }
+function nanosleep(AReq, ARem: Pointer): Int32;
 
 { The at-exit list: handlers run last-registered first, by exit. }
 function __cxa_atexit(Func, Arg, DsoHandle: Pointer): Int32;
@@ -84,6 +104,24 @@ function _WinFdClose(Fd: Int32): Int32;
 { Install the closer for socket descriptors. }
 procedure _WinSetSocketCloser(ACloser: TWinSocketCloser);
 
+type
+  { Sends to a socket: Winsock's send, which runtime.net.windows supplies.
+    The count sent, or -1 with the error set. }
+  TWinSocketSender = function(AHandle: Pointer; ABuf: Pointer;
+    ACount: Int64): Int64;
+
+{ Install the sender write(2) uses for a socket descriptor. }
+procedure _WinSetSocketSender(ASender: TWinSocketSender);
+
+type
+  { Receives from a socket: Winsock's recv (runtime.net.windows).  The
+    count received, 0 at the end, or -1 with the error set. }
+  TWinSocketReceiver = function(AHandle: Pointer; ABuf: Pointer;
+    ACount: Int64): Int64;
+
+{ Install the receiver read(2) uses for a socket descriptor. }
+procedure _WinSetSocketReceiver(AReceiver: TWinSocketReceiver);
+
 implementation
 
 { ---- kernel32 ---- }
@@ -93,6 +131,10 @@ function GetStdHandle(AStdHandle: UInt32): Pointer;
 function Win32WriteFile(AFile: Pointer; ABuffer: Pointer; ACount: UInt32;
   AWritten: Pointer; AOverlapped: Pointer): Int32;
   external 'kernel32' name 'WriteFile';
+function Win32ReadFile(AFile: Pointer; ABuffer: Pointer; ACount: UInt32;
+  ARead: Pointer; AOverlapped: Pointer): Int32;
+  external 'kernel32' name 'ReadFile';
+function GetLastError: UInt32; external 'kernel32' name 'GetLastError';
 function VirtualAlloc(AAddress: Pointer; ASize: UInt64; AAllocationType,
   AProtect: UInt32): Pointer; external 'kernel32' name 'VirtualAlloc';
 function VirtualFree(AAddress: Pointer; ASize: UInt64;
@@ -105,6 +147,23 @@ procedure ReleaseSRWLockExclusive(ALock: Pointer);
   external 'kernel32' name 'ReleaseSRWLockExclusive';
 function CloseHandle(AHandle: Pointer): Int32; external 'kernel32' name 'CloseHandle';
 procedure SetLastError(ACode: UInt32); external 'kernel32' name 'SetLastError';
+function VirtualProtect(AAddress: Pointer; ASize: UInt64; ANewProtect: UInt32;
+  AOldProtect: Pointer): Int32; external 'kernel32' name 'VirtualProtect';
+procedure GetSystemTimePreciseAsFileTime(ATime: Pointer);
+  external 'kernel32' name 'GetSystemTimePreciseAsFileTime';
+function QueryPerformanceCounter(ACount: Pointer): Int32;
+  external 'kernel32' name 'QueryPerformanceCounter';
+function QueryPerformanceFrequency(AFrequency: Pointer): Int32;
+  external 'kernel32' name 'QueryPerformanceFrequency';
+function CreateWaitableTimerExW(AAttributes: Pointer; AName: Pointer;
+  AFlags: UInt32; AAccess: UInt32): Pointer;
+  external 'kernel32' name 'CreateWaitableTimerExW';
+function SetWaitableTimer(ATimer: Pointer; ADueTime: Pointer; APeriod: Int32;
+  ACompletion: Pointer; AArg: Pointer; AResume: Int32): Int32;
+  external 'kernel32' name 'SetWaitableTimer';
+function WaitForSingleObject(AHandle: Pointer; AMilliseconds: UInt32): UInt32;
+  external 'kernel32' name 'WaitForSingleObject';
+procedure WinSleep(AMilliseconds: UInt32); external 'kernel32' name 'Sleep';
 
 const
   STD_INPUT_HANDLE = UInt32(-10);
@@ -122,6 +181,23 @@ const
   MAX_TABLE_FDS = 1048576;
   ERROR_INVALID_HANDLE = 6;
   ERROR_TOO_MANY_OPEN_FILES = 4;
+  ERROR_INVALID_PARAMETER = 87;
+  ERROR_HANDLE_EOF = 38;
+  ERROR_BROKEN_PIPE = 109;
+  PAGE_NOACCESS = $01;
+  PAGE_READONLY = $02;
+  PAGE_EXECUTE = $10;
+  PAGE_EXECUTE_READ = $20;
+  PAGE_EXECUTE_READWRITE = $40;
+  PROT_READ = 1;
+  PROT_WRITE = 2;
+  PROT_EXEC = 4;
+  CREATE_WAITABLE_TIMER_HIGH_RESOLUTION = $00000002;
+  TIMER_ALL_ACCESS = $001F0003;
+  INFINITE = $FFFFFFFF;
+  { 100 ns intervals from 1601-01-01 (FILETIME) to 1970-01-01. }
+  FILETIME_UNIX_EPOCH = 116444736000000000;
+  NS_PER_SEC = 1000000000;
 
 type
   { SYSTEM_INFO: dwNumberOfProcessors is the DWORD at offset 32. }
@@ -144,6 +220,10 @@ var
   GFdCount: Int;
   GFdLock: Pointer;
   GSocketCloser: TWinSocketCloser;
+  GSocketSender: TWinSocketSender;
+  GSocketReceiver: TWinSocketReceiver;
+  { the performance-counter frequency, read on the first monotonic query }
+  GQpcFrequency: Int64;
 
 type
   TFdEntry = record
@@ -340,6 +420,54 @@ begin
   GSocketCloser := ACloser;
 end;
 
+procedure _WinSetSocketSender(ASender: TWinSocketSender);
+begin
+  GSocketSender := ASender;
+end;
+
+procedure _WinSetSocketReceiver(AReceiver: TWinSocketReceiver);
+begin
+  GSocketReceiver := AReceiver;
+end;
+
+function _sys_read(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
+var
+  H: Pointer;
+  Done, Chunk, Err: UInt32;
+begin
+  if Count <= 0 then
+    Exit(0);
+  H := _WinHandleOfFd(Fd);
+  if H = nil then
+  begin
+    SetLastError(ERROR_INVALID_HANDLE);
+    Exit(-1);
+  end;
+  if (Fd >= FIRST_TABLE_FD) and (GSocketReceiver <> nil) and
+     ((_WinFdFlags(Fd) and WIN_FD_SOCKET) <> 0) then
+    Exit(GSocketReceiver(H, Buf, Count));
+  if Count > $40000000 then
+    Chunk := $40000000
+  else
+    Chunk := UInt32(Count);
+  Done := 0;
+  if Win32ReadFile(H, Buf, Chunk, @Done, nil) = 0 then
+  begin
+    Err := GetLastError();
+    if (Err = ERROR_BROKEN_PIPE) or (Err = ERROR_HANDLE_EOF) then
+      Exit(0);
+    Exit(-1);
+  end;
+  Result := Done;
+end;
+
+procedure _read_alias; assembler; nostackframe;
+asm
+.globl read
+read:
+    jmp _sys_read
+end;
+
 function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
 var
   H: Pointer;
@@ -348,6 +476,11 @@ var
 begin
   H := _WinHandleOfFd(Fd);
   if H = nil then Exit(-1);
+  { A socket is written the Winsock way (the reactor's wake and DNS
+    completion "pipes" are socket pairs). }
+  if (Fd >= FIRST_TABLE_FD) and (GSocketSender <> nil) and
+     ((_WinFdFlags(Fd) and WIN_FD_SOCKET) <> 0) then
+    Exit(GSocketSender(H, Buf, Count));
   { WriteFile takes a 32-bit count; a larger write reports the part written,
     as a short write(2) does, and the caller loops }
   if Count > $40000000 then
@@ -384,6 +517,91 @@ begin
     Result := 0
   else
     Result := -1;
+end;
+
+function mprotect(Addr: Pointer; Length: Int64; Prot: Int32): Int32;
+var
+  NewProt, OldProt: UInt32;
+begin
+  if (Prot and PROT_EXEC) <> 0 then
+  begin
+    if (Prot and PROT_WRITE) <> 0 then
+      NewProt := PAGE_EXECUTE_READWRITE
+    else if (Prot and PROT_READ) <> 0 then
+      NewProt := PAGE_EXECUTE_READ
+    else
+      NewProt := PAGE_EXECUTE;
+  end
+  else if (Prot and PROT_WRITE) <> 0 then
+    NewProt := PAGE_READWRITE
+  else if (Prot and PROT_READ) <> 0 then
+    NewProt := PAGE_READONLY
+  else
+    NewProt := PAGE_NOACCESS;
+  OldProt := 0;
+  if VirtualProtect(Addr, UInt64(Length), NewProt, @OldProt) <> 0 then
+    Result := 0
+  else
+    Result := -1;
+end;
+
+function clock_gettime(AClockId: Int32; ATs: Pointer): Int32;
+var
+  T, Count, Freq: Int64;
+begin
+  case AClockId of
+    0:
+      begin
+        T := 0;
+        GetSystemTimePreciseAsFileTime(@T);
+        T := T - FILETIME_UNIX_EPOCH;
+        PInt64(ATs)^ := T div 10000000;
+        PInt64(ATs + 8)^ := (T mod 10000000) * 100;
+      end;
+    1:
+      begin
+        Freq := GQpcFrequency;
+        if Freq = 0 then
+        begin
+          QueryPerformanceFrequency(@Freq);
+          GQpcFrequency := Freq;
+        end;
+        Count := 0;
+        QueryPerformanceCounter(@Count);
+        PInt64(ATs)^ := Count div Freq;
+        PInt64(ATs + 8)^ := ((Count mod Freq) * NS_PER_SEC) div Freq;
+      end;
+  else
+    SetLastError(ERROR_INVALID_PARAMETER);
+    Exit(-1);
+  end;
+  Result := 0;
+end;
+
+function nanosleep(AReq, ARem: Pointer): Int32;
+var
+  Ns, Due: Int64;
+  Timer: Pointer;
+begin
+  Ns := PInt64(AReq)^ * NS_PER_SEC + PInt64(AReq + 8)^;
+  if Ns <= 0 then
+    Exit(0);
+  Timer := CreateWaitableTimerExW(nil, nil,
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+  if Timer <> nil then
+  begin
+    { a negative due time is relative, in 100 ns units }
+    Due := -((Ns + 99) div 100);
+    if SetWaitableTimer(Timer, @Due, 0, nil, nil, 0) <> 0 then
+    begin
+      WaitForSingleObject(Timer, INFINITE);
+      CloseHandle(Timer);
+      Exit(0);
+    end;
+    CloseHandle(Timer);
+  end;
+  WinSleep(UInt32((Ns + 999999) div 1000000));
+  Result := 0;
 end;
 
 function __cxa_atexit(Func, Arg, DsoHandle: Pointer): Int32;
