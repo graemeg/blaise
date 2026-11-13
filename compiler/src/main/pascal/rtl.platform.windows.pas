@@ -134,13 +134,26 @@ function _DaysFromCivil(Y, M, D: Int64): Int64; external name '_DaysFromCivil';
 procedure _CivilFromDays(Z: Int64; var Y, M, D: Int64);
   external name '_CivilFromDays';
 
-{ ---- bcrypt ---- }
+{ ---- bcrypt, loaded on first use ---- }
 
-function W32BCryptGenRandom(AAlgorithm: Pointer; ABuf: Pointer; ACount: UInt32;
-  AFlags: UInt32): Int32; external 'bcrypt' name 'BCryptGenRandom';
+{ Every RTL unit is linked into every program, so a direct binding would make
+  each one import bcrypt; RandomBytes loads it when first asked instead. }
+type
+  TBCryptGenRandom = function(AAlgorithm: Pointer; ABuf: Pointer;
+    ACount: UInt32; AFlags: UInt32): Int32; cdecl;
+
+function W32LoadLibraryA(AName: PChar): Pointer;
+  external 'kernel32' name 'LoadLibraryA';
+function W32GetProcAddress(AModule: Pointer; AName: PChar): Pointer;
+  external 'kernel32' name 'GetProcAddress';
 
 const
   BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
+
+var
+  { nil until RandomBytes first loads bcrypt.  Two threads racing to load it
+    get the same module and the same address, so no lock is needed. }
+  GBCryptGenRandom: TBCryptGenRandom;
 
 { ---- kernel32 ---- }
 
@@ -1073,14 +1086,25 @@ end;
 function TRtlPlatformWindows.RandomBytes(ABuf: Pointer; ACount: Int): Boolean;
 var
   Done, N: Int;
+  H: Pointer;
 begin
+  if Pointer(GBCryptGenRandom) = nil then
+  begin
+    H := W32LoadLibraryA(PChar('bcrypt.dll'));
+    if H = nil then
+      Exit(False);
+    GBCryptGenRandom := TBCryptGenRandom(W32GetProcAddress(H,
+      PChar('BCryptGenRandom')));
+    if Pointer(GBCryptGenRandom) = nil then
+      Exit(False);
+  end;
   Done := 0;
   while Done < ACount do
   begin
     N := ACount - Done;
     if N > $40000000 then
       N := $40000000;
-    if W32BCryptGenRandom(nil, ABuf + Done, UInt32(N),
+    if GBCryptGenRandom(nil, ABuf + Done, UInt32(N),
        BCRYPT_USE_SYSTEM_PREFERRED_RNG) <> 0 then
       Exit(False);
     Done := Done + N;

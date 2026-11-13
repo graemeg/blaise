@@ -369,6 +369,11 @@ begin
       if Img.Imports[I].Dll = 'kernel32.dll' then
         Kernel32 := True;
     AssertTrue('imports kernel32.dll', Kernel32);
+    { The RTL loads bcrypt and ws2_32 when first asked, so a program that
+      needs neither imports neither. }
+    for I := 0 to Img.Imports.Count - 1 do
+      AssertEquals('only kernel32 is imported', 'kernel32.dll',
+        LowerCase(Img.Imports[I].Dll));
     AssertFalse('no pthread DLL: the leaf defines those',
       Pos('pthread', LowerCase(Img.Imports[0].Dll)) >= 0);
   finally
