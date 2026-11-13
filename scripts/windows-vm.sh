@@ -32,9 +32,14 @@
 #                                     and then itself in the VM, and require
 #                                     the result byte-identical to the
 #                                     cross-built one
-#
-# stdlib-test arrives with the milestone that makes it possible (design:
-# windows-x86_64-backend-design.adoc, M7).
+#   scripts/windows-vm.sh stdlib-test [args]
+#                                     cross-compile the stdlib TestRunner
+#                                     with compiler/target/blaise and run it
+#                                     in the VM (TestRunner args, e.g.
+#                                     --verbose or --suite TJsonTests); 1200
+#                                     seconds unless
+#                                     BLAISE_WINDOWS_RUN_TIMEOUT says
+#                                     otherwise
 #
 # The guest is installed once by hand (design, "Development-host setup"):
 # a UTM VM running Windows 11 ARM64 with the UTM guest tools, the OpenSSH
@@ -288,6 +293,24 @@ case "$cmd" in
     [ $fail -eq 0 ] || exit 1
     echo "WINDOWS_CROSSCHECK_OK"
     ;;
+  stdlib-test)
+    [ -x compiler/target/blaise ] || die "build compiler/target/blaise first"
+    mkdir -p "$OUT"
+    echo ">> cross-compiling the stdlib TestRunner (windows-x86_64)"
+    # Test dir BEFORE stdlib, as in macos-dev.sh test-compile.
+    compiler/target/blaise --source stdlib/src/test/pascal/testrunner.pas \
+      --target windows-x86_64 --output "$OUT/stdlib-TestRunner" \
+      --unit-path stdlib/src/test/pascal --unit-path stdlib/src/main/pascal \
+      --rtl-src compiler/src/main/pascal > "$OUT/stdlib-TestRunner.log" 2>&1 \
+      || { grep -v 'note:' "$OUT/stdlib-TestRunner.log" | head -20
+           die "CROSS BUILD FAILED: the stdlib TestRunner"; }
+    RUN_TIMEOUT=${BLAISE_WINDOWS_RUN_TIMEOUT:-1200}
+    t0=$SECONDS
+    rc=0
+    run_in_vm "$OUT/stdlib-TestRunner.exe" "$@" || rc=$?
+    echo ">> stdlib suite exit $rc after $((SECONDS - t0))s"
+    exit $rc
+    ;;
   selfhost)
     # The design's self-hosting gate: the cross-built blaise.exe rebuilds
     # itself on Windows, byte-identical -- the criterion the release process
@@ -336,5 +359,5 @@ case "$cmd" in
     echo "WINDOWS_SELFHOST_OK"
     ;;
   *)
-    sed -n '2,47p' "$0"; exit 1 ;;
+    sed -n '2,56p' "$0"; exit 1 ;;
 esac
