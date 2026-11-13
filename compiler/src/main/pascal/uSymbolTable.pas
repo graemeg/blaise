@@ -2471,6 +2471,16 @@ begin
   Sym := TSymbol.Create('PathSeparator', skConstant, FTypeString);
   Sym.ConstString := TargetPathSeparator(GTarget);
   Define(Sym);
+  { The target the program is built for ("--target"), as the canonical
+    lower-case tokens of TargetName: linux / freebsd / windows / macos and
+    x86_64 / i386 / arm64.  Folded at compile time, so a cross-compiled
+    program reports its target and no conditional compilation is needed. }
+  Sym := TSymbol.Create('TargetOS', skConstant, FTypeString);
+  Sym.ConstString := TargetOSName(GTarget);
+  Define(Sym);
+  Sym := TSymbol.Create('TargetCPU', skConstant, FTypeString);
+  Sym.ConstString := TargetCPUName(GTarget);
+  Define(Sym);
 
   { Built-in I/O procedures }
   Sym := TSymbol.Create('Write',   skProcedure, nil);

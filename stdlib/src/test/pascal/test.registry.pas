@@ -30,6 +30,7 @@ uses
   Xml.Tests,
   Contnrs.Tests,
   Base64.Tests,
+  PlatformInfo.Tests,
   Crypto.Tests,
   Compression.Tests,
   Gzip.Tests,

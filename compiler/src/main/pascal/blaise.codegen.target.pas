@@ -78,6 +78,11 @@ function TargetImageIsElf(const ATarget: TTargetDesc): Boolean;
   unit-list selection and the codegen backends' platform-layout-init call. }
 function TargetOSName(const ATarget: TTargetDesc): string;
 
+{ Lower-case CPU token: 'x86_64' / 'i386' / 'arm64'.  Together with
+  TargetOSName this is what TargetName joins, and what the System constants
+  TargetOS / TargetCPU expose to programs. }
+function TargetCPUName(const ATarget: TTargetDesc): string;
+
 { Assembler symbol of the target's platform-layout unit initialiser
   (rtl.platform.layout.<os>_init).  The compiler emits a direct call to this
   from main so the compile-time --target's layout assigns GPlatformLayout first,
@@ -235,6 +240,16 @@ begin
     osMacOS:   Result := 'macos';
   else
     Result := 'linux';
+  end;
+end;
+
+function TargetCPUName(const ATarget: TTargetDesc): string;
+begin
+  case ATarget.CPU of
+    cpuI386:  Result := 'i386';
+    cpuArm64: Result := 'arm64';
+  else
+    Result := 'x86_64';
   end;
 end;
 

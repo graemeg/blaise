@@ -5775,6 +5775,84 @@ the compiler defines itself in `RegisterBuiltins`.  Their values are derived fro
 target (`GTarget` in `blaise.codegen.target`), so cross-compilation to a
 different OS produces the correct constants without conditional compilation.
 
+== `TargetOS` and `TargetCPU` — the build target as data
+
+=== Decision
+
+The implicit `System` unit defines two further string constants, folded by
+the compiler from the compilation target (`--target`, `GTarget`):
+
+[cols="1,3"]
+|===
+| Constant | Value
+
+| `TargetOS`
+| `linux`, `freebsd`, `windows` or `macos`
+
+| `TargetCPU`
+| `x86_64`, `i386` or `arm64`
+|===
+
+The values are the tokens `TargetName` joins into `<os>-<cpu>`.  They
+describe the target the program was *built for*.  A cross-compiled program
+reports its target, not the machine it was compiled on.
+
+`Platform.Info` (stdlib) adds presentation helpers: `OSDisplayName` maps a
+token to its product spelling (`macos` to `macOS`, `freebsd` to `FreeBSD`)
+and `TargetOSDisplayName` applies it to `TargetOS`.
+
+=== Rationale
+
+An About box, a log header or a crash report needs the platform as a string.
+Without a language-level answer the only route is `{$IFDEF DARWIN}` chains,
+which spread platform knowledge through application code and have to be
+extended by hand when a target is added.  The compiler already knows the
+target, so it supplies the value.
+
+=== Alternatives considered
+
+[cols="1,2,2"]
+|===
+| Language | Mechanism | Note
+
+| Go
+| `runtime.GOOS`, `runtime.GOARCH` (string constants)
+| Closest model; set from the build target.
+
+| Rust
+| `std::env::consts::OS` and `ARCH`; `cfg!(target_os = ...)`
+| Constants, plus a boolean expression form.
+
+| Zig
+| `@import("builtin").os.tag`, `.cpu.arch`
+| Compile-time enums.
+
+| FPC
+| `{$I %FPCTARGETOS%}`, `{$I %FPCTARGETCPU%}`
+| String-literal directives.  Rejected as the spelling: a directive is
+  not a name in the language.
+
+| Swift
+| `#if os(macOS)`, `#if arch(arm64)`
+| Conditional compilation only, with no string value.
+
+| Java, .NET
+| `os.name` and `os.arch` system properties; `RuntimeInformation`
+| Run-time queries, because the same bytecode runs on any host.  A
+  native compiler has a build target, so this does not apply.
+|===
+
+* *A run-time host query* (`HostOS`).  Deferred: it needs per-OS system
+  calls, and the stated use (describing the build) does not.  It would
+  answer a different question: a binary run under Rosetta or a compatibility
+  layer has a different host from its target.
+* *Boolean constants* (`IsMacOS`).  Rejected: one string constant per axis
+  scales to a new target with no new name.
+* *Names `TargetOSName` / `TargetCPUName`.*  Rejected: the compiler's own
+  `blaise.codegen.target` already declares functions of those names, and a
+  unit cannot redeclare a `System` identifier.  Renaming the compiler's
+  functions would have touched every backend for no user benefit.
+
 == `not` — Boolean and Bitwise NOT
 
 === Decision
