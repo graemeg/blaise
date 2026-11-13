@@ -276,33 +276,31 @@ type
     MtimeNsec: Int64;
   end;
 
-  TTimeSpec = record
-    Sec: Int64;
-    Nsec: Int64;
-  end;
-
 function _PathStat(const Path: string; FollowLinks: Int32; AOut: Pointer): Int64;
   external name '_PathStat';
 { The errno behind a failed call's result, in both link profiles
   (runtime.errno.*). }
 function OsErrorOf(N: Int64): Int; external name 'OsErrorOf';
-{ UTIME_OMIT for this target (rtl.platform.layout.*). }
-function _UtimeOmit: Int64; external name '_UtimeOmit';
+function _FdOpenRead(Path: Pointer): Int32; external name '_FdOpenRead';
 function _FdOpenWrite(Path: Pointer): Int32; external name '_FdOpenWrite';
+function _FdRead(Fd: Int32; Buf: Pointer; Count: Int): Int; external name '_FdRead';
+function _FdWrite(Fd: Int32; Buf: Pointer; Count: Int): Int; external name '_FdWrite';
 
-function c_open(Path: PChar; Flags: Int32): Int32; external name 'open';
-function c_close(Fd: Int32): Int32; external name 'close';
-function c_read(Fd: Int32; Buf: Pointer; Count: Int64): Int64; external name 'read';
-function c_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64; external name 'write';
-function c_unlink(Path: PChar): Int32; external name 'unlink';
-function c_rmdir(Path: PChar): Int32; external name 'rmdir';
-function c_mkdir(Path: PChar; Mode: Int32): Int32; external name 'mkdir';
-function c_rename(OldPath, NewPath: PChar): Int32; external name 'rename';
-function c_chmod(Path: PChar; Mode: Int32): Int32; external name 'chmod';
-function c_symlink(Target, LinkPath: PChar): Int32; external name 'symlink';
-function c_readlink(Path: PChar; Buf: Pointer; Size: Int64): Int64; external name 'readlink';
-function c_access(Path: PChar; Mode: Int32): Int32; external name 'access';
-function c_futimens(Fd: Int32; Times: Pointer): Int32; external name 'futimens';
+{ The platform port's POSIX-shaped calls (rtl.platform.abi): each answers as
+  its libc namesake, and OsErrorOf reads a failure's errno on every
+  target. }
+function _FsClose(Fd: Int32): Int32; external name '_FsClose';
+function _FsUnlink(const Path: string): Int32; external name '_FsUnlink';
+function _FsRmdir(const Path: string): Int32; external name '_FsRmdir';
+function _FsMkdir(const Path: string; Mode: Int32): Int32; external name '_FsMkdir';
+function _FsRename(const OldPath, NewPath: string): Int32; external name '_FsRename';
+function _FsChmod(const Path: string; Mode: Int32): Int32; external name '_FsChmod';
+function _FsSymlink(const Target, LinkPath: string): Int32; external name '_FsSymlink';
+function _FsReadlink(const Path: string; Buf: Pointer; Size: Int64): Int64;
+  external name '_FsReadlink';
+function _FsAccess(const Path: string; Mode: Int32): Int32; external name '_FsAccess';
+function _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
+  external name '_FsSetModified';
 
 { Imported from the RTL (rtl.platform.posix): 0 missing, 1 regular file,
   2 directory, 3 symbolic link, 4 other.  FollowLinks <> 0 stats the link's
@@ -314,7 +312,6 @@ const
   KIND_DIR     = 2;
   KIND_SYMLINK = 3;
 
-  O_RDONLY = 0;
   R_OK = 4;
   W_OK = 2;
   X_OK = 1;
@@ -576,33 +573,19 @@ end;
 
 procedure SetModifiedNanos(const APath: string; ANanos: Int64);
 var
-  Fd: Int32;
+  Sec, NSec: Int64;
   Rc: Int64;
-  Times: array[0..1] of TTimeSpec;
 begin
-  { futimens on a read-only descriptor: setting times needs ownership, not
-    write permission, and a directory opens read-only too. }
-  Fd := c_open(PChar(APath), O_RDONLY);
-  if Fd < 0 then
-    FailRc('Cannot set the modification time of', APath, Fd);
-  Times[0].Sec := 0;
-  Times[0].Nsec := _UtimeOmit();
-  Times[1].Sec := ANanos div NANOS_PER_SEC;
-  Times[1].Nsec := ANanos mod NANOS_PER_SEC;
-  if Times[1].Nsec < 0 then
+  Sec := ANanos div NANOS_PER_SEC;
+  NSec := ANanos mod NANOS_PER_SEC;
+  if NSec < 0 then
   begin
-    Times[1].Nsec := Times[1].Nsec + NANOS_PER_SEC;
-    Times[1].Sec := Times[1].Sec - 1;
+    NSec := NSec + NANOS_PER_SEC;
+    Sec := Sec - 1;
   end;
-  Rc := c_futimens(Fd, @Times[0]);
+  Rc := _FsSetModified(APath, Sec, NSec);
   if Rc <> 0 then
-  begin
-    { Read the errno before close can replace it. }
-    Rc := OsErrorOf(Rc);
-    c_close(Fd);
-    Fail('Cannot set the modification time of', APath, Int(Rc));
-  end;
-  c_close(Fd);
+    FailRc('Cannot set the modification time of', APath, Rc);
 end;
 
 procedure SetModifiedMillis(const APath: string; AMillis: Int64);
@@ -628,24 +611,24 @@ procedure SetPermissions(const APath: string; AMode: Int32);
 var
   Rc: Int64;
 begin
-  Rc := c_chmod(PChar(APath), AMode);
+  Rc := _FsChmod(APath, AMode);
   if Rc <> 0 then
     FailRc('Cannot change the permissions of', APath, Rc);
 end;
 
 function IsReadable(const APath: string): Boolean;
 begin
-  Result := c_access(PChar(APath), R_OK) = 0;
+  Result := _FsAccess(APath, R_OK) = 0;
 end;
 
 function IsWritable(const APath: string): Boolean;
 begin
-  Result := c_access(PChar(APath), W_OK) = 0;
+  Result := _FsAccess(APath, W_OK) = 0;
 end;
 
 function IsExecutable(const APath: string): Boolean;
 begin
-  Result := c_access(PChar(APath), X_OK) = 0;
+  Result := _FsAccess(APath, X_OK) = 0;
 end;
 
 { The last name in APath, ignoring trailing separators. }
@@ -674,7 +657,7 @@ procedure CreateSymlink(const ATarget, ALinkPath: string);
 var
   Rc: Int64;
 begin
-  Rc := c_symlink(PChar(ATarget), PChar(ALinkPath));
+  Rc := _FsSymlink(ATarget, ALinkPath);
   if Rc <> 0 then
     FailRc('Cannot create the symbolic link', ALinkPath, Rc);
 end;
@@ -687,7 +670,7 @@ var
   SB: TStringBuilder;
 begin
   SetLength(Buf, MAX_LINK_LEN);
-  N := c_readlink(PChar(ALinkPath), @Buf[0], MAX_LINK_LEN);
+  N := _FsReadlink(ALinkPath, @Buf[0], MAX_LINK_LEN);
   if N < 0 then
     FailRc('Cannot read the symbolic link', ALinkPath, N);
   SB := TStringBuilder.Create();
@@ -702,7 +685,7 @@ procedure DeleteDirectory(const APath: string);
 var
   Rc: Int64;
 begin
-  Rc := c_rmdir(PChar(APath));
+  Rc := _FsRmdir(APath);
   if Rc <> 0 then
     FailRc('Cannot delete the directory', APath, Rc);
 end;
@@ -720,7 +703,7 @@ begin
   if Info.Kind <> KIND_DIR then
   begin
     { A file, or a link removed as a link (lstat above: never followed). }
-    Rc := c_unlink(PChar(APath));
+    Rc := _FsUnlink(APath);
     if Rc <> 0 then
       FailRc('Cannot delete', APath, Rc);
     Exit;
@@ -741,7 +724,7 @@ var
 begin
   while ACount > 0 do
   begin
-    N := c_write(AFd, ABuf, ACount);
+    N := _FdWrite(AFd, ABuf, ACount);
     if N < 0 then
       Exit(N);
     if N = 0 then
@@ -766,7 +749,7 @@ begin
     FailRc('Cannot copy', ASource, Rc);
   if Src.Kind = KIND_DIR then
     Fail('Cannot copy', ASource, EISDIR);
-  InFd := c_open(PChar(ASource), O_RDONLY);
+  InFd := _FdOpenRead(Pointer(ASource));
   if InFd < 0 then
     FailRc('Cannot open for copying', ASource, InFd);
   try
@@ -777,7 +760,7 @@ begin
       if Tgt.Kind = KIND_DIR then
         Fail('Cannot copy to', ATarget, EISDIR);
       { Replace the entry itself: a link is not written through. }
-      Rc := c_unlink(PChar(ATarget));
+      Rc := _FsUnlink(ATarget);
       if Rc <> 0 then
         FailRc('Cannot replace', ATarget, Rc);
     end;
@@ -785,7 +768,7 @@ begin
     if OutFd < 0 then
       FailRc('Cannot create', ATarget, OutFd);
   except
-    c_close(InFd);
+    _FsClose(InFd);
     raise;
   end;
   SetLength(Buf, COPY_BUF_SIZE);
@@ -793,7 +776,7 @@ begin
   WriteErr := 0;
   while True do
   begin
-    N := c_read(InFd, @Buf[0], COPY_BUF_SIZE);
+    N := _FdRead(InFd, @Buf[0], COPY_BUF_SIZE);
     if N = 0 then
       Break;
     if N < 0 then
@@ -810,13 +793,13 @@ begin
       Break;
     end;
   end;
-  c_close(InFd);
+  _FsClose(InFd);
   { close reports a deferred write error (NFS, a full disk) }
-  if (c_close(OutFd) <> 0) and (ReadErr = 0) and (WriteErr = 0) then
+  if (_FsClose(OutFd) <> 0) and (ReadErr = 0) and (WriteErr = 0) then
     WriteErr := 5;
   if (ReadErr <> 0) or (WriteErr <> 0) then
   begin
-    c_unlink(PChar(ATarget));
+    _FsUnlink(ATarget);
     if ReadErr <> 0 then
       Fail('Cannot read', ASource, ReadErr)
     else
@@ -831,7 +814,7 @@ procedure MakeDir(const APath: string; AMode: Int32);
 var
   Rc: Int64;
 begin
-  Rc := c_mkdir(PChar(APath), AMode);
+  Rc := _FsMkdir(APath, AMode);
   if Rc <> 0 then
     FailRc('Cannot create the directory', APath, Rc);
 end;
@@ -930,13 +913,13 @@ begin
     if (Tgt.Kind = KIND_DIR) or (Src.Kind = KIND_DIR) then
     begin
       Aside := ATarget + '.blaise-replaced-' + IntToStr(GetProcessID());
-      Rc := c_rename(PChar(ATarget), PChar(Aside));
+      Rc := _FsRename(ATarget, Aside);
       if Rc <> 0 then
         FailRc('Cannot replace', ATarget, Rc);
     end;
     { A file onto a file: rename replaces it atomically. }
   end;
-  Rc := c_rename(PChar(ASource), PChar(ATarget));
+  Rc := _FsRename(ASource, ATarget);
   if Rc <> 0 then
   begin
     Code := OsErrorOf(Rc);
@@ -950,7 +933,7 @@ begin
       MoveByCopy(ASource, ATarget);
     except
       if Aside <> '' then
-        c_rename(PChar(Aside), PChar(ATarget));
+        _FsRename(Aside, ATarget);
       raise;
     end;
   end;
@@ -1033,9 +1016,14 @@ begin
     ':' + Pad2(Mi) + ':' + Pad2(S);
 end;
 
+{ APath when it is absolute already -- rooted at '/' or the target's own
+  separator, or on a drive (C:, \\server\share) -- else under the current
+  directory. }
 function AbsolutePath(const APath: string): string;
 begin
-  if (Length(APath) > 0) and (OrdAt(APath, 0) = Ord('/')) then
+  if ((Length(APath) > 0) and ((OrdAt(APath, 0) = Ord('/')) or
+      (Copy(APath, 0, 1) = DirectorySeparator))) or
+     (ExtractFileDrive(APath) <> '') then
     Result := APath
   else
     Result := ExcludeTrailingPathDelimiter(GetCurrentDir()) + '/' + APath;
@@ -1082,9 +1070,9 @@ begin
   except
     Exit;
   end;
-  if c_rename(PChar(APath), PChar(FilesDir + '/' + Name)) <> 0 then
+  if _FsRename(APath, FilesDir + '/' + Name) <> 0 then
   begin
-    c_unlink(PChar(InfoPath));
+    _FsUnlink(InfoPath);
     Exit;
   end;
   Result := True;
@@ -1102,8 +1090,8 @@ begin
   Dir := Home + '/.Trash';
   if (GetFileKind(APath, False) = fkNone) or (GetFileKind(Dir) <> fkDirectory) then
     Exit;
-  Result := c_rename(PChar(APath),
-    PChar(Dir + '/' + FreeTrashName(Dir, '', LastName(AbsolutePath(APath))))) = 0;
+  Result := _FsRename(APath,
+    Dir + '/' + FreeTrashName(Dir, '', LastName(AbsolutePath(APath)))) = 0;
   {$ELSE}
   Dir := GetEnvironmentVariable('XDG_DATA_HOME');
   if Dir = '' then

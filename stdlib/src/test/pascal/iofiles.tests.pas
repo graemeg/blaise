@@ -59,6 +59,13 @@ type
 
 implementation
 
+{ Remove APath and everything below it, if it is there. }
+procedure RemoveTree(const APath: string);
+begin
+  if GetFileKind(APath, False) <> fkNone then
+    DeleteTree(APath);
+end;
+
 procedure TIOFilesTests.Touch(const ARelPath: string);
 begin
   WriteFile(FRoot + '/' + ARelPath, 'x');
@@ -66,14 +73,14 @@ end;
 
 procedure TIOFilesTests.SymLink(const ATarget, ARelLink: string);
 begin
-  Exec('ln -s ''' + ATarget + ''' ''' + FRoot + '/' + ARelLink + '''');
+  CreateSymlink(ATarget, FRoot + '/' + ARelLink);
 end;
 
 procedure TIOFilesTests.SetUp;
 begin
   FRoot := ExcludeTrailingPathDelimiter(GetTempDir()) + '/blaise-iofiles-' +
     IntToStr(GetProcessID());
-  Exec('rm -rf ''' + FRoot + '''');
+  RemoveTree(FRoot);
   ForceDirectories(FRoot + '/sub/deeper');
   ForceDirectories(FRoot + '/empty');
   Touch('b.pas');
@@ -86,7 +93,7 @@ end;
 
 procedure TIOFilesTests.TearDown;
 begin
-  Exec('rm -rf ''' + FRoot + '''');
+  RemoveTree(FRoot);
 end;
 
 procedure TIOFilesTests.TestGlob_RecursiveInLexicalOrder;

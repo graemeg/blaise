@@ -93,6 +93,18 @@ type
     function FdSize(Fd: Int32): Int64; override;
     procedure FdClose(Fd: Int32); override;
 
+    { POSIX-shaped file-system calls: the libc calls themselves }
+    function FsClose(Fd: Int32): Int32; override;
+    function FsUnlink(const APath: string): Int32; override;
+    function FsRmdir(const APath: string): Int32; override;
+    function FsMkdir(const APath: string; AMode: Int32): Int32; override;
+    function FsRename(const AOldPath, ANewPath: string): Int32; override;
+    function FsChmod(const APath: string; AMode: Int32): Int32; override;
+    function FsSymlink(const ATarget, ALinkPath: string): Int32; override;
+    function FsReadlink(const APath: string; ABuf: Pointer; ASize: Int64): Int64; override;
+    function FsAccess(const APath: string; AMode: Int32): Int32; override;
+    function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32; override;
+
     { Date/Time }
     function TimeNow: Int64; override;
     function TimeLocalOffsetSecs: Int32; override;
@@ -194,6 +206,11 @@ function  libc_chmod(Path: PChar; Mode: Int32): Int32; external name 'chmod';
 function  libc_getentropy(Buf: Pointer; Len: Int64): Int32; external name 'getentropy';
 function  libc_unlink(Path: PChar): Int32;                                 external name 'unlink';
 function  libc_rename(OldPath, NewPath: PChar): Int32;                     external name 'rename';
+function  libc_symlink(Target, LinkPath: PChar): Int32; external name 'symlink';
+function  libc_access(Path: PChar; Mode: Int32): Int32; external name 'access';
+function  libc_futimens(Fd: Int32; Times: Pointer): Int32; external name 'futimens';
+{ UTIME_OMIT for this target (rtl.platform.layout.<os>). }
+function  _UtimeOmit: Int64; external name '_UtimeOmit';
 function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       external name 'getcwd';
 { getdirentries(3) is the one directory-reading spelling libc provides on all
   three POSIX targets (glibc >= 2.2.5, FreeBSD, macOS); the freestanding
@@ -1066,6 +1083,77 @@ end;
 procedure TRtlPlatformPosix.FdClose(Fd: Int32);
 begin
   if Fd >= 0 then libc_close(Fd);
+end;
+
+{ ================================================================== }
+{ TRtlPlatformPosix — POSIX-shaped file-system calls                  }
+{ ================================================================== }
+
+function TRtlPlatformPosix.FsClose(Fd: Int32): Int32;
+begin
+  Result := libc_close(Fd);
+end;
+
+function TRtlPlatformPosix.FsUnlink(const APath: string): Int32;
+begin
+  Result := libc_unlink(StrData(Pointer(APath)));
+end;
+
+function TRtlPlatformPosix.FsRmdir(const APath: string): Int32;
+begin
+  Result := libc_rmdir(StrData(Pointer(APath)));
+end;
+
+function TRtlPlatformPosix.FsMkdir(const APath: string; AMode: Int32): Int32;
+begin
+  Result := libc_mkdir(StrData(Pointer(APath)), AMode);
+end;
+
+function TRtlPlatformPosix.FsRename(const AOldPath, ANewPath: string): Int32;
+begin
+  Result := libc_rename(StrData(Pointer(AOldPath)), StrData(Pointer(ANewPath)));
+end;
+
+function TRtlPlatformPosix.FsChmod(const APath: string; AMode: Int32): Int32;
+begin
+  Result := libc_chmod(StrData(Pointer(APath)), AMode);
+end;
+
+function TRtlPlatformPosix.FsSymlink(const ATarget, ALinkPath: string): Int32;
+begin
+  Result := libc_symlink(StrData(Pointer(ATarget)), StrData(Pointer(ALinkPath)));
+end;
+
+function TRtlPlatformPosix.FsReadlink(const APath: string; ABuf: Pointer;
+  ASize: Int64): Int64;
+begin
+  Result := libc_readlink(StrData(Pointer(APath)), PChar(ABuf), ASize);
+end;
+
+function TRtlPlatformPosix.FsAccess(const APath: string; AMode: Int32): Int32;
+begin
+  Result := libc_access(StrData(Pointer(APath)), AMode);
+end;
+
+{ futimens on a read-only descriptor: setting times needs ownership, not
+  write permission, and a directory opens read-only too.  A failing futimens
+  result is returned after the close, which leaves its errno alone on
+  success. }
+function TRtlPlatformPosix.FsSetModified(const APath: string;
+  ASec, ANSec: Int64): Int32;
+var
+  Fd: Int32;
+  Times: array[0..1] of TTimeSpec;
+begin
+  Fd := libc_open2(StrData(Pointer(APath)), GPlatformLayout.O_RDONLY());
+  if Fd < 0 then
+    Exit(Fd);
+  Times[0].Sec := 0;
+  Times[0].NSec := _UtimeOmit();
+  Times[1].Sec := ASec;
+  Times[1].NSec := ANSec;
+  Result := libc_futimens(Fd, @Times[0]);
+  libc_close(Fd);
 end;
 
 { ================================================================== }

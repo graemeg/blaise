@@ -28,8 +28,12 @@ function FdExhausted(N: Int64): Boolean;
 { True when N is the return value of a non-blocking connect that is still
   completing (WSAEWOULDBLOCK, as WinSock reports it, or WSAEINPROGRESS). }
 function ConnectPending(N: Int64): Boolean;
-{ The OS error code behind N, a failed call's return value; 0 when N is not
-  a failure. }
+{ The POSIX errno behind N, a failed call's return value, mapped from the
+  Win32 error (EIO for one with no POSIX counterpart); 0 when N is not a
+  failure.  The stdlib reads errno numbers (IO.Files' error texts and
+  ENOENT/EEXIST/EXDEV tests), so the mapping keeps them meaning the same on
+  every target.  The would-block and interrupted questions above read the
+  raw Win32 and WinSock codes. }
 function OsErrorOf(N: Int64): Int;
 { The calling thread's last error code. }
 function GetOsErrno: Int;
@@ -72,10 +76,37 @@ begin
     (GetOsErrno() = WSAEINPROGRESS));
 end;
 
+{ Win32 error -> POSIX errno (the numbers Linux uses, which macOS and FreeBSD
+  share below 35). }
+function PosixErrno(AWin32: Int): Int;
+begin
+  case AWin32 of
+    0: Result := 0;
+    2, 3, 15, 161: Result := 2;          { ENOENT: file, path, drive, bad path }
+    4: Result := 24;                     { EMFILE }
+    5, 82: Result := 13;                 { EACCES; ERROR_CANNOT_MAKE }
+    6: Result := 9;                      { EBADF }
+    8, 14: Result := 12;                 { ENOMEM }
+    17: Result := 18;                    { EXDEV: ERROR_NOT_SAME_DEVICE }
+    19: Result := 30;                    { EROFS: ERROR_WRITE_PROTECT }
+    32, 33: Result := 16;                { EBUSY: sharing, lock violation }
+    39, 112: Result := 28;               { ENOSPC }
+    80, 183: Result := 17;               { EEXIST }
+    87, 123, 4390: Result := 22;         { EINVAL; bad name; not a link }
+    145: Result := 39;                   { ENOTEMPTY }
+    206: Result := 36;                   { ENAMETOOLONG }
+    267: Result := 20;                   { ENOTDIR: ERROR_DIRECTORY }
+    1314: Result := 1;                   { EPERM: privilege not held }
+    1921: Result := 40;                  { ELOOP: cannot resolve the name }
+  else
+    Result := 5;                         { EIO }
+  end;
+end;
+
 function OsErrorOf(N: Int64): Int;
 begin
   if N = -1 then
-    Result := GetOsErrno()
+    Result := PosixErrno(GetOsErrno())
   else
     Result := 0;
 end;

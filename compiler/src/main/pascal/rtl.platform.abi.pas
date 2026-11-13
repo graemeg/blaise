@@ -81,6 +81,19 @@ function  _FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64;
 function  _FdSize(Fd: Int32): Int64;
 procedure _FdClose(Fd: Int32);
 
+{ POSIX-shaped file-system calls (TRtlPlatform.Fs*).  Not compiler builtins:
+  stdlib's IO.Files imports them via `external name`. }
+function  _FsClose(Fd: Int32): Int32;
+function  _FsUnlink(const Path: string): Int32;
+function  _FsRmdir(const Path: string): Int32;
+function  _FsMkdir(const Path: string; Mode: Int32): Int32;
+function  _FsRename(const OldPath, NewPath: string): Int32;
+function  _FsChmod(const Path: string; Mode: Int32): Int32;
+function  _FsSymlink(const Target, LinkPath: string): Int32;
+function  _FsReadlink(const Path: string; Buf: Pointer; Size: Int64): Int64;
+function  _FsAccess(const Path: string; Mode: Int32): Int32;
+function  _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
+
 { Date/Time }
 function  _TimeNow: Int64;
 function  _TimeLocalOffsetSecs: Int32;
@@ -314,6 +327,56 @@ end;
 procedure _FdClose(Fd: Int32);
 begin
   GRtlPlatform.FdClose(Fd);
+end;
+
+function _FsClose(Fd: Int32): Int32;
+begin
+  Result := GRtlPlatform.FsClose(Fd);
+end;
+
+function _FsUnlink(const Path: string): Int32;
+begin
+  Result := GRtlPlatform.FsUnlink(Path);
+end;
+
+function _FsRmdir(const Path: string): Int32;
+begin
+  Result := GRtlPlatform.FsRmdir(Path);
+end;
+
+function _FsMkdir(const Path: string; Mode: Int32): Int32;
+begin
+  Result := GRtlPlatform.FsMkdir(Path, Mode);
+end;
+
+function _FsRename(const OldPath, NewPath: string): Int32;
+begin
+  Result := GRtlPlatform.FsRename(OldPath, NewPath);
+end;
+
+function _FsChmod(const Path: string; Mode: Int32): Int32;
+begin
+  Result := GRtlPlatform.FsChmod(Path, Mode);
+end;
+
+function _FsSymlink(const Target, LinkPath: string): Int32;
+begin
+  Result := GRtlPlatform.FsSymlink(Target, LinkPath);
+end;
+
+function _FsReadlink(const Path: string; Buf: Pointer; Size: Int64): Int64;
+begin
+  Result := GRtlPlatform.FsReadlink(Path, Buf, Size);
+end;
+
+function _FsAccess(const Path: string; Mode: Int32): Int32;
+begin
+  Result := GRtlPlatform.FsAccess(Path, Mode);
+end;
+
+function _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
+begin
+  Result := GRtlPlatform.FsSetModified(Path, Sec, NSec);
 end;
 
 function _TimeNow: Int64;

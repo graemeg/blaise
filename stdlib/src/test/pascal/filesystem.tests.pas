@@ -37,6 +37,7 @@ type
     function P(const ARel: string): string;
     function BigContent: string;
     function RunningAsRoot: Boolean;
+    function ExecBitsKept: Boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -110,9 +111,36 @@ const
   MODE_755 = $1ED;
   MODE_644 = $1A4;
   MODE_600 = $180;
+  MODE_444 = $124;
   MODE_000 = 0;
   { 2020-09-13T12:26:40.123Z: a millisecond part a seconds-only clock loses. }
   STAMP_MS = 1600000000123;
+
+{ Make APath and everything below it owner-accessible again (a test may
+  have taken the permissions away), then remove it all, if it is there. }
+procedure RemoveTree(const APath: string);
+
+  procedure Unlock(const APath: string);
+  var
+    Names: TList<TDirEntry>;
+    I: Int;
+  begin
+    SetPermissions(APath, $1C0);
+    Names := ListDirectory(APath);
+    for I := 0 to Names.Count - 1 do
+      if Names[I].Kind = fkDirectory then
+        Unlock(APath + '/' + Names[I].Name)
+      else if Names[I].Kind = fkFile then
+        SetPermissions(APath + '/' + Names[I].Name, $180);
+  end;
+
+begin
+  if GetFileKind(APath, False) = fkNone then
+    Exit;
+  if GetFileKind(APath, False) = fkDirectory then
+    Unlock(APath);
+  DeleteTree(APath);
+end;
 
 function TFileSystemTests.P(const ARel: string): string;
 begin
@@ -140,13 +168,24 @@ begin
   DeleteFile(P('rootprobe'));
 end;
 
+{ Whether the file system keeps a file's execute bits as set.  Windows
+  decides a program by its extension, not a mode. }
+function TFileSystemTests.ExecBitsKept: Boolean;
+begin
+  WriteFile(P('modeprobe'), 'x');
+  SetPermissions(P('modeprobe'), MODE_755);
+  Result := GetPermissions(P('modeprobe')) = MODE_755;
+  SetPermissions(P('modeprobe'), MODE_644);
+  DeleteFile(P('modeprobe'));
+end;
+
 procedure TFileSystemTests.SetUp;
 var
   Base: string;
 begin
   Base := ExcludeTrailingPathDelimiter(GetTempDir()) + '/blaise-fs-' +
     IntToStr(GetProcessID());
-  Exec('chmod -R u+rwx ''' + Base + ''' 2>/dev/null; rm -rf ''' + Base + '''');
+  RemoveTree(Base);
   FRoot := Base + '/root';
   FOutside := Base + '/outside';
   ForceDirectories(FRoot);
@@ -159,7 +198,7 @@ var
   Base: string;
 begin
   Base := ExtractFileDir(FRoot);
-  Exec('chmod -R u+rwx ''' + Base + ''' 2>/dev/null; rm -rf ''' + Base + '''');
+  RemoveTree(Base);
 end;
 
 { ---- kinds ----------------------------------------------------------------- }
@@ -429,6 +468,13 @@ end;
 
 procedure TFileSystemTests.TestCopyFile_KeepsPermissions;
 begin
+  WriteFile(P('ro'), 'x');
+  SetPermissions(P('ro'), MODE_444);
+  CopyFile(P('ro'), P('ro2'));
+  AssertEquals('read-only mode', MODE_444, GetPermissions(P('ro2')));
+  AssertTrue('read-only', not IsWritable(P('ro2')));
+  if not ExecBitsKept() then
+    Exit;
   WriteFile(P('tool'), '#!/bin/sh');
   SetPermissions(P('tool'), MODE_755);
   CopyFile(P('tool'), P('tool2'));
@@ -494,7 +540,9 @@ begin
   WriteFile(P('src/top'), 'top');
   CopyTree(P('src'), P('dst'));
   AssertTrue('directory link stays a link', GetFileKind(P('dst/out'), False) = fkSymlink);
-  AssertEquals('same target', FOutside, ReadSymlink(P('dst/out')));
+  { A Windows link stores its target with one kind of separator. }
+  AssertEquals('same target', ReplaceAll(FOutside, '\', '/'),
+    ReplaceAll(ReadSymlink(P('dst/out')), '\', '/'));
   AssertEquals('relative target kept as written', 'top', ReadSymlink(P('dst/rel')));
   AssertEquals('relative link resolves inside the copy', 'top', ReadFile(P('dst/rel')));
   AssertTrue('outside not copied into the tree',
@@ -683,8 +731,11 @@ begin
   AssertTrue('readable', IsReadable(P('f')));
   AssertTrue('writable', IsWritable(P('f')));
   AssertTrue('not executable', not IsExecutable(P('f')));
-  SetPermissions(P('f'), MODE_755);
-  AssertTrue('executable', IsExecutable(P('f')));
+  if ExecBitsKept() then
+  begin
+    SetPermissions(P('f'), MODE_755);
+    AssertTrue('executable', IsExecutable(P('f')));
+  end;
   AssertTrue('missing is not readable', not IsReadable(P('nope')));
   AssertEquals('missing mode', -1, GetPermissions(P('nope')));
   if not RunningAsRoot() then
@@ -752,6 +803,14 @@ end;
 
 { ---- trash ----------------------------------------------------------------- }
 
+{ APath as the trashinfo Path= key writes it, for the characters a temporary
+  directory's path can hold. }
+function Escaped(const APath: string): string;
+begin
+  Result := ReplaceAll(ReplaceAll(ReplaceAll(APath, ' ', '%20'), ':', '%3A'),
+    '\', '%5C');
+end;
+
 procedure TFileSystemTests.TestTrashTo_FreedesktopLayout;
 var
   Info: string;
@@ -763,8 +822,7 @@ begin
   Info := ReadFile(P('Trash/info/old world.dat.trashinfo'));
   AssertTrue('header', Pos('[Trash Info]', Info) = 0);
   AssertTrue('original path, percent-encoded',
-    Pos('Path=' + ReplaceAll(FRoot, ' ', '%20') +
-        '/old%20world.dat', Info) > 0);
+    Pos('Path=' + Escaped(FRoot) + '/old%20world.dat', Info) > 0);
   AssertTrue('deletion date', Pos('DeletionDate=', Info) > 0);
 end;
 

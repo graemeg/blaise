@@ -105,6 +105,28 @@ type
     function FdSize(Fd: Int32): Int64; virtual; abstract;
     procedure FdClose(Fd: Int32); virtual; abstract;
 
+    { POSIX-shaped file-system calls, for the stdlib's IO.Files.  Each one
+      answers as its libc namesake does -- 0 (or a count) on success, a
+      negative result on failure -- and the failure's errno is read with
+      OsErrorOf (runtime.errno.*), which on Windows maps the Win32 error to
+      the POSIX number. }
+    function FsClose(Fd: Int32): Int32; virtual; abstract;
+    function FsUnlink(const APath: string): Int32; virtual; abstract;
+    function FsRmdir(const APath: string): Int32; virtual; abstract;
+    function FsMkdir(const APath: string; AMode: Int32): Int32; virtual; abstract;
+    function FsRename(const AOldPath, ANewPath: string): Int32; virtual; abstract;
+    function FsChmod(const APath: string; AMode: Int32): Int32; virtual; abstract;
+    function FsSymlink(const ATarget, ALinkPath: string): Int32; virtual; abstract;
+    function FsReadlink(const APath: string; ABuf: Pointer; ASize: Int64): Int64;
+      virtual; abstract;
+    { AMode is access's R_OK (4), W_OK (2), X_OK (1) or F_OK (0). }
+    function FsAccess(const APath: string; AMode: Int32): Int32; virtual; abstract;
+    { Set APath's modification time, leaving its access time alone.  APath
+      may be a directory; setting the time needs ownership, not write
+      permission. }
+    function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32;
+      virtual; abstract;
+
     { Date/Time }
     function TimeNow: Int64; virtual; abstract;
     function TimeLocalOffsetSecs: Int32; virtual; abstract;

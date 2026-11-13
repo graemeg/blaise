@@ -72,6 +72,16 @@ type
     function FdSeek(Fd: Int32; Offset: Int64; Origin: Int32): Int64; override;
     function FdSize(Fd: Int32): Int64; override;
     procedure FdClose(Fd: Int32); override;
+    function FsClose(Fd: Int32): Int32; override;
+    function FsUnlink(const APath: string): Int32; override;
+    function FsRmdir(const APath: string): Int32; override;
+    function FsMkdir(const APath: string; AMode: Int32): Int32; override;
+    function FsRename(const AOldPath, ANewPath: string): Int32; override;
+    function FsChmod(const APath: string; AMode: Int32): Int32; override;
+    function FsSymlink(const ATarget, ALinkPath: string): Int32; override;
+    function FsReadlink(const APath: string; ABuf: Pointer; ASize: Int64): Int64; override;
+    function FsAccess(const APath: string; AMode: Int32): Int32; override;
+    function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32; override;
     function TimeNow: Int64; override;
     function TimeLocalOffsetSecs: Int32; override;
     procedure TimeSplit(Nanos: Int64; out Year, Month, Day, Hour, Min, Sec, NSec: Int32); override;
@@ -210,6 +220,17 @@ function W32WaitForSingleObject(AHandle: Pointer; AMilliseconds: UInt32): UInt32
   external 'kernel32' name 'WaitForSingleObject';
 function W32GetExitCodeProcess(AProcess: Pointer; ACode: Pointer): Int32;
   external 'kernel32' name 'GetExitCodeProcess';
+procedure W32SetLastError(ACode: UInt32); external 'kernel32' name 'SetLastError';
+function W32SetFileAttributesW(AName: Pointer; AAttrs: UInt32): Int32;
+  external 'kernel32' name 'SetFileAttributesW';
+{ Returns a BOOLEAN (one byte), not a BOOL. }
+function W32CreateSymbolicLinkW(ALink, ATarget: Pointer; AFlags: UInt32): Byte;
+  external 'kernel32' name 'CreateSymbolicLinkW';
+function W32DeviceIoControl(ADevice: Pointer; ACode: UInt32; AIn: Pointer;
+  AInSize: UInt32; AOut: Pointer; AOutSize: UInt32; AReturned: Pointer;
+  AOverlapped: Pointer): Int32; external 'kernel32' name 'DeviceIoControl';
+function W32SetFileTime(AFile: Pointer; ACreation, AAccess,
+  AWrite: Pointer): Int32; external 'kernel32' name 'SetFileTime';
 
 const
   CP_UTF8 = 65001;
@@ -227,6 +248,18 @@ const
   FILE_ATTRIBUTE_NORMAL = $0080;
   FILE_ATTRIBUTE_REPARSE_POINT = $0400;
   FILE_FLAG_BACKUP_SEMANTICS = $02000000;
+  FILE_FLAG_OPEN_REPARSE_POINT = $00200000;
+  FILE_WRITE_ATTRIBUTES = $0100;
+  SYMBOLIC_LINK_FLAG_DIRECTORY = $1;
+  SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE = $2;
+  FSCTL_GET_REPARSE_POINT = $000900A8;
+  IO_REPARSE_TAG_MOUNT_POINT = $A0000003;
+  IO_REPARSE_TAG_SYMLINK = $A000000C;
+  { MAXIMUM_REPARSE_DATA_BUFFER_SIZE }
+  REPARSE_BUF_SIZE = 16384;
+  ERROR_ACCESS_DENIED = 5;
+  ERROR_INVALID_PARAMETER = 87;
+  ERROR_NOT_A_REPARSE_POINT = 4390;
   INVALID_FILE_ATTRIBUTES = $FFFFFFFF;
   MOVEFILE_REPLACE_EXISTING = $0001;
   MOVEFILE_COPY_ALLOWED = $0002;
@@ -1238,6 +1271,397 @@ begin
 end;
 
 { ================================================================== }
+{ POSIX-shaped file-system calls                                       }
+{ ================================================================== }
+{ Each fails with -1 and the Win32 error left for GetLastError, which
+  runtime.errno.windows' OsErrorOf maps to the POSIX errno.  Where POSIX and
+  Windows differ, these follow POSIX: a read-only file can be deleted and
+  replaced (its directory's permissions decide that on POSIX, not its own),
+  and a directory replaces an empty directory. }
+
+const
+  ERROR_INVALID_HANDLE = 6;
+  CH_SLASH = $2F;
+  CH_BACKSLASH = $5C;
+  CH_COLON = $3A;
+
+{ Fail with ACode as the last error. }
+function FailWith(ACode: UInt32): Int32;
+begin
+  W32SetLastError(ACode);
+  Result := -1;
+end;
+
+{ ACall's BOOL result as the POSIX 0 or -1. }
+function PosixResult(ACall: Int32): Int32;
+begin
+  if ACall <> 0 then
+    Result := 0
+  else
+    Result := -1;
+end;
+
+{ Clear READONLY on the entry at wide path W, whose attributes are AAttrs;
+  True when it was set (and so must be put back if the call it made way for
+  fails). }
+function DropReadOnly(W: Pointer; AAttrs: UInt32): Boolean;
+begin
+  Result := (AAttrs <> INVALID_FILE_ATTRIBUTES) and
+    ((AAttrs and FILE_ATTRIBUTE_READONLY) <> 0) and
+    ((AAttrs and FILE_ATTRIBUTE_DIRECTORY) = 0);
+  if Result then
+    W32SetFileAttributesW(W, AAttrs and not FILE_ATTRIBUTE_READONLY);
+end;
+
+{ After a failed call: put READONLY back if DropReadOnly took it, keeping the
+  call's error. }
+procedure RestoreReadOnly(W: Pointer; AAttrs: UInt32; ADropped: Boolean);
+var
+  Err: UInt32;
+begin
+  if not ADropped then
+    Exit;
+  Err := W32GetLastError();
+  W32SetFileAttributesW(W, AAttrs);
+  W32SetLastError(Err);
+end;
+
+{ Replace each UTF-16 unit AFrom in NUL-terminated W with ATo. }
+procedure ReplaceWide(W: Pointer; AFrom, ATo: UInt16);
+var
+  P: PUInt16;
+begin
+  P := PUInt16(W);
+  while P^ <> 0 do
+  begin
+    if P^ = AFrom then
+      P^ := ATo;
+    P := PUInt16(Pointer(P) + 2);
+  end;
+end;
+
+{ The attributes of a link's target WTarget, read relative to the directory
+  of the link WLink when it is a relative path, as the link will resolve
+  it. }
+function LinkTargetAttributes(WLink, WTarget: Pointer): UInt32;
+var
+  First, Second: UInt16;
+  LinkLen, TargetLen, DirLen, I: Int32;
+  W: Pointer;
+begin
+  First := PUInt16(WTarget)^;
+  Second := 0;
+  if First <> 0 then
+    Second := PUInt16(WTarget + 2)^;
+  if (First = CH_SLASH) or (First = CH_BACKSLASH) or (Second = CH_COLON) then
+    Exit(W32GetFileAttributesW(WTarget));
+  LinkLen := WideLen(WLink);
+  DirLen := 0;
+  for I := 0 to LinkLen - 1 do
+    if (PUInt16(WLink + Int64(I) * 2)^ = CH_SLASH) or
+       (PUInt16(WLink + Int64(I) * 2)^ = CH_BACKSLASH) then
+      DirLen := I + 1;
+  TargetLen := WideLen(WTarget);
+  W := _BlaiseGetMem((Int64(DirLen) + TargetLen + 1) * 2);
+  for I := 0 to DirLen - 1 do
+    PUInt16(W + Int64(I) * 2)^ := PUInt16(WLink + Int64(I) * 2)^;
+  for I := 0 to TargetLen - 1 do
+    PUInt16(W + Int64(DirLen + I) * 2)^ := PUInt16(WTarget + Int64(I) * 2)^;
+  PUInt16(W + Int64(DirLen + TargetLen) * 2)^ := 0;
+  Result := W32GetFileAttributesW(W);
+  _BlaiseFreeMem(W);
+end;
+
+{ Whether APath names a program by its extension, as cmd.exe would run it. }
+function HasProgramExtension(const APath: string): Boolean;
+var
+  P: PChar;
+  N, I: Int;
+  Ext: string;
+  B: Int;
+begin
+  Result := False;
+  N := Length(APath);
+  if N < 4 then
+    Exit;
+  P := PChar(APath);
+  if P[N - 4] <> '.' then
+    Exit;
+  Ext := '';
+  for I := N - 3 to N - 1 do
+  begin
+    B := Ord(P[I]);
+    if (B >= Ord('A')) and (B <= Ord('Z')) then
+      B := B + 32;
+    Ext := Ext + Chr(B);
+  end;
+  Result := (Ext = 'exe') or (Ext = 'com') or (Ext = 'bat') or (Ext = 'cmd');
+end;
+
+function TRtlPlatformWindows.FsClose(Fd: Int32): Int32;
+var
+  H: Pointer;
+begin
+  if (Fd >= 0) and (Fd <= 2) then
+    Exit(0);
+  H := _WinFdRemove(Fd);
+  if H = nil then
+    Exit(FailWith(ERROR_INVALID_HANDLE));
+  Result := PosixResult(W32CloseHandle(H));
+end;
+
+{ A link to a directory is a directory entry on Windows, removed with
+  RemoveDirectoryW; a real directory is refused, as unlink(2) refuses it. }
+function TRtlPlatformWindows.FsUnlink(const APath: string): Int32;
+var
+  W: Pointer;
+  Attrs: UInt32;
+  Dropped: Boolean;
+begin
+  W := WideZ(APath);
+  Attrs := W32GetFileAttributesW(W);
+  if Attrs = INVALID_FILE_ATTRIBUTES then
+    Result := -1
+  else if (Attrs and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+  begin
+    if (Attrs and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+      Result := PosixResult(W32RemoveDirectoryW(W))
+    else
+      Result := FailWith(ERROR_ACCESS_DENIED);
+  end
+  else
+  begin
+    Dropped := DropReadOnly(W, Attrs);
+    Result := PosixResult(W32DeleteFileW(W));
+    if Result <> 0 then
+      RestoreReadOnly(W, Attrs, Dropped);
+  end;
+  _BlaiseFreeMem(W);
+end;
+
+function TRtlPlatformWindows.FsRmdir(const APath: string): Int32;
+var
+  W: Pointer;
+begin
+  W := WideZ(APath);
+  Result := PosixResult(W32RemoveDirectoryW(W));
+  _BlaiseFreeMem(W);
+end;
+
+{ Windows has no mode bits; AMode is not used. }
+function TRtlPlatformWindows.FsMkdir(const APath: string; AMode: Int32): Int32;
+var
+  W: Pointer;
+begin
+  W := WideZ(APath);
+  Result := PosixResult(W32CreateDirectoryW(W, nil));
+  _BlaiseFreeMem(W);
+end;
+
+{ Across volumes MoveFileExW fails with ERROR_NOT_SAME_DEVICE (EXDEV), as
+  rename(2) does; the caller copies. }
+function TRtlPlatformWindows.FsRename(const AOldPath, ANewPath: string): Int32;
+var
+  WOld, WNew: Pointer;
+  OldAttrs, NewAttrs: UInt32;
+  Dropped: Boolean;
+begin
+  WOld := WideZ(AOldPath);
+  WNew := WideZ(ANewPath);
+  Dropped := False;
+  Result := 0;
+  OldAttrs := W32GetFileAttributesW(WOld);
+  NewAttrs := W32GetFileAttributesW(WNew);
+  if OldAttrs = INVALID_FILE_ATTRIBUTES then
+    Result := -1
+  else if (NewAttrs <> INVALID_FILE_ATTRIBUTES) and
+          ((NewAttrs and FILE_ATTRIBUTE_DIRECTORY) <> 0) and
+          ((NewAttrs and FILE_ATTRIBUTE_REPARSE_POINT) = 0) then
+  begin
+    { A directory replaces an empty directory; nothing else replaces one. }
+    if (OldAttrs and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+      Result := FailWith(ERROR_ACCESS_DENIED)
+    else
+      Result := PosixResult(W32RemoveDirectoryW(WNew));
+  end
+  else
+    Dropped := DropReadOnly(WNew, NewAttrs);
+  if Result = 0 then
+  begin
+    Result := PosixResult(W32MoveFileExW(WOld, WNew, MOVEFILE_REPLACE_EXISTING));
+    if Result <> 0 then
+      RestoreReadOnly(WNew, NewAttrs, Dropped);
+  end;
+  _BlaiseFreeMem(WOld);
+  _BlaiseFreeMem(WNew);
+end;
+
+{ The owner-write bit decides READONLY, the one permission a file carries;
+  a directory's READONLY has no such meaning, so a directory is left as it
+  is. }
+function TRtlPlatformWindows.FsChmod(const APath: string; AMode: Int32): Int32;
+var
+  W: Pointer;
+  Attrs, Want: UInt32;
+begin
+  W := WideZ(APath);
+  Attrs := W32GetFileAttributesW(W);
+  if Attrs = INVALID_FILE_ATTRIBUTES then
+    Result := -1
+  else if (Attrs and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+    Result := 0
+  else
+  begin
+    if (AMode and $80) <> 0 then
+      Want := Attrs and not FILE_ATTRIBUTE_READONLY
+    else
+      Want := Attrs or FILE_ATTRIBUTE_READONLY;
+    if Want = Attrs then
+      Result := 0
+    else
+      Result := PosixResult(W32SetFileAttributesW(W, Want));
+  end;
+  _BlaiseFreeMem(W);
+end;
+
+{ A link that needs no privilege (Developer Mode, or an elevated process
+  otherwise), marked a directory link when its target is a directory now.
+  The target's '/' separators are stored as '\', which the link resolution
+  needs; FsReadlink turns them back. }
+function TRtlPlatformWindows.FsSymlink(const ATarget, ALinkPath: string): Int32;
+var
+  WTarget, WLink: Pointer;
+  Attrs, Flags: UInt32;
+begin
+  WTarget := WideZ(ATarget);
+  WLink := WideZ(ALinkPath);
+  ReplaceWide(WTarget, CH_SLASH, CH_BACKSLASH);
+  Flags := SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+  Attrs := LinkTargetAttributes(WLink, WTarget);
+  if (Attrs <> INVALID_FILE_ATTRIBUTES) and
+     ((Attrs and FILE_ATTRIBUTE_DIRECTORY) <> 0) then
+    Flags := Flags or SYMBOLIC_LINK_FLAG_DIRECTORY;
+  if W32CreateSymbolicLinkW(WLink, WTarget, Flags) <> 0 then
+    Result := 0
+  else
+    Result := -1;
+  _BlaiseFreeMem(WTarget);
+  _BlaiseFreeMem(WLink);
+end;
+
+{ The link's print name (its target as written), else its substitute name
+  without the NT '\??\' prefix; a junction reads like a symbolic link.  As
+  readlink(2), the result is not NUL-terminated and is cut at ASize. }
+function TRtlPlatformWindows.FsReadlink(const APath: string; ABuf: Pointer;
+  ASize: Int64): Int64;
+var
+  H, Buf, Names: Pointer;
+  Returned, Tag, Err: UInt32;
+  Ofs, Len: Int32;
+  W: Pointer;
+  Target: string;
+  Src, Dst: PChar;
+  I: Int64;
+begin
+  H := OpenPath(APath, 0, OPEN_EXISTING,
+    FILE_FLAG_OPEN_REPARSE_POINT or FILE_FLAG_BACKUP_SEMANTICS);
+  if not IsValidHandle(H) then
+    Exit(-1);
+  Buf := _BlaiseGetMem(REPARSE_BUF_SIZE);
+  Returned := 0;
+  if W32DeviceIoControl(H, FSCTL_GET_REPARSE_POINT, nil, 0, Buf,
+     REPARSE_BUF_SIZE, @Returned, nil) = 0 then
+  begin
+    Err := W32GetLastError();
+    W32CloseHandle(H);
+    _BlaiseFreeMem(Buf);
+    Exit(FailWith(Err));
+  end;
+  W32CloseHandle(H);
+  Tag := PUInt32(Buf)^;
+  if Tag = IO_REPARSE_TAG_SYMLINK then
+    Names := Buf + 20
+  else if Tag = IO_REPARSE_TAG_MOUNT_POINT then
+    Names := Buf + 16
+  else
+  begin
+    _BlaiseFreeMem(Buf);
+    Exit(FailWith(ERROR_NOT_A_REPARSE_POINT));
+  end;
+  Ofs := PUInt16(Buf + 12)^;
+  Len := PUInt16(Buf + 14)^ div 2;
+  if Len = 0 then
+  begin
+    Ofs := PUInt16(Buf + 8)^;
+    Len := PUInt16(Buf + 10)^ div 2;
+    W := Names + Ofs;
+    if (Len >= 4) and (PUInt16(W)^ = CH_BACKSLASH) and
+       (PUInt16(W + 2)^ = Ord('?')) and (PUInt16(W + 4)^ = Ord('?')) and
+       (PUInt16(W + 6)^ = CH_BACKSLASH) then
+    begin
+      Ofs := Ofs + 8;
+      Len := Len - 4;
+    end;
+  end;
+  Target := FromWide(Names + Ofs, Len);
+  _BlaiseFreeMem(Buf);
+  Result := Length(Target);
+  if Result > ASize then
+    Result := ASize;
+  Src := PChar(Target);
+  Dst := PChar(ABuf);
+  for I := 0 to Result - 1 do
+  begin
+    if Src[I] = '\' then
+      Dst[I] := '/'
+    else
+      Dst[I] := Src[I];
+  end;
+end;
+
+{ From the attributes: every entry is readable, a READONLY file is not
+  writable, and a file is executable by its extension (a directory always
+  is, as search permission). }
+function TRtlPlatformWindows.FsAccess(const APath: string; AMode: Int32): Int32;
+var
+  Attrs: UInt32;
+  IsDir: Boolean;
+begin
+  Attrs := PathAttributes(APath);
+  if Attrs = INVALID_FILE_ATTRIBUTES then
+    Exit(-1);
+  IsDir := (Attrs and FILE_ATTRIBUTE_DIRECTORY) <> 0;
+  if ((AMode and 2) <> 0) and (not IsDir) and
+     ((Attrs and FILE_ATTRIBUTE_READONLY) <> 0) then
+    Exit(FailWith(ERROR_ACCESS_DENIED));
+  if ((AMode and 1) <> 0) and (not IsDir) and
+     (not HasProgramExtension(APath)) then
+    Exit(FailWith(ERROR_ACCESS_DENIED));
+  Result := 0;
+end;
+
+{ Through a handle with only FILE_WRITE_ATTRIBUTES, which a read-only file
+  grants, and backup semantics, which opens a directory. }
+function TRtlPlatformWindows.FsSetModified(const APath: string;
+  ASec, ANSec: Int64): Int32;
+var
+  H: Pointer;
+  WriteTime: Int64;
+  Err: UInt32;
+begin
+  H := OpenPath(APath, FILE_WRITE_ATTRIBUTES, OPEN_EXISTING,
+    FILE_FLAG_BACKUP_SEMANTICS);
+  if not IsValidHandle(H) then
+    Exit(-1);
+  WriteTime := ASec * 10000000 + ANSec div 100 + FILETIME_UNIX_EPOCH;
+  Result := PosixResult(W32SetFileTime(H, nil, nil, @WriteTime));
+  Err := W32GetLastError();
+  W32CloseHandle(H);
+  if Result <> 0 then
+    W32SetLastError(Err);
+end;
+
+{ ================================================================== }
 { Date/Time                                                            }
 { ================================================================== }
 
@@ -1533,12 +1957,16 @@ var
 begin
   if not QueryPath(Path, FollowLinks <> 0, Attrs, Size, WriteTime) then
     Exit(-1);
+  { The mode a POSIX reader expects: READONLY clears the write bits, and a
+    program (by its extension, as FsAccess decides) has the execute bits. }
   if (Attrs and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
     Mode := $1ED
   else if (Attrs and FILE_ATTRIBUTE_READONLY) <> 0 then
     Mode := $124
   else
     Mode := $1A4;
+  if ((Attrs and FILE_ATTRIBUTE_DIRECTORY) = 0) and HasProgramExtension(Path) then
+    Mode := Mode or $49;
   SplitFileTime(WriteTime, Sec, NSec);
   PInt32(AOut)^ := KindOfAttributes(Attrs, FollowLinks <> 0);
   PInt32(AOut + 4)^ := Mode;
