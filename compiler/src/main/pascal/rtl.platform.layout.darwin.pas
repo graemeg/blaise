@@ -139,6 +139,13 @@ function _UtimeOmit: Int64;
   sin_zero[8]. }
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 
+{ kqueue, for IO.Watch (rtl.platform.watch.kqueue): the size of struct
+  kevent (Darwin's 64-bit one ends at udata), and the open(2) flags of a
+  descriptor that only watches a path: O_EVTONLY ($8000), which does not
+  hold the volume busy, and O_CLOEXEC ($01000000). }
+function _KeventSize: Int32;
+function _WatchOpenFlags: Int32;
+
 { Flat function for runtime.mem: register Fn(Arg) to run when the CALLING
   thread exits, while its threadvars are still readable.  dyld's _tlv_atexit:
   a pthread key destructor is NOT equivalent -- dyld frees the thread's TLV
@@ -408,6 +415,16 @@ begin
     PB := Pointer(PChar(P) + I);
     PB^ := 0;                              { sin_zero }
   end;
+end;
+
+function _KeventSize: Int32;
+begin
+  Result := 32;
+end;
+
+function _WatchOpenFlags: Int32;
+begin
+  Result := $01008000;
 end;
 
 procedure darwin_tlv_atexit(Fn, Arg: Pointer); external name '_tlv_atexit';

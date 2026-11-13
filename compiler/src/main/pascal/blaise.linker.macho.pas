@@ -462,15 +462,16 @@ end;
   silently bound to libSystem as __UpperCase). }
 function IsKnownLibSystemImport(const AName: string): Boolean;
 const
-  KNOWN: array[0..53] of string = (
-    'abort', 'chdir', 'chmod', 'clock_gettime', 'close', 'dup2',
-    'execve', 'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getentropy', 'getenv',
-    'fcntl', 'getpid', 'gmtime_r', 'kill', 'localtime_r', 'lseek', 'lstat', 'memcmp', 'memcpy',
-    'memmove', 'memset', 'mkdir', 'mkstemp', 'mmap', 'munmap',
-    'nanosleep', 'open', 'pipe', 'poll', 'pthread_create', 'pthread_join',
-    'pthread_key_create', 'pthread_mutex_destroy', 'pthread_mutex_init',
-    'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_setspecific',
-    'read', 'readlink', 'rename', 'rmdir', 'signal', 'stat', 'strlen', 'sysconf', 'system',
+  KNOWN: array[0..55] of string = (
+    'abort', 'chdir', 'chmod', 'clock_gettime', 'close', 'dup2', 'execve',
+    'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getentropy',
+    'getenv', 'fcntl', 'getpid', 'gmtime_r', 'kevent', 'kill', 'kqueue',
+    'localtime_r', 'lseek', 'lstat', 'memcmp', 'memcpy', 'memmove', 'memset',
+    'mkdir', 'mkstemp', 'mmap', 'munmap', 'nanosleep', 'open', 'pipe', 'poll',
+    'pthread_create', 'pthread_join', 'pthread_key_create',
+    'pthread_mutex_destroy', 'pthread_mutex_init', 'pthread_mutex_lock',
+    'pthread_mutex_unlock', 'pthread_setspecific', 'read', 'readlink',
+    'rename', 'rmdir', 'signal', 'stat', 'strlen', 'sysconf', 'system',
     'time', 'unlink', 'waitpid');
 var
   I: Int;

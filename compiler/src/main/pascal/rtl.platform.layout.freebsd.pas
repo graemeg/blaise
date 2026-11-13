@@ -140,6 +140,13 @@ function _UtimeOmit: Int64;
   (Linux has no sin_len; its sin_family is a u16 — hence the seam.) }
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 
+{ kqueue, for IO.Watch (rtl.platform.watch.kqueue): the size of struct
+  kevent (FreeBSD 12's carries ext[4] after udata), and the open(2) flags
+  of a descriptor that only watches a path: O_RDONLY (0) and O_CLOEXEC
+  ($00100000). }
+function _KeventSize: Int32;
+function _WatchOpenFlags: Int32;
+
 { Flat function for runtime.mem: register Fn(Arg) to run when the CALLING
   thread exits, while its threadvars are still readable.  FreeBSD libc's
   __cxa_thread_atexit_impl under a libc link; the --static build supplies
@@ -351,6 +358,16 @@ begin
     PB := Pointer(PChar(P) + I);
     PB^ := 0;                              { sin_zero }
   end;
+end;
+
+function _KeventSize: Int32;
+begin
+  Result := 64;
+end;
+
+function _WatchOpenFlags: Int32;
+begin
+  Result := $00100000;
 end;
 
 function cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Int32;

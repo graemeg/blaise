@@ -96,6 +96,11 @@ function TargetCPUName(const ATarget: TTargetDesc): string;
   emitted a call to rtl.platform.layout.macos_init that nothing defines. }
 function RTLOSSuffix(AOS: TTargetOS): string;
 
+{ The RTL unit defining IO.Watch's flat _Watch* functions on AOS:
+  rtl.platform.watch.inotify on Linux, .kqueue on macOS and FreeBSD,
+  .windows on Windows. }
+function RTLWatchUnit(AOS: TTargetOS): string;
+
 function PlatformLayoutInitSym(const ATarget: TTargetDesc): string;
 
 { True when the C calling convention differs from the Blaise one on ATarget,
@@ -243,6 +248,16 @@ begin
     osWindows: Result := 'windows';
   else
     Result := 'linux';
+  end;
+end;
+
+function RTLWatchUnit(AOS: TTargetOS): string;
+begin
+  case AOS of
+    osFreeBSD, osMacOS: Result := 'rtl.platform.watch.kqueue';
+    osWindows: Result := 'rtl.platform.watch.windows';
+  else
+    Result := 'rtl.platform.watch.inotify';
   end;
 end;
 

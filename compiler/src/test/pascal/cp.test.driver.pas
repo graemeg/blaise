@@ -55,6 +55,7 @@ type
     { Windows: its own start, errno, layout and adapter, the kernel32
       leaves, the C stubs and the pthread leaf; no POSIX adapter. }
     procedure TestRTLUnits_Windows_Profile;
+    procedure TestRTLUnits_WatchUnit_FollowsKernel;
 
     { BUG-20260726: the RTL object cache must be keyed on the COMPILER as well
       as the target.  Cached objects are invalidated on source mtime, which
@@ -313,6 +314,37 @@ begin
   finally
     U.Free();
   end;
+end;
+
+{ IO.Watch's flat _Watch* functions come from one unit per kernel
+  mechanism; a program linked for one target must not carry another's (the
+  inotify names do not exist on the BSDs, nor kqueue on Linux). }
+procedure TBackendDriverContractTests.TestRTLUnits_WatchUnit_FollowsKernel;
+const
+  ALL: array[0..2] of string = ('rtl.platform.watch.inotify',
+    'rtl.platform.watch.kqueue', 'rtl.platform.watch.windows');
+
+  procedure Check(AStatic: Boolean; AOS: TTargetOS; const AWant: string);
+  var
+    U: TStringList;
+    I: Int;
+  begin
+    U := BuildRTLUnitList(AStatic, AOS);
+    try
+      for I := 0 to 2 do
+        AssertEquals(AWant + ' vs ' + ALL[I], ALL[I] = AWant,
+          ListContains(U, ALL[I]));
+    finally
+      U.Free();
+    end;
+  end;
+
+begin
+  Check(False, osLinux, 'rtl.platform.watch.inotify');
+  Check(True, osLinux, 'rtl.platform.watch.inotify');
+  Check(False, osMacOS, 'rtl.platform.watch.kqueue');
+  Check(True, osFreeBSD, 'rtl.platform.watch.kqueue');
+  Check(False, osWindows, 'rtl.platform.watch.windows');
 end;
 
 procedure TBackendDriverContractTests.TestRTLUnits_Errno_FreeBSD_FollowsTarget;

@@ -10,7 +10,7 @@ unit iowatch.tests;
 interface
 
 uses
-  SysUtils, Generics.Collections, blaise.testing, IO.Watch;
+  IO.Files, SysUtils, Generics.Collections, blaise.testing, IO.Watch;
 
 type
   TIOWatchTests = class(TTestCase)
@@ -36,13 +36,15 @@ implementation
 procedure TIOWatchTests.SetUp;
 begin
   FDir := ExcludeTrailingPathDelimiter(GetTempDir()) + '/blaise-iowatch-' + IntToStr(GetProcessID());
-  Exec('rm -rf ''' + FDir + '''');
+  if GetFileKind(FDir, False) <> fkNone then
+    DeleteTree(FDir);
   ForceDirectories(FDir);
 end;
 
 procedure TIOWatchTests.TearDown;
 begin
-  Exec('rm -rf ''' + FDir + '''');
+  if GetFileKind(FDir, False) <> fkNone then
+    DeleteTree(FDir);
 end;
 
 procedure TIOWatchTests.WriteText(const APath, AText: string);

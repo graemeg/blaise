@@ -739,6 +739,8 @@ begin
     CPUARM64 defines that follow --target, so the unit NAMES never change —
     a filename split would break `uses runtime.atomic` in shared units.
     ACPU is accepted for future list-level divergence only. }
+  { IO.Watch's change notification, one mechanism per kernel. }
+  Result.Add(RTLWatchUnit(AOS));
   { The freestanding kernel leaf that replaces libc under --static: the raw
     syscall stubs, the OS-invariant freestanding C functions (runtime.cstub),
     the libc-shim layers, and the static-TLS thread leaf. }
