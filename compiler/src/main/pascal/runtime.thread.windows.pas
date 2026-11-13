@@ -28,6 +28,10 @@ function pthread_join(Thread: Int64; RetVal: Pointer): Int32; cdecl;
 { Let the thread run on unjoined: its handle is closed now, and the system
   frees the thread when it ends. }
 function pthread_detach(Thread: Int64): Int32; cdecl;
+{ The calling thread's id (GetCurrentThreadId): equal for calls on one
+  thread and different between threads running at once, which is all a
+  caller may compare.  Not the handle pthread_create gave. }
+function pthread_self: Int64;
 { The mutex buffer is runtime.thread's 64-byte block; an SRWLOCK is its
   first pointer-sized word.  Not recursive, as a default pthread mutex. }
 function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Int32; cdecl;
@@ -46,6 +50,7 @@ function CreateThread(AAttributes: Pointer; AStackSize: UInt64;
   AThreadId: Pointer): Pointer; external 'kernel32' name 'CreateThread';
 function WaitForSingleObject(AHandle: Pointer; AMilliseconds: UInt32): UInt32;
   external 'kernel32' name 'WaitForSingleObject';
+function GetCurrentThreadId: UInt32; external 'kernel32' name 'GetCurrentThreadId';
 function CloseHandle(AHandle: Pointer): Int32;
   external 'kernel32' name 'CloseHandle';
 procedure InitializeSRWLock(ALock: Pointer);
@@ -158,6 +163,11 @@ begin
     Result := 0
   else
     Result := 3;                    { ESRCH }
+end;
+
+function pthread_self: Int64;
+begin
+  Result := GetCurrentThreadId();
 end;
 
 function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Int32; cdecl;

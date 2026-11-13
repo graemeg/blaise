@@ -69,6 +69,13 @@ procedure abort;
 { sysconf(3): the only name the runtime asks for is the online processor
   count. }
 function sysconf(Name: Int32): Int64;
+{ getrlimit(2) and setrlimit(2) over the limits Windows has.  The resource
+  numbers are Linux's, as the errno numbers are.  RLIMIT_NOFILE (7) is the
+  descriptor table's capacity, soft and hard alike; every other resource is
+  unlimited.  setrlimit changes nothing, and succeeds for any soft limit up
+  to the hard one. }
+function getrlimit(AResource: Int32; ARlim: Pointer): Int32;
+function setrlimit(AResource: Int32; ARlim: Pointer): Int32;
 
 const
   { A descriptor's flags: a Winsock SOCKET rather than a kernel32 handle,
@@ -664,6 +671,46 @@ var
 begin
   GetSystemInfo(@Info);
   Result := Info.NumberOfProcessors;
+end;
+
+const
+  RLIMIT_NOFILE = 7;
+
+type
+  TRLimit = record
+    Cur: UInt64;
+    Max: UInt64;
+  end;
+  PRLimit = ^TRLimit;
+
+function getrlimit(AResource: Int32; ARlim: Pointer): Int32;
+begin
+  if AResource = RLIMIT_NOFILE then
+  begin
+    PRLimit(ARlim)^.Cur := MAX_TABLE_FDS;
+    PRLimit(ARlim)^.Max := MAX_TABLE_FDS;
+  end
+  else
+  begin
+    { RLIM_INFINITY }
+    PRLimit(ARlim)^.Cur := High(UInt64);
+    PRLimit(ARlim)^.Max := High(UInt64);
+  end;
+  Result := 0;
+end;
+
+function setrlimit(AResource: Int32; ARlim: Pointer): Int32;
+var
+  Now: TRLimit;
+begin
+  getrlimit(AResource, @Now);
+  if (PRLimit(ARlim)^.Cur > PRLimit(ARlim)^.Max) or
+     (PRLimit(ARlim)^.Max > Now.Max) then
+  begin
+    SetLastError(ERROR_INVALID_PARAMETER);
+    Exit(-1);
+  end;
+  Result := 0;
 end;
 
 end.

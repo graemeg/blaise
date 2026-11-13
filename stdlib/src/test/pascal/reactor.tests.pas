@@ -22,13 +22,17 @@ interface
 
 uses
   blaise.testing, SysUtils, async.reactor,
-  { the per-OS readiness reactor: kqueue on FreeBSD and macOS, epoll on Linux.  Both
-    expose the same surface, so the tests are written against a TOsReactor
-    alias and exercise whichever adapter the target actually uses (GH #204
-    fallout: the hard epoll dependency could not compile on FreeBSD).
+  { the per-OS readiness reactor: kqueue on FreeBSD and macOS, epoll on
+    Linux, poll (WSAPoll) on Windows.  All expose the same surface, so the
+    tests are written against a TOsReactor alias and exercise whichever
+    adapter the target actually uses (GH #204 fallout: the hard epoll
+    dependency could not compile on FreeBSD).
     NOTE: TAlias.Create() through such an alias used to silently SKIP the
     constructor body -- fixed alongside this port; see the alias-constructor
     tests in cp.test.classes. }
+  {$IFDEF WINDOWS}
+  async.reactor.poll,
+  {$ELSE}
   {$IFDEF FREEBSD}
   async.reactor.kqueue,
   {$ELSE}
@@ -38,9 +42,13 @@ uses
   async.reactor.epoll,
   {$ENDIF}
   {$ENDIF}
+  {$ENDIF}
   async.fibers;
 
 type
+  {$IFDEF WINDOWS}
+  TOsReactor = TPollReactor;
+  {$ELSE}
   {$IFDEF FREEBSD}
   TOsReactor = TKqueueReactor;
   {$ELSE}
@@ -48,6 +56,7 @@ type
   TOsReactor = TKqueueReactor;
   {$ELSE}
   TOsReactor = TEpollReactor;
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
 

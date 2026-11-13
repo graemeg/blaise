@@ -17,8 +17,8 @@ unit Zip.Tests;
 interface
 
 uses
-  blaise.testing, SysUtils, StrUtils, DateUtils, Compression.Checksums,
-  Compression.Deflate, Compression.Zip;
+  IO.Files, blaise.testing, SysUtils, StrUtils, DateUtils,
+  Compression.Checksums, Compression.Deflate, Compression.Zip;
 
 type
   TZipReaderTests = class(TTestCase)
@@ -73,11 +73,17 @@ const
   TRAVERSAL_ZIP = {$EMBEDSTR '../resources/compression/traversal.zip'};
   RAW_BIN = 'stored bytes' + #0 + #1 + #2 + #10;
 
+procedure RemoveTree(const APath: string);
+begin
+  if GetFileKind(APath, False) <> fkNone then
+    DeleteTree(APath);
+end;
+
 function TempDir(const ATag: string): string;
 begin
   Result := ExcludeTrailingPathDelimiter(GetTempDir()) + '/blaise-zip-' + ATag +
     '-' + IntToStr(GetProcessID());
-  Exec('rm -rf ''' + Result + '''');
+  RemoveTree(Result);
   ForceDirectories(Result);
 end;
 
@@ -109,7 +115,7 @@ end;
 
 procedure TZipReaderTests.TearDown;
 begin
-  Exec('rm -rf ''' + FDir + '''');
+  RemoveTree(FDir);
 end;
 
 procedure TZipReaderTests.TestList_EntriesFromZipTool;
@@ -397,7 +403,7 @@ end;
 
 procedure TZipWriterTests.TearDown;
 begin
-  Exec('rm -rf ''' + FDir + '''');
+  RemoveTree(FDir);
 end;
 
 procedure TZipWriterTests.TestWrite_RoundTrip;

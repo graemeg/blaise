@@ -43,6 +43,10 @@ function accept4(AFd: Int32; AAddr: Pointer; AAddrLen: Pointer;
   the fibre reactor parks on a pipe's read end (async.io's DNS completion).
   Not for a child process's standard handles. }
 function pipe(AFds: Pointer): Int32;
+{ socketpair(2): a connected pair of loopback TCP sockets, as pipe makes,
+  whatever the domain asked for (AF_UNIX on POSIX); both ends read and
+  write. }
+function socketpair(ADomain, AType, AProtocol: Int32; ASv: Pointer): Int32;
 function connect(AFd: Int32; AAddr: Pointer; AAddrLen: Int32): Int32;
 function setsockopt(AFd, ALevel, AOptName: Int32; AOptVal: Pointer;
   AOptLen: Int32): Int32;
@@ -427,6 +431,11 @@ begin
   PInt32(AFds)^ := ReadFd;
   PInt32(AFds + 4)^ := WriteFd;
   Result := 0;
+end;
+
+function socketpair(ADomain, AType, AProtocol: Int32; ASv: Pointer): Int32;
+begin
+  Result := pipe(ASv);
 end;
 
 function connect(AFd: Int32; AAddr: Pointer; AAddrLen: Int32): Int32;
