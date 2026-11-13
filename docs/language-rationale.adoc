@@ -6218,87 +6218,101 @@ globals.
 * Implicit TLS via runtime per-thread tables — rejected; the explicit keyword
   makes the intent clear and matches established Pascal practice (Delphi, FPC).
 
-== `TThread` Lifetime and ARC — No `FreeOnTerminate`
+== `TThread` Lifetime and ARC — A Running Thread Does Not Keep Itself Alive
 
 === Decision
 
-Blaise's `TThread` does not provide the `FreeOnTerminate` property found in
-Delphi and FPC.  Thread lifetime is managed entirely through ARC: when the
-last reference to a `TThread` instance is released, `Destroy` calls `WaitFor`
-(which calls `pthread_join`), blocking until the OS thread has fully exited
-before the object's memory is freed.
+A `TThread` instance belongs to its owners, not to the OS thread running its
+`Execute`.  When the last owner reference is released, `Destroy` sets
+`Terminated` and joins the OS thread (`WaitFor`, which calls
+`pthread_join`), so the object's memory is freed only after the thread has
+exited.  A thread that loops until `Terminated` therefore stops when its
+owner lets go of it -- the semantics of `Free` on a Delphi or FPC thread, and
+of C++20's `std::jthread`.
 
-Starting the thread from the constructor (`TThread.Create(False)`) is safe:
-a constructor call owns its instance from allocation (see *A constructor call
-returns an owned reference* under ARC), so a worker that retains and
-releases the instance — a closure in `Execute` capturing `Self` — cannot take
-it to 0 while the constructor is still running.
+The worker never touches the instance's reference count.  The routine handed
+to `pthread_create` is a `TThread` method (`Run`), not a free procedure that
+casts its argument: a method takes `Self` in the register where a start
+routine takes its argument, on every target, and a call on `Self` takes no
+reference (see *A receiver stays alive for the call* under ARC).  A call
+through a cast pointer, by contrast, is held for its duration -- which, for
+`Execute`, is the thread's whole life.
 
-The trampoline (the free procedure passed to `pthread_create`) does *not*
-hold an ARC reference to the `TThread` instance.  It accesses the object
-only while the thread is running; `pthread_join` in `Destroy` guarantees
-the trampoline has returned before the object is deallocated, so there is
-no use-after-free.
+A fire-and-forget thread opts in with `FreeOnTerminate`, set before the
+thread starts:
+
+[source,pascal]
+----
+T := TMyThread.Create(True);
+T.FreeOnTerminate := True;
+T.Start();
+T := nil;          { the thread frees itself when Execute returns }
+----
+
+`Start` then takes a reference on the thread's behalf (on the starting
+thread, so the owner cannot drop the last reference first), and the worker
+releases it when `Execute` returns.  When that release is the last one,
+`Destroy` runs on the worker itself.  A thread cannot join itself, so its
+handle is parked and joined by the next `Start`, or when the `Classes` unit
+finalizes; the thread has finished `Execute` by then and is only returning.
+Setting `FreeOnTerminate` after the thread has started raises, rather than
+being silently ignored.
+
+`WaitFor` called from the thread itself raises: it would wait for ever.
 
 === Rationale
 
-In Delphi and FPC, object lifetime is manual.  `Free` directly calls
-`Destroy`, and if the programmer forgets to call it the object leaks.
-`FreeOnTerminate` exists to handle the "fire-and-forget" pattern: when a
-thread is spawned and the caller discards the reference, the thread must
-clean itself up on completion or the `TThread` instance leaks.
+Under ARC, "the worker holds a reference while it runs" and "releasing the
+last reference stops the thread" cannot both be true.  If the worker holds
+one, the owner's release never takes the count to 0 while the thread runs,
+so `Destroy` -- and its `Terminate` -- never happens, and a thread that loops
+until `Terminated` outlives every reference to it.  Blaise chooses the second
+property as the default because it is the one ARC can give: the owner's
+scope decides the thread's lifetime, exactly as it decides any other
+object's.
 
-In Blaise, ARC eliminates this class of leak.  Every relevant scenario is
-already handled:
+* *Explicit release* -- `T := nil` or `Free` drops the reference; `Destroy`
+  terminates and joins.
+* *Scope exit* -- a local `TThread` is released at the end of its scope; the
+  same chain.
+* *Field of an owning object* -- the field is released with its owner.
 
-* *Explicit Free* — `Free` lowers to `_ClassRelease`.  If this drops the
-  refcount to zero, `Destroy` runs, which calls `WaitFor`.  The caller
-  blocks until the thread finishes, then the object is freed.
-* *Scope exit* — when a local `TThread` variable goes out of scope, ARC
-  emits `_ClassRelease`.  Same chain: `Destroy` → `WaitFor` → join → free.
-* *Field in an owning object* — when the owner is destroyed, the field is
-  released.  Same chain.
-* *Reassignment* — `T := nil` or `T := SomeOtherThread` releases the old
-  reference.  Same chain.
+The rule was reached twice.  The first `TThread` had `Start` retain the
+instance and the trampoline release it, and releasing the caller's reference
+never ran `Destroy`.  That retain was removed -- and later reintroduced
+without anyone writing it: the receiver hold added in 3af666d4 retains a
+receiver the caller does not own for the length of the call, and the
+trampoline's `TThread(Arg).Execute()` was such a call
+(BUG-20261113-thread-trampoline-pins-receiver).  The owner's release then
+destroyed the thread only when it happened before the worker entered
+`Execute`, a race that failed under CPU load.  Running `Execute` from a
+method makes the rule structural rather than dependent on how a cast
+receiver is lowered.
 
-In every case, ARC ensures the `TThread` is joined and freed exactly once,
-without any explicit cleanup code from the programmer.
-
-=== Why the trampoline must not hold an ARC reference
-
-The original implementation had `Start` call `_ClassAddRef` on the
-`TThread` instance, and the trampoline call `_ClassRelease` in its
-`finally` block.  This created a reference-count of 2 (one for the caller,
-one for the trampoline).  The consequence: when the caller released its
-reference (via `Free`, scope exit, or reassignment), the refcount dropped
-to 1 — not zero — so `Destroy` did not run, `WaitFor` was never called,
-and the main program could exit before the thread finished.
-
-Removing the trampoline's ARC reference restores the correct behaviour:
-the caller's reference is the *only* reference, so releasing it triggers
-`Destroy` → `WaitFor`.  The `pthread_join` call is the synchronisation
-barrier that guarantees the trampoline has fully returned before the object
-is deallocated.
-
-=== Migration note
-
-Code ported from Delphi or FPC that sets `FreeOnTerminate := True` will
-fail to compile.  The fix is to simply delete the assignment — ARC handles
-the lifetime automatically.  The Blaise migration analyser flags this
-pattern and explains the removal.
+The rule has one consequence for `Execute`: it must not store `Self`
+anywhere that outlives the call.  A reference the worker holds when the
+owner lets go makes the worker's release the last one, and the instance is
+then destroyed under the running `Execute`.  Calls on `Self` and reads of its
+fields take no reference.
 
 === Alternatives considered
 
-* *Keep `FreeOnTerminate` for compatibility* — rejected.  The property
-  introduces a second, redundant lifetime model that conflicts with ARC
-  semantics.  Keeping it would require the trampoline to hold an extra ARC
-  reference (breaking the join-on-free guarantee) or special-case logic in
-  `Destroy` (complexity for a feature that ARC already covers).
-* *Detached threads (no join)* — not yet supported.  If a future use-case
-  requires truly detached threads (where the caller never waits), this
-  would be a separate API (`TThread.Detach` or a `TDetachedThread`
-  subclass) with explicit opt-in semantics, not a boolean property on the
-  base class.
+* *The worker always holds a reference* (the old trampoline, or Rust's
+  `Arc` moved into the spawned closure) -- rejected as the default.  A
+  thread that waits for `Terminated` could then never be stopped by
+  releasing it; every owner would have to call `Terminate` and `WaitFor`
+  by hand, which is the manual lifetime management ARC exists to remove.
+* *No `FreeOnTerminate`; detached threads through a separate API* (the
+  earlier position of this document) -- rejected.  A fire-and-forget thread
+  is a real pattern, and Delphi and FPC code expresses it with
+  `FreeOnTerminate := True`; supporting the property with the same meaning
+  keeps ported code working and makes the opt-in explicit at the point of
+  use.
+* *`pthread_detach` for a self-destroyed thread* -- not used.  The
+  freestanding Linux and FreeBSD runtimes free a thread's stack in
+  `pthread_join`, so a detached thread would have to unmap the stack it is
+  running on; parking the handle for a later join needs no new runtime
+  primitive on any target.
 
 
 == Mandatory parentheses on zero-argument calls

@@ -33,6 +33,10 @@ type
     procedure TestRun_CriticalSection_MutexProtectsCounter;
     procedure TestRun_Thread_InheritedDestroy_CleanExit;
     procedure TestRun_Thread_ReleaseTerminatesRunningThread;
+    procedure TestRun_Thread_ReleaseAfterExecuteBegan_Terminates;
+    procedure TestRun_Thread_FreeOnTerminate_DestroyedOnWorker;
+    procedure TestRun_Thread_FreeOnTerminate_OwnerOutlives;
+    procedure TestRun_Thread_FreeOnTerminate_AfterStart_Rejected;
     procedure TestRun_ThreadVar_MainThread_ReadWrite;
     procedure TestRun_ThreadVar_MixedWithGlobalVar;
     procedure TestRun_ThreadVar_RecordField_PerThreadIsolation;
@@ -402,6 +406,154 @@ const
     end.
     ''';
 
+  { The same release, but only once the worker is inside Execute -- the
+    order SrcReleaseTerminates reaches only under load
+    (BUG-20261113-thread-trampoline-pins-receiver: the worker held the
+    instance for the whole of Execute, so the release never destroyed it).
+    Execute also calls a method of Self and reads a field of Self in its
+    loop: neither may take a reference the owner's release then misses. }
+  SrcReleaseAfterExecuteBegan =
+    '''
+    program P;
+    uses Classes;
+    type
+      TLoopThread = class(TThread)
+      protected
+        FTicks: Int;
+        procedure Tick;
+        procedure Execute; override;
+      end;
+    var
+      Started: Boolean;
+    procedure TLoopThread.Tick;
+    begin
+      Self.FTicks := Self.FTicks + 1
+    end;
+    procedure TLoopThread.Execute;
+    begin
+      Started := True;
+      while not Self.Terminated do
+      begin
+        Self.Tick();
+        if Self.FTicks > 2000000000 then
+          break
+      end;
+      WriteLn(Self.Terminated)
+    end;
+    var T: TLoopThread;
+    begin
+      T := TLoopThread.Create(False);
+      while not Started do ;
+      T := nil;
+      WriteLn('released')
+    end.
+    ''';
+
+  { FreeOnTerminate: the worker holds a reference while Execute runs, so the
+    owner may drop its own at once; the worker's release at the end of
+    Execute is the last one and runs Destroy on the worker thread, which
+    must not join itself. }
+  SrcFreeOnTerminate =
+    '''
+    program P;
+    uses Classes;
+    type
+      TWorker = class(TThread)
+      protected
+        procedure Execute; override;
+      public
+        destructor Destroy; override;
+      end;
+    var
+      Go: Boolean;
+      Destroyed: Boolean;
+    procedure TWorker.Execute;
+    begin
+      while not Go do ;
+      WriteLn('executed')
+    end;
+    destructor TWorker.Destroy;
+    begin
+      WriteLn('destroyed');
+      inherited Destroy();
+      Destroyed := True
+    end;
+    var T: TWorker;
+    begin
+      T := TWorker.Create(True);
+      T.FreeOnTerminate := True;
+      T.Start();
+      T := nil;
+      WriteLn('released');
+      Go := True;
+      while not Destroyed do ;
+      WriteLn('done')
+    end.
+    ''';
+
+  { FreeOnTerminate where the owner keeps its reference past the end of
+    Execute: the owner's release is then the last one, and Destroy joins. }
+  SrcFreeOnTerminateOwnerOutlives =
+    '''
+    program P;
+    uses Classes;
+    type
+      TWorker = class(TThread)
+      protected
+        procedure Execute; override;
+      public
+        destructor Destroy; override;
+      end;
+    procedure TWorker.Execute;
+    begin
+      WriteLn('executed')
+    end;
+    destructor TWorker.Destroy;
+    begin
+      WriteLn('destroyed');
+      inherited Destroy()
+    end;
+    var T: TWorker;
+    begin
+      T := TWorker.Create(True);
+      T.FreeOnTerminate := True;
+      T.Start();
+      T.WaitFor();
+      WriteLn(T.Finished);
+      T := nil;
+      WriteLn('done')
+    end.
+    ''';
+
+  { FreeOnTerminate is read when the thread starts; setting it later is a
+    mistake the class reports rather than ignores. }
+  SrcFreeOnTerminateAfterStart =
+    '''
+    program P;
+    uses SysUtils, Classes;
+    type
+      TWorker = class(TThread)
+      protected
+        procedure Execute; override;
+      end;
+    procedure TWorker.Execute;
+    begin
+    end;
+    var T: TWorker;
+    begin
+      T := TWorker.Create(False);
+      try
+        T.FreeOnTerminate := True;
+        WriteLn('accepted')
+      except
+        on E: Exception do
+          WriteLn('rejected')
+      end;
+      WriteLn(T.FreeOnTerminate);
+      T := nil
+    end.
+    ''';
+
 { ------------------------------------------------------------------ }
 { Tests                                                                }
 { ------------------------------------------------------------------ }
@@ -467,6 +619,44 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcReleaseTerminates, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('stdout', 'True' + LE + 'released' + LE, Output)
+end;
+
+procedure TE2EThreadingTests.TestRun_Thread_ReleaseAfterExecuteBegan_Terminates;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(SrcReleaseAfterExecuteBegan, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', 'True' + LE + 'released' + LE, Output)
+end;
+
+procedure TE2EThreadingTests.TestRun_Thread_FreeOnTerminate_DestroyedOnWorker;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(SrcFreeOnTerminate, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', 'released' + LE + 'executed' + LE + 'destroyed' + LE +
+    'done' + LE, Output)
+end;
+
+procedure TE2EThreadingTests.TestRun_Thread_FreeOnTerminate_OwnerOutlives;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(SrcFreeOnTerminateOwnerOutlives, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', 'executed' + LE + 'True' + LE + 'destroyed' + LE +
+    'done' + LE, Output)
+end;
+
+procedure TE2EThreadingTests.TestRun_Thread_FreeOnTerminate_AfterStart_Rejected;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(SrcFreeOnTerminateAfterStart, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', 'rejected' + LE + 'False' + LE, Output)
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_InheritedDestroy_CleanExit;

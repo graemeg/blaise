@@ -36,6 +36,7 @@ uses
   Gzip.Tests,
   Zip.Tests,
   Sockets.Tests,
+  Thread.Tests,
   WebSockets.Tests,
   HttpServer.Tests,
   NetTcp.Tests,

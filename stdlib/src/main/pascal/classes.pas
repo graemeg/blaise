@@ -88,16 +88,17 @@ type
   { ------------------------------------------------------------------ }
 
   { Lightweight wrapper around a POSIX thread.
-    Lifetime is managed by ARC — there is no FreeOnTerminate property.
-    When the last reference is released, Destroy calls WaitFor (which
-    joins the OS thread) before freeing the object. This guarantees the
-    thread has fully exited before the memory is reclaimed.
+    Lifetime is managed by ARC, and a running thread does NOT keep its own
+    instance alive: when the last reference is released, Destroy sets
+    Terminated and joins the OS thread before the memory is reclaimed.  A
+    thread that loops until Terminated therefore stops when its owner lets
+    go of it.
 
     Typical usage:
 
       T := TMyThread.Create(False);   // starts immediately
       // ... do other work ...
-      T.Free;                         // blocks until Execute returns
+      T := nil;                       // terminates, then waits for Execute
 
     Or simply let ARC handle it:
 
@@ -105,7 +106,21 @@ type
       var T: TMyThread;
       begin
         T := TMyThread.Create(False);
-      end;  // scope exit joins and frees automatically }
+      end;  // scope exit terminates, joins and frees
+
+    A fire-and-forget thread opts in with FreeOnTerminate, set before the
+    thread starts: the thread then holds a reference of its own until
+    Execute returns, so the owner may drop its reference at once.
+
+      T := TMyThread.Create(True);
+      T.FreeOnTerminate := True;
+      T.Start();
+      T := nil;                       // the thread frees itself when done
+
+    Execute must not store Self anywhere that outlives the call: a
+    reference the worker holds when the owner lets go makes the worker's
+    release the last one, and the instance is destroyed under the running
+    Execute.  Calls on Self and reads of its fields take no reference. }
 
   TThreadProc = procedure(Arg: Pointer);
 
@@ -114,6 +129,10 @@ type
     FHandle:          Int64;
     FFinished:        Boolean;
     FTerminated:      Boolean;
+    FFreeOnTerminate: Boolean;
+    { The OS thread's start routine (see Start). }
+    procedure Run;
+    procedure SetFreeOnTerminate(AValue: Boolean);
   protected
     { Override this method with the thread's workload. Check Terminated
       periodically in long-running loops to support cooperative shutdown. }
@@ -134,10 +153,15 @@ type
     procedure Terminate;
     { Blocks until the thread has finished. Called automatically by
       Destroy; call it explicitly when you need the result before
-      releasing the reference. }
+      releasing the reference.  Raises when called from the thread
+      itself, which would wait for ever. }
     procedure WaitFor;
     property Finished:        Boolean read FFinished;
     property Terminated:      Boolean read FTerminated;
+    { When True, the running thread holds a reference to its own instance
+      until Execute returns.  Read when the thread starts; setting it after
+      Start raises. }
+    property FreeOnTerminate: Boolean read FFreeOnTerminate write SetFreeOnTerminate;
   end;
 
   { ------------------------------------------------------------------ }
@@ -231,6 +255,9 @@ type
 procedure SplitIntoList(const S: string; ASep: Int; AList: TStringList);
 
 implementation
+
+uses
+  SysUtils;
 
 { ================================================================== }
 { TComponent                                                           }
@@ -1182,18 +1209,50 @@ end;
 { TThread                                                              }
 { ================================================================== }
 
-{ Arg is used through casts, never stored in a TThread local: the thread's
-  lifetime belongs to its owners (dropping the last reference joins it), not
-  to the worker.  Create(False) starts the thread INSIDE the constructor; the
-  constructor call already owns the instance (it is retained once allocated),
-  so a worker retain/release pair cannot take it to 0 there. }
-procedure ThreadTrampoline(Arg: Pointer);
+type
+  TThreadRunMethod = procedure of object;
+
+threadvar
+  { The TThread whose Execute this OS thread runs (nil on a thread no
+    TThread started).  Not a counted reference. }
+  CurrentThreadObj: Pointer;
+
+var
+  { OS threads whose TThread was destroyed on the thread itself: a thread
+    cannot join itself, so its handle is parked here and joined by the next
+    Start, or when the unit finalizes.  Each such thread has finished
+    Execute and is only returning, so the join is brief. }
+  ParkedLock: TCriticalSection;
+  ParkedHandles: array of Int64;
+
+procedure JoinParkedThreads;
+var
+  Handles: array of Int64;
+  I: Int;
 begin
-  try
-    TThread(Arg).Execute()
-  finally
-    TThread(Arg).FFinished := True
-  end
+  if ParkedLock = nil then
+    Exit;
+  ParkedLock.Enter();
+  Handles := ParkedHandles;
+  ParkedHandles := nil;
+  ParkedLock.Leave();
+  for I := 0 to Length(Handles) - 1 do
+    pthread_join(Handles[I], nil)
+end;
+
+procedure ParkThread(AHandle: Int64);
+var
+  N: Int;
+begin
+  { a thread destroyed on itself after the unit finalized: the process is
+    exiting, nothing is left to join it }
+  if ParkedLock = nil then
+    Exit;
+  ParkedLock.Enter();
+  N := Length(ParkedHandles);
+  SetLength(ParkedHandles, N + 1);
+  ParkedHandles[N] := AHandle;
+  ParkedLock.Leave()
 end;
 
 constructor TThread.Create(ACreateSuspended: Boolean);
@@ -1201,36 +1260,85 @@ begin
   Self.FHandle := 0;
   Self.FFinished := False;
   Self.FTerminated := False;
+  Self.FFreeOnTerminate := False;
   if not ACreateSuspended then
     Self.Start()
 end;
 
 destructor TThread.Destroy;
 begin
+  if Self.FHandle = 0 then
+    Exit;
   { As Delphi's TThread: ask a still-running worker to stop before joining
     it.  Without the Terminate, releasing the last reference to a thread
-    that loops until Terminated waited for it forever. }
-  if (Self.FHandle <> 0) and (not Self.FFinished) then
-  begin
+    that loops until Terminated waited for it for ever. }
+  if not Self.FFinished then
     Self.Terminate();
-    Self.WaitFor()
+  if CurrentThreadObj = Pointer(Self) then
+  begin
+    { destroyed on its own thread (FreeOnTerminate, or a reference Execute
+      held when the owner let go): it cannot join itself }
+    ParkThread(Self.FHandle);
+    Self.FHandle := 0
   end
+  else
+    { joined even when Finished, so the OS thread's resources are freed }
+    Self.WaitFor()
 end;
 
 procedure TThread.Execute;
 begin
 end;
 
+{ The OS thread's start routine.  A method takes Self where a start routine
+  takes its argument (the first argument register, on every target), so
+  pthread_create is handed Run's code and the instance as the argument.
+  Running as a method is what keeps the worker off the instance's reference
+  count: a call on Self takes no reference, where a call through a cast
+  pointer is held for its duration -- and a worker holding the instance for
+  the whole of Execute kept a released thread running
+  (BUG-20261113-thread-trampoline-pins-receiver).  Only FreeOnTerminate
+  gives the worker a reference, taken by Start and released here. }
+procedure TThread.Run;
+begin
+  CurrentThreadObj := Pointer(Self);
+  try
+    Self.Execute()
+  finally
+    Self.FFinished := True;
+    { the last touch of the instance: this release may destroy it }
+    if Self.FFreeOnTerminate then
+      _ClassRelease(Pointer(Self))
+  end
+end;
+
 procedure TThread.Start;
 var
-  Fn: TThreadProc;
+  Entry: TThreadRunMethod;
   H: Int64;
 begin
   if Self.FHandle <> 0 then Exit;
-  Fn := @ThreadTrampoline;
+  JoinParkedThreads();
+  Entry := @Self.Run;
+  { the thread's own reference, taken here so the owner cannot drop the
+    last one before the thread is running }
+  if Self.FFreeOnTerminate then
+    _ClassAddRef(Pointer(Self));
   H := 0;
-  pthread_create(@H, nil, Pointer(Fn), Pointer(Self));
+  if pthread_create(@H, nil, PPointer(@Entry)^, Pointer(Self)) <> 0 then
+  begin
+    if Self.FFreeOnTerminate then
+      _ClassRelease(Pointer(Self));
+    Exit
+  end;
   Self.FHandle := H
+end;
+
+procedure TThread.SetFreeOnTerminate(AValue: Boolean);
+begin
+  if Self.FHandle <> 0 then
+    raise Exception.Create('TThread.FreeOnTerminate must be set before the thread starts');
+  Self.FFreeOnTerminate := AValue
 end;
 
 procedure TThread.Terminate;
@@ -1240,11 +1348,12 @@ end;
 
 procedure TThread.WaitFor;
 begin
-  if Self.FHandle <> 0 then
-  begin
-    pthread_join(Self.FHandle, nil);
-    Self.FHandle := 0
-  end
+  if Self.FHandle = 0 then
+    Exit;
+  if CurrentThreadObj = Pointer(Self) then
+    raise Exception.Create('TThread.WaitFor called from the thread itself');
+  pthread_join(Self.FHandle, nil);
+  Self.FHandle := 0
 end;
 
 { ================================================================== }
@@ -1267,5 +1376,12 @@ function TStringListEnumerator.GetCurrent: string;
 begin
   Result := Self.FList.Get(Self.FIndex)
 end;
+
+initialization
+  ParkedLock := TCriticalSection.Create();
+
+finalization
+  JoinParkedThreads();
+  ParkedLock := nil;
 
 end.

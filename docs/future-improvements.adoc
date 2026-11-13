@@ -882,59 +882,11 @@ Required for porting existing Pascal codebases.  Provides the familiar
 `Terminate` / `Terminated` pattern.  Not inspiring, but necessary for
 ecosystem compatibility.
 
-**Important ARC consideration for TThread:**
-Blaise's automatic reference counting introduces a subtle but critical
-interaction with thread lifetimes.  The naive fire-and-forget pattern:
-
-[source,pascal]
-----
-var T: TMyThread;
-begin
-  T := TMyThread.Create;
-  T.FreeOnTerminate := True;
-  T.Start;
-end; // <- T is released here; refcount → 0; object freed while thread runs
-----
-
-...is unsafe under ARC.  When the local variable `T` goes out of scope,
-ARC immediately decrements the refcount.  If this is the last reference,
-the object is freed whilst the thread is still executing, causing a
-use-after-free or crash.
-
-The recommended solution is **self-referential threads**: each TThread
-increments its own refcount during `Execute` and decrements it during
-finalisation, keeping itself alive for the duration of its work.  This
-mirrors modern threading APIs (Rust's `Arc<Thread>`, Go's goroutines).
-
-Implementation sketch:
-
-[source,pascal]
-----
-procedure TThread.Execute;
-begin
-  _ClassAddRef(Self);  { Keep self alive during execution }
-  try
-    // User's Execute override (via virtual dispatch)
-    Self.UserExecute;
-  finally
-    _ClassRelease(Self);  { Release self; if FreeOnTerminate, frees object }
-  end;
-end;
-----
-
-This way the caller can write idiomatic fire-and-forget code and the
-thread automatically cleans itself up once it finishes:
-
-[source,pascal]
-----
-var T: TMyThread;
-begin
-  T := TMyThread.Create;
-  T.FreeOnTerminate := True;
-  T.Start;  // Thread increments self-refcount in Execute
-end;        // T's refcount drops, but thread keeps itself alive
-            // Thread finalizer decrements self-refcount, freeing the object
-----
+Layer 1 is implemented in `Classes`.  Its ARC lifetime rule -- a running
+thread does not keep its instance alive, releasing the last reference
+terminates and joins it, and `FreeOnTerminate` opts a fire-and-forget thread
+into holding its own reference -- is recorded in `language-rationale.adoc`,
+"`TThread` Lifetime and ARC".  `Synchronize` is not implemented.
 
 *Layer 2 — Modern structured concurrency.*
 
