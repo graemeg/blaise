@@ -76,6 +76,7 @@ type
       imports kernel32, and the options a PE image cannot honour are
       refused. }
     procedure TestWindows_OutputGetsExeAndIsPe;
+    procedure TestWindows_PthreadBindings_ImportNoDll;
     procedure TestWindows_StaticRefused;
     procedure TestWindows_ExternalToolsRefused;
     { --check: parse and analyse only (no output file, no toolchain);
@@ -376,6 +377,43 @@ begin
         LowerCase(Img.Imports[I].Dll));
     AssertFalse('no pthread DLL: the leaf defines those',
       Pos('pthread', LowerCase(Img.Imports[0].Dll)) >= 0);
+  finally
+    Img.Free();
+  end;
+end;
+
+{ The stdlib binds the pthread names with `external 'pthread'` (async.io's
+  DNS helper thread uses pthread_create and pthread_detach).  On Windows the
+  RTL's runtime.thread.windows supplies every one of them as a C entry, so
+  the image imports no pthread DLL -- one it lacked was imported from
+  pthread.dll, and the program died at load with STATUS_DLL_NOT_FOUND. }
+procedure TCLIContractTests.TestWindows_PthreadBindings_ImportNoDll;
+var
+  Src, Out_, Exe: string;
+  EC, I: Int;
+  Img: TPeImage;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program winpth;' + LineEnding +
+    'function pthread_create(T, A, F, P: Pointer): Int32;' + LineEnding +
+    '  external ''pthread'' name ''pthread_create'';' + LineEnding +
+    'function pthread_detach(T: Int64): Int32;' + LineEnding +
+    '  external ''pthread'' name ''pthread_detach'';' + LineEnding +
+    'var' + LineEnding + '  T: Int64;' + LineEnding +
+    'begin' + LineEnding +
+    '  if pthread_create(@T, nil, nil, nil) = 0 then' + LineEnding +
+    '    pthread_detach(T);' + LineEnding +
+    'end.');
+  Exe := FScratch + 'winpth';
+  DeleteFile(Exe + '.exe');
+  EC := RunCompiler(['--source', Src, '--target', 'windows-x86_64',
+    '--output', Exe, '--rtl-src', FRTLPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  Img := ReadPeImageFile(Exe + '.exe');
+  try
+    for I := 0 to Img.Imports.Count - 1 do
+      AssertEquals('only kernel32 is imported', 'kernel32.dll',
+        LowerCase(Img.Imports[I].Dll));
   finally
     Img.Free();
   end;

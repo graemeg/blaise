@@ -25,6 +25,9 @@ interface
 function pthread_create(Thread: Pointer; Attr: Pointer;
   StartRoutine: Pointer; Arg: Pointer): Int32; cdecl;
 function pthread_join(Thread: Int64; RetVal: Pointer): Int32; cdecl;
+{ Let the thread run on unjoined: its handle is closed now, and the system
+  frees the thread when it ends. }
+function pthread_detach(Thread: Int64): Int32; cdecl;
 { The mutex buffer is runtime.thread's 64-byte block; an SRWLOCK is its
   first pointer-sized word.  Not recursive, as a default pthread mutex. }
 function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Int32; cdecl;
@@ -147,6 +150,14 @@ begin
   if RetVal <> nil then
     PPointer(RetVal)^ := nil;
   Result := 0;
+end;
+
+function pthread_detach(Thread: Int64): Int32; cdecl;
+begin
+  if CloseHandle(Pointer(Thread)) <> 0 then
+    Result := 0
+  else
+    Result := 3;                    { ESRCH }
 end;
 
 function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Int32; cdecl;
