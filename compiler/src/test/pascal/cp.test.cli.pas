@@ -28,7 +28,7 @@ interface
 uses
   SysUtils, Classes, Process, blaise.testing,
   blaise.codegen.target,   { TargetImageIsElf / HostTarget: link-mode gating }
-  blaise.pereader, blaise.pewriter;
+  blaise.pereader, blaise.pewriter, uStrCompat;
 
 type
   { Invokes the compiler binary directly and inspects the CLI contract. }
@@ -78,6 +78,7 @@ type
     procedure TestWindows_OutputGetsExeAndIsPe;
     procedure TestWindows_PthreadBindings_ImportNoDll;
     procedure TestWindows_OpenSSLBindings_ImportVersionedDlls;
+    procedure TestWindows_ExceptionDirectory_CoversBlaiseFrames;
     procedure TestWindows_StaticRefused;
     procedure TestWindows_ExternalToolsRefused;
     { --check: parse and analyse only (no output file, no toolchain);
@@ -453,6 +454,70 @@ begin
     AssertTrue('libssl-3-x64.dll:' + Dlls, Pos(' libssl-3-x64.dll', Dlls) >= 0);
     AssertTrue('libcrypto-3-x64.dll:' + Dlls,
       Pos(' libcrypto-3-x64.dll', Dlls) >= 0);
+  finally
+    Img.Free();
+  end;
+end;
+
+{ Windows walks a stack with the image's exception directory; a routine
+  with no entry is taken for a leaf, and a walk through a Blaise frame lost
+  its way (the m7unwind fixture shows the walk in the guest).  Every entry
+  must cover a routine that opens with the Blaise frame and name the one
+  UNWIND_INFO that describes it, and the entries must be sorted and
+  disjoint, as the system's binary search needs. }
+procedure TCLIContractTests.TestWindows_ExceptionDirectory_CoversBlaiseFrames;
+const
+  Info: array[0..7] of Int = ($01, $04, $02, $05, $04, $03, $01, $50);
+  Prologue: array[0..3] of Int = ($55, $48, $89, $E5);
+var
+  Src, Out_, Exe, Ent: string;
+  EC, I, N: Int;
+  Img: TPeImage;
+  B, E, U, PrevEnd, K: Int;
+  Bytes: string;
+
+  function U32(const S: string; AOff: Int): Int;
+  begin
+    Result := StrAt(S, AOff) or (StrAt(S, AOff + 1) shl 8) or
+      (StrAt(S, AOff + 2) shl 16) or (StrAt(S, AOff + 3) shl 24);
+  end;
+
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  Src := WriteScratchSource('program winunw;' + LineEnding +
+    'function Twice(A: Int): Int;' + LineEnding +
+    'begin' + LineEnding + '  Result := A * 2' + LineEnding + 'end;' +
+    LineEnding + 'begin' + LineEnding + '  WriteLn(Twice(21))' + LineEnding +
+    'end.');
+  Exe := FScratch + 'winunw';
+  DeleteFile(Exe + '.exe');
+  EC := RunCompiler(['--source', Src, '--target', 'windows-x86_64',
+    '--output', Exe, '--rtl-src', FRTLPath], Out_);
+  AssertEquals('exit 0: ' + Out_, 0, EC);
+  Img := ReadPeImageFile(Exe + '.exe');
+  try
+    N := Img.DirectorySize(3) div 12;
+    AssertTrue('an exception directory', Img.DirectoryRva(3) <> 0);
+    AssertEquals('whole entries', 0, Img.DirectorySize(3) mod 12);
+    AssertTrue('the RTL''s routines and the program''s: ' + IntToStr(N),
+      N > 50);
+    PrevEnd := 0;
+    for I := 0 to N - 1 do
+    begin
+      Ent := Img.ReadRva(Img.DirectoryRva(3) + I * 12, 12);
+      B := U32(Ent, 0);
+      E := U32(Ent, 4);
+      U := U32(Ent, 8);
+      AssertTrue('sorted and disjoint at ' + IntToStr(I), B >= PrevEnd);
+      AssertTrue('a routine longer than its prologue', E - B > 4);
+      Bytes := Img.ReadRva(B, 4);
+      for K := 0 to 3 do
+        AssertEquals('opens with the frame', Prologue[K], StrAt(Bytes, K));
+      Bytes := Img.ReadRva(U, 8);
+      for K := 0 to 7 do
+        AssertEquals('the frame''s UNWIND_INFO', Info[K], StrAt(Bytes, K));
+      PrevEnd := E;
+    end;
   finally
     Img.Free();
   end;

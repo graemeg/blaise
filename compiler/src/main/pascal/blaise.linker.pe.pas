@@ -31,7 +31,8 @@ unit blaise.linker.pe;
   (.text always):
 
     .text   R X   code, then the import thunks
-    .rdata  R     read-only data, the import tables, the TLS directory
+    .rdata  R     read-only data, the import tables, the TLS directory, the
+                  unwind data (.pdata entries and their one UNWIND_INFO)
     .data   R W   initialised data, the TLS index, then .bss as a tail
     .tls    R W   .tdata, then .tbss written out as zero bytes
     .blunw  R W   the blaise_unwind blocks, bracketed by
@@ -43,7 +44,26 @@ unit blaise.linker.pe;
   thunk); R_X86_64_64 writes the preferred virtual address and records a
   DIR64 base relocation; TPOFF32 is the symbol's offset into the TLS
   template.  A 32-bit absolute relocation cannot be rebased above 4 GiB and
-  is an error, as is any GOT relocation: the backend emits neither. }
+  is an error, as is any GOT relocation: the backend emits neither.
+
+  Unwind data.  Windows walks a stack -- for a debugger, a crash report,
+  RtlCaptureStackBackTrace, the exception dispatcher -- with the image's
+  exception directory: a RUNTIME_FUNCTION per routine, naming its
+  UNWIND_INFO.  A routine with none is taken for a leaf, whose return
+  address is at the stack pointer, so a walk lost its way in the first
+  Blaise frame.  Every routine the backend compiles opens with the same
+  frame, push %rbp then mov %rsp, %rbp, so one UNWIND_INFO describes them
+  all: a 4-byte prologue that pushes RBP and makes it the frame register.
+  The linker gives an entry to every routine (an STT_FUNC symbol in .text)
+  whose code starts with those 4 bytes, ending where the next routine or
+  its input section does;
+  a routine that starts any other way (a nostackframe assembler routine,
+  an import thunk) keeps no entry and is walked as a leaf, which is what
+  it is.  The registers a routine saves into its frame by MOV are not
+  described, so the data serves a walk of the stack, not the recovery of
+  those registers by an exception unwinding through Blaise frames.  Nor is
+  the one instruction between pop %rbp and ret, where RBP is the caller's
+  again. }
 
 interface
 
@@ -93,6 +113,10 @@ type
     FWantTlsIndex: Boolean;            { an object references _tls_index }
     FTlsDirOff: Int64;                 { offset of the TLS directory in .rdata }
     FImpTableOff: Int64;               { offset of the import tables in .rdata }
+    { the routines given unwind data: start and end offsets in .text }
+    FUnwStarts, FUnwEnds: TList<Int64>;
+    FXdataOff: Int64;                  { the UNWIND_INFO, in .rdata }
+    FPdataOff: Int64;                  { the RUNTIME_FUNCTION entries }
     FTextRva, FRdataRva, FDataRva, FTlsRva, FUnwRva, FOpdfRva: Int64;
     procedure PlaceSections;
     procedure ReadImportPairs(AObjIdx: Int; AObj: TElfObjectFile;
@@ -103,6 +127,7 @@ type
       const AName: string): Boolean;
     procedure CollectDefinitions;
     procedure CollectImports;
+    procedure CollectUnwindRanges;
     procedure Layout;
     procedure ApplyRelocations;
     function SymbolRva(AObjIdx, ASymIdx: Int; out AAbsolute: Boolean;
@@ -217,6 +242,8 @@ begin
   FImpIndex := TDictionary<string, Int>.Create();
   FImpTable := TPeImportTableBuilder.Create();
   FBaseRelocs := TList<Int>.Create();
+  FUnwStarts := TList<Int64>.Create();
+  FUnwEnds := TList<Int64>.Create();
   Subsystem := PeSubsystemConsole;
   DllNameOf := nil;
 end;
@@ -244,6 +271,8 @@ begin
   FImpIndex.Free();
   FImpTable.Free();
   FBaseRelocs.Free();
+  FUnwStarts.Free();
+  FUnwEnds.Free();
   inherited Destroy();
 end;
 
@@ -457,8 +486,96 @@ begin
   end;
 end;
 
-{ Lay out the image: append the thunks, the import tables and the TLS
-  bookkeeping to their streams, then give each stream its RVA. }
+const
+  { push %rbp; mov %rsp, %rbp }
+  FramePrologue: array[0..3] of Byte = ($55, $48, $89, $E5);
+  { UNWIND_INFO: version 1, no handler; a 4-byte prologue; two codes;
+    frame register RBP (5) at offset 0.  The codes, last prologue
+    instruction first: at 4 UWOP_SET_FPREG (3), at 1 UWOP_PUSH_NONVOL (0)
+    of RBP. }
+  FrameUnwindInfo: array[0..7] of Byte = ($01, $04, $02, $05,
+    $04, $03, $01, $50);
+  RuntimeFunctionSize = 12;
+
+{ The .text ranges of the routines that open with the Blaise frame (see the
+  unit comment): each runs from its symbol to the next routine or the end
+  of its input section. }
+procedure TPeLinker.CollectUnwindRanges;
+var
+  Oi, Si, Flat, I, J: Int;
+  Obj: TElfObjectFile;
+  Sym: TRdSymbol;
+  Bounds, Starts: TList<Int64>;
+  S, E: Int64;
+  Match: Boolean;
+begin
+  Bounds := TList<Int64>.Create();
+  Starts := TList<Int64>.Create();
+  try
+    for Oi := 0 to FObjs.Count - 1 do
+    begin
+      Obj := FObjs[Oi];
+      for Si := 0 to Obj.Sections.Count - 1 do
+      begin
+        Flat := FSecFirst[Oi] + Si;
+        if FSecStream[Flat] <> stText then Continue;
+        Bounds.Add(FSecOff[Flat]);
+        Bounds.Add(FSecOff[Flat] + Obj.Sections[Si].Size);
+      end;
+      for Si := 0 to Obj.Symbols.Count - 1 do
+      begin
+        Sym := Obj.Symbols[Si];
+        if (Sym.Name = '') or (Sym.Shndx = SHN_UNDEF) or
+           (Sym.Shndx = SHN_ABS) or (Sym.Shndx = SHN_COMMON) then Continue;
+        { routines only: the backend's .L labels inside them are symbols
+          too, for the relocations that name them }
+        if Sym.SymType <> STT_FUNC then
+          Continue;
+        Flat := FSecFirst[Oi] + Sym.Shndx;
+        if FSecStream[Flat] <> stText then Continue;
+        Bounds.Add(FSecOff[Flat] + Sym.Value);
+        Starts.Add(FSecOff[Flat] + Sym.Value);
+      end;
+    end;
+    Bounds.Sort(function(A, B: Int64): Int32
+      begin
+        if A < B then Result := -1
+        else if A > B then Result := 1
+        else Result := 0;
+      end);
+    Starts.Sort(function(A, B: Int64): Int32
+      begin
+        if A < B then Result := -1
+        else if A > B then Result := 1
+        else Result := 0;
+      end);
+    J := 0;
+    for I := 0 to Starts.Count - 1 do
+    begin
+      S := Starts[I];
+      if (I > 0) and (Starts[I - 1] = S) then Continue;
+      while (J < Bounds.Count) and (Bounds[J] <= S) do
+        Inc(J);
+      if J >= Bounds.Count then Break;
+      E := Bounds[J];
+      if E - S <= Length(FramePrologue) then Continue;
+      Match := True;
+      for Si := 0 to High(FramePrologue) do
+        if FStreams[stText].Bytes[S + Si] <> FramePrologue[Si] then
+          Match := False;
+      if not Match then Continue;
+      FUnwStarts.Add(S);
+      FUnwEnds.Add(E);
+    end;
+  finally
+    Bounds.Free();
+    Starts.Free();
+  end;
+end;
+
+{ Lay out the image: append the thunks, the import tables, the TLS
+  bookkeeping and the unwind data to their streams, then give each stream
+  its RVA. }
 procedure TPeLinker.Layout;
 var
   I, NumSecs: Int;
@@ -506,6 +623,20 @@ begin
     FStreams[stRdata].PadTo(FTlsDirOff + PeTlsDirectorySize + 8);
     FStreamSize[stRdata] := FStreams[stRdata].Count;
   end;
+  { the unwind data: the UNWIND_INFO now, the entries once .text has its
+    RVA }
+  CollectUnwindRanges();
+  if FUnwStarts.Count > 0 then
+  begin
+    FXdataOff := PeAlignUp(FStreamSize[stRdata], 4);
+    FStreams[stRdata].PadTo(FXdataOff);
+    for I := 0 to High(FrameUnwindInfo) do
+      FStreams[stRdata].PushByte(FrameUnwindInfo[I]);
+    FPdataOff := PeAlignUp(FStreams[stRdata].Count, 4);
+    FStreams[stRdata].PadTo(FPdataOff +
+      Int64(FUnwStarts.Count) * RuntimeFunctionSize);
+    FStreamSize[stRdata] := FStreams[stRdata].Count;
+  end;
 
   { count the image sections, then assign RVAs in address order }
   NumSecs := 1;
@@ -545,6 +676,16 @@ begin
     Rva := PeAlignUp(Rva + FStreamSize[stUnwind], PeSectionAlignment);
   FOpdfRva := Rva;
   FStreamRva[stOpdf] := Rva;
+
+  for I := 0 to FUnwStarts.Count - 1 do
+  begin
+    Patch32(stRdata, FPdataOff + Int64(I) * RuntimeFunctionSize,
+      FTextRva + FUnwStarts[I]);
+    Patch32(stRdata, FPdataOff + Int64(I) * RuntimeFunctionSize + 4,
+      FTextRva + FUnwEnds[I]);
+    Patch32(stRdata, FPdataOff + Int64(I) * RuntimeFunctionSize + 8,
+      FRdataRva + FXdataOff);
+  end;
 
   { now the import tables can be built where they live }
   if not FImpTable.IsEmpty() then
@@ -832,6 +973,9 @@ begin
     end;
     if FHasTls then
       W.SetDirectory(PeDirTls, FRdataRva + FTlsDirOff, PeTlsDirectorySize);
+    if FUnwStarts.Count > 0 then
+      W.SetDirectory(PeDirException, FRdataRva + FPdataOff,
+        FUnwStarts.Count * RuntimeFunctionSize);
     Result := W.Finish();
   finally
     W.Free();

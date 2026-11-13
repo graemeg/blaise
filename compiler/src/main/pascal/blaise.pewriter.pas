@@ -59,6 +59,7 @@ const
   { data-directory indices }
   PeDirExport = 0;
   PeDirImport = 1;
+  PeDirException = 3;
   PeDirBaseReloc = 5;
   PeDirTls = 9;
   PeDirIat = 12;

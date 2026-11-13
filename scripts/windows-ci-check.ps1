@@ -38,7 +38,7 @@ function Expected([string]$Name) {
   return $Text.Replace("`r", '').TrimEnd("`n")
 }
 
-foreach ($Name in 'm3rtl', 'l3ffi') {
+foreach ($Name in 'm3rtl', 'm7unwind', 'l3ffi') {
   Write-Host "=== $Name ==="
   $Got = Out "$Bin/$Name.exe"
   Write-Host $Got

@@ -680,6 +680,7 @@ jobs:
           xbuild compiler/src/main/pascal/Blaise.pas blaise
           xbuild compiler/src/it/windows/m3rtl.pas m3rtl
           xbuild compiler/src/it/windows/m3fault.pas m3fault
+          xbuild compiler/src/it/windows/m7unwind.pas m7unwind
           xbuild compiler/src/it/windows/l3ffi.pas l3ffi
           x86_64-w64-mingw32-gcc -O2 -Wall -shared -o target/windows/l3ffi.dll \
             compiler/src/it/windows/l3ffi.c

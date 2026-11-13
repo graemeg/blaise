@@ -231,6 +231,7 @@ case "$cmd" in
     }
     xbuild compiler/src/it/windows/m3rtl.pas "$OUT/m3rtl"
     xbuild compiler/src/it/windows/m3fault.pas "$OUT/m3fault"
+    xbuild compiler/src/it/windows/m7unwind.pas "$OUT/m7unwind"
     # Layer 3: a C DLL from an independent compiler, mingw-w64
     MINGW_CC=${MINGW_CC:-x86_64-w64-mingw32-gcc}
     have_mingw=
@@ -257,13 +258,15 @@ case "$cmd" in
         echo "FAIL: $name.exe exit $rc, output differs from $name.expected"; fail=1
       fi
     done
-    echo "=== m3rtl ==="
-    rc=0
-    got=$(run_in_vm "$OUT/m3rtl.exe" | tr -d '\r') || rc=$?
-    echo "$got"
-    if [ $rc -ne 0 ] || [ "$got" != "$(cat compiler/src/it/windows/m3rtl.expected)" ]; then
-      echo "FAIL: m3rtl.exe exit $rc, output differs from m3rtl.expected"; fail=1
-    fi
+    for name in m3rtl m7unwind; do
+      echo "=== $name ==="
+      rc=0
+      got=$(run_in_vm "$OUT/$name.exe" | tr -d '\r') || rc=$?
+      echo "$got"
+      if [ $rc -ne 0 ] || [ "$got" != "$(cat "compiler/src/it/windows/$name.expected")" ]; then
+        echo "FAIL: $name.exe exit $rc, output differs from $name.expected"; fail=1
+      fi
+    done
     echo "=== l3ffi ==="
     if [ -n "$have_mingw" ]; then
       rc=0
