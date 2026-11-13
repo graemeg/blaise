@@ -2422,7 +2422,7 @@ var
   IsInsert: Boolean;
   Target: TASTExpr;
 begin
-  IsInsert := SameText(ACall.Name, 'Insert');
+  IsInsert := IsBuiltinCall(ACall, 'Insert');
   if IsInsert then
     Target := TASTExpr(ACall.Args.Items[1])
   else
@@ -7133,7 +7133,7 @@ end;
 procedure TX86_64Backend.EmitByteRhsToEax(AExpr: TASTExpr);
 begin
   if (AExpr is TFuncCallExpr) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Chr') and
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Chr') and
      (TFuncCallExpr(AExpr).Args.Count = 1) then
   begin
     Self.EmitExprToEax(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
@@ -8245,7 +8245,7 @@ var
   IsInc, IsWide, HasStep, NarrowIdent: Boolean;
   FI: TFieldInfo;
 begin
-  IsInc := SameText(ACall.Name, 'Inc');
+  IsInc := IsBuiltinCall(ACall, 'Inc');
   Arg0 := TASTExpr(ACall.Args.Items[0]);
   HasStep := ACall.Args.Count >= 2;
   IsWide := (Arg0.ResolvedType <> nil) and
@@ -9024,7 +9024,7 @@ begin
   Arg := TASTExpr(FC.Args.Items[0]);
   IsS := (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tySingle);
 
-  if SameText(FC.Name, 'Sqrt') then
+  if IsBuiltinCall(FC, 'Sqrt') then
   begin
     Self.EmitExprToXmm0(Arg);
     if IsS then
@@ -9036,35 +9036,35 @@ begin
   end;
 
   Sym := '';
-  if SameText(FC.Name, 'Sin') then
+  if IsBuiltinCall(FC, 'Sin') then
     Sym := '_BlaiseSin'
-  else if SameText(FC.Name, 'Cos') then
+  else if IsBuiltinCall(FC, 'Cos') then
     Sym := '_BlaiseCos'
-  else if SameText(FC.Name, 'Tan') then
+  else if IsBuiltinCall(FC, 'Tan') then
     Sym := '_BlaiseTan'
-  else if SameText(FC.Name, 'ArcTan') then
+  else if IsBuiltinCall(FC, 'ArcTan') then
     Sym := '_BlaiseArcTan'
-  else if SameText(FC.Name, 'ArcSin') then
+  else if IsBuiltinCall(FC, 'ArcSin') then
     Sym := '_BlaiseArcSin'
-  else if SameText(FC.Name, 'ArcCos') then
+  else if IsBuiltinCall(FC, 'ArcCos') then
     Sym := '_BlaiseArcCos'
-  else if SameText(FC.Name, 'Ln') then
+  else if IsBuiltinCall(FC, 'Ln') then
     Sym := '_BlaiseLn'
-  else if SameText(FC.Name, 'Exp') then
+  else if IsBuiltinCall(FC, 'Exp') then
     Sym := '_BlaiseExp'
-  else if SameText(FC.Name, 'Expm1') then
+  else if IsBuiltinCall(FC, 'Expm1') then
     Sym := '_BlaiseExpm1'
-  else if SameText(FC.Name, 'Log2') then
+  else if IsBuiltinCall(FC, 'Log2') then
     Sym := '_BlaiseLog2'
-  else if SameText(FC.Name, 'Log10') then
+  else if IsBuiltinCall(FC, 'Log10') then
     Sym := '_BlaiseLog10'
-  else if SameText(FC.Name, 'Sinh') then
+  else if IsBuiltinCall(FC, 'Sinh') then
     Sym := '_BlaiseSinh'
-  else if SameText(FC.Name, 'Cosh') then
+  else if IsBuiltinCall(FC, 'Cosh') then
     Sym := '_BlaiseCosh'
-  else if SameText(FC.Name, 'Tanh') then
+  else if IsBuiltinCall(FC, 'Tanh') then
     Sym := '_BlaiseTanh'
-  else if SameText(FC.Name, 'Abs') and (Arg.ResolvedType <> nil) and
+  else if IsBuiltinCall(FC, 'Abs') and (Arg.ResolvedType <> nil) and
           Arg.ResolvedType.IsFloat() then
     Sym := '_BlaiseFabs';
   if Sym = '' then
@@ -9096,9 +9096,9 @@ begin
   if FC.Args.Count <> 2 then
     Exit;
   Sym := '';
-  if SameText(FC.Name, 'ArcTan2') then
+  if IsBuiltinCall(FC, 'ArcTan2') then
     Sym := '_BlaiseArcTan2'
-  else if SameText(FC.Name, 'Power') then
+  else if IsBuiltinCall(FC, 'Power') then
     Sym := '_BlaisePow';
   if Sym = '' then
     Exit;
@@ -9118,7 +9118,7 @@ begin
   Self.Emit(#9'movsd (%rsp), %xmm0');
   Self.Emit(#9'addq $8, %rsp');
   Self.Emit(#9'callq ' + Sym);
-  if SameText(FC.Name, 'ArcTan2') and IsS then
+  if IsBuiltinCall(FC, 'ArcTan2') and IsS then
     { result type follows the first argument }
     Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
   Result := True;
@@ -9131,7 +9131,7 @@ begin
     the Double in %xmm0.  It MUST be handled here in the float emitter — if it
     falls through to the integer EmitExprToEax path, the result (already in
     %xmm0) is discarded and the leftover %rax is cvtsi2sd'd into garbage. }
-  if SameText(FC.Name, 'StrToDouble') and (FC.Args.Count = 1) then
+  if IsBuiltinCall(FC, 'StrToDouble') and (FC.Args.Count = 1) then
   begin
     Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToDouble', True);
     Exit;
@@ -9443,7 +9443,7 @@ begin
       The method name string blob (__cn_Name) must exist in the data section;
       the class section emits it for published methods.  Just reference it here
       via a forward label without re-emitting the blob. }
-    if SameText(FC.Name, 'MethodAddress') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'MethodAddress') and (FC.Args.Count = 2) then
     begin
       { Arg0: class instance → class pointer in %rdi }
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
@@ -9513,14 +9513,14 @@ begin
       Exit;
     end;
     { SizeOf(expr) → integer literal = byte size of the resolved type. }
-    if SameText(FC.Name, 'SizeOf') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'SizeOf') and (FC.Args.Count = 1) then
     begin
       Self.Emit(Format(#9'movq $%d, %%rax',
         [TASTExpr(FC.Args.Items[0]).ResolvedType.ByteSize()]));
       Exit;
     end;
     { Length/High/Low built-ins for arrays and strings. }
-    if SameText(FC.Name, 'High') and (FC.Args.Count = 1) and
+    if IsBuiltinCall(FC, 'High') and (FC.Args.Count = 1) and
        (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) then
     begin
       { High(subrange) is the subrange's own HIGH bound, not the base type's
@@ -9586,7 +9586,7 @@ begin
       Exit;
     end;
 
-    if SameText(FC.Name, 'Low') and (FC.Args.Count = 1) and
+    if IsBuiltinCall(FC, 'Low') and (FC.Args.Count = 1) and
        (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) then
     begin
       { Low(subrange) is the subrange's own LOW bound (may be negative), not the
@@ -9622,7 +9622,7 @@ begin
       Exit;
     end;
 
-    if SameText(FC.Name, 'Length') and (FC.Args.Count = 1) and
+    if IsBuiltinCall(FC, 'Length') and (FC.Args.Count = 1) and
        (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) then
     begin
       case TASTExpr(FC.Args.Items[0]).ResolvedType.Kind of
@@ -9647,13 +9647,13 @@ begin
       end;
       Exit;
     end;
-    if SameText(FC.Name, 'Pos') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'Pos') and (FC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_StringPos');
       Exit;
     end;
-    if SameText(FC.Name, 'Copy') and (FC.Args.Count = 3) then
+    if IsBuiltinCall(FC, 'Copy') and (FC.Args.Count = 3) then
     begin
       if ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[0])) then
       begin
@@ -9690,23 +9690,23 @@ begin
       Self.Emit(#9'callq _StringCopy');
       Exit;
     end;
-    if SameText(FC.Name, 'UpperCase') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'UpperCase') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringUpperCase');
       Exit;
     end;
-    if SameText(FC.Name, 'LowerCase') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'LowerCase') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringLowerCase');
       Exit;
     end;
-    if SameText(FC.Name, 'Trim') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Trim') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringTrim');
       Exit;
     end;
     { GetMem(N) → _BlaiseGetMem(N) → pointer.  The size is an Int64. }
-    if SameText(FC.Name, 'GetMem') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'GetMem') and (FC.Args.Count = 1) then
     begin
       Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
@@ -9714,7 +9714,7 @@ begin
       Exit;
     end;
     { ReallocMem(P, N) → _BlaiseReallocMem(P, N) → pointer. }
-    if SameText(FC.Name, 'ReallocMem') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'ReallocMem') and (FC.Args.Count = 2) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
@@ -9724,14 +9724,14 @@ begin
       Self.Emit(#9'callq _BlaiseReallocMem');
       Exit;
     end;
-    if SameText(FC.Name, 'SameText') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'SameText') and (FC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_StringSameText');
       Self.Emit(#9'movslq %eax, %rax');
       Exit;
     end;
-    if SameText(FC.Name, 'Chr') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Chr') and (FC.Args.Count = 1) then
     begin
       { Chr(N) returns a one-character heap String (tyString) — the data pointer
         of a freshly-allocated string.  Lower to _Chr(N), matching the QBE
@@ -9744,7 +9744,7 @@ begin
       Self.Emit(#9'callq _Chr');
       Exit;
     end;
-    if SameText(FC.Name, 'IntToStr') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'IntToStr') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -9776,7 +9776,7 @@ begin
       end;
       Exit;
     end;
-    if SameText(FC.Name, 'StrToInt') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'StrToInt') and (FC.Args.Count = 1) then
     begin
       if Self.StrToIntChecked() then
         Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]),
@@ -9786,7 +9786,7 @@ begin
       Self.Emit(#9'movslq %eax, %rax');
       Exit;
     end;
-    if SameText(FC.Name, 'StrToInt64') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'StrToInt64') and (FC.Args.Count = 1) then
     begin
       if Self.StrToIntChecked() then
         Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]),
@@ -9795,13 +9795,13 @@ begin
         Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToInt64');
       Exit;
     end;
-    if SameText(FC.Name, 'PChar') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'PChar') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       { PChar(str) is identity — the Blaise string data pointer IS the char data. }
       Exit;
     end;
-    if SameText(FC.Name, 'string') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'string') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
@@ -9810,12 +9810,12 @@ begin
     end;
     { Format(Fmt, Arg1, ...) — built-in that builds an args array and calls
       _StringFormatN; handled specially because it takes a variadic args list. }
-    if SameText(FC.Name, 'Format') and (FC.Args.Count >= 1) then
+    if IsBuiltinCall(FC, 'Format') and (FC.Args.Count >= 1) then
     begin
       Self.EmitFormatCall(FC.Args);
       Exit;
     end;
-    if SameText(FC.Name, 'Ord') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Ord') and (FC.Args.Count = 1) then
     begin
       { Ord is Int (D5): the ordinal is extended from the argument's width }
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
@@ -9835,7 +9835,7 @@ begin
         Self.EmitNarrowToType(TASTExpr(FC.Args.Items[0]).ResolvedType);
       Exit;
     end;
-    if (SameText(FC.Name, 'Succ') or SameText(FC.Name, 'Pred')) and
+    if (IsBuiltinCall(FC, 'Succ') or IsBuiltinCall(FC, 'Pred')) and
        (FC.Args.Count = 1) then
     begin
       { Next/previous ordinal value: +1 / -1.  Result keeps the arg's type,
@@ -9845,18 +9845,18 @@ begin
       if (FC.ResolvedType <> nil) and
          (FC.ResolvedType.Kind in [tyInt64, tyUInt64]) then
       begin
-        if SameText(FC.Name, 'Succ') then
+        if IsBuiltinCall(FC, 'Succ') then
           Self.Emit(#9'addq $1, %rax')
         else
           Self.Emit(#9'subq $1, %rax');
       end
-      else if SameText(FC.Name, 'Succ') then
+      else if IsBuiltinCall(FC, 'Succ') then
         Self.Emit(#9'addl $1, %eax')
       else
         Self.Emit(#9'subl $1, %eax');
       Exit;
     end;
-    if SameText(FC.Name, 'Assigned') and (FC.Args.Count = 1) and
+    if IsBuiltinCall(FC, 'Assigned') and (FC.Args.Count = 1) and
        IsMethodPtrType(TASTExpr(FC.Args.Items[0]).ResolvedType) and
        IsFatLValueExpr(TASTExpr(FC.Args.Items[0])) then
     begin
@@ -9870,7 +9870,7 @@ begin
       Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
-    if SameText(FC.Name, 'Assigned') and (FC.Args.Count = 1) and
+    if IsBuiltinCall(FC, 'Assigned') and (FC.Args.Count = 1) and
        IsMethodPtrType(TASTExpr(FC.Args.Items[0]).ResolvedType) and
        Self.IsFatCallValue(TASTExpr(FC.Args.Items[0])) then
     begin
@@ -9884,7 +9884,7 @@ begin
       Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
-    if SameText(FC.Name, 'Assigned') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Assigned') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       if Self.IsOwnedClassOperand(TASTExpr(FC.Args.Items[0])) then
@@ -9904,21 +9904,21 @@ begin
       Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
-    if SameText(FC.Name, 'Int64ToStr') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Int64ToStr') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _Int64ToStr');
       Exit;
     end;
-    if SameText(FC.Name, 'UInt64ToStr') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'UInt64ToStr') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _UInt64ToStr');
       Exit;
     end;
-    if SameText(FC.Name, 'Abs') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Abs') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -9950,7 +9950,7 @@ begin
       Self.Emit(#9'movq %xmm0, %rax');
       Exit;
     end;
-    if SameText(FC.Name, 'DoubleToStr') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'DoubleToStr') and (FC.Args.Count = 1) then
     begin
       { The argument expression may resolve to Single (e.g. a bare Single
         variable, or Sqrt(X)/Abs(X) where X: Single -- every float-unary
@@ -9963,7 +9963,7 @@ begin
       Self.Emit(#9'callq _DoubleToStr');
       Exit;
     end;
-    if SameText(FC.Name, 'SingleToStr') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'SingleToStr') and (FC.Args.Count = 1) then
     begin
       { Mirror of the DoubleToStr arm above: the argument expression may
         resolve to Double (e.g. Abs(D) where D: Double, or any other
@@ -9975,12 +9975,12 @@ begin
       Self.Emit(#9'callq _SingleToStr');
       Exit;
     end;
-    if SameText(FC.Name, 'StrToDouble') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'StrToDouble') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToDouble', True);
       Exit;
     end;
-    if SameText(FC.Name, 'Round') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Round') and (FC.Args.Count = 1) then
     begin
       { Round to nearest with ties to EVEN (banker's rounding), as Delphi and
         FPC do: cvtsd2si / cvtss2si convert under the MXCSR rounding mode,
@@ -9995,7 +9995,7 @@ begin
         Self.Emit(#9'cvtsd2si %xmm0, %rax');
       Exit;
     end;
-    if SameText(FC.Name, 'Trunc') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Trunc') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -10005,19 +10005,19 @@ begin
         Self.Emit(#9'cvttsd2si %xmm0, %rax');
       Exit;
     end;
-    if SameText(FC.Name, 'CompareStr') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'CompareStr') and (FC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_StringCompare');
       Exit;
     end;
-    if SameText(FC.Name, 'CompareText') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'CompareText') and (FC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_StringCompareText');
       Exit;
     end;
-    if SameText(FC.Name, 'PosEx') and (FC.Args.Count = 3) then
+    if IsBuiltinCall(FC, 'PosEx') and (FC.Args.Count = 3) then
     begin
       if ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[0])) or
          ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[1])) then
@@ -10058,7 +10058,7 @@ begin
       Self.Emit(#9'callq _StringPosEx');
       Exit;
     end;
-    if SameText(FC.Name, 'UpCase') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'UpCase') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -10072,7 +10072,7 @@ begin
       Self.Emit(#9'callq _UpCase');
       Exit;
     end;
-    if SameText(FC.Name, 'ClassCreate') and (FC.Args.Count >= 1) then
+    if IsBuiltinCall(FC, 'ClassCreate') and (FC.Args.Count >= 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
@@ -10123,7 +10123,7 @@ begin
       end;
       Exit;
     end;
-    if SameText(FC.Name, 'OrdAt') and (FC.Args.Count = 2) and
+    if IsBuiltinCall(FC, 'OrdAt') and (FC.Args.Count = 2) and
        ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[0])) then
     begin
       { OrdAt(MakeStr(), I) / OrdAt(A + B, I): the string transient is
@@ -10157,7 +10157,7 @@ begin
       Self.Emit(#9'addq $8, %rsp');
       Exit;
     end;
-    if SameText(FC.Name, 'OrdAt') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'OrdAt') and (FC.Args.Count = 2) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
@@ -10167,161 +10167,161 @@ begin
       Self.Emit(#9'callq _OrdAt');
       Exit;
     end;
-    if SameText(FC.Name, 'FileExists') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'FileExists') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_FileExists');
       Exit;
     end;
-    if SameText(FC.Name, 'DirectoryExists') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'DirectoryExists') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_DirectoryExists');
       Exit;
     end;
-    if SameText(FC.Name, 'ReadFile') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ReadFile') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ReadFile');
       Exit;
     end;
-    if SameText(FC.Name, 'ExtractFilePath') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ExtractFilePath') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ExtractFilePath');
       Exit;
     end;
-    if SameText(FC.Name, 'ExtractFileName') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ExtractFileName') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ExtractFileName');
       Exit;
     end;
-    if SameText(FC.Name, 'ExtractFileDir') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ExtractFileDir') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ExtractFileDir');
       Exit;
     end;
-    if SameText(FC.Name, 'ExtractFileExt') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ExtractFileExt') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ExtractFileExt');
       Exit;
     end;
-    if SameText(FC.Name, 'ChangeFileExt') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'ChangeFileExt') and (FC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_ChangeFileExt');
       Exit;
     end;
-    if SameText(FC.Name, 'ForceDirectories') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ForceDirectories') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ForceDirectories');
       Exit;
     end;
-    if SameText(FC.Name, 'ExcludeTrailingPathDelimiter') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ExcludeTrailingPathDelimiter') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]),
         '_ExcludeTrailingPathDelimiter');
       Exit;
     end;
-    if SameText(FC.Name, 'IncludeTrailingPathDelimiter') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'IncludeTrailingPathDelimiter') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]),
         '_IncludeTrailingPathDelimiter');
       Exit;
     end;
-    if SameText(FC.Name, 'RenameFile') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'RenameFile') and (FC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_RenameFile');
       Exit;
     end;
-    if SameText(FC.Name, 'SetCurrentDir') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'SetCurrentDir') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_SetCurrentDir');
       Exit;
     end;
-    if SameText(FC.Name, 'GetCurrentDir') and (FC.Args.Count = 0) then
+    if IsBuiltinCall(FC, 'GetCurrentDir') and (FC.Args.Count = 0) then
     begin
       Self.Emit(#9'callq _GetCurrentDir');
       Exit;
     end;
-    if SameText(FC.Name, 'ParamStr') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ParamStr') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movl %eax, %edi');
       Self.Emit(#9'callq _ParamStr');
       Exit;
     end;
-    if SameText(FC.Name, 'ParamCount') and (FC.Args.Count = 0) then
+    if IsBuiltinCall(FC, 'ParamCount') and (FC.Args.Count = 0) then
     begin
       Self.Emit(#9'callq _ParamCount');
       Exit;
     end;
-    if SameText(FC.Name, 'ListDir') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ListDir') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ListDir');
       Exit;
     end;
-    if (SameText(FC.Name, 'GetEnvVar') or SameText(FC.Name, 'GetEnvironmentVariable'))
+    if (IsBuiltinCall(FC, 'GetEnvVar') or IsBuiltinCall(FC, 'GetEnvironmentVariable'))
        and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_GetEnvVar');
       Exit;
     end;
-    if SameText(FC.Name, 'GetProcessID') and (FC.Args.Count = 0) then
+    if IsBuiltinCall(FC, 'GetProcessID') and (FC.Args.Count = 0) then
     begin
       Self.Emit(#9'callq _GetProcessID');
       Exit;
     end;
-    if SameText(FC.Name, 'GetTempDir') and (FC.Args.Count = 0) then
+    if IsBuiltinCall(FC, 'GetTempDir') and (FC.Args.Count = 0) then
     begin
       Self.Emit(#9'callq _GetTempDir');
       Exit;
     end;
-    if SameText(FC.Name, 'GetTempFileName') and (FC.Args.Count = 2) then
+    if IsBuiltinCall(FC, 'GetTempFileName') and (FC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_GetTempFileName');
       Exit;
     end;
-    if SameText(FC.Name, 'Exec') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Exec') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_Exec');
       Exit;
     end;
-    if SameText(FC.Name, 'CurrentExceptionMessage') and (FC.Args.Count = 0) then
+    if IsBuiltinCall(FC, 'CurrentExceptionMessage') and (FC.Args.Count = 0) then
     begin
       Self.Emit(#9'callq _CurrentExceptionMessage');
       Exit;
     end;
-    if SameText(FC.Name, 'ProcessCreate') and (FC.Args.Count = 0) then
+    if IsBuiltinCall(FC, 'ProcessCreate') and (FC.Args.Count = 0) then
     begin
       Self.Emit(#9'callq _ProcessCreate');
       Exit;
     end;
-    if SameText(FC.Name, 'ProcessRunning') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ProcessRunning') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _ProcessRunning');
       Exit;
     end;
-    if SameText(FC.Name, 'ProcessReadOutput') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ProcessReadOutput') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _ProcessReadOutput');
       Exit;
     end;
-    if SameText(FC.Name, 'ProcessExitCode') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'ProcessExitCode') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _ProcessExitCode');
       Exit;
     end;
-    if SameText(FC.Name, 'FileAge') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'FileAge') and (FC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_FileAge');
       Exit;
     end;
-    if SameText(FC.Name, 'Floor') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Floor') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -10338,7 +10338,7 @@ begin
       end;
       Exit;
     end;
-    if SameText(FC.Name, 'Ceil') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Ceil') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -10362,7 +10362,7 @@ begin
         IsNaN:      NaN is the only value unordered with itself (PF set).
         IsInfinite: shift the sign bit out; +/-inf is then exactly the
                     all-ones exponent over a zero mantissa, $FFE0... }
-    if SameText(FC.Name, 'IsNaN') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'IsNaN') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -10373,7 +10373,7 @@ begin
       Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
-    if SameText(FC.Name, 'IsInfinite') and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'IsInfinite') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
@@ -18753,18 +18753,18 @@ begin
       implicit Self, nor a routine of the program's own: those were taken for
       the built-in and failed with "Write/WriteLn argument of a type with no
       text form" }
-    if IsBuiltinWrite(PC) and SameText(PC.Name, 'WriteLn') then
+    if IsBuiltinWrite(PC) and IsBuiltinCall(PC, 'WriteLn') then
     begin
       Self.EmitWrite(PC, True);
       Exit;
     end;
-    if IsBuiltinWrite(PC) and SameText(PC.Name, 'Write') then
+    if IsBuiltinWrite(PC) and IsBuiltinCall(PC, 'Write') then
     begin
       Self.EmitWrite(PC, False);
       Exit;
     end;
     { FreeMem(P) → _BlaiseFreeMem(P).  Pointer arg in %rdi. }
-    if SameText(PC.Name, 'FreeMem') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'FreeMem') and (PC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
@@ -18773,16 +18773,16 @@ begin
     end;
     { Delete(A, I, N) / Insert(Src, A, I) on a dynamic array }
     if (PC.ResolvedDecl = nil) and (PC.Args.Count = 3) and
-       ((SameText(PC.Name, 'Delete') and
+       ((IsBuiltinCall(PC, 'Delete') and
          (TASTExpr(PC.Args.Items[0]).ResolvedType <> nil) and
          (TASTExpr(PC.Args.Items[0]).ResolvedType.Kind = tyDynArray)) or
-        SameText(PC.Name, 'Insert')) then
+        IsBuiltinCall(PC, 'Insert')) then
     begin
       Self.EmitDynArrayDeleteInsert(PC);
       Exit;
     end;
     { Delete(S, Idx, Count): S := _StringDelete(S, Idx, Count) with ARC. }
-    if SameText(PC.Name, 'Delete') and (PC.Args.Count = 3) then
+    if IsBuiltinCall(PC, 'Delete') and (PC.Args.Count = 3) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
@@ -18833,7 +18833,7 @@ begin
       Exit;
     end;
     { SetLength(A, N) for dynamic arrays: A := _DynArraySetLength(A, N, ElemSize). }
-    if SameText(PC.Name, 'SetLength') and (PC.Args.Count = 2) and
+    if IsBuiltinCall(PC, 'SetLength') and (PC.Args.Count = 2) and
        (TASTExpr(PC.Args.Items[0]).ResolvedType <> nil) and
        (TASTExpr(PC.Args.Items[0]).ResolvedType.Kind = tyDynArray) then
     begin
@@ -18882,7 +18882,7 @@ begin
       Exit;
     end;
     { SetLength(S, N): S := _StringSetLength(S, N) with ARC. }
-    if SameText(PC.Name, 'SetLength') and (PC.Args.Count = 2) and
+    if IsBuiltinCall(PC, 'SetLength') and (PC.Args.Count = 2) and
        (TASTExpr(PC.Args.Items[0]).ResolvedType <> nil) and
        (TASTExpr(PC.Args.Items[0]).ResolvedType.Kind = tyString) then
     begin
@@ -18925,14 +18925,14 @@ begin
     { Inc(x) / Inc(x,n) / Dec(x) / Dec(x,n) — in-place add/sub.
       Supports TIdentExpr (local, global, implicit-Self field, var param)
       and TFieldAccessExpr (record/class field). }
-    if (SameText(PC.Name, 'Inc') or SameText(PC.Name, 'Dec')) and
+    if (IsBuiltinCall(PC, 'Inc') or IsBuiltinCall(PC, 'Dec')) and
        (PC.Args.Count >= 1) and (PC.Args.Count <= 2) then
     begin
       Self.EmitIncDec(PC);
       Exit;
     end;
     { Include(S, elem): S := S or (1 shl ord(elem)) }
-    if SameText(PC.Name, 'Include') and (PC.Args.Count = 2) then
+    if IsBuiltinCall(PC, 'Include') and (PC.Args.Count = 2) then
     begin
       { Jumbo set: address of the set, ordinal, then _SetInclude. Handles any
         lvalue shape (var, field, element), not just a bare ident. }
@@ -18984,7 +18984,7 @@ begin
       Exit;
     end;
     { Exclude(S, elem): S := S and (not (1 shl ord(elem))) }
-    if SameText(PC.Name, 'Exclude') and (PC.Args.Count = 2) then
+    if IsBuiltinCall(PC, 'Exclude') and (PC.Args.Count = 2) then
     begin
       { Jumbo set: address of the set, ordinal, then _SetExclude. }
       if IsJumboSet(TASTExpr(PC.Args.Items[0]).ResolvedType) then
@@ -19032,7 +19032,7 @@ begin
         Self.Emit(#9'andl %ecx, (%rax)');
       Exit;
     end;
-    if SameText(PC.Name, 'Halt') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'Halt') and (PC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'movl %eax, %edi');
@@ -19042,7 +19042,7 @@ begin
     { Move(Source, Dest, Count) -> _BlaiseMove(@Source, @Dest, Count): the
       semantic pass rewrote both operands to address-of nodes.  The count is
       widened to 64 bits by its own signedness. }
-    if SameText(PC.Name, 'Move') and (PC.ResolvedDecl = nil) and
+    if IsBuiltinCall(PC, 'Move') and (PC.ResolvedDecl = nil) and
        (PC.Args.Count = 3) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
@@ -19062,7 +19062,7 @@ begin
     end;
     { FillByte(Dest, Count, Value) -> _BlaiseFillByte(@Dest, Count, Value),
       Dest already rewritten to an address-of node by the semantic pass. }
-    if SameText(PC.Name, 'FillByte') and (PC.ResolvedDecl = nil) and
+    if IsBuiltinCall(PC, 'FillByte') and (PC.ResolvedDecl = nil) and
        (PC.Args.Count = 3) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
@@ -19080,7 +19080,7 @@ begin
       Self.Emit(#9'callq _BlaiseFillByte');
       Exit;
     end;
-    if SameText(PC.Name, 'ZeroMem') and (PC.Args.Count = 2) then
+    if IsBuiltinCall(PC, 'ZeroMem') and (PC.Args.Count = 2) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
@@ -19091,41 +19091,41 @@ begin
       Self.Emit(#9'callq memset');
       Exit;
     end;
-    if SameText(PC.Name, 'Sleep') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'Sleep') and (PC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'movl %eax, %edi');
       Self.Emit(#9'callq _Sleep');
       Exit;
     end;
-    if SameText(PC.Name, 'DeleteFile') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'DeleteFile') and (PC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(PC.Args.Items[0]), '_DeleteFile');
       Exit;
     end;
-    if SameText(PC.Name, 'RemoveDir') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'RemoveDir') and (PC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(PC.Args.Items[0]), '_RemoveDir');
       Exit;
     end;
-    if SameText(PC.Name, 'ForceDirectories') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'ForceDirectories') and (PC.Args.Count = 1) then
     begin
       Self.EmitBuiltinStrCall1(TASTExpr(PC.Args.Items[0]), '_ForceDirectories');
       Exit;
     end;
-    if SameText(PC.Name, 'WriteFile') and (PC.Args.Count = 2) then
+    if IsBuiltinCall(PC, 'WriteFile') and (PC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(PC.Args.Items[0]),
         TASTExpr(PC.Args.Items[1]), '_WriteFile');
       Exit;
     end;
-    if SameText(PC.Name, 'AppendFile') and (PC.Args.Count = 2) then
+    if IsBuiltinCall(PC, 'AppendFile') and (PC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(PC.Args.Items[0]),
         TASTExpr(PC.Args.Items[1]), '_AppendFile');
       Exit;
     end;
-    if SameText(PC.Name, 'ProcessSetExe') and (PC.Args.Count = 2) then
+    if IsBuiltinCall(PC, 'ProcessSetExe') and (PC.Args.Count = 2) then
     begin
       { Arg1 (the string) may be an owned (+1) transient — EmitBuiltinStrCall2
         handles both operand slots; the pointer arg0 just travels through. }
@@ -19133,27 +19133,27 @@ begin
         TASTExpr(PC.Args.Items[1]), '_ProcessSetExe');
       Exit;
     end;
-    if SameText(PC.Name, 'ProcessAddArg') and (PC.Args.Count = 2) then
+    if IsBuiltinCall(PC, 'ProcessAddArg') and (PC.Args.Count = 2) then
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(PC.Args.Items[0]),
         TASTExpr(PC.Args.Items[1]), '_ProcessAddArg');
       Exit;
     end;
-    if SameText(PC.Name, 'ProcessExecute') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'ProcessExecute') and (PC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _ProcessExecute');
       Exit;
     end;
-    if SameText(PC.Name, 'ProcessWaitOnExit') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'ProcessWaitOnExit') and (PC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _ProcessWaitOnExit');
       Exit;
     end;
-    if SameText(PC.Name, 'ProcessFree') and (PC.Args.Count = 1) then
+    if IsBuiltinCall(PC, 'ProcessFree') and (PC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'movq %rax, %rdi');
@@ -19253,6 +19253,7 @@ begin
           DiscShim.Name := PC.Name;
           DiscShim.Args := PC.Args;
           DiscShim.ResolvedDecl := PC.ResolvedDecl;
+          DiscShim.ResolvesToUserRoutine := PC.ResolvesToUserRoutine;
           DiscShim.IsImplicitSelfMethod := True;
           Self.EmitIntfSretCall(DiscShim);
         finally
@@ -19367,6 +19368,7 @@ begin
         DiscShim.Name := PC.Name;
         DiscShim.Args := PC.Args;
         DiscShim.ResolvedDecl := PC.ResolvedDecl;
+        DiscShim.ResolvesToUserRoutine := PC.ResolvesToUserRoutine;
         Self.EmitIntfSretCall(DiscShim);
       finally
         DiscShim.Args := nil;          { borrowed — do not free }

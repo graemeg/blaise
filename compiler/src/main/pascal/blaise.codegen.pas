@@ -653,7 +653,7 @@ begin
     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
     not TFuncCallExpr(AExpr).IsIndirectCall and
     not TFuncCallExpr(AExpr).IsProcFieldCall and
-    SameText(TFuncCallExpr(AExpr).Name, 'Copy');
+    IsBuiltinCall(TFuncCallExpr(AExpr), 'Copy');
 end;
 
 function IsDynArrayConcatExpr(AExpr: TASTExpr): Boolean;
@@ -743,7 +743,7 @@ begin
       procedural-variable form -- not counting it leaked one string per
       call on both backends }
     if (TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
-       SameText(TFuncCallExpr(AExpr).Name, 'ClassCreate') or
+       IsBuiltinCall(TFuncCallExpr(AExpr), 'ClassCreate') or
        TFuncCallExpr(AExpr).IsIndirectCall or
        TFuncCallExpr(AExpr).IsProcFieldCall then
       Result := True;
@@ -981,7 +981,7 @@ begin
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (not TFuncCallExpr(AExpr).IsProcFieldCall) then
   begin
-    if not SameText(TFuncCallExpr(AExpr).Name, 'string') then
+    if not IsBuiltinCall(TFuncCallExpr(AExpr), 'string') then
       Exit(True);
     if (TFuncCallExpr(AExpr).Args.Count = 1) and
        (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and

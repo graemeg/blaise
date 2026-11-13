@@ -3923,7 +3923,7 @@ var
   IsInsert: Boolean;
   Target: TASTExpr;
 begin
-  IsInsert := SameText(ACall.Name, 'Insert');
+  IsInsert := IsBuiltinCall(ACall, 'Insert');
   if IsInsert then
     Target := TASTExpr(ACall.Args.Items[1])
   else
@@ -5522,7 +5522,7 @@ begin
   begin
     FC := TFuncCallExpr(AValueExpr);
     if (FC.ResolvedDecl = nil) and (FC.Args.Count = 1) and
-       SameText(FC.Name, 'Chr') then
+       IsBuiltinCall(FC, 'Chr') then
     begin
       Self.EmitExprToX0(TASTExpr(FC.Args.Items[0]));
       Exit;
@@ -5665,7 +5665,7 @@ begin
   { ClassCreate carries the resolved CONSTRUCTOR in ResolvedDecl, so it must
     be claimed before any arm that lowers a resolved call as a plain call }
   if (AExpr is TFuncCallExpr) and
-     SameText(TFuncCallExpr(AExpr).Name, 'ClassCreate') and
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'ClassCreate') and
      (TFuncCallExpr(AExpr).Args.Count >= 1) then
   begin
     EmitClassCreate(TFuncCallExpr(AExpr));
@@ -5996,20 +5996,20 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
        tyOpenArray) and
-     (SameText(TFuncCallExpr(AExpr).Name, 'High') or
-      SameText(TFuncCallExpr(AExpr).Name, 'Low') or
-      SameText(TFuncCallExpr(AExpr).Name, 'Length')) then
+     (IsBuiltinCall(TFuncCallExpr(AExpr), 'High') or
+      IsBuiltinCall(TFuncCallExpr(AExpr), 'Low') or
+      IsBuiltinCall(TFuncCallExpr(AExpr), 'Length')) then
   begin
     { open-array bounds live in the (ptr, high) slot pair: High reads
       the companion slot, Length is High + 1, Low is always 0 }
-    if SameText(TFuncCallExpr(AExpr).Name, 'Low') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Low') then
       Self.Emit(#9'movz x0, #0')
     else
     begin
       EmitLoadSlot('x0',
         TIdentExpr(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])).Name
         + '_high');
-      if SameText(TFuncCallExpr(AExpr).Name, 'Length') then
+      if IsBuiltinCall(TFuncCallExpr(AExpr), 'Length') then
         Self.Emit(#9'add x0, x0, #1');
     end;
     Exit;
@@ -6020,11 +6020,11 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
        tyStaticArray) and
-     (SameText(TFuncCallExpr(AExpr).Name, 'High') or
-      SameText(TFuncCallExpr(AExpr).Name, 'Low')) then
+     (IsBuiltinCall(TFuncCallExpr(AExpr), 'High') or
+      IsBuiltinCall(TFuncCallExpr(AExpr), 'Low')) then
   begin
     { static-array bounds are compile-time constants }
-    if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'High') then
       EmitIntLiteral('x0', TStaticArrayTypeDesc(
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType).HighBound)
     else
@@ -6039,7 +6039,7 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
        tyStaticArray) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Length') then
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Length') then
   begin
     EmitIntLiteral('x0',
       TStaticArrayTypeDesc(
@@ -6062,15 +6062,15 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind in
        [tyEnum, tyByte, tyBoolean, tyInt8, tySmallInt, tyWord, tyInteger,
         tyUInt32, tyInt64, tyUInt64]) and
-     (SameText(TFuncCallExpr(AExpr).Name, 'High') or
-      SameText(TFuncCallExpr(AExpr).Name, 'Low')) then
+     (IsBuiltinCall(TFuncCallExpr(AExpr), 'High') or
+      IsBuiltinCall(TFuncCallExpr(AExpr), 'Low')) then
   begin
     { High/Low(subrange) is the subrange's own bound (Low may be negative), not
       the base type's — the descriptor's Kind is the narrowest fitting int but
       SubrangeLow/High carry the real bounds (GH #160). }
     if TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsSubrange then
     begin
-      if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+      if IsBuiltinCall(TFuncCallExpr(AExpr), 'High') then
         EmitIntLiteral('x0',
           TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.SubrangeHigh)
       else
@@ -6078,7 +6078,7 @@ begin
           TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.SubrangeLow);
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'High') then
       case TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind of
         tyEnum:     EmitIntLiteral('x0', TEnumTypeDesc(
           TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType)
@@ -6118,7 +6118,7 @@ begin
      ((TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
         tyDynArray) or
       TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsString()) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Low') then
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Low') then
   begin
     { Low of a dynamic array or a string is always 0 (Blaise is 0-based) }
     Self.Emit(#9'movz x0, #0');
@@ -6130,7 +6130,7 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
        tyDynArray) and
-     SameText(TFuncCallExpr(AExpr).Name, 'High') then
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'High') then
   begin
     { High(D) = Length(D) - 1 }
     EmitDynArrayLengthOf(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
@@ -6138,7 +6138,7 @@ begin
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Length') and
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Length') and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
@@ -6152,8 +6152,8 @@ begin
      (TFuncCallExpr(AExpr).Args.Count = 1) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsString()
-     and (SameText(TFuncCallExpr(AExpr).Name, 'Length') or
-          SameText(TFuncCallExpr(AExpr).Name, 'High')) then
+     and (IsBuiltinCall(TFuncCallExpr(AExpr), 'Length') or
+          IsBuiltinCall(TFuncCallExpr(AExpr), 'High')) then
   begin
     { Length(S), and High(S) = Length(S) - 1 (-1 for the empty string; Blaise
       strings are 0-based).
@@ -6175,12 +6175,12 @@ begin
       EmitStrDisposeX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitPopTo('x0');
       Self.Emit(#9'add sp, sp, #16');
-      if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+      if IsBuiltinCall(TFuncCallExpr(AExpr), 'High') then
         Self.Emit(#9'sub x0, x0, #1');
       Exit;
     end;
     EmitStrLen('x0');
-    if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'High') then
       Self.Emit(#9'sub x0, x0, #1');
     Exit;
   end;
@@ -6191,92 +6191,92 @@ begin
   begin
     { one-string-arg RTL builtins (the sysutils file/string surface) —
       each disposes a transient argument by shape (handover doc rule) }
-    if SameText(TFuncCallExpr(AExpr).Name, 'FileExists') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'FileExists') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_FileExists');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'DirectoryExists') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'DirectoryExists') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_DirectoryExists');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ReadFile') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ReadFile') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_ReadFile');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'FileAge') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'FileAge') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_FileAge');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ForceDirectories') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ForceDirectories') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_ForceDirectories');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Trim') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Trim') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_StringTrim');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'LowerCase') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'LowerCase') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_StringLowerCase');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'UpperCase') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'UpperCase') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_StringUpperCase');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ExtractFilePath') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ExtractFilePath') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_ExtractFilePath');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ExtractFileName') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ExtractFileName') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_ExtractFileName');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ExtractFileDir') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ExtractFileDir') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_ExtractFileDir');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ExtractFileExt') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ExtractFileExt') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_ExtractFileExt');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ListDir') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ListDir') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_ListDir');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'GetEnvVar') or
-       SameText(TFuncCallExpr(AExpr).Name, 'GetEnvironmentVariable') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'GetEnvVar') or
+       IsBuiltinCall(TFuncCallExpr(AExpr), 'GetEnvironmentVariable') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_GetEnvVar');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'SetCurrentDir') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'SetCurrentDir') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_SetCurrentDir');
@@ -6285,7 +6285,7 @@ begin
     { With SysUtils in scope, StrToInt validates the WHOLE string and raises
       EConvertError ('42abc' is not an integer); the bare runtime routine
       stops at the first non-digit and returned 42 -- x86-64 parity. }
-    if SameText(TFuncCallExpr(AExpr).Name, 'StrToInt') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'StrToInt') then
     begin
       if Self.StrToIntChecked() then
         EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
@@ -6295,7 +6295,7 @@ begin
           '_StrToInt');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'StrToInt64') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'StrToInt64') then
     begin
       if Self.StrToIntChecked() then
         EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
@@ -6305,7 +6305,7 @@ begin
           '_StrToInt64');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Exec') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Exec') then
     begin
       EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         '_Exec');
@@ -6325,13 +6325,13 @@ begin
         '_ExcludeTrailingPathDelimiter');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ParamStr') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ParamStr') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_ParamStr');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'UpCase') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'UpCase') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       { _UpCase takes an INTEGER char code.  A STRING argument (UpCase(Chr(C)),
@@ -6351,7 +6351,7 @@ begin
       EmitCallSym('_UpCase');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Assigned') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Assigned') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       if Self.IsOwnedClassOperand(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
@@ -6368,25 +6368,25 @@ begin
       Self.Emit(#9'cset x0, ne');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Pred') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Pred') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       Self.Emit(#9'sub x0, x0, #1');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Succ') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Succ') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       Self.Emit(#9'add x0, x0, #1');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'GetMem') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'GetMem') then
     begin
       EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_BlaiseGetMem');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'DoubleToStr') and
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'DoubleToStr') and
        (TFuncCallExpr(AExpr).Args.Count = 1) then
     begin
       { float -> shortest round-trip decimal string.  EmitExprToD0OrConvert
@@ -6396,7 +6396,7 @@ begin
       EmitCallSym('_DoubleToStr');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'SingleToStr') and
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'SingleToStr') and
        (TFuncCallExpr(AExpr).Args.Count = 1) then
     begin
       { _SingleToStr takes a genuine 32-bit Single in s0: narrow the Double
@@ -6407,7 +6407,7 @@ begin
       EmitCallSym('_SingleToStr');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Abs') and
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Abs') and
        (TFuncCallExpr(AExpr).Args.Count = 1) and
        not IsFloatExpr(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
     begin
@@ -6422,7 +6422,7 @@ begin
       Self.Emit(Lit + ':');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'IntToStr') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'IntToStr') then
     begin
       { integer argument — no transient to dispose.  A UInt64 needs the
         unsigned formatter: _Int64ToStr would print a value with the high
@@ -6436,7 +6436,7 @@ begin
         EmitCallSym('_Int64ToStr');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Int64ToStr') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Int64ToStr') then
     begin
       { Int64 -> decimal string; same lowering as IntToStr, which already
         routes through _Int64ToStr.  Integer argument, no transient to
@@ -6445,7 +6445,7 @@ begin
       EmitCallSym('_Int64ToStr');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'UInt64ToStr') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'UInt64ToStr') then
     begin
       { unsigned 64-bit -> decimal string.  Mirrors x86-64's UInt64ToStr case. }
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
@@ -6458,26 +6458,26 @@ begin
       runtime.math helpers and the integral result is then truncated.
       EmitExprToD0OrConvert promotes a Single operand to double exactly, so
       one double conversion serves both widths. }
-    if SameText(TFuncCallExpr(AExpr).Name, 'Trunc') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Trunc') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Round') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Round') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       Self.Emit(#9'fcvtns x0, d0');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Floor') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Floor') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_BlaiseFloorD');
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Ceil') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Ceil') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_BlaiseCeilD');
@@ -6491,7 +6491,7 @@ begin
         IsNaN:      NaN is the only value unordered with itself (V set).
         IsInfinite: shift the sign bit out; +/-inf is then exactly the
                     all-ones exponent over a zero mantissa, $FFE0... }
-    if SameText(TFuncCallExpr(AExpr).Name, 'IsNaN') and
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'IsNaN') and
        (TFuncCallExpr(AExpr).Args.Count = 1) then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
@@ -6499,7 +6499,7 @@ begin
       Self.Emit(#9'cset x0, vs');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'IsInfinite') and
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'IsInfinite') and
        (TFuncCallExpr(AExpr).Args.Count = 1) then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
@@ -6513,19 +6513,19 @@ begin
     { process-control family (expression context): each takes the process
       handle (a pointer) and returns an int/pointer — pointer arg, no
       transient to dispose }
-    if SameText(TFuncCallExpr(AExpr).Name, 'ProcessRunning') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ProcessRunning') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_ProcessRunning');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ProcessReadOutput') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ProcessReadOutput') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_ProcessReadOutput');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ProcessExitCode') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ProcessExitCode') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_ProcessExitCode');
@@ -6536,7 +6536,7 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 2) and
-     SameText(TFuncCallExpr(AExpr).Name, 'MethodAddress') then
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'MethodAddress') then
   begin
     { MethodAddress(Instance, 'Name') — published-method lookup through
       typeinfo[3] (see EmitMethodsTable).  x0 = instance, x1 = the name's
@@ -6561,32 +6561,32 @@ begin
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 0) then
   begin
-    if SameText(TFuncCallExpr(AExpr).Name, 'ParamCount') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ParamCount') then
     begin
       EmitCallSym('_ParamCount');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'GetCurrentDir') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'GetCurrentDir') then
     begin
       EmitCallSym('_GetCurrentDir');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'GetTempDir') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'GetTempDir') then
     begin
       EmitCallSym('_GetTempDir');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'CurrentExceptionMessage') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'CurrentExceptionMessage') then
     begin
       EmitCallSym('_CurrentExceptionMessage');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'GetProcessID') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'GetProcessID') then
     begin
       EmitCallSym('_GetProcessID');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ProcessCreate') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ProcessCreate') then
     begin
       { allocate a process handle — returns a pointer in x0 }
       EmitCallSym('_ProcessCreate');
@@ -6597,7 +6597,7 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count > 2) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Format') then
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Format') then
   begin
     { Format(F, A, B, ...) -- the bare variadic form with several values }
     Self.EmitFormatCall(TFuncCallExpr(AExpr).Args);
@@ -6608,36 +6608,36 @@ begin
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 2) then
   begin
-    if SameText(TFuncCallExpr(AExpr).Name, 'Format') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Format') then
     begin
       Self.EmitFormatCall(TFuncCallExpr(AExpr).Args);
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'Pos') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Pos') then
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_StringPos');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'SameText') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'SameText') then
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_StringSameText');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'CompareStr') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'CompareStr') then
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_StringCompare');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'CompareText') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'CompareText') then
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_StringCompareText');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'OrdAt') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'OrdAt') then
     begin
       { OrdAt(S, I): byte value at 0-based index — (str, int) args }
       { a string transient (OrdAt(MakeStr(), I), OrdAt(A + B, I)) is parked,
@@ -6670,25 +6670,25 @@ begin
       end;
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ChangeFileExt') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ChangeFileExt') then
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_ChangeFileExt');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'RenameFile') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'RenameFile') then
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_RenameFile');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'GetTempFileName') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'GetTempFileName') then
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_GetTempFileName');
       Exit;
     end;
-    if SameText(TFuncCallExpr(AExpr).Name, 'ReallocMem') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'ReallocMem') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitPushX0();
@@ -6713,8 +6713,8 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 3) and
-     (SameText(TFuncCallExpr(AExpr).Name, 'Copy') or
-      SameText(TFuncCallExpr(AExpr).Name, 'PosEx')) then
+     (IsBuiltinCall(TFuncCallExpr(AExpr), 'Copy') or
+      IsBuiltinCall(TFuncCallExpr(AExpr), 'PosEx')) then
   begin
     { Copy(S, I, N) / PosEx(Sub, S, From): three args, first two may be
       string transients — full parking bracket like the 2-arg helper }
@@ -6727,7 +6727,7 @@ begin
     if ArcBuiltinStrArgOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
       ShadowH := UnwShadowOpen(
         UnwStrKindOf(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])));
-    if SameText(TFuncCallExpr(AExpr).Name, 'Copy') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Copy') then
       EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]))
     else
     begin
@@ -6741,7 +6741,7 @@ begin
     Self.Emit(#9'mov x2, x0');
     Self.Emit(#9'ldr x1, [sp]');
     Self.Emit(#9'ldr x0, [sp, #16]');
-    if SameText(TFuncCallExpr(AExpr).Name, 'Copy') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Copy') then
       EmitCallSym('_StringCopy')
     else
     begin
@@ -6770,7 +6770,7 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     SameText(TFuncCallExpr(AExpr).Name, 'string') and
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'string') and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyPChar) then
   begin
@@ -6785,8 +6785,8 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     (SameText(TFuncCallExpr(AExpr).Name, 'PChar') or
-      SameText(TFuncCallExpr(AExpr).Name, 'Pointer')) then
+     (IsBuiltinCall(TFuncCallExpr(AExpr), 'PChar') or
+      IsBuiltinCall(TFuncCallExpr(AExpr), 'Pointer')) then
   begin
     { PChar(x)/Pointer(x): bit-level reinterpret — a Blaise string data
       pointer is already NUL-terminated, so it IS the PChar value }
@@ -6796,7 +6796,7 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     SameText(TFuncCallExpr(AExpr).Name, 'SizeOf') and
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'SizeOf') and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) then
   begin
     { SizeOf(x): compile-time constant — the resolved type's byte size }
@@ -6807,7 +6807,7 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Ord') then
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Ord') then
   begin
     { Ord(x): a char literal folds to its byte; any other ordinal is already
       its own value (Char IS its byte in this backend). }
@@ -6831,7 +6831,7 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Chr') then
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Chr') then
   begin
     { Chr(N) is the INVERSE of Ord: the semantic pass types it tyString, so it
       must return a freshly-allocated one-character heap string — lower it to
@@ -8588,37 +8588,37 @@ begin
      (TFuncCallExpr(AExpr).Args.Count = 1) then
   begin
     RtlMathSym := '';
-    if SameText(TFuncCallExpr(AExpr).Name, 'Sqrt') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Sqrt') then
       RtlMathSym := '_BlaiseSqrtD'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Sin') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Sin') then
       RtlMathSym := '_BlaiseSin'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Cos') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Cos') then
       RtlMathSym := '_BlaiseCos'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Tan') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Tan') then
       RtlMathSym := '_BlaiseTan'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'ArcSin') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcSin') then
       RtlMathSym := '_BlaiseArcSin'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'ArcCos') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcCos') then
       RtlMathSym := '_BlaiseArcCos'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'ArcTan') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcTan') then
       RtlMathSym := '_BlaiseArcTan'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Ln') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Ln') then
       RtlMathSym := '_BlaiseLn'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Exp') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Exp') then
       RtlMathSym := '_BlaiseExp'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Expm1') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Expm1') then
       RtlMathSym := '_BlaiseExpm1'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Log2') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Log2') then
       RtlMathSym := '_BlaiseLog2'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Log10') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Log10') then
       RtlMathSym := '_BlaiseLog10'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Sinh') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Sinh') then
       RtlMathSym := '_BlaiseSinh'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Cosh') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Cosh') then
       RtlMathSym := '_BlaiseCosh'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Tanh') then
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Tanh') then
       RtlMathSym := '_BlaiseTanh'
-    else if SameText(TFuncCallExpr(AExpr).Name, 'Abs') and
+    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Abs') and
             (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
             TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsFloat() then
       RtlMathSym := '_BlaiseFabs';
@@ -8634,8 +8634,8 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 2) and
-     (SameText(TFuncCallExpr(AExpr).Name, 'Power') or
-      SameText(TFuncCallExpr(AExpr).Name, 'ArcTan2')) then
+     (IsBuiltinCall(TFuncCallExpr(AExpr), 'Power') or
+      IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcTan2')) then
   begin
     { two-argument RTL math call: first arg in d0, second in d1, each
       widened to double by its own type via EmitExprToD0OrConvert }
@@ -8644,7 +8644,7 @@ begin
     Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
     Self.Emit(#9'fmov d1, d0');
     Self.Emit(#9'ldr d0, [sp], #16');
-    if SameText(TFuncCallExpr(AExpr).Name, 'Power') then
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Power') then
       EmitCallSym('_BlaisePow')
     else
       EmitCallSym('_BlaiseArcTan2');
@@ -8652,7 +8652,7 @@ begin
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
-     SameText(TFuncCallExpr(AExpr).Name, 'StrToDouble') and
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'StrToDouble') and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) then
   begin
@@ -10354,17 +10354,17 @@ begin
     implicit Self, nor a routine of the program's own: those were taken for
     the built-in and failed with "Write/WriteLn argument of a type with no
     text form" }
-  if IsBuiltinWrite(ACall) and SameText(ACall.Name, 'WriteLn') then
+  if IsBuiltinWrite(ACall) and IsBuiltinCall(ACall, 'WriteLn') then
   begin
     EmitWrite(ACall, True);
     Exit;
   end;
-  if IsBuiltinWrite(ACall) and SameText(ACall.Name, 'Write') then
+  if IsBuiltinWrite(ACall) and IsBuiltinCall(ACall, 'Write') then
   begin
     EmitWrite(ACall, False);
     Exit;
   end;
-  if SameText(ACall.Name, 'SetLength') and (ACall.Args.Count = 2) and
+  if IsBuiltinCall(ACall, 'SetLength') and (ACall.Args.Count = 2) and
      (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
      TASTExpr(ACall.Args.Items[0]).ResolvedType.IsString() and
      (((TASTExpr(ACall.Args.Items[0]) is TIdentExpr) and
@@ -10412,7 +10412,7 @@ begin
     Self.Emit(#9'ldr x19, [sp], #16');           { restore x19 }
     Exit;
   end;
-  if SameText(ACall.Name, 'SetLength') and (ACall.Args.Count = 2) and
+  if IsBuiltinCall(ACall, 'SetLength') and (ACall.Args.Count = 2) and
      (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind = tyDynArray) then
   begin
@@ -10457,14 +10457,14 @@ begin
       TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     Exit;
   end;
-  if SameText(ACall.Name, 'FreeMem') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'FreeMem') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
     EmitCallSym('_BlaiseFreeMem');
     Exit;
   end;
-  if SameText(ACall.Name, 'Halt') and (ACall.ResolvedDecl = nil) then
+  if IsBuiltinCall(ACall, 'Halt') and (ACall.ResolvedDecl = nil) then
   begin
     if ACall.Args.Count = 1 then
       Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]))
@@ -10473,7 +10473,7 @@ begin
     EmitCallSym('exit');
     Exit;
   end;
-  if SameText(ACall.Name, 'Sleep') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'Sleep') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
@@ -10483,7 +10483,7 @@ begin
   { Move(Source, Dest, Count) -> _BlaiseMove(@Source, @Dest, Count): the
     semantic pass rewrote both operands to address-of nodes.  The count is
     widened to 64 bits by its own signedness. }
-  if SameText(ACall.Name, 'Move') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'Move') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 3) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
@@ -10504,7 +10504,7 @@ begin
   end;
   { FillByte(Dest, Count, Value) -> _BlaiseFillByte(@Dest, Count, Value),
     Dest already rewritten to an address-of node by the semantic pass. }
-  if SameText(ACall.Name, 'FillByte') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'FillByte') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 3) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
@@ -10524,7 +10524,7 @@ begin
     EmitCallSym('_BlaiseFillByte');
     Exit;
   end;
-  if SameText(ACall.Name, 'ZeroMem') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'ZeroMem') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 2) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
@@ -10536,13 +10536,13 @@ begin
     EmitCallSym('memset');
     Exit;
   end;
-  if SameText(ACall.Name, 'RemoveDir') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'RemoveDir') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     EmitBuiltinStrCall1(TASTExpr(ACall.Args.Items[0]), '_RemoveDir');
     Exit;
   end;
-  if SameText(ACall.Name, 'ForceDirectories') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'ForceDirectories') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     { statement-context ForceDirectories (return value discarded) — the
@@ -10550,7 +10550,7 @@ begin
     EmitBuiltinStrCall1(TASTExpr(ACall.Args.Items[0]), '_ForceDirectories');
     Exit;
   end;
-  if SameText(ACall.Name, 'AppendFile') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'AppendFile') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 2) then
   begin
     EmitBuiltinStrCall2(TASTExpr(ACall.Args.Items[0]),
@@ -10558,15 +10558,15 @@ begin
     Exit;
   end;
   if (ACall.ResolvedDecl = nil) and (ACall.Args.Count = 3) and
-     ((SameText(ACall.Name, 'Delete') and
+     ((IsBuiltinCall(ACall, 'Delete') and
        (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
        (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind = tyDynArray)) or
-      SameText(ACall.Name, 'Insert')) then
+      IsBuiltinCall(ACall, 'Insert')) then
   begin
     EmitDynArrayDeleteInsert(ACall);
     Exit;
   end;
-  if SameText(ACall.Name, 'Delete') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'Delete') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 3) then
   begin
     { Delete(S, I, N): _StringDelete returns the new string — retain it,
@@ -10594,13 +10594,13 @@ begin
     Self.Emit(#9'str x0, [x9]');
     Exit;
   end;
-  if SameText(ACall.Name, 'DeleteFile') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'DeleteFile') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     EmitBuiltinStrCall1(TASTExpr(ACall.Args.Items[0]), '_DeleteFile');
     Exit;
   end;
-  if SameText(ACall.Name, 'WriteFile') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'WriteFile') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 2) then
   begin
     EmitBuiltinStrCall2(TASTExpr(ACall.Args.Items[0]),
@@ -10611,49 +10611,49 @@ begin
     string) — the string arg may be an owned transient, so route both slots
     through EmitBuiltinStrCall2; Execute/WaitOnExit/Free take the handle
     pointer only }
-  if SameText(ACall.Name, 'ProcessSetExe') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'ProcessSetExe') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 2) then
   begin
     EmitBuiltinStrCall2(TASTExpr(ACall.Args.Items[0]),
       TASTExpr(ACall.Args.Items[1]), '_ProcessSetExe');
     Exit;
   end;
-  if SameText(ACall.Name, 'ProcessAddArg') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'ProcessAddArg') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 2) then
   begin
     EmitBuiltinStrCall2(TASTExpr(ACall.Args.Items[0]),
       TASTExpr(ACall.Args.Items[1]), '_ProcessAddArg');
     Exit;
   end;
-  if SameText(ACall.Name, 'ProcessExecute') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'ProcessExecute') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
     EmitCallSym('_ProcessExecute');
     Exit;
   end;
-  if SameText(ACall.Name, 'ProcessWaitOnExit') and
+  if IsBuiltinCall(ACall, 'ProcessWaitOnExit') and
      (ACall.ResolvedDecl = nil) and (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
     EmitCallSym('_ProcessWaitOnExit');
     Exit;
   end;
-  if SameText(ACall.Name, 'ProcessFree') and (ACall.ResolvedDecl = nil) and
+  if IsBuiltinCall(ACall, 'ProcessFree') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
     EmitCallSym('_ProcessFree');
     Exit;
   end;
-  if (SameText(ACall.Name, 'Include') or SameText(ACall.Name, 'Exclude')) and
+  if (IsBuiltinCall(ACall, 'Include') or IsBuiltinCall(ACall, 'Exclude')) and
      (ACall.ResolvedDecl = nil) and (ACall.Args.Count = 2) and
      (TASTExpr(ACall.Args.Items[0]).ResolvedType is TSetTypeDesc) then
   begin
-    EmitSetIncludeExclude(ACall, SameText(ACall.Name, 'Include'));
+    EmitSetIncludeExclude(ACall, IsBuiltinCall(ACall, 'Include'));
     Exit;
   end;
-  if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
+  if (IsBuiltinCall(ACall, 'Inc') or IsBuiltinCall(ACall, 'Dec')) and
      (ACall.ResolvedDecl = nil) and
      ((ACall.Args.Count = 1) or (ACall.Args.Count = 2)) and
      (TASTExpr(ACall.Args.Items[0]) is TFieldAccessExpr) and
@@ -10681,7 +10681,7 @@ begin
       Self.Emit(#9'movz x2, #1');
     EmitElemLoad(
       TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])).FieldInfo.TypeDesc);
-    if SameText(ACall.Name, 'Inc') then
+    if IsBuiltinCall(ACall, 'Inc') then
       Self.Emit(#9'add x0, x0, x2')
     else
       Self.Emit(#9'sub x0, x0, x2');
@@ -10695,7 +10695,7 @@ begin
     end;
     Exit;
   end;
-  if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
+  if (IsBuiltinCall(ACall, 'Inc') or IsBuiltinCall(ACall, 'Dec')) and
      (ACall.ResolvedDecl = nil) and
      ((ACall.Args.Count = 1) or (ACall.Args.Count = 2)) and
      (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) and
@@ -10722,7 +10722,7 @@ begin
       Self.Emit(#9'movz x2, #1');
     EmitElemLoad(TFieldInfo(TIdentExpr(TASTExpr(ACall.Args.Items[0]))
       .ImplicitFieldInfo).TypeDesc);
-    if SameText(ACall.Name, 'Inc') then
+    if IsBuiltinCall(ACall, 'Inc') then
       Self.Emit(#9'add x0, x0, x2')
     else
       Self.Emit(#9'sub x0, x0, x2');
@@ -10736,7 +10736,7 @@ begin
     end;
     Exit;
   end;
-  if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
+  if (IsBuiltinCall(ACall, 'Inc') or IsBuiltinCall(ACall, 'Dec')) and
      (ACall.ResolvedDecl = nil) and
      ((ACall.Args.Count = 1) or (ACall.Args.Count = 2)) and
      (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) then
@@ -10757,7 +10757,7 @@ begin
       Self.Emit(#9'str x2, [sp, #-16]!');
       EmitCapturedLoad(TIdentExpr(TASTExpr(ACall.Args.Items[0])));
       Self.Emit(#9'ldr x2, [sp], #16');
-      if SameText(ACall.Name, 'Inc') then
+      if IsBuiltinCall(ACall, 'Inc') then
         Self.Emit(#9'add x0, x0, x2')
       else
         Self.Emit(#9'sub x0, x0, x2');
@@ -10783,7 +10783,7 @@ begin
       EmitLoadSlot('x9', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
       Self.Emit(#9'mov x0, x9');
       EmitElemLoad(TASTExpr(ACall.Args.Items[0]).ResolvedType);
-      if SameText(ACall.Name, 'Inc') then
+      if IsBuiltinCall(ACall, 'Inc') then
         Self.Emit(#9'add x0, x0, x2')
       else
         Self.Emit(#9'sub x0, x0, x2');
@@ -10797,7 +10797,7 @@ begin
       Exit;
     end;
     EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
-    if SameText(ACall.Name, 'Inc') then
+    if IsBuiltinCall(ACall, 'Inc') then
       Self.Emit(#9'add x0, x0, x2')
     else
       Self.Emit(#9'sub x0, x0, x2');
@@ -10885,7 +10885,7 @@ begin
     EmitDiscardedProcResult(TProceduralTypeDesc(ACall.ResolvedProcType));
     Exit;
   end;
-  if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
+  if (IsBuiltinCall(ACall, 'Inc') or IsBuiltinCall(ACall, 'Dec')) and
      (ACall.ResolvedDecl = nil) and
      ((ACall.Args.Count = 1) or (ACall.Args.Count = 2)) and
      (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
@@ -10915,7 +10915,7 @@ begin
     EmitPopTo('x2');                                   { step }
     Self.Emit(#9'mov x9, x0');
     EmitElemLoad(TASTExpr(ACall.Args.Items[0]).ResolvedType);
-    if SameText(ACall.Name, 'Inc') then
+    if IsBuiltinCall(ACall, 'Inc') then
       Self.Emit(#9'add x0, x0, x2')
     else
       Self.Emit(#9'sub x0, x0, x2');
@@ -11878,7 +11878,7 @@ begin
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
-     SameText(TFuncCallExpr(AExpr).Name, 'Ord') and
+     IsBuiltinCall(TFuncCallExpr(AExpr), 'Ord') and
      (TFuncCallExpr(AExpr).Args.Count = 1) then
   begin
     { Ord(x) as a case value is compile-time foldable: a one-char

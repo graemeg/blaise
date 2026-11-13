@@ -5884,7 +5884,9 @@ Three kinds of `System` name stay reserved, with `Duplicate identifier` as
 before:
 
 * `True` and `False`.
-* Built-in routines (`WriteLn`, `Length`, `Inc`, ...).
+* Built-in routines (`WriteLn`, `Length`, `Inc`, ...), at unit and program
+  level.  A routine nested inside another routine may reuse one: see
+  _Nested Routines May Reuse Built-in Routine Names_.
 * A name the same unit or program already declares.
 
 === Rationale
@@ -5920,11 +5922,14 @@ redeclared.
 
 === Alternatives considered
 
-* *Shadow built-in routines as well* (the FPC and Delphi behaviour).
-  Deferred: calls to built-in routines are lowered as intrinsics by name, so
-  a user routine of the same name would compile and then be bypassed
-  (BUG-20261113-nested-builtin-routine-shadow-ignored).  Once that dispatch
-  checks the resolved symbol, `ShadowsBuiltin` can admit routines.
+* *Shadow built-in routines at unit and program level as well* (the FPC and
+  Delphi behaviour).  Deferred: calls to built-in routines are recognised by
+  name, and a call to a unit- or program-level routine is resolved through
+  the global overload index, after the built-in checks.  Nested routines
+  are marked so that the built-in checks skip them (see _Nested Routines May
+  Reuse Built-in Routine Names_).  Extending that mark to unit- and
+  program-level routines is what `ShadowsBuiltin` needs before it can admit
+  routines.
 * *Keep the `Duplicate identifier` error for routines, variables and types.*
   Rejected: every new `System` constant would be a breaking change, and the
   rule would still differ between constants and the other declaration kinds,
@@ -5932,6 +5937,66 @@ redeclared.
 * *Shadow `True` and `False`.*  Rejected: no program means anything useful by
   redefining them, and doing so would change the meaning of every Boolean
   literal in the program.
+
+== Nested Routines May Reuse Built-in Routine Names
+
+=== Decision
+
+A routine declared inside another routine may have the name of a built-in
+routine.  A bare call to that name inside the enclosing routine calls the
+nested routine, whatever its parameters.  Outside the enclosing routine the
+name means the built-in again.
+
+[source,pascal]
+----
+procedure Report;
+  function Length(const S: string): Int32;   { counts words, say }
+  begin
+    Result := 99;
+  end;
+begin
+  WriteLn(Length('a b c'));   { 99: the nested routine }
+end;
+----
+
+An implicit-`Self` method of the same name still takes precedence over the
+nested routine, as it did before.
+
+=== Rationale
+
+The nested routine was already accepted, but whether a call reached it
+depended on the name.  `Inc`, `Delete` and `Halt` called the nested routine,
+while `Length`, `Copy`, `Sqrt`, `Abs`, `Ord` and `SetLength` ran the built-in
+instead, with no diagnostic
+(BUG-20261113-nested-builtin-routine-shadow-ignored).  A declaration that
+compiles and is then silently ignored is the worst outcome, so the choice
+was between making every such call reach the routine and rejecting the
+declaration.  Pascal scoping says an inner declaration hides an outer one,
+which is the behaviour a reader expects.
+
+=== Mechanism
+
+The analyser and both backends recognise built-in calls by name, at several
+hundred sites.  The analyser resolves a bare call to a nested routine before
+any built-in check and marks the call node `ResolvesToUserRoutine`.  Every
+name check goes through `IsBuiltinCall`, which is false for a marked call.
+An unmarked call compiles exactly as before.
+
+Calls the compiler writes itself, such as the `Copy` and `Ord` that
+`WriteLn(B:6)` lowers to, are qualified as `System.Copy` and `System.Ord`,
+so a nested routine of the same name cannot capture them.
+
+=== Alternatives considered
+
+* *Reject the nested declaration with `Duplicate identifier`*, as unit and
+  program level do.  Rejected: it would break code in which the nested
+  routine is called correctly today (`Inc`, `Delete`, `Halt`), and it hides
+  an outer name in the one place where Pascal scoping makes the intent
+  plainest.
+* *Guard each built-in name check against a resolved user declaration.*
+  Rejected as the mechanism: it would tie several hundred checks to how
+  the analyser happens to fill `ResolvedDecl` for each kind of call.  An
+  explicit mark set by the analyser states the fact directly, in one place.
 
 == `not` — Boolean and Bitwise NOT
 

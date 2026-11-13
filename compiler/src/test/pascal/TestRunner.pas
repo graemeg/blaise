@@ -180,6 +180,8 @@ uses
   cp.test.targettoolkit,
   cp.test.targetnames,
   cp.test.e2e.targetnames,
+  cp.test.nestedshadow,
+  cp.test.e2e.nestedshadow,
   cp.test.platformlayout.freebsd,
   cp.test.platformlayout.darwin,
   cp.test.entitlements,

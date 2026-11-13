@@ -670,6 +670,12 @@ type
       procedural property, lowered to the TExprCallStmt that calls the value
       the getter returns.  Codegen emits it in place of this node. }
     LoweredCall: TASTStmt;
+    { set by uSemantic: the call names a routine declared inside another
+      routine (a nested routine).  It is always a direct call to that
+      declaration, even when the name is also a built-in's (Length, Copy,
+      SetLength, ...), so nothing may lower it as the built-in: see
+      IsBuiltinCall. }
+    ResolvesToUserRoutine: Boolean;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -682,6 +688,12 @@ type
                                   call 'Unit.Func(..)'; only that unit's
                                   routines are candidates }
     [Unretained] ResolvedDecl: TObject;      { TMethodDecl — not owned; set by uSemantic }
+    { set by uSemantic: the call names a routine declared inside another
+      routine (a nested routine).  It is always a direct call to that
+      declaration, even when the name is also a built-in's (Length, Copy,
+      SetLength, ...), so nothing may lower it as the built-in: see
+      IsBuiltinCall. }
+    ResolvesToUserRoutine: Boolean;
     IsImplicitSelfMethod: Boolean; { set by uSemantic — call is on Self }
     IsIndirectCall:       Boolean; { set by uSemantic — Name resolves to a
                                      variable of procedural type; codegen
@@ -1660,6 +1672,14 @@ function ClonePropertyDecl(ASrc: TPropertyDecl): TPropertyDecl;
   or a call through a procedural value.  Code generation asks this before
   lowering the call as text output. }
 function IsBuiltinWrite(ACall: TProcCall): Boolean;
+
+{ True when ACall is a call of the built-in named AName: its name matches
+  and it does not resolve to a user routine of that name
+  (ResolvesToUserRoutine).  Every check that lowers a call as a built-in by
+  its name goes through here, so a nested routine named like a built-in is
+  never silently replaced by it. }
+function IsBuiltinCall(ACall: TFuncCallExpr; const AName: string): Boolean; overload;
+function IsBuiltinCall(ACall: TProcCall; const AName: string): Boolean; overload;
 
 implementation
 
@@ -3543,6 +3563,16 @@ begin
     Result.ProcDecls.Add(CloneMethodDecl(TMethodDecl(ABlock.ProcDecls.Items[I])));
   for I := 0 to ABlock.Stmts.Count - 1 do
     Result.Stmts.Add(CloneStmt(TASTStmt(ABlock.Stmts.Items[I])));
+end;
+
+function IsBuiltinCall(ACall: TFuncCallExpr; const AName: string): Boolean;
+begin
+  Result := not ACall.ResolvesToUserRoutine and SameText(ACall.Name, AName);
+end;
+
+function IsBuiltinCall(ACall: TProcCall; const AName: string): Boolean;
+begin
+  Result := not ACall.ResolvesToUserRoutine and SameText(ACall.Name, AName);
 end;
 
 function IsBuiltinWrite(ACall: TProcCall): Boolean;

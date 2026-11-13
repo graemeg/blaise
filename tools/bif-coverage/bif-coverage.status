@@ -254,6 +254,7 @@ TProcCall.Name  serialise
 TProcCall.Args  serialise
 TProcCall.QualifierUnit  serialise
 TProcCall.IsImplicitSelfMethod  safe
+TProcCall.ResolvesToUserRoutine  safe
 TProcCall.IsIndirectCall  safe
 TProcCall.IndirectCallIsGlobal  safe
 TProcCall.IsProcFieldCall  safe
@@ -264,6 +265,7 @@ TFuncCallExpr.Name  serialise
 TFuncCallExpr.Args  serialise
 TFuncCallExpr.QualifierUnit  serialise
 TFuncCallExpr.IsImplicitSelfMethod  safe
+TFuncCallExpr.ResolvesToUserRoutine  safe
 TFuncCallExpr.IsIndirectCall  safe
 TFuncCallExpr.IndirectCallIsGlobal  safe
 TFuncCallExpr.IsBuiltinHasClassAttr  safe

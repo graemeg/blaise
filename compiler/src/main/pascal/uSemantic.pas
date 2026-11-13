@@ -886,6 +886,9 @@ type
       instance method's class, or a static method's owning type (a static
       method leaves FCurrentClass unset -- it has no Self) }
     function  BareMemberOwner: TRecordTypeDesc;
+    function  NestedRoutineSym(const AName, AQualifierUnit: string): TSymbol;
+    function  AnalyseDirectFuncCall(AExpr: TFuncCallExpr;
+      MDecl: TMethodDecl): TTypeDesc;
     function  BareStaticCallExpr(AOwner: TRecordTypeDesc; AMDecl: TMethodDecl;
       AExpr: TFuncCallExpr): TMethodCallExpr;
     function  BareStaticCallStmt(AOwner: TRecordTypeDesc; AMDecl: TMethodDecl;
@@ -2695,9 +2698,9 @@ begin
   if (FC.ResolvedDecl <> nil) or (FC.Args = nil) or (FC.Args.Count <> 1) or
      (FC.ResolvedType = nil) or (FC.ResolvedType.Kind <> tyInt64) then
     Exit;
-  if SameText(FC.Name, 'Length') or SameText(FC.Name, 'SizeOf') then
+  if IsBuiltinCall(FC, 'Length') or IsBuiltinCall(FC, 'SizeOf') then
     Exit(True);
-  if not SameText(FC.Name, 'Ord') then Exit;
+  if not IsBuiltinCall(FC, 'Ord') then Exit;
   { a character of a string, Ord(S[I]): a byte, typed Integer }
   if (TASTExpr(FC.Args.Items[0]) is TStringSubscriptExpr) and
      (TStringSubscriptExpr(FC.Args.Items[0]).StrExpr.ResolvedType <> nil) and
@@ -8135,7 +8138,7 @@ begin
   begin
     FC := TFuncCallExpr(AExpr);
     { Ord(X) of an ordinal constant (Ord(eC), Ord(True)): its ordinal }
-    if SameText(FC.Name, 'Ord') and (FC.Args <> nil) and (FC.Args.Count = 1) then
+    if IsBuiltinCall(FC, 'Ord') and (FC.Args <> nil) and (FC.Args.Count = 1) then
       Exit(EvalConstIntExpr(TASTExpr(FC.Args.Items[0]), ALine, ACol));
     if (FC.Args <> nil) and (FC.Args.Count = 1) then
     begin
@@ -8473,7 +8476,7 @@ begin
     Exit(Self.ConstExprAwaitsTypes(TNegExpr(AExpr).Expr));
   if AExpr is TFuncCallExpr then
   begin
-    if not SameText(TFuncCallExpr(AExpr).Name, 'Ord') and
+    if not IsBuiltinCall(TFuncCallExpr(AExpr), 'Ord') and
        (FTable.Lookup(TFuncCallExpr(AExpr).Name) = nil) then
       Exit(True);
     if TFuncCallExpr(AExpr).Args <> nil then
@@ -18997,6 +19000,9 @@ begin
       bytes an element on x86-64 }
     RetypeSetLiteralArgs(ACall.Args, MDecl);
     ACall.ResolvedDecl := MDecl;
+    { a nested SetLength is this routine, not the built-in the backends
+      lower by name }
+    ACall.ResolvesToUserRoutine := True;
     Exit;
   end;
 
@@ -19291,12 +19297,15 @@ var
     Result.Value := AValue;
   end;
 
+  { A call of the System built-in AName.  Qualified, so a routine the
+    program nests under the same name cannot capture it. }
   function MkCall(const AName: string; AArg: TASTExpr): TFuncCallExpr;
   begin
     Result := TFuncCallExpr.Create();
     Result.Line := AExpr.Line;
     Result.Col := AExpr.Col;
     Result.Name := AName;
+    Result.QualifierUnit := 'System';
     Result.Args.Add(AArg);
   end;
 
@@ -19367,6 +19376,7 @@ begin
     Cvt.Line := AExpr.Line;
     Cvt.Col := AExpr.Col;
     Cvt.Name := 'Copy';
+    Cvt.QualifierUnit := 'System';
     Cvt.Args.Add(MkStr('FalseTrue'));
     Cvt.Args.Add(MkBin(boMul, MkCall('Ord', Value), MkInt(5)));
     Cvt.Args.Add(MkInt(5));
@@ -19444,6 +19454,71 @@ begin
   AExpr.ResolvedType := Result;
 end;
 
+{ AExpr calls the single routine MDecl, which is not in the global overload
+  index -- a nested routine, or a scoped one: check and bind the arguments
+  against MDecl alone. }
+function TSemanticAnalyser.AnalyseDirectFuncCall(AExpr: TFuncCallExpr;
+  MDecl: TMethodDecl): TTypeDesc;
+var
+  I:       Int;
+  Par:     TMethodParam;
+  ArgType: TTypeDesc;
+begin
+  HintBareEnumArgs(AExpr.Name, AExpr.Args);
+  for I := 0 to AExpr.Args.Count - 1 do
+    Self.AnalyseListSlot(AExpr.Args, I);
+  if (AExpr.Args.Count < MinArity(MDecl)) or
+     (AExpr.Args.Count > MDecl.Params.Count) then
+    SemanticError(
+      Format('''%s'' expects %d argument(s), got %d',
+        [AExpr.Name, MDecl.Params.Count, AExpr.Args.Count]),
+      AExpr.Line, AExpr.Col);
+  for I := 0 to AExpr.Args.Count - 1 do
+  begin
+    Par := TMethodParam(MDecl.Params.Items[I]);
+    if Par.IsVarParam then
+    begin
+      if not IsVarArgLValue(TASTExpr(AExpr.Args.Items[I])) then
+        SemanticError(
+          Format('var argument %d of ''%s'' must be a variable',
+            [I + 1, AExpr.Name]),
+          AExpr.Line, AExpr.Col);
+      CheckVarArgWidth(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]),
+        I, AExpr.Name, AExpr.Line, AExpr.Col);
+      ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
+      CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
+        Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
+        AExpr.Line, AExpr.Col);
+      WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
+    end;
+  end;
+  RetypeSetLiteralArgs(AExpr.Args, MDecl);
+  CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
+  AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
+  AExpr.ResolvedDecl := MDecl;
+  Result := MDecl.ResolvedReturnType;
+end;
+
+{ The nested routine a bare call named AName reaches, or nil.  An
+  implicit-Self method of the same name still wins, as it does on the
+  ordinary resolution path. }
+function TSemanticAnalyser.NestedRoutineSym(const AName,
+  AQualifierUnit: string): TSymbol;
+var
+  BareOwner: TRecordTypeDesc;
+begin
+  Result := nil;
+  if AQualifierUnit <> '' then Exit;
+  Result := FTable.Lookup(AName);
+  if (Result = nil) or not (Result.Kind in [skProcedure, skFunction]) or
+     not (Result.Decl is TMethodDecl) or
+     (TMethodDecl(Result.Decl).EnclosingDecl = nil) then
+    Exit(nil);
+  BareOwner := BareMemberOwner();
+  if (BareOwner <> nil) and (FindMethodDecl(BareOwner.Name, AName) <> nil) then
+    Result := nil;
+end;
+
 function TSemanticAnalyser.AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
 var
   BareOwner: TRecordTypeDesc;
@@ -19460,6 +19535,17 @@ var
 begin
   if SameText(AExpr.Name, '__WriteFmt') then
     Exit(Self.AnalyseWriteFmt(AExpr));
+  { A nested routine is reached before any built-in of the same name: a
+    nested Length, Copy or Sqrt is the routine the program declared.  Both
+    the built-in arms below and the backends recognise built-ins by name, so
+    the call is marked to keep them all off it. }
+  Sym := Self.NestedRoutineSym(AExpr.Name, AExpr.QualifierUnit);
+  if (Sym <> nil) and (Sym.Kind = skFunction) then
+  begin
+    NoteNameXref(AExpr.Line, AExpr.Col, AExpr.Name, Sym, True);
+    AExpr.ResolvesToUserRoutine := True;
+    Exit(Self.AnalyseDirectFuncCall(AExpr, TMethodDecl(Sym.Decl)));
+  end;
   { HasClassAttribute(AClass, AAttrClass): Boolean — runtime query of the custom
     attribute RTTI stored in slot 7 of the class's typeinfo.  Both arguments
     must be metaclass expressions (bare class names).  Lowers to a call to
@@ -20600,43 +20686,7 @@ begin
     against that single decl rather than the overload group. }
   if (FProcIndex.IndexOf(AExpr.Name) < 0) and (Sym <> nil) and
      (Sym.Decl <> nil) and (Sym.Decl is TMethodDecl) then
-  begin
-    MDecl := TMethodDecl(Sym.Decl);
-    HintBareEnumArgs(AExpr.Name, AExpr.Args);
-    for I := 0 to AExpr.Args.Count - 1 do
-      Self.AnalyseListSlot(AExpr.Args, I);
-    if (AExpr.Args.Count < MinArity(MDecl)) or
-       (AExpr.Args.Count > MDecl.Params.Count) then
-      SemanticError(
-        Format('''%s'' expects %d argument(s), got %d',
-          [AExpr.Name, MDecl.Params.Count, AExpr.Args.Count]),
-        AExpr.Line, AExpr.Col);
-    for I := 0 to AExpr.Args.Count - 1 do
-    begin
-      Par := TMethodParam(MDecl.Params.Items[I]);
-      if Par.IsVarParam then
-      begin
-        if not IsVarArgLValue(TASTExpr(AExpr.Args.Items[I])) then
-          SemanticError(
-            Format('var argument %d of ''%s'' must be a variable',
-              [I + 1, AExpr.Name]),
-            AExpr.Line, AExpr.Col);
-        CheckVarArgWidth(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]),
-          I, AExpr.Name, AExpr.Line, AExpr.Col);
-        ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
-        CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
-          Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
-          AExpr.Line, AExpr.Col);
-        WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
-      end;
-    end;
-    RetypeSetLiteralArgs(AExpr.Args, MDecl);
-    CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
-    AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
-    AExpr.ResolvedDecl := MDecl;
-    Result := MDecl.ResolvedReturnType;
-    Exit;
-  end;
+    Exit(Self.AnalyseDirectFuncCall(AExpr, TMethodDecl(Sym.Decl)));
 
   Idx := FProcIndex.IndexOf(AExpr.Name);
   if Idx < 0 then

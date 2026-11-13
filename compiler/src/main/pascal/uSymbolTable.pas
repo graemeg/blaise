@@ -1023,8 +1023,9 @@ function GenericCollisionMsg(const AKind, AName, APrevUnit, ANewUnit: string): s
 { True when ASym is a System name that a unit or program may reuse for its
   own routine, variable, type or constant: a built-in CONSTANT (TargetOS,
   PathSeparator, MaxInt, ...) other than True and False.  A built-in routine
-  is excluded because its calls are lowered as intrinsics by name, so a
-  declaration of the same name would be silently bypassed. }
+  is excluded: its calls are recognised by name, and only a NESTED routine's
+  calls are marked to skip that (TFuncCallExpr.ResolvesToUserRoutine), so a
+  unit-level declaration of the same name would be silently bypassed. }
 function ShadowsBuiltin(ASym: TSymbol): Boolean;
 
 const
