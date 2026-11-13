@@ -1090,14 +1090,21 @@ begin
   { the dep becomes an .o carrying its interface; its source is hidden so
     the program must read that interface }
   WriteFile(DepPas, DepSrc);
-  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  { functional and generics.collections are stdlib units: name the path,
+    as the other stdlib-using tests here do, rather than rely on a
+    blaise.cfg (the FreeBSD guest has none) }
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                  Captured);
   AssertEquals('blaise(PickDep) exit code (output: ' + Captured + ')', 0, Rc);
   AssertTrue('PickDep.o exists', FileExists(DepObj));
   DeleteFile(DepPas);
 
   WriteFile(UsePas, UseSrc);
   Rc := RunBlaise(['--source', UsePas, '--output', UseBin,
-                   '--unit-path', FScratch], Captured);
+                   '--unit-path', FScratch,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                  Captured);
   AssertEquals('blaise(use_pick) exit code (output: ' + Captured + ')',
                0, Rc);
   Rc := RunBinary(UseBin, Captured);
