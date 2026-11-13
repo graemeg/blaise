@@ -76,6 +76,16 @@ try {
     $Got = Out ./hello.exe
     if ($Got -ne 'Hello from blaise.exe') { Fail "hello.exe printed '$Got'" }
   }
+  # The native-host export check: kernel32 exports no ExitProcesz, and a
+  # native link must say so rather than build an image that cannot load.
+  Set-Content -Path badimport.pas -Value ("program badimport;`nprocedure ExitProcesz(C: UInt32); " +
+    "external 'kernel32' name 'ExitProcesz';`nbegin`n  ExitProcesz(0);`nend.")
+  $Log = cmd /c "blaise.exe --source badimport.pas --output badimport --rtl-src $Rtl 2>&1"
+  if ($LASTEXITCODE -eq 0) { Fail 'blaise.exe linked an import kernel32 does not export' }
+  elseif (-not (($Log | Out-String).Contains('not exported'))) {
+    Fail "blaise.exe refused badimport.pas for another reason: $($Log | Out-String)"
+  }
+  else { Write-Host 'export check: the misspelt import was refused' }
   $Watch = [Diagnostics.Stopwatch]::StartNew()
   & ./blaise.exe --source "$Rtl/Blaise.pas" --unit-path $Rtl --unit-path $Std `
     --rtl-src $Rtl --output s2/blaise

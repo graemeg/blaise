@@ -317,7 +317,8 @@ case "$cmd" in
   selfhost)
     # The design's self-hosting gate: the cross-built blaise.exe rebuilds
     # itself on Windows, byte-identical -- the criterion the release process
-    # applies to the Linux binary.
+    # applies to the Linux binary.  On the way, a native link must refuse an
+    # import its DLL does not export (the native-host export check).
     [ -x compiler/target/blaise ] || die "build compiler/target/blaise first"
     ssh_up || die "VM not reachable: scripts/windows-vm.sh start"
     SH=$OUT/selfhost
@@ -331,11 +332,17 @@ case "$cmd" in
     tar -cf "$SH/src.tar" compiler/src/main/pascal stdlib/src/main/pascal
     printf 'program hello;\nbegin\n  WriteLn(%sHello from blaise.exe%s);\nend.\n' "'" "'" \
       > "$SH/hello.pas"
+    # the native-host export check: kernel32 exports no ExitProcesz
+    printf 'program badimport;\nprocedure ExitProcesz(C: UInt32); external %skernel32%s name %sExitProcesz%s;\nbegin\n  ExitProcesz(0);\nend.\n' "'" "'" "'" "'" \
+      > "$SH/badimport.pas"
     # the guest's steps, as one batch file: no quoting crosses ssh
     printf '%s\r\n' '@echo off' 'cd /d %~dp0' 'tar -xf src.tar || exit /b 2' \
       'blaise.exe --source hello.pas --output hello --rtl-src compiler\src\main\pascal > hello.log 2>&1' \
       'if errorlevel 1 (type hello.log & exit /b 3)' \
       'hello.exe || exit /b 4' \
+      'blaise.exe --source badimport.pas --output badimport --rtl-src compiler\src\main\pascal > badimport.log 2>&1' \
+      'if not errorlevel 1 exit /b 7' \
+      'findstr /c:"not exported" badimport.log > nul || (type badimport.log & exit /b 7)' \
       'mkdir s2' \
       'blaise.exe --source compiler\src\main\pascal\Blaise.pas --unit-path compiler\src\main\pascal --unit-path stdlib\src\main\pascal --rtl-src compiler\src\main\pascal --output s2\blaise > s2\build.log 2>&1' \
       'if errorlevel 1 (type s2\build.log & exit /b 5)' \
@@ -343,7 +350,8 @@ case "$cmd" in
       > "$SH/selfhost.cmd"
     dir="$GUEST_DIR\\selfhost-$$"
     vm_ssh "mkdir $dir" >/dev/null
-    vm_scp "$SH/blaise.exe" "$SH/src.tar" "$SH/hello.pas" "$SH/selfhost.cmd" \
+    vm_scp "$SH/blaise.exe" "$SH/src.tar" "$SH/hello.pas" "$SH/badimport.pas" \
+      "$SH/selfhost.cmd" \
       "$GUEST_USER@127.0.0.1:${dir//\\//}/"
     echo ">> in the VM: blaise.exe compiles hello.pas, then itself"
     t0=$SECONDS
@@ -356,6 +364,7 @@ case "$cmd" in
       4) die "FAIL: hello.exe did not run" ;;
       5) die "FAIL: blaise.exe could not compile itself" ;;
       6) die "FAIL: the self-built blaise.exe differs from the cross-built one" ;;
+      7) die "FAIL: blaise.exe linked an import kernel32 does not export" ;;
       *) die "FAIL: selfhost step exited $rc" ;;
     esac
     echo ">> self-built blaise.exe is byte-identical ($((SECONDS - t0))s in the VM)"

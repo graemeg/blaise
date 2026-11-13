@@ -69,7 +69,7 @@ interface
 
 uses
   SysUtils, Classes, Generics.Collections, blaise.elfreader,
-  blaise.container.writer, blaise.pewriter;
+  blaise.container.writer, blaise.pewriter, blaise.pereader;
 
 type
   EPeLinker = class(Exception);
@@ -127,6 +127,7 @@ type
       const AName: string): Boolean;
     procedure CollectDefinitions;
     procedure CollectImports;
+    procedure CheckImportsExported;
     procedure CollectUnwindRanges;
     procedure Layout;
     procedure ApplyRelocations;
@@ -143,6 +144,11 @@ type
       PeSubsystemGui. }
     Subsystem: Int;
     DllNameOf: TPeDllNameFunc;
+    { Directories holding the DLLs the image imports from, for the export
+      check: each import from a DLL found here must be one it exports.  A
+      native Windows link names the system directory; a cross link has
+      none and trusts the names.  Not owned; may be nil. }
+    LibDirs: TStringList;
     constructor Create;
     destructor Destroy; override;
     { Takes ownership of AObj. }
@@ -246,6 +252,7 @@ begin
   FUnwEnds := TList<Int64>.Create();
   Subsystem := PeSubsystemConsole;
   DllNameOf := nil;
+  LibDirs := nil;
 end;
 
 destructor TPeLinker.Destroy;
@@ -570,6 +577,75 @@ begin
   finally
     Bounds.Free();
     Starts.Free();
+  end;
+end;
+
+{ Each import from a DLL that LibDirs holds must be a name the DLL
+  exports: a misspelt import otherwise links, and the program dies at load
+  with STATUS_ENTRYPOINT_NOT_FOUND.  A DLL that is not there, or that
+  cannot be read, is trusted. }
+procedure TPeLinker.CheckImportsExported;
+var
+  Exports: TDictionary<string, TStringList>;
+  Missing: TStringList;
+  I, D: Int;
+  Dll, Key, Path, Lib: string;
+  Names: TStringList;
+  Img: TPeImage;
+begin
+  if (LibDirs = nil) or (LibDirs.Count = 0) or (FImpNames.Count = 0) then
+    Exit;
+  Exports := TDictionary<string, TStringList>.Create();
+  Missing := TStringList.Create();
+  try
+    for I := 0 to FImpNames.Count - 1 do
+    begin
+      if not FImportLib.TryGetValue(FImpNames[I], Lib) then Continue;
+      Dll := DllOf(Lib);
+      Key := LowerCase(Dll);
+      if not Exports.TryGetValue(Key, Names) then
+      begin
+        Names := nil;
+        for D := 0 to LibDirs.Count - 1 do
+        begin
+          Path := IncludeTrailingPathDelimiter(LibDirs[D]) + Dll;
+          if not FileExists(Path) then Continue;
+          try
+            Img := ParsePeImage(ReadFile(Path), Path);
+            try
+              Names := TStringList.Create();
+              Names.Sorted := True;
+              Names.CaseSensitive := True;
+              Names.AddStrings(Img.ExportNames);
+            finally
+              Img.Free();
+            end;
+          except
+            on E: EPeReader do
+              Names := nil;
+          end;
+          Break;
+        end;
+        Exports.Add(Key, Names);
+      end;
+      if (Names <> nil) and (Names.IndexOf(FImpNames[I]) < 0) then
+        Missing.Add('''' + FImpNames[I] + ''' (' + Dll + ')');
+    end;
+    if Missing.Count > 0 then
+    begin
+      Path := '';
+      for I := 0 to Missing.Count - 1 do
+      begin
+        if I > 0 then Path := Path + ', ';
+        Path := Path + Missing[I];
+      end;
+      raise EPeLinker.Create('imported but not exported: ' + Path +
+        '; check the name in its external declaration');
+    end;
+  finally
+    { the name lists go with the dictionary, by reference count }
+    Exports.Free();
+    Missing.Free();
   end;
 end;
 
@@ -900,6 +976,7 @@ begin
   PlaceSections();
   CollectDefinitions();
   CollectImports();
+  CheckImportsExported();
   Layout();
   ApplyRelocations();
   Entry := DefinedRva(AEntrySym, Found);

@@ -65,6 +65,7 @@ type
     procedure ParseImports;
     procedure ParseBaseRelocs;
     procedure ParseTls;
+    procedure ParseExports;
   public
     SourceName: string;
     { COFF file header }
@@ -95,6 +96,8 @@ type
     BaseRelocs: TList<Int>;
     HasTls: Boolean;
     Tls: TPeTlsDirectory;
+    { the names the export directory lists, in its (sorted) order }
+    ExportNames: TStringList;
     constructor Create;
     destructor Destroy; override;
     function DirectoryRva(AIndex: Int): Int;
@@ -194,6 +197,7 @@ begin
   Sections := TList<TPeSection>.Create();
   Imports := TList<TPeImportDll>.Create();
   BaseRelocs := TList<Int>.Create();
+  ExportNames := TStringList.Create();
   for I := 0 to 15 do
   begin
     FDirRva[I] := 0;
@@ -213,6 +217,7 @@ begin
     Imports[I].Free();
   Imports.Free();
   BaseRelocs.Free();
+  ExportNames.Free();
   inherited Destroy();
 end;
 
@@ -380,6 +385,21 @@ begin
   Tls.Characteristics := ReadU32(R + 36);
 end;
 
+{ IMAGE_EXPORT_DIRECTORY: NumberOfNames at 24, AddressOfNames (an array of
+  name RVAs) at 32. }
+procedure TPeImage.ParseExports;
+var
+  Dir, Count, Names, I: Int;
+begin
+  Dir := FDirRva[0];
+  if (Dir = 0) or (FDirSize[0] = 0) then
+    Exit;
+  Count := Int(ReadU32(Dir + 24));
+  Names := Int(ReadU32(Dir + 32));
+  for I := 0 to Count - 1 do
+    ExportNames.Add(ReadCStr(Int(ReadU32(Names + I * 4))));
+end;
+
 function ParsePeImage(const ABytes, ASourceName: string): TPeImage;
 var
   Img: TPeImage;
@@ -456,6 +476,7 @@ begin
     Img.ParseImports();
     Img.ParseBaseRelocs();
     Img.ParseTls();
+    Img.ParseExports();
   except
     Img.Free();
     raise;

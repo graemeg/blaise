@@ -722,6 +722,7 @@ var
   Lk: TPeLinker;
   Toolkit: TTargetToolkit;
   RTLObjs: TStringList;
+  PeLibDirs: TStringList;
   I: Int;
 begin
   Toolkit := ResolveToolkit(AOpts.Target);
@@ -736,9 +737,18 @@ begin
     Result := Self.EnsureRTLObjects(AOpts, True, False, AExtraObjects, RTLObjs);
     if Result <> '' then Exit;
     Lk := TPeLinker.Create();
+    PeLibDirs := TStringList.Create();
     try
       try
         Lk.DllNameOf := @Toolkit.LibraryImageName;
+        { the export check's DLL directories: --lib-path, then the system
+          directory on a native Windows host }
+        if AOpts.LibPaths <> nil then
+          for I := 0 to AOpts.LibPaths.Count - 1 do
+            if AOpts.LibPaths.Strings[I] <> '' then
+              PeLibDirs.Add(AOpts.LibPaths.Strings[I]);
+        Toolkit.AddSystemLibDirs(PeLibDirs);
+        Lk.LibDirs := PeLibDirs;
         Lk.AddObjectFile(AObjFile);
         if AExtraObjects <> nil then
           for I := 0 to AExtraObjects.Count - 1 do
@@ -753,6 +763,7 @@ begin
       end;
     finally
       Lk.Free();
+      PeLibDirs.Free();
     end;
   finally
     RTLObjs.Free();

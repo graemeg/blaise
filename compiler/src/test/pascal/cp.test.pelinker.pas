@@ -62,6 +62,11 @@ type
     procedure TestLink_Deterministic;
     procedure TestLink_MissingEntryFails;
     procedure TestLink_Exit42Fixture;
+    { on a host that can read the DLLs (a native Windows link), an import
+      the DLL does not export fails the link }
+    procedure TestLink_ExportCheck_MissingNameFails;
+    procedure TestLink_ExportCheck_ExportedNameLinks;
+    procedure TestLink_ExportCheck_DllNotFoundIsTrusted;
   end;
 
 implementation
@@ -583,6 +588,122 @@ end;
 
 { compiler/src/it/windows/exit42.s, the M1 program under test: linked here
   and left at compiler/target/it/windows/exit42.exe for windows-vm.sh. }
+{ A DLL image exporting Alpha and Beta, written to ADir\fake.dll: one
+  .rdata section holding the export directory, its address and name
+  arrays and the strings. }
+procedure WriteFakeDll(const ADir: string);
+const
+  Base = $1000;
+var
+  W: TPeImageWriter;
+  B: string;
+
+  procedure U32(V: Int64);
+  begin
+    B := B + Chr(V and $FF) + Chr((V shr 8) and $FF) +
+      Chr((V shr 16) and $FF) + Chr((V shr 24) and $FF);
+  end;
+
+  procedure U16(V: Int);
+  begin
+    B := B + Chr(V and $FF) + Chr((V shr 8) and $FF);
+  end;
+
+begin
+  { IMAGE_EXPORT_DIRECTORY at 0 (40 bytes); functions at 40, names at 48,
+    ordinals at 56; strings from 60: fake.dll, Alpha, Beta }
+  B := '';
+  U32(0); U32(0); U16(0); U16(0);
+  U32(Base + 60);          { Name }
+  U32(1);                  { Base }
+  U32(2); U32(2);          { NumberOfFunctions, NumberOfNames }
+  U32(Base + 40); U32(Base + 48); U32(Base + 56);
+  U32(Base); U32(Base);    { the functions' RVAs: never called }
+  U32(Base + 69); U32(Base + 75);
+  U16(0); U16(1);
+  B := B + 'fake.dll' + #0 + 'Alpha' + #0 + 'Beta' + #0;
+  W := TPeImageWriter.Create();
+  try
+    W.AddSection('.rdata', Base, Length(B), B, PeScnInitialisedData or
+      PeScnMemRead);
+    W.SetDirectory(PeDirExport, Base, 40);
+    WriteFile(ADir + '/fake.dll', W.Finish());
+  finally
+    W.Free();
+  end;
+end;
+
+{ Link a program importing the names from fake.dll, with ADir as the only
+  library directory: the error, or '' when it links. }
+function LinkAgainstFakeDll(const ADir: string;
+  const ANames: array of string): string;
+var
+  Lk: TPeLinker;
+  Dirs: TStringList;
+  Src: string;
+  I: Int;
+begin
+  Src := StartRet;
+  for I := 0 to High(ANames) do
+    Src := Src + 'call ' + ANames[I] + NL;
+  for I := 0 to High(ANames) do
+    Src := Src + ImportsAsm(ANames[I], 'fake.dll');
+  Result := '';
+  Dirs := TStringList.Create();
+  Lk := TPeLinker.Create();
+  try
+    Dirs.Add(ADir);
+    Lk.LibDirs := Dirs;
+    Lk.AddObject(ParseElfObject(AssembleToBytes(Src), 'a.o'));
+    try
+      Lk.Link('_start');
+    except
+      on E: EPeLinker do
+        Result := E.Message;
+    end;
+  finally
+    Lk.Free();
+    Dirs.Free();
+  end;
+end;
+
+function FakeDllDir: string;
+begin
+  Result := ExcludeTrailingPathDelimiter(GetTempDir()) + '/blaise-pe-exports-' +
+    IntToStr(GetProcessID());
+  ForceDirectories(Result);
+  WriteFakeDll(Result);
+end;
+
+procedure TPeLinkerTests.TestLink_ExportCheck_MissingNameFails;
+var
+  Msg: string;
+begin
+  Msg := LinkAgainstFakeDll(FakeDllDir(), ['Alpha', 'Gamma']);
+  AssertTrue('names the missing import: ' + Msg,
+    Pos('''Gamma''', Msg) >= 0);
+  AssertTrue('and the DLL: ' + Msg, Pos('fake.dll', Msg) >= 0);
+  AssertTrue('not the exported one: ' + Msg, Pos('Alpha', Msg) < 0);
+end;
+
+procedure TPeLinkerTests.TestLink_ExportCheck_ExportedNameLinks;
+begin
+  AssertEquals('', LinkAgainstFakeDll(FakeDllDir(), ['Alpha', 'Beta']));
+end;
+
+{ A DLL the directories do not hold -- the program's own, beside it at run
+  time -- cannot be checked, and its imports are trusted, as on a cross
+  host. }
+procedure TPeLinkerTests.TestLink_ExportCheck_DllNotFoundIsTrusted;
+var
+  Dir: string;
+begin
+  Dir := ExcludeTrailingPathDelimiter(GetTempDir()) + '/blaise-pe-noexports-' +
+    IntToStr(GetProcessID());
+  ForceDirectories(Dir);
+  AssertEquals('', LinkAgainstFakeDll(Dir, ['Gamma']));
+end;
+
 procedure TPeLinkerTests.TestLink_Exit42Fixture;
 var
   Root, Src, OutDir: string;

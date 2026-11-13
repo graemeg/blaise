@@ -129,7 +129,8 @@ type
     function LibraryImageName(const ALibName: string): string; override;
     { Nothing on a cross host: the linker cannot read the DLLs, so a cross
       link trusts the import names.  A native Windows host adds its system
-      directory here, for the export check. }
+      directory, %SystemRoot%\System32, for the export check
+      (TPeLinker.LibDirs). }
     procedure AddSystemLibDirs(AOut: TStringList); override;
   end;
 
@@ -338,7 +339,14 @@ begin
 end;
 
 procedure TWindowsX86_64Toolkit.AddSystemLibDirs(AOut: TStringList);
+var
+  Root: string;
 begin
+  if HostTarget().OS <> osWindows then
+    Exit;
+  Root := GetEnvironmentVariable('SystemRoot');
+  if Root <> '' then
+    AddLibDir(AOut, IncludeTrailingPathDelimiter(Root) + 'System32');
 end;
 
 { ---- TTargetRegistry ------------------------------------------------- }
