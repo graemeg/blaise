@@ -54,6 +54,29 @@ type
   memory only and ignores the flags. }
 function _MapAnonFlag: Int32;
 
+{ Socket-layer constants (Net.Sockets, async.io), as the POSIX-named socket
+  leaves in runtime.net.windows take them: Winsock's own values where
+  Winsock has the option, and the fcntl vocabulary those leaves define. }
+function _SolSocket: Int32;      { SOL_SOCKET   = $FFFF }
+function _SoReuseAddr: Int32;    { SO_REUSEADDR = 4; the setsockopt leaf
+                                   takes it as the POSIX meaning, which is
+                                   Windows' default }
+function _SoReusePort: Int32;    { none: an option Winsock refuses }
+function _SoError: Int32;        { SO_ERROR     = $1007 }
+function _MsgNoSignal: Int32;    { 0: no signals }
+function _ONonBlock: Int32;      { the fcntl leaf's O_NONBLOCK = $800 }
+function _SockNonBlock: Int32;   { the accept4 leaf's SOCK_NONBLOCK = $800 }
+function _SoNoSigPipe: Int32;    { 0: no signals }
+
+{ struct addrinfo (ADDRINFOA): ai_addrlen is a size_t, so ai_canonname
+  comes before ai_addr, at 32.  AI_ADDRCONFIG is $0400. }
+function _AddrInfoAddrOffset: Int32;
+function _AiAddrConfig: Int32;
+
+{ Fill a 16-byte struct sockaddr_in at P for AF_INET (the Linux layout: a
+  u16 sin_family).  APortN/AAddrN are in network byte order. }
+procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
+
 implementation
 
 function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;
@@ -135,6 +158,67 @@ end;
 function _MapAnonFlag: Int32;
 begin
   Result := 0;
+end;
+
+function _SolSocket: Int32;
+begin
+  Result := $FFFF;
+end;
+
+function _SoReuseAddr: Int32;
+begin
+  Result := 4;
+end;
+
+function _SoReusePort: Int32;
+begin
+  Result := $7FFF;
+end;
+
+function _SoError: Int32;
+begin
+  Result := $1007;
+end;
+
+function _MsgNoSignal: Int32;
+begin
+  Result := 0;
+end;
+
+function _ONonBlock: Int32;
+begin
+  Result := $800;
+end;
+
+function _SockNonBlock: Int32;
+begin
+  Result := $800;
+end;
+
+function _SoNoSigPipe: Int32;
+begin
+  Result := 0;
+end;
+
+function _AddrInfoAddrOffset: Int32;
+begin
+  Result := 32;
+end;
+
+function _AiAddrConfig: Int32;
+begin
+  Result := $0400;
+end;
+
+procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
+var
+  I: Int;
+begin
+  for I := 0 to 15 do
+    PByte(P + I)^ := 0;
+  PUInt16(P)^ := 2;
+  PUInt16(P + 2)^ := APortN;
+  PUInt32(P + 4)^ := AAddrN;
 end;
 
 initialization

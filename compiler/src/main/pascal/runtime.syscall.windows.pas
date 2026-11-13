@@ -50,14 +50,39 @@ procedure abort;
   count. }
 function sysconf(Name: Int32): Int64;
 
-{ The kernel32 handle behind descriptor Fd, or nil. }
+const
+  { A descriptor's flags: a Winsock SOCKET rather than a kernel32 handle,
+    and (for a socket) in non-blocking mode, which Winsock cannot be asked
+    for afterwards. }
+  WIN_FD_SOCKET = 1;
+  WIN_FD_NONBLOCK = 2;
+
+type
+  { Closes a socket's handle: Winsock's closesocket, which runtime.net.windows
+    supplies once it has loaded ws2_32.  0, or -1 with the error set. }
+  TWinSocketCloser = function(AHandle: Pointer): Int32;
+
+{ The kernel32 handle (or SOCKET) behind descriptor Fd, or nil. }
 function _WinHandleOfFd(Fd: Int32): Pointer;
-{ Enter AHandle in the descriptor table: its descriptor, or -1 when the
-  table is full. }
+{ Enter AHandle in the descriptor table: its descriptor, or -1 (error
+  ERROR_TOO_MANY_OPEN_FILES) when the table cannot grow. }
 function _WinFdAdd(AHandle: Pointer): Int32;
+{ As _WinFdAdd, with the descriptor's WIN_FD_* flags. }
+function _WinFdAddFlags(AHandle: Pointer; AFlags: Int32): Int32;
+{ Descriptor Fd's WIN_FD_* flags: 0 for a standard descriptor, -1 when Fd
+  is not open. }
+function _WinFdFlags(Fd: Int32): Int32;
+{ Replace descriptor Fd's flags; False when Fd is not a table entry. }
+function _WinFdSetFlags(Fd: Int32; AFlags: Int32): Boolean;
 { Take descriptor Fd out of the table: its handle, for the caller to close,
   or nil when Fd is not a table entry. }
 function _WinFdRemove(Fd: Int32): Pointer;
+{ close(2): take Fd out of the table and close its handle, the socket way
+  for a socket.  The standard descriptors stay open.  0, or -1 with the
+  error set.  The bare `close` symbol is an alias of it. }
+function _WinFdClose(Fd: Int32): Int32;
+{ Install the closer for socket descriptors. }
+procedure _WinSetSocketCloser(ACloser: TWinSocketCloser);
 
 implementation
 
@@ -78,6 +103,8 @@ procedure AcquireSRWLockExclusive(ALock: Pointer);
   external 'kernel32' name 'AcquireSRWLockExclusive';
 procedure ReleaseSRWLockExclusive(ALock: Pointer);
   external 'kernel32' name 'ReleaseSRWLockExclusive';
+function CloseHandle(AHandle: Pointer): Int32; external 'kernel32' name 'CloseHandle';
+procedure SetLastError(ACode: UInt32); external 'kernel32' name 'SetLastError';
 
 const
   STD_INPUT_HANDLE = UInt32(-10);
@@ -88,9 +115,13 @@ const
   MEM_RELEASE = $8000;
   PAGE_READWRITE = $04;
   MAX_ATEXIT = 64;
-  { The first descriptor the table hands out, and its size. }
+  { The first descriptor the table hands out; the table's first size, and
+    the most it grows to, by doubling. }
   FIRST_TABLE_FD = 3;
-  MAX_TABLE_FDS = 1024;
+  INITIAL_TABLE_FDS = 1024;
+  MAX_TABLE_FDS = 1048576;
+  ERROR_INVALID_HANDLE = 6;
+  ERROR_TOO_MANY_OPEN_FILES = 4;
 
 type
   { SYSTEM_INFO: dwNumberOfProcessors is the DWORD at offset 32. }
@@ -104,55 +135,209 @@ var
   GAtExitFns: array[0..MAX_ATEXIT - 1] of Pointer;
   GAtExitArgs: array[0..MAX_ATEXIT - 1] of Pointer;
   GAtExitCount: Int;
-  { The descriptor table: slot I holds descriptor FIRST_TABLE_FD + I, nil
-    when free.  GFdLock, an SRWLOCK, is all zero bits when unlocked, so the
-    zeroed global needs no initialisation. }
-  GFdHandles: array[0..MAX_TABLE_FDS - 1] of Pointer;
+  { The descriptor table: GFdCount TFdEntry slots, slot I holding
+    descriptor FIRST_TABLE_FD + I (a nil Handle when free), allocated on the
+    first open and doubled when full.  GFdLock, an SRWLOCK, guards it and is
+    all zero bits when unlocked, so the zeroed global needs no
+    initialisation. }
+  GFdTable: Pointer;
+  GFdCount: Int;
   GFdLock: Pointer;
+  GSocketCloser: TWinSocketCloser;
+
+type
+  TFdEntry = record
+    Handle: Pointer;
+    Flags: Int64;
+  end;
+  PFdEntry = ^TFdEntry;
+
+{ Slot I of the table; GFdLock held. }
+function EntryAt(I: Int): PFdEntry;
+begin
+  Result := PFdEntry(GFdTable + I * SizeOf(TFdEntry));
+end;
+
+{ The slot of descriptor Fd, or nil when Fd is outside the table; GFdLock
+  held. }
+function SlotOf(Fd: Int32): PFdEntry;
+begin
+  if (Fd < FIRST_TABLE_FD) or (Fd >= FIRST_TABLE_FD + GFdCount) then
+    Exit(nil);
+  Result := EntryAt(Fd - FIRST_TABLE_FD);
+end;
+
+{ Double the table (or make its first one); False when it cannot grow.
+  GFdLock held. }
+function GrowTable: Boolean;
+var
+  NewCount, I: Int;
+  NewTable: Pointer;
+begin
+  if GFdCount = 0 then
+    NewCount := INITIAL_TABLE_FDS
+  else
+    NewCount := GFdCount * 2;
+  if NewCount > MAX_TABLE_FDS then
+    Exit(False);
+  { VirtualAlloc returns zeroed pages: every new slot is free. }
+  NewTable := VirtualAlloc(nil, UInt64(NewCount * SizeOf(TFdEntry)),
+    MEM_RESERVE or MEM_COMMIT, PAGE_READWRITE);
+  if NewTable = nil then
+    Exit(False);
+  for I := 0 to GFdCount - 1 do
+    PFdEntry(NewTable + I * SizeOf(TFdEntry))^ := EntryAt(I)^;
+  if GFdTable <> nil then
+    VirtualFree(GFdTable, 0, MEM_RELEASE);
+  GFdTable := NewTable;
+  GFdCount := NewCount;
+  Result := True;
+end;
 
 function _WinHandleOfFd(Fd: Int32): Pointer;
+var
+  E: PFdEntry;
 begin
   case Fd of
     0: Result := GetStdHandle(STD_INPUT_HANDLE);
     1: Result := GetStdHandle(STD_OUTPUT_HANDLE);
     2: Result := GetStdHandle(STD_ERROR_HANDLE);
   else
-    if (Fd >= FIRST_TABLE_FD) and (Fd < FIRST_TABLE_FD + MAX_TABLE_FDS) then
-    begin
-      AcquireSRWLockExclusive(@GFdLock);
-      Result := GFdHandles[Fd - FIRST_TABLE_FD];
-      ReleaseSRWLockExclusive(@GFdLock);
-    end
+    AcquireSRWLockExclusive(@GFdLock);
+    E := SlotOf(Fd);
+    if E <> nil then
+      Result := E^.Handle
     else
       Result := nil;
+    ReleaseSRWLockExclusive(@GFdLock);
   end;
 end;
 
-function _WinFdAdd(AHandle: Pointer): Int32;
+function _WinFdAddFlags(AHandle: Pointer; AFlags: Int32): Int32;
 var
-  I: Int;
+  I, Start: Int;
 begin
   Result := -1;
   AcquireSRWLockExclusive(@GFdLock);
-  for I := 0 to MAX_TABLE_FDS - 1 do
-    if GFdHandles[I] = nil then
-    begin
-      GFdHandles[I] := AHandle;
-      Result := Int32(FIRST_TABLE_FD + I);
+  { The lowest free descriptor, as open(2) gives. }
+  Start := 0;
+  while Result < 0 do
+  begin
+    for I := Start to GFdCount - 1 do
+      if EntryAt(I)^.Handle = nil then
+      begin
+        EntryAt(I)^.Handle := AHandle;
+        EntryAt(I)^.Flags := AFlags;
+        Result := Int32(FIRST_TABLE_FD + I);
+        Break;
+      end;
+    if Result >= 0 then
       Break;
-    end;
+    Start := GFdCount;
+    if not GrowTable() then
+      Break;
+  end;
+  ReleaseSRWLockExclusive(@GFdLock);
+  if Result < 0 then
+    SetLastError(ERROR_TOO_MANY_OPEN_FILES);
+end;
+
+function _WinFdAdd(AHandle: Pointer): Int32;
+begin
+  Result := _WinFdAddFlags(AHandle, 0);
+end;
+
+function _WinFdFlags(Fd: Int32): Int32;
+var
+  E: PFdEntry;
+begin
+  if (Fd >= 0) and (Fd < FIRST_TABLE_FD) then
+    Exit(0);
+  Result := -1;
+  AcquireSRWLockExclusive(@GFdLock);
+  E := SlotOf(Fd);
+  if (E <> nil) and (E^.Handle <> nil) then
+    Result := Int32(E^.Flags);
+  ReleaseSRWLockExclusive(@GFdLock);
+end;
+
+function _WinFdSetFlags(Fd: Int32; AFlags: Int32): Boolean;
+var
+  E: PFdEntry;
+begin
+  Result := False;
+  AcquireSRWLockExclusive(@GFdLock);
+  E := SlotOf(Fd);
+  if (E <> nil) and (E^.Handle <> nil) then
+  begin
+    E^.Flags := AFlags;
+    Result := True;
+  end;
   ReleaseSRWLockExclusive(@GFdLock);
 end;
 
 function _WinFdRemove(Fd: Int32): Pointer;
+var
+  E: PFdEntry;
 begin
-  Result := nil;
-  if (Fd < FIRST_TABLE_FD) or (Fd >= FIRST_TABLE_FD + MAX_TABLE_FDS) then
-    Exit;
   AcquireSRWLockExclusive(@GFdLock);
-  Result := GFdHandles[Fd - FIRST_TABLE_FD];
-  GFdHandles[Fd - FIRST_TABLE_FD] := nil;
+  E := SlotOf(Fd);
+  if E <> nil then
+  begin
+    Result := E^.Handle;
+    E^.Handle := nil;
+    E^.Flags := 0;
+  end
+  else
+    Result := nil;
   ReleaseSRWLockExclusive(@GFdLock);
+end;
+
+function _WinFdClose(Fd: Int32): Int32;
+var
+  Flags: Int64;
+  H: Pointer;
+  E: PFdEntry;
+begin
+  if (Fd >= 0) and (Fd < FIRST_TABLE_FD) then
+    Exit(0);
+  { The handle and its kind in one step, so a racing close and reopen of
+    the same number cannot pair one with the other. }
+  H := nil;
+  Flags := 0;
+  AcquireSRWLockExclusive(@GFdLock);
+  E := SlotOf(Fd);
+  if E <> nil then
+  begin
+    H := E^.Handle;
+    Flags := E^.Flags;
+    E^.Handle := nil;
+    E^.Flags := 0;
+  end;
+  ReleaseSRWLockExclusive(@GFdLock);
+  if H = nil then
+  begin
+    SetLastError(ERROR_INVALID_HANDLE);
+    Exit(-1);
+  end;
+  if ((Flags and WIN_FD_SOCKET) <> 0) and (GSocketCloser <> nil) then
+    Result := GSocketCloser(H)
+  else if CloseHandle(H) <> 0 then
+    Result := 0
+  else
+    Result := -1;
+end;
+
+procedure _close_alias; assembler; nostackframe;
+asm
+.globl close
+close:
+    jmp _WinFdClose
+end;
+
+procedure _WinSetSocketCloser(ACloser: TWinSocketCloser);
+begin
+  GSocketCloser := ACloser;
 end;
 
 function _sys_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64;

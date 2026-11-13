@@ -742,11 +742,13 @@ begin
   { The freestanding kernel leaf that replaces libc under --static: the raw
     syscall stubs, the OS-invariant freestanding C functions (runtime.cstub),
     the libc-shim layers, and the static-TLS thread leaf. }
-  { Windows has one profile: the POSIX-named leaves over kernel32, the
-    C stubs, and the pthread names over Windows threads. }
+  { Windows has one profile: the POSIX-named leaves over kernel32 (and,
+    for sockets, over Winsock), the C stubs, and the pthread names over
+    Windows threads. }
   if AOS = osWindows then
   begin
     Result.Add('runtime.syscall.windows');
+    Result.Add('runtime.net.windows');
     Result.Add('runtime.civil');
     Result.Add('runtime.cstub');
     Result.Add('runtime.thread.windows');

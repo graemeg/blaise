@@ -129,6 +129,7 @@ procedure _BlaiseFreeMem(Ptr: Pointer);       external name '_BlaiseFreeMem';
 function _WinHandleOfFd(Fd: Int32): Pointer;  external name '_WinHandleOfFd';
 function _WinFdAdd(AHandle: Pointer): Int32;  external name '_WinFdAdd';
 function _WinFdRemove(Fd: Int32): Pointer;    external name '_WinFdRemove';
+function _WinFdClose(Fd: Int32): Int32;       external name '_WinFdClose';
 function _DaysFromCivil(Y, M, D: Int64): Int64; external name '_DaysFromCivil';
 procedure _CivilFromDays(Z: Int64; var Y, M, D: Int64);
   external name '_CivilFromDays';
@@ -1260,14 +1261,11 @@ begin
   Result := Size;
 end;
 
-{ The standard descriptors stay open. }
+{ The standard descriptors stay open; a socket closes the Winsock way. }
 procedure TRtlPlatformWindows.FdClose(Fd: Int32);
-var
-  H: Pointer;
 begin
-  H := _WinFdRemove(Fd);
-  if H <> nil then
-    W32CloseHandle(H);
+  if Fd >= 0 then
+    _WinFdClose(Fd);
 end;
 
 { ================================================================== }
@@ -1280,7 +1278,6 @@ end;
   and a directory replaces an empty directory. }
 
 const
-  ERROR_INVALID_HANDLE = 6;
   CH_SLASH = $2F;
   CH_BACKSLASH = $5C;
   CH_COLON = $3A;
@@ -1399,15 +1396,8 @@ begin
 end;
 
 function TRtlPlatformWindows.FsClose(Fd: Int32): Int32;
-var
-  H: Pointer;
 begin
-  if (Fd >= 0) and (Fd <= 2) then
-    Exit(0);
-  H := _WinFdRemove(Fd);
-  if H = nil then
-    Exit(FailWith(ERROR_INVALID_HANDLE));
-  Result := PosixResult(W32CloseHandle(H));
+  Result := _WinFdClose(Fd);
 end;
 
 { A link to a directory is a directory entry on Windows, removed with

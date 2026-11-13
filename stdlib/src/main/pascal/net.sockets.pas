@@ -62,13 +62,14 @@ unit Net.Sockets;
 
 interface
 
-{ PORTING BOUNDARY (resolved for Linux + FreeBSD) — the OS-divergent socket
-  constants and the sockaddr_in fill are supplied by the per-target
-  rtl.platform.layout.<os> unit (the `_So*`/`_SockAddrIn4Fill` seam), chosen
-  at link time by the resolved --target, so this unit stays IFDEF-free.
-  Still pending here:
-    * Windows: a separate Winsock backend (ws2_32, WSAStartup, closesocket,
-      SOCKET handles, WSAGetLastError).
+{ PORTING BOUNDARY (resolved for Linux, FreeBSD, macOS and Windows) — the
+  OS-divergent socket constants and the sockaddr_in fill are supplied by the
+  per-target rtl.platform.layout.<os> unit (the `_So*`/`_SockAddrIn4Fill`
+  seam), chosen at link time by the resolved --target, so this unit stays
+  IFDEF-free.  On Windows the BSD names bound below (socket, recv, fcntl,
+  poll, getaddrinfo, close, ...) are Blaise leaves in runtime.net.windows
+  with POSIX behaviour over Winsock: a socket is an ordinary Int32
+  descriptor there too.
   The helper API (TcpListen*/TcpConnect*/AcceptConn/RecvString/SendAll/Close/
   MakeNonBlocking/FillSockAddr/IgnoreSigPipe) is the stable surface — callers
   never touch raw constants — so further ports change only the seam, not

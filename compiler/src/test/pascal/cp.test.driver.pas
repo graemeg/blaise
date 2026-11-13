@@ -304,6 +304,7 @@ begin
     AssertTrue('adapter', ListContains(U, 'rtl.platform.windows'));
     AssertTrue('flat ABI', ListContains(U, 'rtl.platform.abi'));
     AssertTrue('kernel32 leaves', ListContains(U, 'runtime.syscall.windows'));
+    AssertTrue('Winsock leaves', ListContains(U, 'runtime.net.windows'));
     AssertTrue('C stubs', ListContains(U, 'runtime.cstub'));
     AssertTrue('pthread leaf', ListContains(U, 'runtime.thread.windows'));
     AssertFalse('no POSIX adapter', ListContains(U, 'rtl.platform.posix'));
