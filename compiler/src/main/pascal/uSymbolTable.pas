@@ -538,6 +538,9 @@ type
                                 site whose per-execution environment the
                                 variable belongs to when captured.  nil for
                                 ordinary symbols. }
+    IsBuiltin:    Boolean;    { true for a name RegisterBuiltins defined: one
+                                of the implicit System unit's.  See
+                                ShadowsBuiltin. }
     IsOverload:   Boolean;    { true when declared with the 'overload' directive;
                                 same-named overload symbols form a NextOverload chain }
     [Unretained] NextOverload: TSymbol;    { not owned — link to next overload in the chain;
@@ -747,6 +750,13 @@ type
     FLastHiddenName: string;
     FLastHiddenUnit: string;
 
+    { System names a declaration displaced from the global scope, by name
+      (sorted, case-insensitive; the objects are not retained).  A unit that
+      cannot see the displacing declaration still resolves the System name
+      through ShadowedBuiltin.  FShadowedBuiltinsKeep owns the symbols. }
+    FShadowedBuiltins: TStringList;
+    FShadowedBuiltinsKeep: TObjectList;
+
     FInCodegen: Boolean;             { True while a backend is emitting code.
                                        Disables the Layer-6 impl-private
                                        suppression in Lookup: that guard exists
@@ -808,6 +818,12 @@ type
     { Detach a symbol from the current scope without freeing it (see
       TScope.ExtractLocal).  Returns the detached symbol or nil. }
     function ExtractLocal(const AName: string): TSymbol;
+    { If the current scope's AName is a System constant a declaration may
+      reuse (ShadowsBuiltin), set it aside so the declaration can take its
+      place.  True when it did. }
+    function DisplaceBuiltin(const AName: string): Boolean;
+    { The System symbol a declaration displaced under AName, or nil. }
+    function ShadowedBuiltin(const AName: string): TSymbol;
     function LookupCore(const AName: string): TSymbol;
     function Lookup(const AName: string): TSymbol;
 
@@ -1003,6 +1019,13 @@ function MangleUnitPrefix(const AUnitName: string): string;
   (uSemanticImport) report identically.  AKind is 'Generic type' or
   'Generic routine'. }
 function GenericCollisionMsg(const AKind, AName, APrevUnit, ANewUnit: string): string;
+
+{ True when ASym is a System name that a unit or program may reuse for its
+  own routine, variable, type or constant: a built-in CONSTANT (TargetOS,
+  PathSeparator, MaxInt, ...) other than True and False.  A built-in routine
+  is excluded because its calls are lowered as intrinsics by name, so a
+  declaration of the same name would be silently bypassed. }
+function ShadowsBuiltin(ASym: TSymbol): Boolean;
 
 const
   { Sentinel owning-unit value meaning "this global's emit name is ALREADY a
@@ -2015,6 +2038,8 @@ begin
 end;
 
 constructor TSymbolTable.Create;
+var
+  I: Int;
 begin
   inherited Create();
   FClassVarEmits := TStringList.Create();
@@ -2041,13 +2066,22 @@ begin
   FLeakedDeps.Sorted := True;
   FLeakedDeps.Duplicates := dupIgnore;
   FLeakedDeps.CaseSensitive := False;
+  FShadowedBuiltins := TStringList.Create();
+  FShadowedBuiltins.Sorted := True;
+  FShadowedBuiltins.CaseSensitive := False;
+  FShadowedBuiltinsKeep := TObjectList.Create(True);
   { Global scope — parent = nil }
   FScopeStack.Add(TScope.Create(nil));
   RegisterBuiltins();
+  { Everything defined so far is the implicit System unit. }
+  for I := 0 to GlobalScope().SymbolCount() - 1 do
+    GlobalScope().SymbolAt(I).IsBuiltin := True;
 end;
 
 destructor TSymbolTable.Destroy;
 begin
+  FShadowedBuiltins.Free();
+  FShadowedBuiltinsKeep.Free();
   FLeakedDeps.Free();
   FImportedDecls.Free();
   FGenericRoutines.Free();
@@ -2812,9 +2846,43 @@ begin
   Result := CurrentScope.Define(ASymbol);
 end;
 
+function ShadowsBuiltin(ASym: TSymbol): Boolean;
+begin
+  Result := (ASym <> nil) and ASym.IsBuiltin and (ASym.Kind = skConstant)
+    and ((ASym.TypeDesc = nil) or (ASym.TypeDesc.Kind <> tyBoolean));
+end;
+
 function TSymbolTable.ExtractLocal(const AName: string): TSymbol;
 begin
   Result := CurrentScope.ExtractLocal(AName);
+  { Every displacement of a System name passes through here (the source
+    path's last-wins and the cached-import Register* routines alike), so this
+    is where the System symbol is kept for the units that do not see the
+    declaration that displaced it. }
+  if (Result <> nil) and Result.IsBuiltin
+     and (FShadowedBuiltins.IndexOf(Result.Name) < 0) then
+  begin
+    FShadowedBuiltinsKeep.Add(Result);
+    FShadowedBuiltins.AddObject(Result.Name, Result);
+  end;
+end;
+
+function TSymbolTable.DisplaceBuiltin(const AName: string): Boolean;
+begin
+  Result := ShadowsBuiltin(CurrentScope.LookupLocal(AName));
+  if Result then
+    Self.ExtractLocal(AName);
+end;
+
+function TSymbolTable.ShadowedBuiltin(const AName: string): TSymbol;
+var
+  Idx: Int;
+begin
+  Idx := FShadowedBuiltins.IndexOf(AName);
+  if Idx >= 0 then
+    Result := TSymbol(FShadowedBuiltins.Objects[Idx])
+  else
+    Result := nil;
 end;
 
 function IsPlainIdentName(const AName: string): Boolean; forward;
@@ -2986,7 +3054,8 @@ begin
      and not SameText(Sym.OwningUnit, DOU)
      and not (ViewOn and SameText(Sym.OwningUnit, FGenericViewUnit)) then
   begin
-    Result := nil;
+    { the System name it displaced, if any, is what this unit sees }
+    Result := Self.ShadowedBuiltin(AName);
     Exit;
   end;
   { Another unit's symbol that the uses chain did not supply.  When its unit
@@ -3007,9 +3076,14 @@ begin
      and IsPlainIdentName(AName)
      and not FUsesChainProvider.IsUnitVisible(Sym.OwningUnit) then
   begin
-    FLastHiddenName := AName;
-    FLastHiddenUnit := Sym.OwningUnit;
-    Result := nil;
+    { A declaration that displaced a System name hides it only where that
+      declaration is visible; everywhere else the System name resolves. }
+    Result := Self.ShadowedBuiltin(AName);
+    if Result = nil then
+    begin
+      FLastHiddenName := AName;
+      FLastHiddenUnit := Sym.OwningUnit;
+    end;
     Exit;
   end;
   { Another unit's symbol that the uses chain did not supply: the unit being

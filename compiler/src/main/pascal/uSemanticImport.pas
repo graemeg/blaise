@@ -278,12 +278,14 @@ end;
   RegisterUnitIface when that unit was imported.  Freeing the stub instead
   left the earlier unit's descriptor in the slot, and pass 2 then filled it
   with THIS unit's members, merging two classes into one.  A built-in type
-  (no owning unit) is still reused, as before. }
+  (no owning unit) is still reused, as before.  A System constant of the
+  same name is shadowed, as DefineTypeLastWins does on the source path. }
 procedure DefineImportedType(ASym: TSymbol; ATable: TSymbolTable;
   const AUnitName: string);
 var
   Existing: TSymbol;
 begin
+  ATable.DisplaceBuiltin(ASym.Name);
   if ATable.Define(ASym) then Exit;
   Existing := ATable.CurrentScope.LookupLocal(ASym.Name);
   if (Existing <> nil) and (Existing.Kind = skType) and

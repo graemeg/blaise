@@ -33,6 +33,16 @@ type
     procedure TestOSName_FreeBSDTarget;
     procedure TestOSName_WindowsTarget;
     procedure TestNames_UsableInConstExpression;
+    { A declaration may reuse the name of a System constant: the program's
+      own routine, type or variable shadows it, as a constant already did. }
+    procedure TestProgramRoutine_ShadowsSystemConstant;
+    procedure TestProgramType_ShadowsSystemConstant;
+    procedure TestNestedRoutine_ShadowsSystemConstant;
+    { ... but not a built-in routine (its calls are dispatched as
+      intrinsics), not True/False, and not the program's own name. }
+    procedure TestProgramRoutine_CannotShadowBuiltinRoutine;
+    procedure TestProgramRoutine_CannotShadowTrue;
+    procedure TestProgramRoutine_AfterOwnConst_IsDuplicate;
   end;
 
 implementation
@@ -101,6 +111,92 @@ begin
     'begin'#10 +
     '  WriteLn(Platform);'#10 +
     'end.'#10));
+end;
+
+procedure TTargetNamesTests.TestProgramRoutine_ShadowsSystemConstant;
+begin
+  AssertEquals('', SemanticError(
+    'program p;'#10 +
+    'function TargetOS: string;'#10 +
+    'begin'#10 +
+    '  Result := ''mine'';'#10 +
+    'end;'#10 +
+    'procedure TargetCPU;'#10 +
+    'begin'#10 +
+    'end;'#10 +
+    'var S: string;'#10 +
+    'begin'#10 +
+    '  S := TargetOS();'#10 +
+    '  TargetCPU();'#10 +
+    'end.'#10));
+end;
+
+procedure TTargetNamesTests.TestProgramType_ShadowsSystemConstant;
+begin
+  AssertEquals('', SemanticError(
+    'program p;'#10 +
+    'type TargetCPU = Int32;'#10 +
+    'var X: TargetCPU;'#10 +
+    'begin'#10 +
+    '  X := 3;'#10 +
+    'end.'#10));
+end;
+
+procedure TTargetNamesTests.TestNestedRoutine_ShadowsSystemConstant;
+begin
+  AssertEquals('', SemanticError(
+    'program p;'#10 +
+    'procedure Outer;'#10 +
+    '  function TargetOS: Int32;'#10 +
+    '  begin'#10 +
+    '    Result := 1;'#10 +
+    '  end;'#10 +
+    'var N: Int32;'#10 +
+    'begin'#10 +
+    '  N := TargetOS();'#10 +
+    'end;'#10 +
+    'begin'#10 +
+    '  Outer();'#10 +
+    'end.'#10));
+end;
+
+procedure TTargetNamesTests.TestProgramRoutine_CannotShadowBuiltinRoutine;
+begin
+  AssertTrue('a built-in routine stays reserved',
+    Pos('Duplicate identifier ''WriteLn''', SemanticError(
+      'program p;'#10 +
+      'procedure WriteLn;'#10 +
+      'begin'#10 +
+      'end;'#10 +
+      'begin'#10 +
+      'end.'#10)) >= 0);
+end;
+
+procedure TTargetNamesTests.TestProgramRoutine_CannotShadowTrue;
+begin
+  AssertTrue('True stays reserved',
+    Pos('Duplicate identifier ''True''', SemanticError(
+      'program p;'#10 +
+      'function True: Boolean;'#10 +
+      'begin'#10 +
+      '  Result := False;'#10 +
+      'end;'#10 +
+      'begin'#10 +
+      'end.'#10)) >= 0);
+end;
+
+procedure TTargetNamesTests.TestProgramRoutine_AfterOwnConst_IsDuplicate;
+begin
+  AssertTrue('the program''s own constant is not a System name',
+    Pos('Duplicate identifier ''Tag''', SemanticError(
+      'program p;'#10 +
+      'const Tag = ''x'';'#10 +
+      'function Tag: string;'#10 +
+      'begin'#10 +
+      '  Result := ''y'';'#10 +
+      'end;'#10 +
+      'begin'#10 +
+      'end.'#10)) >= 0);
 end;
 
 initialization

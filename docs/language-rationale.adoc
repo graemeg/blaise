@@ -5848,10 +5848,90 @@ target, so it supplies the value.
   layer has a different host from its target.
 * *Boolean constants* (`IsMacOS`).  Rejected: one string constant per axis
   scales to a new target with no new name.
-* *Names `TargetOSName` / `TargetCPUName`.*  Rejected: the compiler's own
-  `blaise.codegen.target` already declares functions of those names, and a
-  unit cannot redeclare a `System` identifier.  Renaming the compiler's
-  functions would have touched every backend for no user benefit.
+* *Names `TargetOSName` / `TargetCPUName`.*  Not chosen: the values are
+  tokens for comparison, not names for display (that is `OSDisplayName`), and
+  the shorter names pair with FPC's `%FPCTARGETOS%` / `%FPCTARGETCPU%`.
+
+Adding a `System` constant does not break existing code that already uses the
+name: a unit's or program's own declaration shadows it (see _Declarations May
+Shadow `System` Constants_).
+
+== Declarations May Shadow `System` Constants
+
+=== Decision
+
+A unit or program may declare a routine, variable, type or constant with the
+name of a built-in `System` constant (`TargetOS`, `PathSeparator`, `MaxInt`,
+...).  The declaration shadows the constant wherever the declaration is
+visible: in its own unit, and in a unit or program that uses that unit.
+Everywhere else the name still means the `System` constant, and
+`System.TargetOS` always does.
+
+[source,pascal]
+----
+unit Build.Info;
+interface
+function TargetOS: string;     { shadows System.TargetOS for users of Build.Info }
+implementation
+function TargetOS: string;
+begin
+  Result := 'custom';
+end;
+end.
+----
+
+Three kinds of `System` name stay reserved, with `Duplicate identifier` as
+before:
+
+* `True` and `False`.
+* Built-in routines (`WriteLn`, `Length`, `Inc`, ...).
+* A name the same unit or program already declares.
+
+=== Rationale
+
+A constant declaration could already shadow a `System` constant.  A routine,
+variable or type could not, and was rejected with `Duplicate identifier`.  The
+rule depended on what kind of declaration reused the name, which nothing in
+the language explains.
+
+The rule also decides whether a new `System` constant is a breaking change.
+When `TargetOS` and `TargetCPU` were added, any existing unit with a function
+or variable of either name stopped compiling.  With the rule above, adding a
+`System` constant breaks no code that already uses the name.
+
+Cold and warm builds also disagreed.  A unit loaded from the unit cache
+already replaced a `System` name of any kind, while the same unit compiled
+from source was rejected.
+
+FPC and Delphi treat `System` as an ordinary unit, implicitly first in every
+`uses` clause, so any later declaration shadows any `System` name.  This
+decision follows that model for constants.
+
+=== Mechanism
+
+The compiler keeps every unit's names in one shared table.  A declaration
+that reuses a `System` name takes that name's slot in the table, and the
+displaced `System` symbol is kept beside the table
+(`TSymbolTable.ShadowedBuiltin`).  A lookup from a unit that cannot see the
+displacing declaration resolves to the kept `System` symbol, and
+`System.Name` always does.  Without this, a unit that did not use the
+shadowing unit failed with `Undeclared identifier` for a name it had never
+redeclared.
+
+=== Alternatives considered
+
+* *Shadow built-in routines as well* (the FPC and Delphi behaviour).
+  Deferred: calls to built-in routines are lowered as intrinsics by name, so
+  a user routine of the same name would compile and then be bypassed
+  (BUG-20261113-nested-builtin-routine-shadow-ignored).  Once that dispatch
+  checks the resolved symbol, `ShadowsBuiltin` can admit routines.
+* *Keep the `Duplicate identifier` error for routines, variables and types.*
+  Rejected: every new `System` constant would be a breaking change, and the
+  rule would still differ between constants and the other declaration kinds,
+  and between cold and warm builds.
+* *Shadow `True` and `False`.*  Rejected: no program means anything useful by
+  redefining them, and doing so would change the meaning of every Boolean
+  literal in the program.
 
 == `not` — Boolean and Bitwise NOT
 

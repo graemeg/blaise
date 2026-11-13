@@ -4456,6 +4456,13 @@ begin
        collision winner is evicted from the flat table but kept here). }
   Result := FindUnitSymbol(AUnit, AName);
   if Result <> nil then Exit;
+  { 1a. A System name that a declaration displaced from the flat table:
+        System.TargetOS still names System's constant. }
+  if SameText(AUnit, 'System') then
+  begin
+    Result := FTable.ShadowedBuiltin(AName);
+    if Result <> nil then Exit;
+  end;
 
   { 1b. The fallback below resolves by the TAIL name alone, which is only
         sound when AUnit names a UNIT — the qualifier is informational there
@@ -9521,6 +9528,8 @@ var
   Prev:   TSymbol;
   DupName: string;
 begin
+  { a System constant of the same name is shadowed, as a constant does }
+  FTable.DisplaceBuiltin(ASym.Name);
   if not FTable.Define(ASym) then
   begin
     RefSym := FTable.CurrentScope.LookupLocal(ASym.Name);
@@ -9572,12 +9581,15 @@ end;
   Unit.Name still reaches it, and ASym takes the flat slot -- a program's own
   PadRight beside StrUtils.PadRight, or two used units exporting one name.
   Overload-marked routines on both sides still merge into one set (the
-  scope chains them).  False, with ASym NOT freed, for a genuine duplicate:
-  a module marker, a builtin, or a redeclaration within the same unit. }
+  scope chains them).  A System constant (ShadowsBuiltin) is shadowed too.
+  False, with ASym NOT freed, for a genuine duplicate: a module marker, a
+  built-in routine, or a redeclaration within the same unit. }
 function TSemanticAnalyser.DefineRoutineLastWins(ASym: TSymbol): Boolean;
 var
   Prev: TSymbol;
 begin
+  { a System constant of the same name is shadowed, as a constant does }
+  FTable.DisplaceBuiltin(ASym.Name);
   if FTable.Define(ASym) then
     Exit(True);
   Prev := FTable.CurrentScope.LookupLocal(ASym.Name);
@@ -9653,6 +9665,8 @@ begin
     own type even after a same-named type from another used unit wins the flat
     slot (extracted below). }
   ATypeDecl.ResolvedDesc := ASym.TypeDesc;
+  { a System constant of the same name is shadowed, as a constant does }
+  FTable.DisplaceBuiltin(AName);
   if not FTable.Define(ASym) then
   begin
     RefSym := FTable.CurrentScope.LookupLocal(AName);
@@ -10184,7 +10198,8 @@ begin
       begin
         { Forward class: register a placeholder class type so intervening
           declarations can name it.  A name already in the table — including a
-          prior forward — is a redeclaration. }
+          prior forward — is a redeclaration; a System constant is shadowed. }
+        FTable.DisplaceBuiltin(TD.Name);
         if FTable.Lookup(TD.Name) <> nil then
         begin
           if ForwardDecls.IndexOf(TD.Name) >= 0 then
@@ -10272,7 +10287,9 @@ begin
     begin
       if TInterfaceTypeDef(TD.Def).IsForward then
       begin
-        { Forward interface: placeholder, completed later in scope. }
+        { Forward interface: placeholder, completed later in scope.  A System
+          constant of the same name is shadowed. }
+        FTable.DisplaceBuiltin(TD.Name);
         if FTable.Lookup(TD.Name) <> nil then
         begin
           if ForwardDecls.IndexOf(TD.Name) >= 0 then
