@@ -1144,7 +1144,8 @@ existing `async.reactor.epoll` / `async.reactor.kqueue` pair:
 
 | `async.reactor.*`
 | New `async.reactor.iocp` (already anticipated in
-  `async-networking-design.adoc`)
+  `async-networking-design.adoc`); as delivered, `async.reactor.poll` over
+  `WSAPoll` (see M7)
 
 | `async.fibers.context`
 | The context switch keeps the internal callee-saved set, and must also swap
@@ -1230,7 +1231,8 @@ possible (M3 and M7).
 
 | `selfhost`
 | Cross-build `blaise.exe`, have it rebuild itself in the guest, and compare
-  the two images byte for byte
+  the two images byte for byte; on the way, require the native link to
+  refuse an import its DLL does not export
 |===
 
 Like the FreeBSD script it builds from the working tree with
@@ -1649,6 +1651,83 @@ under emulation): `scripts/windows-vm.sh selfhost` prints
 M7 — Breadth::
 Stdlib networking, async and fibres; `.pdata` / `.xdata`; native-host export
 verification.
++
+_As delivered:_ the whole stdlib suite runs in the guest
+(`scripts/windows-vm.sh stdlib-test`: 627 tests, 4 ignored -- the two live
+network tests, as on every host, and two that need POSIX permission bits),
+and so do the e2e suites, one at a time: 76 of the 77 pass (2359 tests), and
+the ARC suite fails two tests only when run whole, through the cached-object
+bug noted under _Open_ below; each passes alone.  In detail:
++
+* *The ruling on per-OS code.*  Shared code tests no OS.  Stdlib code that
+  differs per OS goes through the platform port: `TRtlPlatform` methods with
+  flat `_X` wrappers in `rtl.platform.abi`, or, where the three POSIX targets
+  differ among themselves, flat functions in a per-OS unit that
+  `BuildRTLUnitList` picks (every RTL unit links into every program, so a
+  unit may bind only names its target has).  The one exception is the
+  reactor choice in `async.fibers`' uses clause.  Sockets are a ruled
+  exception the other way: `net.sockets` keeps its libc bindings, and
+  Windows supplies the BSD names as leaves.
+* *Random bytes and files.*  `TRtlPlatform.RandomBytes` (getentropy;
+  `BCryptGenRandom`, bcrypt loaded on first use so a plain program imports
+  only kernel32) and the `Fs*` calls `io.files` needed.  Windows answers as
+  POSIX does -- a read-only file can be deleted, a cross-volume move fails
+  with `EXDEV`, symbolic links are made unprivileged -- and
+  `runtime.errno.windows` maps Win32 errors to POSIX errno numbers.
+* *Sockets.*  `runtime.net.windows` defines `socket` ... `poll`,
+  `getaddrinfo`, `fcntl` (`FIONBIO`), `socketpair` and `pipe` (both a
+  loopback TCP pair) over `ws2_32`, loaded on first use.  Sockets live in
+  `runtime.syscall.windows`' descriptor table, flagged, so `read`, `write`
+  and `close` serve both.
+* *Fibres.*  The leaves the fibre runtime binds (`mprotect`,
+  `clock_gettime`, `nanosleep`, `accept4`), parking over `WaitOnAddress`, a
+  new layout seam `_FiberStackBounds` / `_FiberSetStackBounds` that swaps
+  the thread environment block's `StackBase` and `StackLimit` on every
+  switch (`DeallocationStack` is left alone), and `async.reactor.poll`: a
+  readiness reactor over `WSAPoll`, which disarms a delivered registration
+  to give the scheduler the edge-triggered contract the epoll and kqueue
+  reactors give.  It stands in for the `async.reactor.iocp` this document
+  first planned, because the reactor interface is readiness-based and IOCP
+  reports completions.
+* *Processes.*  `TRtlPlatform.ProcSpawn`, `ProcWait`, `ProcSignal`,
+  `ProcPollRead` and friends: on POSIX `io.process`'s fork/exec code,
+  moved; on Windows `CreateProcessW` with three pipes, only the child's ends
+  inherited (a `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), a given environment as
+  a Unicode block with its `PATH` searched (`.exe` and `.com` tried too),
+  and `PeekNamedPipe` polling, since nothing waits on an anonymous pipe.
+  Terminate and kill end a child with 143 and 137, as the signals would.
+  The Windows `_EnvVector` upper-cases variable names, as Python's
+  `os.environ` does.
+* *Watching.*  `_WatchOpen` ... `_WatchWait` in
+  `rtl.platform.watch.inotify`, `.kqueue` (the struct size and open flags
+  from the Darwin and FreeBSD layouts) and `.windows`:
+  `ReadDirectoryChangesW` on a completion port, watching each path through
+  its parent directory, since that is where a deletion or rename shows.
+* *TLS.*  The Windows toolkit maps `ssl` and `crypto` to OpenSSL 3's
+  `libssl-3-x64.dll` and `libcrypto-3-x64.dll`.  The guest has no OpenSSL,
+  so no handshake has run on Windows yet.
+* *Unwind data.*  The PE linker writes the exception directory: a
+  `RUNTIME_FUNCTION` for every routine that opens with
+  `push %rbp; mov %rsp, %rbp`, all naming one `UNWIND_INFO`.  Stack walks
+  now pass through Blaise frames (the `m7unwind` fixture).  Registers a
+  routine saves into its frame by `MOV` are not described.
+* *Export check.*  On a Windows host the PE linker reads the export table of
+  each DLL it finds in `%SystemRoot%\System32` (and `--lib-path`) and fails
+  a link whose import that DLL does not export.
+* *Fixes found on the way:* the array constants of nested routines were
+  never emitted (both backends); `pthread_detach` was missing from the
+  Windows thread leaf, so `external 'pthread'` imported a `pthread.dll`;
+  the Mach-O fallback libSystem list was read only to index 46; and
+  `ParamStr(0)` gave the command line's first word, so a compiler started
+  as a bare `blaise.exe` could not find the `blaise.cfg` beside it -- it is
+  now `GetModuleFileNameW`'s full path, as in Delphi and FPC.
+* *Open:* a cached unit object depends on whether the program uses
+  `SysUtils` (`BUG-20261113-unit-object-depends-on-program`): a
+  `runtime.arc.o` an earlier ARC test compiled references
+  `SysUtils__RaiseDivByZero`, which a later program without `SysUtils`
+  lacks.  And an
+  implementation-section type cannot size itself on an
+  implementation-section constant.
 
 == Risks
 
