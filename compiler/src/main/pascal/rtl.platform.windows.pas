@@ -247,6 +247,8 @@ function W32WaitForSingleObject(AHandle: Pointer; AMilliseconds: UInt32): UInt32
 function W32GetExitCodeProcess(AProcess: Pointer; ACode: Pointer): Int32;
   external 'kernel32' name 'GetExitCodeProcess';
 procedure W32SetLastError(ACode: UInt32); external 'kernel32' name 'SetLastError';
+function W32GetModuleFileNameW(AModule: Pointer; AName: Pointer;
+  ASize: UInt32): UInt32; external 'kernel32' name 'GetModuleFileNameW';
 function W32TerminateProcess(AProcess: Pointer; ACode: UInt32): Int32;
   external 'kernel32' name 'TerminateProcess';
 function W32GetProcessId(AProcess: Pointer): UInt32;
@@ -1221,10 +1223,35 @@ begin
     Result := 0;
 end;
 
+{ ParamStr(0) is the program's full path, from GetModuleFileNameW, as
+  Delphi and FPC give it on Windows: the command line holds only what the
+  user typed, a bare blaise.exe found in the current directory or on the
+  PATH, and the compiler finds its blaise.cfg beside its own image. }
 function TRtlPlatformWindows.ParamStr(AIndex: Int32): string;
 var
   Slot: PPChar;
+  Buf: Pointer;
+  Units, Size: UInt32;
 begin
+  if AIndex = 0 then
+  begin
+    Size := 260;
+    while Size <= 32768 do
+    begin
+      Buf := _BlaiseGetMem(Int64(Size) * 2);
+      Units := W32GetModuleFileNameW(nil, Buf, Size);
+      if (Units > 0) and (Units < Size) then
+      begin
+        Result := FromWide(Buf, Int32(Units));
+        _BlaiseFreeMem(Buf);
+        Exit;
+      end;
+      _BlaiseFreeMem(Buf);
+      if Units = 0 then
+        Break;
+      Size := Size * 2;
+    end;
+  end;
   if (GArgV = nil) or (AIndex < 0) or (AIndex >= GArgC) then
     Exit('');
   Slot := PPChar(GArgV + AIndex * SizeOf(Pointer));

@@ -98,4 +98,8 @@ begin
       WriteLn('outer caught ', E.Message);
   end;
   WriteLn(Format('%d-%s-%.3f', [42, 'x', 1.5]));
+  { ParamStr(0) is the program's full path however it was started, as
+    Delphi and FPC give it on Windows: a compiler started as a bare
+    blaise.exe finds its blaise.cfg beside itself through it }
+  WriteLn('argv0 has a drive: ', ExtractFileDrive(ParamStr(0)) <> '');
 end.
