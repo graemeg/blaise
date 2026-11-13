@@ -84,10 +84,11 @@ function TIOProcessTests.Sleeper: TSubprocess;
 begin
   if OnWindows() then
   begin
-    Result := TSubprocess.Create('ping');
-    Result.Args.Add('-n');
-    Result.Args.Add('31');
-    Result.Args.Add('127.0.0.1');
+    { waits for a signal nothing sends, silently, until the time runs out }
+    Result := TSubprocess.Create('waitfor');
+    Result.Args.Add('/t');
+    Result.Args.Add('30');
+    Result.Args.Add('BlaiseIOProcessTests');
   end
   else
     Result := Shell('sleep 30', '');
@@ -224,10 +225,6 @@ var
 begin
   P := Sleeper();
   P.Start();
-  { ping reports at once that it has started; what matters is that a
-    quiet pipe gives up after the timeout }
-  if OnWindows() then
-    P.Read(-1, Out_, Err);
   AssertTrue('still open', P.Read(50, Out_, Err));
   AssertEquals('', Out_);
   AssertEquals('', Err);
