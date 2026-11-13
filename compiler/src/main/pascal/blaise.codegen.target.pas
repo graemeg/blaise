@@ -72,15 +72,14 @@ function TargetObjectIsElf(const ATarget: TTargetDesc): Boolean;
   ELF-image facts (shared-object emission, ELF link modes) on this. }
 function TargetImageIsElf(const ATarget: TTargetDesc): Boolean;
 
-{ Lower-case OS token used in the OS-specific RTL unit names, e.g.
-  'linux' / 'freebsd' in rtl.platform.layout.<os>, runtime.syscall.<os>.
-  The single source of truth for the OS suffix, shared by the driver's RTL
-  unit-list selection and the codegen backends' platform-layout-init call. }
+{ Lower-case OS token: 'linux' / 'freebsd' / 'windows' / 'macos'.  The
+  single source of the OS spelling: TargetName joins it with TargetCPUName,
+  and the System constant TargetOS exposes it to programs.  RTL unit names
+  use RTLOSSuffix instead, which differs for macOS. }
 function TargetOSName(const ATarget: TTargetDesc): string;
 
-{ Lower-case CPU token: 'x86_64' / 'i386' / 'arm64'.  Together with
-  TargetOSName this is what TargetName joins, and what the System constants
-  TargetOS / TargetCPU expose to programs. }
+{ Lower-case CPU token: 'x86_64' / 'i386' / 'arm64'.  The single source of
+  the CPU spelling, for TargetName and the System constant TargetCPU. }
 function TargetCPUName(const ATarget: TTargetDesc): string;
 
 { Assembler symbol of the target's platform-layout unit initialiser
@@ -195,25 +194,8 @@ begin
 end;
 
 function TargetName(const ATarget: TTargetDesc): string;
-var
-  OSPart, CPUPart: string;
 begin
-  case ATarget.OS of
-    osLinux:   OSPart := 'linux';
-    osFreeBSD: OSPart := 'freebsd';
-    osWindows: OSPart := 'windows';
-    osMacOS:   OSPart := 'macos';
-  else
-    OSPart := 'unknown';
-  end;
-  case ATarget.CPU of
-    cpuX86_64: CPUPart := 'x86_64';
-    cpuI386:   CPUPart := 'i386';
-    cpuArm64:  CPUPart := 'arm64';
-  else
-    CPUPart := 'unknown';
-  end;
-  Result := OSPart + '-' + CPUPart;
+  Result := TargetOSName(ATarget) + '-' + TargetCPUName(ATarget);
 end;
 
 function TargetHasNativeBackend(const ATarget: TTargetDesc): Boolean;
@@ -232,24 +214,24 @@ begin
   Result := (ATarget.OS = osLinux) or (ATarget.OS = osFreeBSD);
 end;
 
+{ Both name every member of their enum, so a target added to TTargetOS or
+  TTargetCPU gets a spelling here, not a silent fallback to another's. }
 function TargetOSName(const ATarget: TTargetDesc): string;
 begin
   case ATarget.OS of
+    osLinux:   Result := 'linux';
     osFreeBSD: Result := 'freebsd';
     osWindows: Result := 'windows';
     osMacOS:   Result := 'macos';
-  else
-    Result := 'linux';
   end;
 end;
 
 function TargetCPUName(const ATarget: TTargetDesc): string;
 begin
   case ATarget.CPU of
-    cpuI386:  Result := 'i386';
-    cpuArm64: Result := 'arm64';
-  else
-    Result := 'x86_64';
+    cpuX86_64: Result := 'x86_64';
+    cpuI386:   Result := 'i386';
+    cpuArm64:  Result := 'arm64';
   end;
 end;
 
