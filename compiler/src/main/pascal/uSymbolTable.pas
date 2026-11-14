@@ -2703,10 +2703,34 @@ end;
   whichever unit created it first (see IsPlainIdentName).  Marked private, a
   later unit could not see it, built it again and could not register the copy
   under the taken name, so the copy's own methods that name the instance
-  instantiated it again until the compiler's stack overflowed. }
+  instantiated it again until the compiler's stack overflowed.
+
+  The same holds for every other spelling the compiler synthesises and
+  interns by name: 'array of T', 'array[0..3] of T', '^T', 'set of T',
+  'class of T', a procedural signature.  None is a declaration -- no unit
+  owns it -- so only a name a declaration can carry (an identifier, or a
+  dotted nested-type path) is private.  A private 'array of Int64' from an
+  impl-section field made every later unit's use of that spelling a fresh,
+  unregistered descriptor, so a global and a local of it did not match. }
+function IsDeclaredSymbolName(const AName: string): Boolean;
+var
+  I, B: Int;
+begin
+  Result := AName <> '';
+  for I := 0 to Length(AName) - 1 do
+  begin
+    B := StrAt(AName, I);
+    if not (((B >= Ord('A')) and (B <= Ord('Z'))) or
+            ((B >= Ord('a')) and (B <= Ord('z'))) or
+            ((B >= Ord('0')) and (B <= Ord('9'))) or
+            (B = Ord('_')) or (B = Ord('.'))) then
+      Exit(False);
+  end;
+end;
+
 function MarksImplPrivate(AImplPrivate: Boolean; ASymbol: TSymbol): Boolean;
 begin
-  Result := AImplPrivate and (StrPos('<', ASymbol.Name) < 0);
+  Result := AImplPrivate and IsDeclaredSymbolName(ASymbol.Name);
 end;
 
 function TSymbolTable.DefineGlobal(ASymbol: TSymbol): Boolean;

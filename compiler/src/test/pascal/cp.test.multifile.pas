@@ -94,6 +94,14 @@ type
       method returning TBox<T> instantiated it again, without end, until the
       compiler's stack overflowed. }
     procedure TestUsesVisibility_ImplSectionGenericInstanceShared;
+    { An anonymous structural type ('array of Int64', 'array[0..1] of
+      Int64', '^Int64') first written in a unit's implementation section is
+      interned under its spelling, shared by every unit that later writes it.
+      It was marked private to that unit, so a later unit could not find it
+      and could not register its own copy under the taken name: each of its
+      uses built a fresh descriptor, and assigning one to another failed with
+      "expected 'array of Int64' but got 'array of Int64'". }
+    procedure TestUsesVisibility_ImplSectionAnonArrayTypeShared;
     procedure TestUsesVisibility_ImplUsesNotReExported;
     { A unit's implementation-section uses are visible to that unit's own
       implementation. }
@@ -1152,6 +1160,72 @@ begin
     Pos('TUnitRec', Msg) >= 0);
   AssertTrue('names the unit to add: ' + Msg,
     Pos('declared in unit ''VisTypes''', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_ImplSectionAnonArrayTypeShared;
+const
+  FirstSrc =
+    '''
+        unit ImplAnonFirst;
+        interface
+        function Count(): Int;
+        implementation
+        type
+          THolder = class
+            Dyn: array of Int64;
+            Fixed: array[0..1] of Int64;
+            Ptr: ^Int64;
+          end;
+        function Count(): Int;
+        var
+          H: THolder;
+        begin
+          H := THolder.Create();
+          SetLength(H.Dyn, 2);
+          Result := Length(H.Dyn)
+        end;
+        end.
+        ''';
+  LaterSrc =
+    '''
+        unit ImplAnonLater;
+        interface
+        function Total(): Int64;
+        implementation
+        var
+          GDyn: array of Int64;
+          GFixed: array[0..1] of Int64;
+          GPtr: ^Int64;
+        function Total(): Int64;
+        var
+          LDyn: array of Int64;
+          LFixed: array[0..1] of Int64;
+          LPtr: ^Int64;
+        begin
+          SetLength(GDyn, 1);
+          GDyn[0] := 40;
+          GFixed[1] := 2;
+          LDyn := GDyn;
+          LFixed := GFixed;
+          GPtr := @LFixed[1];
+          LPtr := GPtr;
+          Result := LDyn[0] + LPtr^
+        end;
+        end.
+        ''';
+  ProgSrc =
+    '''
+        program P;
+        uses ImplAnonFirst, ImplAnonLater;
+        var
+          N: Int64;
+        begin
+          N := Total() + Count()
+        end.
+        ''';
+begin
+  AssertEquals('an impl-section anonymous array type is shared', '',
+    AnalyseUnitsAndProg([FirstSrc, LaterSrc], ProgSrc));
 end;
 
 procedure TMultifileTests.TestUsesVisibility_ImplSectionGenericInstanceShared;

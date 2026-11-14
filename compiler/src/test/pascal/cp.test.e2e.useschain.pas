@@ -132,6 +132,11 @@ type
       shared with the units after it.  The compiler overflowed its stack
       instantiating TBox<Int> again and again (exit 139). }
     procedure TestRun_ImplSectionGenericInstance_SharedWithLaterUnits;
+    { An anonymous 'array of Int64' (and 'array[0..1] of Int64', '^Int64')
+      first written in a unit's implementation section is shared with later
+      units, so a later unit's global and local of that spelling are one
+      type (Classes.JoinParkedThreads, built after such a unit). }
+    procedure TestRun_ImplSectionAnonArrayType_SharedWithLaterUnits;
   end;
 
 implementation
@@ -1764,6 +1769,72 @@ begin
   AssertTrue('compile+run: ' + Output,
     CompileAndRunWithUnits(UHolder, UUser, Prog, Output, RCode));
   AssertEquals('42' + LE + '84' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_ImplSectionAnonArrayType_SharedWithLaterUnits;
+const
+  UFirst = '''
+    unit uiafirst;
+    interface
+    function Count(): Int;
+    implementation
+    type
+      THolder = class
+        Dyn: array of Int64;
+        Fixed: array[0..1] of Int64;
+        Ptr: ^Int64;
+      end;
+    function Count(): Int;
+    var
+      H: THolder;
+    begin
+      H := THolder.Create();
+      SetLength(H.Dyn, 2);
+      Result := Length(H.Dyn)
+    end;
+    end.
+    ''';
+  ULater = '''
+    unit uialater;
+    interface
+    function Total(): Int64;
+    implementation
+    var
+      GDyn: array of Int64;
+      GFixed: array[0..1] of Int64;
+      GPtr: ^Int64;
+    function Total(): Int64;
+    var
+      LDyn: array of Int64;
+      LFixed: array[0..1] of Int64;
+      LPtr: ^Int64;
+    begin
+      SetLength(GDyn, 1);
+      GDyn[0] := High(Int64) - 2;
+      GFixed[1] := 2;
+      LDyn := GDyn;
+      LFixed := GFixed;
+      GPtr := @LFixed[1];
+      LPtr := GPtr;
+      Result := LDyn[0] + LPtr^
+    end;
+    end.
+    ''';
+  Prog = '''
+    program P;
+    uses uiafirst, uialater;
+    begin
+      WriteLn(Count());
+      WriteLn(Total())
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRunWithUnits(UFirst, ULater, Prog, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('2' + LE + '9223372036854775807' + LE, Output);
 end;
 
 initialization
