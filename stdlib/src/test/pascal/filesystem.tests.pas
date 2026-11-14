@@ -472,7 +472,9 @@ begin
   SetPermissions(P('ro'), MODE_444);
   CopyFile(P('ro'), P('ro2'));
   AssertEquals('read-only mode', MODE_444, GetPermissions(P('ro2')));
-  AssertTrue('read-only', not IsWritable(P('ro2')));
+  { root may write a read-only file, so access() reports it writable }
+  if not RunningAsRoot() then
+    AssertTrue('read-only', not IsWritable(P('ro2')));
   if not ExecBitsKept() then
     Exit;
   WriteFile(P('tool'), '#!/bin/sh');
