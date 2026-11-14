@@ -37,6 +37,7 @@ type
     procedure TestRun_Thread_FreeOnTerminate_DestroyedOnWorker;
     procedure TestRun_Thread_FreeOnTerminate_OwnerOutlives;
     procedure TestRun_Thread_FreeOnTerminate_AfterStart_Rejected;
+    procedure TestRun_Thread_SubclassFieldsSetBeforeExecute;
     procedure TestRun_ThreadVar_MainThread_ReadWrite;
     procedure TestRun_ThreadVar_MixedWithGlobalVar;
     procedure TestRun_ThreadVar_RecordField_PerThreadIsolation;
@@ -119,12 +120,14 @@ end;
 
 procedure TE2EThreadingTests.TestRun_Thread_FinishesInsideConstructor_ObjectSurvives;
 const
-  { Create(False) starts the worker inside the constructor, while the new
-    instance's refcount is still 0.  The worker must not take (and drop) an
-    ARC reference to it: a 0 -> 1 -> 0 round trip destroyed the object under
-    the constructor, and the creator's reference dangled -- releasing it
-    crashed.  WaitFor inside the constructor makes the worker finish first
-    every time, so the old trampoline failed deterministically. }
+  { A constructor that starts the worker itself (Create(True), then Start)
+    and waits for it: the worker runs and finishes inside the constructor.
+    It must not take (and drop) an ARC reference to the instance: a
+    0 -> 1 -> 0 round trip destroyed the object under the constructor, and
+    the creator's reference dangled -- releasing it crashed.  WaitFor inside
+    the constructor makes the worker finish first every time, so the old
+    trampoline failed deterministically.  (Create(False) no longer starts the
+    thread inside the constructor at all: AfterConstruction does.) }
   Src = '''
     program tc;
     uses SysUtils, Classes;
@@ -136,7 +139,8 @@ const
     var Seen: string;
     constructor TW.Create;
     begin
-      inherited Create(False);
+      inherited Create(True);
+      Start();
       WaitFor();
     end;
     procedure TW.Execute;
@@ -554,6 +558,50 @@ const
     end.
     ''';
 
+  { The usual TThread subclass: inherited Create(False) first, fields after.
+    The constructor gives a thread started inside it every chance to run
+    first (it waits for Execute, up to a second); Execute must still see the
+    field the constructor set. }
+  SrcThreadFields =
+    '''
+    program P;
+    uses Classes;
+    type
+      TWorker = class(TThread)
+      protected
+        FValue: Int;
+        procedure Execute; override;
+      public
+        constructor Create;
+      end;
+    var
+      Started: Boolean;
+    constructor TWorker.Create;
+    var
+      I: Int;
+    begin
+      inherited Create(False);
+      I := 0;
+      while (not Started) and (I < 100) do
+      begin
+        Sleep(10);
+        I := I + 1
+      end;
+      Self.FValue := 42
+    end;
+    procedure TWorker.Execute;
+    begin
+      Started := True;
+      WriteLn(Self.FValue)
+    end;
+    var T: TWorker;
+    begin
+      T := TWorker.Create();
+      T.WaitFor();
+      WriteLn('done')
+    end.
+    ''';
+
 { ------------------------------------------------------------------ }
 { Tests                                                                }
 { ------------------------------------------------------------------ }
@@ -657,6 +705,19 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTL(SrcFreeOnTerminateAfterStart, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('stdout', 'rejected' + LE + 'False' + LE, Output)
+end;
+
+{ Create(False) starts the thread in AfterConstruction, once the subclass
+  constructor -- inherited Create(False) first, fields after -- has
+  returned (as Delphi and FPC do); it used to start inside TThread.Create,
+  and Execute read the field before it was set. }
+procedure TE2EThreadingTests.TestRun_Thread_SubclassFieldsSetBeforeExecute;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(SrcThreadFields, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', '42' + LE + 'done' + LE, Output)
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_InheritedDestroy_CleanExit;

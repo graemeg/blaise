@@ -3731,6 +3731,11 @@ discarded, a class-reference variable (`C.Create()`), and `ClassCreate`.
 An exception raised by `AfterConstruction` propagates, and the instance is
 released -- destroyed, as when a constructor raises.
 
+`TThread` is the motivating client.  `Create(False)` records that the
+thread is to start, and `TThread.AfterConstruction` starts it, so the usual
+subclass constructor -- `inherited Create(False)` first, fields after -- has
+finished before `Execute` runs.
+
 === Lowering
 
 `AfterConstruction` is `TObject`'s third built-in virtual (slot 2, after
@@ -6309,6 +6314,11 @@ routine takes its argument, on every target, and a call on `Self` takes no
 reference (see *A receiver stays alive for the call* under ARC).  A call
 through a cast pointer, by contrast, is held for its duration -- which, for
 `Execute`, is the thread's whole life.
+
+`Create(False)` starts the thread in `AfterConstruction` (see
+*`AfterConstruction` -- A Hook for a Finished Construction*), not inside
+`TThread.Create`: a subclass constructor that sets fields after
+`inherited Create(False)` has finished before `Execute` runs.
 
 A fire-and-forget thread opts in with `FreeOnTerminate`, set before the
 thread starts:

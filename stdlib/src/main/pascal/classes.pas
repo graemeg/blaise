@@ -130,6 +130,8 @@ type
     FFinished:        Boolean;
     FTerminated:      Boolean;
     FFreeOnTerminate: Boolean;
+    { Create(False): AfterConstruction starts the thread }
+    FStartWhenConstructed: Boolean;
     { The OS thread's start routine (see Start). }
     procedure Run;
     procedure SetFreeOnTerminate(AValue: Boolean);
@@ -138,14 +140,21 @@ type
       periodically in long-running loops to support cooperative shutdown. }
     procedure Execute; virtual;
   public
-    { Pass False to start the thread immediately, or True to defer
-      execution until Start is called. }
+    { Pass False to start the thread once the instance is constructed, or
+      True to defer execution until Start is called.  With False the thread
+      starts in AfterConstruction -- after the outermost constructor has
+      returned, as in Delphi and FPC -- so a subclass constructor that sets
+      fields after inherited Create(False) has finished before Execute
+      runs. }
     constructor Create(ACreateSuspended: Boolean);
+    { Starts the thread when it was created with Create(False).  An override
+      must call inherited AfterConstruction(). }
+    procedure AfterConstruction; override;
     { Sets Terminated and joins the OS thread (if still running), then
       frees the object.  Called automatically by ARC when the last
       reference is released. }
     destructor Destroy; override;
-    { Spawns the OS thread. Called automatically by Create(False).
+    { Spawns the OS thread. Called automatically after Create(False).
       Has no effect if the thread is already running. }
     procedure Start;
     { Sets the Terminated flag. Does not forcibly stop the thread —
@@ -159,8 +168,9 @@ type
     property Finished:        Boolean read FFinished;
     property Terminated:      Boolean read FTerminated;
     { When True, the running thread holds a reference to its own instance
-      until Execute returns.  Read when the thread starts; setting it after
-      Start raises. }
+      until Execute returns.  Read when the thread starts -- for
+      Create(False), after construction, so a subclass constructor may set
+      it after inherited Create(False); setting it once started raises. }
     property FreeOnTerminate: Boolean read FFreeOnTerminate write SetFreeOnTerminate;
   end;
 
@@ -1261,8 +1271,17 @@ begin
   Self.FFinished := False;
   Self.FTerminated := False;
   Self.FFreeOnTerminate := False;
-  if not ACreateSuspended then
+  Self.FStartWhenConstructed := not ACreateSuspended
+end;
+
+procedure TThread.AfterConstruction;
+begin
+  inherited AfterConstruction();
+  if Self.FStartWhenConstructed then
+  begin
+    Self.FStartWhenConstructed := False;
     Self.Start()
+  end
 end;
 
 destructor TThread.Destroy;

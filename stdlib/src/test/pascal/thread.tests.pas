@@ -26,6 +26,7 @@ type
     procedure TestFreeOnTerminate_DefaultsToFalse;
     procedure TestFreeOnTerminate_SetBeforeStart_Accepted;
     procedure TestFreeOnTerminate_SetAfterStart_Raises;
+    procedure TestFreeOnTerminate_SetInSubclassConstructor_Accepted;
     procedure TestWaitFor_FromTheThreadItself_Raises;
     procedure TestRelease_AfterExecuteBegan_TerminatesAndJoins;
   end;
@@ -53,7 +54,18 @@ type
     procedure Execute; override;
   end;
 
+  { The Delphi idiom: FreeOnTerminate set in the constructor, after
+    inherited Create(False) -- the thread has not started yet then. }
+  TSelfFreeingThread = class(TThread)
+  protected
+    procedure Execute; override;
+  public
+    Accepted: Boolean;
+    constructor Create;
+  end;
+
 var
+  SelfFreeingDone: Boolean;
   LoopStarted: Boolean;
   LoopSawTerminated: Boolean;
 
@@ -69,6 +81,23 @@ begin
     on E: Exception do
       Self.Raised := True
   end
+end;
+
+constructor TSelfFreeingThread.Create;
+begin
+  inherited Create(False);
+  try
+    Self.FreeOnTerminate := True;
+    Self.Accepted := True
+  except
+    on E: Exception do
+      Self.Accepted := False
+  end
+end;
+
+procedure TSelfFreeingThread.Execute;
+begin
+  SelfFreeingDone := Self.Accepted
 end;
 
 procedure TLoopThread.Execute;
@@ -120,6 +149,24 @@ begin
   end;
   AssertTrue('raised', Raised);
   AssertFalse('unchanged', T.FreeOnTerminate)
+end;
+
+procedure TThreadTests.TestFreeOnTerminate_SetInSubclassConstructor_Accepted;
+var
+  T: TSelfFreeingThread;
+  I: Int;
+begin
+  SelfFreeingDone := False;
+  T := TSelfFreeingThread.Create();
+  T := nil;
+  { the thread frees itself; wait for it to report, up to two seconds }
+  I := 0;
+  while (not SelfFreeingDone) and (I < 200) do
+  begin
+    Sleep(10);
+    I := I + 1
+  end;
+  AssertTrue('accepted in the constructor', SelfFreeingDone)
 end;
 
 procedure TThreadTests.TestWaitFor_FromTheThreadItself_Raises;
