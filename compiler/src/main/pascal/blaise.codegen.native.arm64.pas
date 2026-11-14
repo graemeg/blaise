@@ -777,11 +777,6 @@ type
     procedure EmitDynElemHooks;
     function  RecReturnShape(ARec: TRecordTypeDesc): Int;
     procedure EmitRecRegsStore(AShape, ASize: Int);
-    { True when StrToInt/StrToInt64 should call the validating SysUtils
-      wrapper (raises EConvertError) instead of the lenient runtime routine:
-      SysUtils is in scope and is not the unit being emitted (the wrapper
-      itself calls StrToInt).  Twin of the x86-64 StrToIntChecked. }
-    function StrToIntChecked(): Boolean;
     procedure EmitHfaLaneToX0(AShape, AIdx: Int; ASpill: Boolean);
 
     procedure EmitStrLitSection;
@@ -842,8 +837,8 @@ type
     procedure EmitReleaseDiscardedResult(AType: TTypeDesc);
     procedure EmitMethodCallExpr(AExpr: TMethodCallExpr);
     procedure EmitClassCreate(AExpr: TFuncCallExpr);
-    { A failed `as`: SysUtils' _RaiseInvalidCast (a catchable EInvalidCast)
-      when SysUtils is in scope, else the RTL's fatal _Raise_InvalidCast. }
+    { A failed `as`: the RTL's _Raise_InvalidCast, which raises EInvalidCast
+      through the hook SysUtils installs, else aborts. }
     procedure EmitRaiseInvalidCast;
     procedure EmitNonOwningFieldStore(AFld: TFieldInfo; const ABase: string);
     { ABaseInfo describes the CONTAINING field for a nested Self path
@@ -6334,27 +6329,20 @@ begin
         '_SetCurrentDir');
       Exit;
     end;
-    { With SysUtils in scope, StrToInt validates the WHOLE string and raises
-      EConvertError ('42abc' is not an integer); the bare runtime routine
-      stops at the first non-digit and returned 42 -- x86-64 parity. }
+    { StrToInt validates the WHOLE string: '42abc' raises EConvertError
+      through the hook SysUtils installs, and without it gives the lenient
+      42.  The RTL decides, so the object does not depend on what is in
+      scope (BUG-20261113-unit-object-depends-on-program). }
     if IsBuiltinCall(TFuncCallExpr(AExpr), 'StrToInt') then
     begin
-      if Self.StrToIntChecked() then
-        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
-          'SysUtils__StrToIntChecked')
-      else
-        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
-          '_StrToInt');
+      EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+        '_StrToIntChecked');
       Exit;
     end;
     if IsBuiltinCall(TFuncCallExpr(AExpr), 'StrToInt64') then
     begin
-      if Self.StrToIntChecked() then
-        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
-          'SysUtils__StrToInt64Checked')
-      else
-        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
-          '_StrToInt64');
+      EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+        '_StrToInt64Checked');
       Exit;
     end;
     if IsBuiltinCall(TFuncCallExpr(AExpr), 'Exec') then
@@ -7390,17 +7378,16 @@ begin
       boMul: Self.Emit(#9'mul x0, x0, x1');
       boDiv, boMod:
       begin
-        { AArch64 sdiv does NOT trap on a zero divisor (it yields 0), so the
-          guard is ALWAYS emitted — the x86-64 backend can lean on the CPU
-          trap, this leaf cannot (design doc, Phase 2 risks). }
+        { The divisor-zero guard.  The RTL's _DivByZero raises EDivByZero
+          through the hook SysUtils installs, whatever is in scope, so the
+          object does not depend on its program
+          (BUG-20261113-unit-object-depends-on-program).  Without the hook it
+          returns, and since AArch64 sdiv does NOT trap on a zero divisor
+          (it yields 0), a deliberate brk stands in for the trap. }
         DivGuardOk := NewLabel('divok');
         Self.Emit(Format(#9'cbnz x1, %s', [DivGuardOk]));
-        if (FSymTable <> nil) and (FSymTable.Lookup('EDivByZero') <> nil) then
-          { SysUtils in scope: a catchable EDivByZero (x86-64 / QBE parity);
-            _RaiseDivByZero never returns }
-          EmitCallSym('SysUtils__RaiseDivByZero')
-        else
-          Self.Emit(#9'brk #1');              { deliberate trap: div by zero }
+        EmitCallSym('_DivByZero');
+        Self.Emit(#9'brk #1');
         Self.Emit(DivGuardOk + ':');
         { Signed vs unsigned follows the EXPRESSION's result type, matching
           the QBE backend (which keys udiv/urem off BinExpr.ResolvedType).
@@ -14572,13 +14559,6 @@ begin
   end;
 end;
 
-function TArm64Backend.StrToIntChecked(): Boolean;
-begin
-  Result := (FSymTable <> nil) and
-            (FSymTable.Lookup('EConvertError') <> nil) and
-            (not SameText(FCurrentUnitName, 'SysUtils'));
-end;
-
 procedure TArm64Backend.RegisterForSlots(AStmt: TASTStmt);
 var
   I: Int;
@@ -19656,10 +19636,7 @@ end;
 
 procedure TArm64Backend.EmitRaiseInvalidCast;
 begin
-  if (FSymTable <> nil) and (FSymTable.Lookup('EInvalidCast') <> nil) then
-    EmitCallSym('SysUtils__RaiseInvalidCast')
-  else
-    EmitCallSym('_Raise_InvalidCast');
+  EmitCallSym('_Raise_InvalidCast');
 end;
 
 { ClassCreate(Cls, args...): construction from a metaclass VALUE.  The

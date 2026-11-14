@@ -56,6 +56,19 @@ function  _CurrentExceptionMessage: Pointer;
 function  _IsInstance(Obj: Pointer; Target: Pointer): Int32;
 function  _ImplementsInterface(Obj: Pointer; IntfTI: Pointer): Int32;
 function  _GetItab(Obj: Pointer; IntfTI: Pointer): Pointer;
+{ Runtime-error hooks.  Division by zero and a failed `as` call the RTL,
+  whatever the unit being compiled has in scope, so a unit's object never
+  depends on the program it was built for.  SysUtils installs a raising
+  routine for each from its initialization; without it the old behaviour
+  stays (docs/language-rationale.adoc, "Integer division by zero"). }
+procedure _SetRuntimeErrorHooks(ADivByZero, AInvalidCast: Pointer);
+{ Called by the division guard on a zero divisor: raises EDivByZero through
+  the installed hook.  Returns when none is installed, and the caller then
+  traps as an unguarded divide does (the divide itself on x86-64, brk on
+  arm64). }
+procedure _DivByZero;
+{ A failed `as`: EInvalidCast through the installed hook, else a fatal
+  runtime error.  Never returns. }
 procedure _Raise_InvalidCast;
 procedure _CheckNil(Obj: Pointer);
 { Exception unwind cleanup (docs/exception-unwind-cleanup-design.adoc).
@@ -227,6 +240,8 @@ type
   { an aggregate's release hook: releases and zeroes every managed field or
     element of the record or static array at Addr }
   TUnwAggHook = procedure(Addr: Pointer);
+  { a raising routine SysUtils installs (see _SetRuntimeErrorHooks) }
+  TRuntimeErrorHook = procedure;
 
 function _blaise_getfp: Pointer; external name '_blaise_getfp';
 procedure _StringRelease(Ptr: Pointer); external name '_StringRelease';
@@ -234,6 +249,11 @@ procedure _StringAddRef(Ptr: Pointer); external name '_StringAddRef';
 procedure _ClassRelease(Ptr: Pointer); external name '_ClassRelease';
 procedure _DynArrayRelease(Ptr: Pointer); external name '_DynArrayRelease';
 procedure _WeakClear(Slot: Pointer); external name '_WeakClear';
+
+var
+  { set once, by SysUtils' initialization; nil without SysUtils }
+  g_div_by_zero_hook: Pointer;
+  g_invalid_cast_hook: Pointer;
 
 var
   g_unw_start: Pointer;
@@ -618,8 +638,32 @@ begin
   _libc_abort();
 end;
 
-procedure _Raise_InvalidCast;
+procedure _SetRuntimeErrorHooks(ADivByZero, AInvalidCast: Pointer);
 begin
+  g_div_by_zero_hook := ADivByZero;
+  g_invalid_cast_hook := AInvalidCast;
+end;
+
+procedure _DivByZero;
+var
+  Hook: TRuntimeErrorHook;
+begin
+  if g_div_by_zero_hook <> nil then
+  begin
+    Hook := TRuntimeErrorHook(g_div_by_zero_hook);
+    Hook();
+  end;
+end;
+
+procedure _Raise_InvalidCast;
+var
+  Hook: TRuntimeErrorHook;
+begin
+  if g_invalid_cast_hook <> nil then
+  begin
+    Hook := TRuntimeErrorHook(g_invalid_cast_hook);
+    Hook();
+  end;
   DiagAbort('Runtime error: invalid typecast', 31);
 end;
 

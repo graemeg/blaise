@@ -107,7 +107,7 @@ type
     { A Single-returning METHOD call in float context comes back in s0 and
       must be widened to d0 (the D0 contract); arm64 read the stale d0. }
     procedure TestSingleMethodResult_WidenedAfterCall;
-    procedure TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
+    procedure TestStrToInt_ValidatingRtlRoutine;
     procedure TestRecordFieldStoreFromCall_ReleaseBaseSurvivesCalls;
     procedure TestFieldOfIndexedRecordGetterOnClassField_CallsGetter;
     procedure TestVariadicIntArgs_EightByteStackSlots;
@@ -1677,28 +1677,24 @@ begin
     Pos(#9'str xzr, [x0', AsmT) < 0);
 end;
 
-procedure TArm64BackendTests.TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
+procedure TArm64BackendTests.TestStrToInt_ValidatingRtlRoutine;
 const
-  { EConvertError in scope stands in for `uses SysUtils` -- it is exactly what
-    the backends look up to choose the validating wrapper }
   Src = '''
     program P;
-    type EConvertError = class end;
     begin
       WriteLn(StrToInt('42abc'));
       WriteLn(StrToInt64('99bad'))
     end.
     ''';
 begin
-  { StrToInt must reject trailing characters when SysUtils is in scope.
-    arm64 always called the lenient runtime _StrToInt, which stops at the
-    first non-digit: StrToInt('42abc') returned 42 instead of raising. }
-  AssertEquals('StrToInt -> validating wrapper', '',
-    AsmMissing(Src, 'callq SysUtils__StrToIntChecked',
-      'bl _SysUtils__StrToIntChecked'));
-  AssertEquals('StrToInt64 -> validating wrapper', '',
-    AsmMissing(Src, 'callq SysUtils__StrToInt64Checked',
-      'bl _SysUtils__StrToInt64Checked'));
+  { StrToInt must reject trailing characters when SysUtils is in the
+    program.  arm64 once always called the lenient runtime _StrToInt, which
+    stops at the first non-digit: StrToInt('42abc') returned 42 instead of
+    raising.  The validating RTL routine raises through SysUtils' hook. }
+  AssertEquals('StrToInt -> validating RTL routine', '',
+    AsmMissing(Src, 'callq _StrToIntChecked', 'bl __StrToIntChecked'));
+  AssertEquals('StrToInt64 -> validating RTL routine', '',
+    AsmMissing(Src, 'callq _StrToInt64Checked', 'bl __StrToInt64Checked'));
 end;
 
 procedure TArm64BackendTests.TestSingleMethodResult_WidenedAfterCall;

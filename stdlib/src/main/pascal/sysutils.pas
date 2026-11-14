@@ -67,15 +67,17 @@ type
   EInvalidCast = class(Exception)
   end;
 
-{ _RaiseDivByZero — raises EDivByZero('Division by zero').  Called by the
-  compiler-emitted div/mod guard; not intended for direct use.  Declared in
-  the interface so the code generator can reference the $SysUtils_RaiseDivByZero
-  symbol. }
+{ _RaiseDivByZero — raises EDivByZero('Division by zero').  The RTL's
+  division-by-zero hook, installed by this unit's initialization; not
+  intended for direct use.  It stays in the interface because code compiled
+  by a compiler before the RTL hooks calls SysUtils__RaiseDivByZero
+  directly. }
 procedure _RaiseDivByZero;
 
-{ _RaiseInvalidCast — raises EInvalidCast('Invalid class typecast').  Called
-  by the compiler-emitted check behind a failed `as`; not intended for direct
-  use.  Declared in the interface so the code generator can reference it. }
+{ _RaiseInvalidCast — raises EInvalidCast('Invalid class typecast').  The
+  RTL's failed-`as` hook, installed by this unit's initialization; not
+  intended for direct use.  In the interface for the same reason as
+  _RaiseDivByZero. }
 procedure _RaiseInvalidCast;
 
 { StrToIntDef — convert a string to Integer; return ADefault on failure. }
@@ -87,11 +89,10 @@ function StrToInt64Def(const S: string; ADefault: Int64): Int64;
 { _StrToIntChecked / _StrToInt64Checked — validating variants of the StrToInt /
   StrToInt64 built-ins.  They raise EConvertError('...') when S is empty or
   contains trailing non-digit characters, matching Delphi/FPC semantics.  The
-  code generator rewrites a StrToInt/StrToInt64 call to reference the
-  $SysUtils__StrToIntChecked symbol when SysUtils is in scope; without SysUtils
-  the lenient runtime _StrToInt is called (parses what it can, never raises).
-  Not intended for direct use — declared in the interface so codegen can link
-  them. }
+  compiler now calls the RTL's validating _StrToIntChecked, which raises
+  through the convert-error hook this unit installs; these two remain for
+  code compiled by a compiler before the RTL hooks, which calls them when
+  SysUtils is in scope.  Not intended for direct use. }
 function _StrToIntChecked(const S: string): Int;
 function _StrToInt64Checked(const S: string): Int64;
 
@@ -139,6 +140,17 @@ function GetEnvironmentString(AIndex: Int): string;
 implementation
 
 function _EnvVector: Pointer; external name '_EnvVector';
+procedure _SetRuntimeErrorHooks(ADivByZero, AInvalidCast: Pointer);
+  external name '_SetRuntimeErrorHooks';
+procedure _SetConvertErrorHook(AHook: Pointer);
+  external name '_SetConvertErrorHook';
+
+{ The RTL's convert-error hook: StrToInt was handed S, which is not a whole
+  integer. }
+procedure RaiseConvertError(const S: string);
+begin
+  raise EConvertError.Create('"' + S + '" is not a valid integer value');
+end;
 
 { Slot AIndex of the environment vector, or nil past its end. }
 function EnvEntry(AIndex: Int): PChar;
@@ -405,5 +417,13 @@ function SameFileName(const S1, S2: string): Boolean;
 begin
   Result := S1 = S2;
 end;
+
+initialization
+  { From here on the RTL raises EDivByZero, EInvalidCast and EConvertError
+    for the runtime errors every unit's code reports to it, whether or not
+    that unit uses SysUtils (docs/language-rationale.adoc, "Integer division
+    by zero"). }
+  _SetRuntimeErrorHooks(Pointer(@_RaiseDivByZero), Pointer(@_RaiseInvalidCast));
+  _SetConvertErrorHook(Pointer(@RaiseConvertError));
 
 end.

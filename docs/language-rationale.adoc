@@ -2987,18 +2987,35 @@ OnClause      = "on" [ IDENT ":" ] TypeRef DO Stmt ;
 Integer `div` and `mod` by zero raise a catchable `EDivByZero` exception
 (declared in `SysUtils`, a subclass of `Exception`) rather than trapping in
 hardware.  The code generator emits a divisor-equals-zero check before each
-integer `idiv`; when the divisor is zero it calls the runtime helper
-`_RaiseDivByZero`, which raises `EDivByZero('Division by zero')` through the
-normal exception machinery.  Every backend (QBE, native x86-64 and native
-arm64) emits the guard; on arm64, whose `sdiv` yields 0 instead of trapping,
-the fallback without `SysUtils` is a deliberate `brk` trap.
+integer divide; when the divisor is zero it calls the runtime routine
+`_DivByZero`, which raises `EDivByZero('Division by zero')` through the
+normal exception machinery when `SysUtils` is in the program.  Both native
+backends emit the guard; on arm64, whose `sdiv` yields 0 instead of
+trapping, the fallback without `SysUtils` is a deliberate `brk` trap.
 
-The guard is emitted *only when `SysUtils` is in scope* — i.e. when
-`EDivByZero` resolves through the active symbol table.  A program that does
-not use `SysUtils` cannot name the exception class anyway, and its integer
-division falls through to the hardware behaviour (a `SIGFPE` trap) as before.
-This mirrors Delphi, where `EDivByZero` lives in `System.SysUtils` and the
-catchable behaviour is tied to that unit.
+Whether the zero divisor becomes an exception is decided at run time, not
+at compile time.  The guard is emitted on every division and calls the
+runtime routine `_DivByZero`.  `SysUtils`' initialization installs
+`_RaiseDivByZero` as the runtime's division-by-zero hook, and `_DivByZero`
+calls it.  So the exception is catchable whenever `SysUtils` is part of the
+program, including a division in a unit that does not use `SysUtils` itself
+(`Generics.Collections`, say).  A program without `SysUtils` cannot name the
+exception class anyway: there `_DivByZero` returns, and the code traps
+exactly as an unguarded division does -- the divide itself, given a zero
+divisor (`SIGFPE`, `STATUS_INTEGER_DIVIDE_BY_ZERO` on Windows), on x86-64,
+and a `brk` on arm64.  This mirrors Delphi and FPC, where `SysUtils` turns
+runtime errors into exceptions by installing a hook (`ErrorProc`) in the
+`System` unit.
+
+The rule used to be decided at compile time: the guard was emitted, calling
+`SysUtils__RaiseDivByZero` directly, only when `EDivByZero` resolved
+through the symbol table of the compilation.  When a unit was compiled for a
+program, that symbol table was the program's, so a unit's object depended on
+the program that built it.  A cached unit object compiled for a program with
+`SysUtils` named a `SysUtils` symbol that a later program without it lacked,
+and the link failed.  In the other order a program using `SysUtils` silently
+lost the guard (`BUG-20261113-unit-object-depends-on-program`).  The failed
+`as` cast and `StrToInt` had the same flaw and use the same mechanism.
 
 ==== Rationale
 
@@ -3014,11 +3031,21 @@ than pre-checking every divisor.
 * *Leave it as a hardware trap* — zero runtime cost, but a zero divisor
   crashes hard and uncatchably; unacceptable for code that handles untrusted
   input.
-* *Define `EDivByZero` in the always-linked runtime so the guard is
-  unconditional* — the runtime (`blaise_exc.pas`) deliberately does not
-  depend on stdlib, and exception classes (with their vtable + TypeInfo) are
-  a stdlib concern.  Gating the guard on `SysUtils` keeps the runtime free of
-  class machinery and matches Delphi's unit placement.
+* *Define `EDivByZero` in the always-linked runtime* — the runtime
+  deliberately does not depend on stdlib, and exception classes (with their
+  vtable + TypeInfo) are a stdlib concern.  The hook keeps the runtime free
+  of class machinery: it holds a procedure pointer, nothing more.
+* *Keep the compile-time rule and make it part of the unit cache's key*,
+  recompiling a unit whose cached object was built with a different answer
+  -- the smallest change, but a unit's behaviour would still depend on the
+  program it is built for, and a cache shared by programs with and without
+  `SysUtils` (the test suites) would rebuild on every switch.
+* *Decide per unit, from the unit's own uses* -- deterministic, but a
+  division inside `Generics.Collections` would stay uncatchable even in a
+  program that uses `SysUtils`.
+* *Raise from the hardware trap's handler* -- no guard at all, but raising
+  from a signal handler (or a vectored exception handler on Windows) is not
+  portable, and arm64 has no trap to begin with.
 
 === Failed `as` cast
 
@@ -3028,10 +3055,15 @@ than pre-checking every divisor.
 an instance of the target raises a catchable `EInvalidCast` exception
 (declared in `SysUtils`, a subclass of `Exception`) with the message
 `Invalid class typecast`.  The check behind every `as` calls `SysUtils`'
-`_RaiseInvalidCast` when it fails.  Exactly as for division by zero, this is
-gated on `SysUtils` being in scope -- on `EInvalidCast` resolving through the
-active symbol table.  Without `SysUtils` a failed cast remains a fatal
-runtime error (`Runtime error: invalid typecast`).
+the runtime's `_Raise_InvalidCast` when it fails, which raises through the
+hook `SysUtils`' initialization installs (`_RaiseInvalidCast`), exactly as
+for division by zero.  Without `SysUtils` in the program a failed cast
+remains a fatal runtime error (`Runtime error: invalid typecast`).
+
+`StrToInt` and `StrToInt64` follow the same rule.  They call the runtime's
+validating `_StrToIntChecked`: a string that is not a whole integer
+(`'42abc'`) raises `EConvertError` through `SysUtils`' convert-error hook,
+and without `SysUtils` gives the lenient result (the leading digits, 42).
 
 ==== Rationale
 

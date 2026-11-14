@@ -78,6 +78,14 @@ function  _Int64ToStr(N: Int64): Pointer;
 function  _UInt64ToStr(N: UInt64): Pointer;
 function  _StrToInt(S: Pointer): Int32;
 function  _StrToInt64(S: Pointer): Int64;
+{ The StrToInt / StrToInt64 built-ins.  A string that is not a whole
+  integer goes to the convert-error hook, which SysUtils installs to raise
+  EConvertError; without it the result is _StrToInt's lenient one (the
+  leading digits).  The compiler calls these whatever is in scope, so a
+  unit's object does not depend on the program it was built for. }
+function  _StrToIntChecked(S: Pointer): Int32;
+function  _StrToInt64Checked(S: Pointer): Int64;
+procedure _SetConvertErrorHook(AHook: Pointer);
 function  _OrdAt(S: Pointer; I: Int64): Int32;
 function  _Chr(N: Int32): Pointer;
 function  _UpCase(N: Int32): Pointer;
@@ -854,6 +862,89 @@ begin
   end;
   if Neg then
     Result := -Result;
+end;
+
+type
+  { SysUtils' raising routine: S is the string StrToInt rejected }
+  TConvertErrorHook = procedure(S: Pointer);
+
+var
+  { set once, by SysUtils' initialization; nil without SysUtils }
+  GConvertErrorHook: Pointer;
+
+procedure _SetConvertErrorHook(AHook: Pointer);
+begin
+  GConvertErrorHook := AHook;
+end;
+
+{ S (a data pointer) is a whole integer: an optional sign, then decimal
+  digits or '$' and hexadecimal digits, at least one digit, nothing else. }
+function StrIsWholeInt(S: Pointer): Boolean;
+var
+  Data: PChar;
+  I, Len, C: Int;
+begin
+  Len := Int(StrLen(S));
+  if Len = 0 then
+    Exit(False);
+  Data := StrData(S);
+  I := 0;
+  C := Data[0];
+  if (C = 43) or (C = 45) then  { '+' or '-' }
+  begin
+    I := 1;
+    if I >= Len then
+      Exit(False);
+  end;
+  if Data[I] = 36 then  { '$' }
+  begin
+    I := I + 1;
+    if I >= Len then
+      Exit(False);
+    while I < Len do
+    begin
+      C := Data[I];
+      if not (((C >= 48) and (C <= 57))
+           or ((C >= 65) and (C <= 70))
+           or ((C >= 97) and (C <= 102))) then
+        Exit(False);
+      I := I + 1;
+    end;
+    Exit(True);
+  end;
+  while I < Len do
+  begin
+    C := Data[I];
+    if (C < 48) or (C > 57) then
+      Exit(False);
+    I := I + 1;
+  end;
+  Result := True;
+end;
+
+{ Hand S to the convert-error hook when it is not a whole integer; the
+  hook raises.  Returns when there is no hook or S is valid. }
+procedure CheckWholeInt(S: Pointer);
+var
+  Hook: TConvertErrorHook;
+begin
+  if (GConvertErrorHook <> nil) and not StrIsWholeInt(S) then
+  begin
+    Hook := TConvertErrorHook(GConvertErrorHook);
+    Hook(S);
+  end;
+end;
+
+function _StrToIntChecked(S: Pointer): Int32;
+begin
+  CheckWholeInt(S);
+  Result := _StrToInt(S);
+end;
+
+function _StrToInt64Checked(S: Pointer): Int64;
+begin
+  CheckWholeInt(S);
+  Result := _StrToInt64(S);
 end;
 
 { ------------------------------------------------------------------ }

@@ -206,6 +206,13 @@ type
       header), for a test that needs more units than CompileAndRunWithUnits
       takes. }
     procedure WriteScratchUnit(const AUnitSrc: string);
+    { Compile + run ASrc with the scratch directory on the unit path, writing
+      no unit: the units WriteScratchUnit put there, and the objects compiled
+      from them beside the output, are reused as they stand. }
+    function  CompileAndRunInScratch(const ASrc: string; out AStdout: string;
+                                     out AExitCode: Int): Boolean;
+    { Delete AName from the scratch directory, if it is there. }
+    procedure DeleteScratchFile(const AName: string);
   end;
 
 { The target e2e programs are compiled for: BLAISE_E2E_TARGET, else the
@@ -954,6 +961,20 @@ end;
 procedure TE2ETestCase.WriteScratchUnit(const AUnitSrc: string);
 begin
   WriteFile(FScratch + '/' + UnitNameOf(AUnitSrc) + '.pas', AUnitSrc);
+end;
+
+function TE2ETestCase.CompileAndRunInScratch(const ASrc: string;
+                                             out AStdout: string;
+                                             out AExitCode: Int): Boolean;
+begin
+  Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
+    AExitCode)
+end;
+
+procedure TE2ETestCase.DeleteScratchFile(const AName: string);
+begin
+  if FileExists(FScratch + '/' + AName) then
+    DeleteFile(FScratch + '/' + AName)
 end;
 
 function TE2ETestCase.CompileAndRunWithUnits(const AUnit1Src, AUnit2Src,

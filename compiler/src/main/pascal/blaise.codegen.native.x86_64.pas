@@ -415,20 +415,10 @@ type
 
     { Allocate a fresh local assembly label (".L<prefix><N>"). }
     function NewLabel(const APrefix: string): string;
-    { True when a catchable EDivByZero can be raised (SysUtils, which declares
-      EDivByZero + _RaiseDivByZero, is in scope).  Gates the div/mod zero
-      guard; without it a zero divisor traps in hardware as before. }
-    function DivGuardAvailable(): Boolean;
-    { A failed `as`: SysUtils' _RaiseInvalidCast (a catchable EInvalidCast)
-      when SysUtils is in scope, else the RTL's fatal _Raise_InvalidCast.
-      Never returns, so the stack is realigned for the Pascal raise path. }
+    { A failed `as`: the RTL's _Raise_InvalidCast, which raises EInvalidCast
+      through the hook SysUtils installs, else aborts.  Never returns, so the
+      stack is realigned for the Pascal raise path. }
     procedure EmitRaiseInvalidCast;
-    { True when a StrToInt/StrToInt64 call should route to the validating
-      SysUtils wrapper (raises EConvertError on invalid input) rather than
-      the lenient runtime _StrToInt.  True iff SysUtils is in scope and the
-      unit being emitted is NOT SysUtils itself (the wrapper calls StrToInt
-      and would otherwise recurse forever). }
-    function StrToIntChecked(): Boolean;
     { Register a global integer slot of the given type (idempotent; the first
       registration's type wins).  The width and signedness drive both the
       .data directive and every load/store of the slot. }
@@ -2035,27 +2025,13 @@ begin
   Inc(FLabelCount);
 end;
 
-function TX86_64Backend.DivGuardAvailable(): Boolean;
-begin
-  Result := (FSymTable <> nil) and (FSymTable.Lookup('EDivByZero') <> nil);
-end;
-
+{ Whatever is in scope: the RTL decides, through the hook SysUtils installs,
+  so a unit's object does not depend on the program it is compiled for
+  (BUG-20261113-unit-object-depends-on-program). }
 procedure TX86_64Backend.EmitRaiseInvalidCast;
 begin
-  if (FSymTable <> nil) and (FSymTable.Lookup('EInvalidCast') <> nil) then
-  begin
-    Self.Emit(#9'andq $-16, %rsp');
-    Self.Emit(#9'callq SysUtils__RaiseInvalidCast');
-  end
-  else
-    Self.Emit(#9'callq _Raise_InvalidCast');
-end;
-
-function TX86_64Backend.StrToIntChecked(): Boolean;
-begin
-  Result := (FSymTable <> nil)
-        and (FSymTable.Lookup('EConvertError') <> nil)
-        and (not SameText(FCurrentUnitName, 'SysUtils'));
+  Self.Emit(#9'andq $-16, %rsp');
+  Self.Emit(#9'callq _Raise_InvalidCast');
 end;
 
 procedure TX86_64Backend.AddGlobal(const AName: string; AType: TTypeDesc);
@@ -9760,21 +9736,14 @@ begin
     end;
     if IsBuiltinCall(FC, 'StrToInt') and (FC.Args.Count = 1) then
     begin
-      if Self.StrToIntChecked() then
-        Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]),
-          'SysUtils__StrToIntChecked')
-      else
-        Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToInt');
+      { validating: EConvertError through SysUtils' hook, else lenient }
+      Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToIntChecked');
       Self.Emit(#9'movslq %eax, %rax');
       Exit;
     end;
     if IsBuiltinCall(FC, 'StrToInt64') and (FC.Args.Count = 1) then
     begin
-      if Self.StrToIntChecked() then
-        Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]),
-          'SysUtils__StrToInt64Checked')
-      else
-        Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToInt64');
+      Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StrToInt64Checked');
       Exit;
     end;
     if IsBuiltinCall(FC, 'PChar') and (FC.Args.Count = 1) then
@@ -10999,18 +10968,19 @@ begin
           Self.Emit(#9'imulq %rcx, %rax');
       boDiv, boMod:
         begin
-          { Divisor-zero guard: when SysUtils is in scope, a zero divisor
-            raises a catchable EDivByZero instead of trapping (SIGFPE).
-            The divisor is in %rcx; SysUtils__RaiseDivByZero longjmps and
-            never returns. }
-          if Self.DivGuardAvailable() then
-          begin
-            DivOkLbl := Self.NewLabel('divok');
-            Self.Emit(#9'testq %rcx, %rcx');
-            Self.Emit(#9'jne ' + DivOkLbl);
-            Self.Emit(#9'callq SysUtils__RaiseDivByZero');
-            Self.Emit(DivOkLbl + ':');
-          end;
+          { Divisor-zero guard, whatever is in scope: the RTL's _DivByZero
+            raises EDivByZero through the hook SysUtils installs, so a unit's
+            object does not depend on its program
+            (BUG-20261113-unit-object-depends-on-program).  Without the hook
+            it returns, and the divide below traps as an unguarded one does
+            (SIGFPE, STATUS_INTEGER_DIVIDE_BY_ZERO on Windows): the call may
+            have changed %rcx, so the divisor is zeroed again. }
+          DivOkLbl := Self.NewLabel('divok');
+          Self.Emit(#9'testq %rcx, %rcx');
+          Self.Emit(#9'jne ' + DivOkLbl);
+          Self.Emit(#9'callq _DivByZero');
+          Self.Emit(#9'xorl %ecx, %ecx');
+          Self.Emit(DivOkLbl + ':');
           { 64-bit divide.  Choose signed vs unsigned by the EXPRESSION's
             result type, matching the QBE backend (which keys udiv/urem off
             BinExpr.ResolvedType).  Requiring both operands to be unsigned

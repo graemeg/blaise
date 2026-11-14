@@ -180,6 +180,8 @@ uses
   cp.test.targettoolkit,
   cp.test.targetnames,
   cp.test.e2e.targetnames,
+  cp.test.rterrorhooks,
+  cp.test.e2e.rterrorhooks,
   cp.test.nestedshadow,
   cp.test.e2e.nestedshadow,
   cp.test.afterconstruction,

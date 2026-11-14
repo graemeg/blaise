@@ -1721,13 +1721,17 @@ bug noted under _Open_ below; each passes alone.  In detail:
   `ParamStr(0)` gave the command line's first word, so a compiler started
   as a bare `blaise.exe` could not find the `blaise.cfg` beside it -- it is
   now `GetModuleFileNameW`'s full path, as in Delphi and FPC.
-* *Open:* a cached unit object depends on whether the program uses
-  `SysUtils` (`BUG-20261113-unit-object-depends-on-program`): a
-  `runtime.arc.o` an earlier ARC test compiled references
+* *Open:* an implementation-section type cannot size itself on an
+  implementation-section constant
+  (`BUG-20261113-impl-type-impl-const-bound`).
+* *Fixed after M7:* a cached unit object depended on whether the program
+  used `SysUtils` (`BUG-20261113-unit-object-depends-on-program`): a
+  `runtime.arc.o` an earlier ARC test compiled referenced
   `SysUtils__RaiseDivByZero`, which a later program without `SysUtils`
-  lacks.  And an
-  implementation-section type cannot size itself on an
-  implementation-section constant.
+  lacked, and the ARC suite failed when run whole in the guest.  Division by
+  zero, a failed `as` and `StrToInt` now call the RTL, which raises through
+  hooks `SysUtils` installs (language rationale, "Integer division by
+  zero").
 
 == Risks
 
