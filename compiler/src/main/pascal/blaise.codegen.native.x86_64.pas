@@ -1424,6 +1424,11 @@ type
     function UnwRecvBufOpen(AObjExpr: TASTExpr): Int;
     function EmitCtorHoldBegin(): Int;
     procedure EmitCtorHoldEnd(var AHandle: Int);
+    { TObject.AfterConstruction on the new instance in %rax, left there.
+      ADynamic: the runtime class is not known here (a class reference),
+      so the call goes through the instance's vtable; otherwise AClass IS
+      the runtime class and its override, if any, is called directly. }
+    procedure EmitAfterConstruction(AClass: TTypeDesc; ADynamic: Boolean);
     procedure UnwStrTempClose(var AHandle: Int);
     procedure UnwPendOpen(AIdx: Int);
     procedure UnwPendClose(AIdx: Int);
@@ -4615,6 +4620,7 @@ begin
     Self.Emit(#9'.quad typeinfo_TObject');
     Self.Emit(#9'.quad TObject_Destroy');
     Self.Emit(#9'.quad TObject_ToString');
+    Self.Emit(#9'.quad TObject_AfterConstruction');
 
     Self.Emit('.balign 8');
     Self.Emit('.globl vtable_TCustomAttribute');
@@ -4622,6 +4628,7 @@ begin
     Self.Emit(#9'.quad typeinfo_TCustomAttribute');
     Self.Emit(#9'.quad TObject_Destroy');
     Self.Emit(#9'.quad TObject_ToString');
+    Self.Emit(#9'.quad TObject_AfterConstruction');
   end;
 
   for I := 0 to ATypeDecls.Count - 1 do
@@ -10121,6 +10128,7 @@ begin
               TMethodDecl(FC.ResolvedDecl).OwnerTypeName, 'Create')]));
         Self.EmitCtorHoldEnd(UnwH);
       end;
+      Self.EmitAfterConstruction(nil, True);
       Exit;
     end;
     if IsBuiltinCall(FC, 'OrdAt') and (FC.Args.Count = 2) and
@@ -12393,6 +12401,7 @@ begin
       Self.UnwStrTempClose(UnwH);
       Self.Emit(#9'popq %rax');
     end;
+    Self.EmitAfterConstruction(FAE.ResolvedType, False);
     { %rax = new instance pointer. }
     Exit;
   end;
@@ -12784,6 +12793,7 @@ begin
         Self.EmitCtorHoldEnd(UnwH);
       end;
     end;
+    Self.EmitAfterConstruction(RT, ACall.IsMetaclassDispatch);
     Exit;
   end;
 
@@ -14767,6 +14777,7 @@ begin
         Self.EmitCtorHoldEnd(UnwH);
       end;
     end;
+    Self.EmitAfterConstruction(RT, True);
     { Discarded result: free the rc=1 instance. }
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(#9'callq _ClassRelease');
@@ -27539,6 +27550,45 @@ begin
   Self.Emit(#9'addq $16, %rsp');
   Self.Emit(#9'movq %rbx, %rax');
   Self.Emit(#9'popq %rbx');
+end;
+
+{ Called once a construction's outermost constructor has returned, with the
+  instance's owned reference in %rax.  The instance is held as a constructor
+  call's is (EmitCtorHoldBegin), so an AfterConstruction that raises
+  releases it -- destroying it, as a raising constructor does. }
+procedure TX86_64Backend.EmitAfterConstruction(AClass: TTypeDesc;
+  ADynamic: Boolean);
+var
+  RT: TRecordTypeDesc;
+  Slot: Int;
+  Impl: string;
+  UnwH: Int;
+begin
+  Slot := AFTER_CONSTRUCTION_SLOT;
+  Impl := '';
+  if not ADynamic then
+  begin
+    if not (AClass is TRecordTypeDesc) then Exit;
+    RT := TRecordTypeDesc(AClass);
+    Slot := RT.FindVTableSlot('AfterConstruction');
+    if Slot < 0 then Exit;
+    Impl := RT.VTableEntryAt(Slot).ImplName;
+    if (Length(Impl) > 0) and (StrAt(Impl, 0) = 36) then
+      Impl := StrCopyTail(Impl, 1);
+    { TObject's is empty: nothing to call }
+    if (Impl = '') or SameText(Impl, 'TObject_AfterConstruction') then Exit;
+  end;
+  UnwH := Self.EmitCtorHoldBegin();
+  Self.Emit(#9'movq %rbx, %rdi');
+  if ADynamic then
+  begin
+    Self.Emit(#9'movq (%rdi), %rax');
+    Self.Emit(Format(#9'movq %d(%%rax), %%rax', [(Slot + 1) * 8]));
+    Self.Emit(#9'callq *%rax');
+  end
+  else
+    Self.Emit(#9'callq ' + NativeMangle(Impl));
+  Self.EmitCtorHoldEnd(UnwH);
 end;
 
 procedure TX86_64Backend.UnwStrTempClose(var AHandle: Int);

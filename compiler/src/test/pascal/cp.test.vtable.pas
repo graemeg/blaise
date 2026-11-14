@@ -496,8 +496,8 @@ const
         ''';
 begin
   AssertEquals('the instance vtable holds the override', '',
-    AsmMissing(Src, 'TObject_ToString' + #10#9 + '.quad TWork_Int64_Wait',
-      'TObject_ToString' + #10#9 + '.quad _TWork_Int64_Wait'));
+    AsmMissing(Src, 'TObject_AfterConstruction' + #10#9 + '.quad TWork_Int64_Wait',
+      'TObject_AfterConstruction' + #10#9 + '.quad _TWork_Int64_Wait'));
 end;
 
 initialization

@@ -3706,6 +3706,78 @@ records it (`IsConstructor`, carried in the `.bif`).
 
 ---
 
+== `AfterConstruction` — A Hook for a Finished Construction
+
+=== Decision
+
+`TObject` declares a virtual `AfterConstruction`, empty by default, as in
+Delphi and FPC.  The compiler calls it once on a new instance, after the
+*outermost* constructor of the construction has returned -- not after an
+`inherited Create(...)` inside the chain.  A class overrides it to act on an
+instance that every constructor in its hierarchy has finished initialising:
+
+[source,pascal]
+----
+procedure TWidget.AfterConstruction;
+begin
+  inherited AfterConstruction();
+  Self.Register();              { every constructor has run }
+end;
+----
+
+Every form of construction calls it: `TFoo.Create(...)`, `TFoo.Create`
+without parentheses, `TFoo.Create();` as a statement whose result is
+discarded, a class-reference variable (`C.Create()`), and `ClassCreate`.
+An exception raised by `AfterConstruction` propagates, and the instance is
+released -- destroyed, as when a constructor raises.
+
+=== Lowering
+
+`AfterConstruction` is `TObject`'s third built-in virtual (slot 2, after
+`Destroy` and `ToString`, whose offsets are unchanged).  The cost is chosen to
+be nothing for a class that does not use it:
+
+* `TFoo.Create(...)` constructs exactly a `TFoo`, so the compiler knows
+  statically which `AfterConstruction` applies.  When it is `TObject`'s,
+  no call is emitted; otherwise the override is called directly.
+* Construction through a class reference does not know the runtime class,
+  so it calls the slot through the new instance's vtable.
+
+The call runs while the constructor call's owned reference is held (see
+*A constructor call returns an owned reference* under ARC), so a thread
+started there, or any retain and release of `Self`, cannot take the instance
+to a count of 0.
+
+=== Rationale
+
+Without the hook, a base class whose constructor starts work that uses the
+instance -- a thread, a registration, a callback -- exposes a partly built
+object: the derived constructor's statements after `inherited Create` have
+not run yet.  For `TThread` that was a data race: `Execute` could read
+fields the subclass constructor had not yet set, and whether it did
+depended on scheduling.  Delphi and FPC both close this the same way
+(FPC's `TThread.AfterConstruction` resumes the thread its constructor
+created suspended), so ported code is written on that assumption.  Calling
+the hook from the compiler, rather than requiring a base class to know when
+the outermost constructor ends, is the only way to give it that meaning: a
+constructor cannot tell whether it was called by `inherited`.
+
+=== Alternatives considered
+
+* *Document "set fields before `inherited Create(False)`"* -- rejected.  The
+  idiomatic order would be silently wrong, and code ported from Delphi or
+  FPC would race without any diagnostic.
+* *A compiler warning for statements after `inherited Create(False)` in a
+  `TThread` descendant* -- rejected.  It special-cases one library class,
+  misses fields set through a helper method or a deeper subclass's
+  constructor, and its remedy is to reorder code that is correct in Delphi
+  and FPC.
+* *Make `TThread.Create` never start the thread* (explicit `Start` always)
+  -- rejected: incompatible with `Create(False)` as Delphi and FPC define it.
+* *`BeforeDestruction`* -- not added yet.  Delphi and FPC pair it with
+  `AfterConstruction`; under ARC the destructor already runs once, when the
+  last reference is released, and no client needs a separate hook today.
+
 == Constructors and Static Methods Through a Receiver
 
 === Decision

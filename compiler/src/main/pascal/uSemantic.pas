@@ -15986,8 +15986,10 @@ begin
 
   if FCurrentClass.Parent = nil then
   begin
-    { No explicit parent — implicit TObject. inherited Create/Destroy are no-ops. }
-    if SameText(ACall.Name, 'Create') or SameText(ACall.Name, 'Destroy') then
+    { No explicit parent — implicit TObject. inherited Create/Destroy (and
+      TObject's empty AfterConstruction) are no-ops. }
+    if SameText(ACall.Name, 'Create') or SameText(ACall.Name, 'Destroy') or
+       SameText(ACall.Name, 'AfterConstruction') then
     begin
       ACall.ResolvedParentType := nil;
       ACall.ResolvedMethod     := nil;
@@ -16013,8 +16015,10 @@ begin
   if MDecl = nil then
   begin
     { Constructor/destructor chaining: if the parent doesn't explicitly declare
-      Create or Destroy, the call chains up to TObject (a no-op in ARC). }
-    if SameText(ACall.Name, 'Create') or SameText(ACall.Name, 'Destroy') then
+      Create or Destroy, the call chains up to TObject (a no-op in ARC); so
+      does AfterConstruction, which TObject's is empty. }
+    if SameText(ACall.Name, 'Create') or SameText(ACall.Name, 'Destroy') or
+       SameText(ACall.Name, 'AfterConstruction') then
     begin
       ACall.ResolvedParentType := ParentType;
       ACall.ResolvedMethod     := nil;

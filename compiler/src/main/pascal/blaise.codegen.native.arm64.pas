@@ -347,6 +347,11 @@ type
     function UnwStrOpndOpen(AExpr: TASTExpr; const ASlot: string): Int;
     procedure UnwStrOpndClose(var AHandle: Int);
     procedure EmitCtorBodyCall(AMethod: TMethodDecl; AArgs: TObjectList);
+    { TObject.AfterConstruction on the new instance in x0, left there.
+      ADynamic: the runtime class is not known here (a class reference),
+      so the call goes through the instance's vtable; otherwise AClass IS
+      the runtime class and its override, if any, is called directly. }
+    procedure EmitAfterConstruction(AClass: TTypeDesc; ADynamic: Boolean);
     function UnwRecArgOpen(AArg: TASTExpr): Int;
     function UnwClassSlotOpen(const ASlot: string): Int;
     function UnwShadowOpen(AKind: Int): Int;
@@ -1780,6 +1785,53 @@ begin
     if Lbl <> '' then Self.Emit(Lbl + ':');
   end;
   EmitMethodCallCommon(AMethod, 'Create', AArgs);
+  UnwStrOpndClose(H);
+  EmitLoadSlot('x0', Slot);
+  FOpndTop := FOpndTop - 1;
+end;
+
+{ Called once a construction's outermost constructor has returned, with the
+  instance's owned reference in x0.  The instance is parked and covered as
+  EmitCtorBodyCall's is, so an AfterConstruction that raises releases it --
+  destroying it, as a raising constructor does. }
+procedure TArm64Backend.EmitAfterConstruction(AClass: TTypeDesc;
+  ADynamic: Boolean);
+var
+  RT: TRecordTypeDesc;
+  VSlot, Off, H: Int;
+  Impl, Slot, Lbl: string;
+begin
+  VSlot := AFTER_CONSTRUCTION_SLOT;
+  Impl := '';
+  if not ADynamic then
+  begin
+    if not (AClass is TRecordTypeDesc) then Exit;
+    RT := TRecordTypeDesc(AClass);
+    VSlot := RT.FindVTableSlot('AfterConstruction');
+    if VSlot < 0 then Exit;
+    Impl := RT.VTableEntryAt(VSlot).ImplName;
+    if (Length(Impl) > 0) and (StrAt(Impl, 0) = Ord('$')) then
+      Impl := StrCopyTail(Impl, 1);
+    { TObject's is empty: nothing to call }
+    if (Impl = '') or SameText(Impl, 'TObject_AfterConstruction') then Exit;
+  end;
+  Slot := OpndSlot(FOpndTop);
+  FOpndTop := FOpndTop + 1;
+  EmitStoreSlot('x0', Slot);
+  H := -1;
+  if (FUnw <> nil) and FFrame.TryGetValue(Slot, Off) then
+  begin
+    H := FUnw.OpenRange(UNW_CLASS, -Off, 0, 0, False, Lbl);
+    if Lbl <> '' then Self.Emit(Lbl + ':');
+  end;
+  if ADynamic then
+  begin
+    Self.Emit(#9'ldr x9, [x0]');
+    Self.Emit(Format(#9'ldr x9, [x9, #%d]', [(VSlot + 1) * 8]));
+    Self.Emit(#9'blr x9');
+  end
+  else
+    EmitCallSym(CodegenMangle(Impl));
   UnwStrOpndClose(H);
   EmitLoadSlot('x0', Slot);
   FOpndTop := FOpndTop - 1;
@@ -18232,6 +18284,7 @@ begin
     references must go through DarwinSym too or the vtable slot dangles }
   Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_Destroy')]));
   Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_ToString')]));
+  Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_AfterConstruction')]));
 
   { TCustomAttribute base stubs: attribute classes declare it as their
     parent, so the typeinfo chain needs a real symbol here }
@@ -18260,6 +18313,7 @@ begin
   Self.Emit(Format(#9'.quad %s', [TypeinfoSym('TCustomAttribute')]));
   Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_Destroy')]));
   Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_ToString')]));
+  Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_AfterConstruction')]));
 
   for I := 0 to FClassDecls.Count - 1 do
   begin
@@ -19395,6 +19449,7 @@ begin
     MD := TMethodDecl(AStmt.ResolvedMethod);
     if MD <> nil then
       EmitCtorBodyCall(MD, AStmt.Args);
+    EmitAfterConstruction(AStmt.ResolvedClassType, True);
     EmitCallSym('_ClassRelease');
     Exit;
   end;
@@ -19631,16 +19686,18 @@ begin
   end
   else
     EmitCallSym('_ClassCreate');
-  if AExpr.ResolvedDecl = nil then
-    Exit;
-  CtorArgs := TObjectList.Create(False);
-  try
-    for I := 1 to AExpr.Args.Count - 1 do
-      CtorArgs.Add(AExpr.Args.Items[I]);
-    EmitCtorBodyCall(TMethodDecl(AExpr.ResolvedDecl), CtorArgs);
-  finally
-    CtorArgs.Free();
+  if AExpr.ResolvedDecl <> nil then
+  begin
+    CtorArgs := TObjectList.Create(False);
+    try
+      for I := 1 to AExpr.Args.Count - 1 do
+        CtorArgs.Add(AExpr.Args.Items[I]);
+      EmitCtorBodyCall(TMethodDecl(AExpr.ResolvedDecl), CtorArgs);
+    finally
+      CtorArgs.Free();
+    end;
   end;
+  EmitAfterConstruction(nil, True);
 end;
 
 procedure TArm64Backend.EmitMethodCallExpr(AExpr: TMethodCallExpr);
@@ -19685,6 +19742,7 @@ begin
         implicit default constructor).  An undeclared Create* variant WITH
         args never reaches codegen — the semantic pass desugars CreateFmt
         and rejects any other arg-bearing undeclared ctor (BUG-046 fix). }
+      EmitAfterConstruction(AExpr.ResolvedClassType, True);
       Exit;
     end;
     Sym := '';
@@ -19748,6 +19806,7 @@ begin
       implicit default constructor).  An undeclared Create* variant WITH
       args never reaches codegen — the semantic pass desugars CreateFmt
       and rejects any other arg-bearing undeclared ctor (BUG-046 fix). }
+    EmitAfterConstruction(AExpr.ResolvedClassType, False);
     Exit;
   end;
   if AExpr.IsBuiltinToString then

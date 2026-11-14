@@ -38,6 +38,9 @@ TObject_Destroy:
 TObject_ToString:
         xorl %eax, %eax
         ret
+        .globl TObject_AfterConstruction
+TObject_AfterConstruction:
+        ret
 
 # memset(dest, byte, count), System V: the frame zeroing of large locals.
         .globl memset

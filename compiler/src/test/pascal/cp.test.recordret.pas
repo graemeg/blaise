@@ -304,9 +304,11 @@ const
     end.
     ''';
 begin
+  { Calc is TBase's first own virtual: slot 3 (offset 32), after TObject's
+    Destroy, ToString and AfterConstruction }
   AssertEquals('Calc goes through the vtable', '',
     AsmMissing(Src,
-      #9'movq (%rsi), %rax'#10#9'movq 24(%rax), %rax'#10#9'callq *%rax',
+      #9'movq (%rsi), %rax'#10#9'movq 32(%rax), %rax'#10#9'callq *%rax',
       #9'blr '));
 end;
 

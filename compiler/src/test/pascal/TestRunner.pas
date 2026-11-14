@@ -182,6 +182,8 @@ uses
   cp.test.e2e.targetnames,
   cp.test.nestedshadow,
   cp.test.e2e.nestedshadow,
+  cp.test.afterconstruction,
+  cp.test.e2e.afterconstruction,
   cp.test.platformlayout.freebsd,
   cp.test.platformlayout.darwin,
   cp.test.entitlements,

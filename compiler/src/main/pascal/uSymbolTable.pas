@@ -1036,6 +1036,11 @@ const
     control byte can never collide with a real unit name. }
   PreMangledGlobalOwner = #1'premangled';
 
+  { TObject's third built-in virtual slot, after Destroy (0) and ToString
+    (1).  The vtable's word 0 is the typeinfo, so slot N lives at offset
+    (N + 1) * 8. }
+  AFTER_CONSTRUCTION_SLOT = 2;
+
 implementation
 
 uses
@@ -2422,6 +2427,10 @@ begin
   TObjectDesc := NewClassType('TObject');
   TObjectDesc.AddVTableSlot('Destroy',  '$TObject_Destroy');
   TObjectDesc.AddVTableSlot('ToString', '$TObject_ToString');
+  { called once on a new instance after its outermost constructor returns
+    (the backends' EmitAfterConstruction); slot 2, after the two above, so
+    their offsets are unchanged }
+  TObjectDesc.AddVTableSlot('AfterConstruction', '$TObject_AfterConstruction');
   Define(TSymbol.Create('TObject', skType, TObjectDesc));
 
   { TCustomAttribute — base class for user-defined custom attributes.

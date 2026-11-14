@@ -54,7 +54,11 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 36; { v36: a procedural type's PROC and generic-proc
+  IFACE_VERSION = 37; { v37: TObject gains a third built-in virtual,
+                          AfterConstruction (slot 2), so every class's own
+                          vtable slots -- recorded in a cached interface --
+                          start one later.
+                        v36: a procedural type's PROC and generic-proc
                           payloads carry its CallingConv after IsReference
                           ('cdecl' or ''), so the C convention survives a
                           cached import.

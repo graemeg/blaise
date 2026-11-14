@@ -62,6 +62,7 @@ function  _StringEquals(S1, S2: Pointer): Int32;
 function  _StringConcat(S1, S2: Pointer): Pointer;
 procedure TObject_Destroy(Self: Pointer);
 function  TObject_ToString(Self: Pointer): Pointer;
+procedure TObject_AfterConstruction(Self: Pointer);
 function  _MethodAddress(Self, Name: Pointer): Pointer;
 function  _InheritsFrom(AChild, AParent: Pointer): Boolean;
 function  _ClassCreate(TInfo: Pointer): Pointer;
@@ -774,9 +775,17 @@ procedure TObject_Destroy(Self: Pointer);
 begin
 end;
 
+{ TObject.AfterConstruction: nothing to do.  The compiler calls the slot on
+  a new instance after its outermost constructor has returned; a class that
+  does not override it gets no call at all. }
+procedure TObject_AfterConstruction(Self: Pointer);
+begin
+end;
+
 { TObject_ToString: returns the class name as an immortal string.
   Instance layout: Self[0] = vptr -> vtable.
-  Vtable layout:   vtable[0] = typeinfo, vtable[1] = Destroy, vtable[2] = ToString.
+  Vtable layout:   vtable[0] = typeinfo, vtable[1] = Destroy, vtable[2] = ToString,
+                   vtable[3] = AfterConstruction.
   Typeinfo layout: typeinfo[0]=parent, typeinfo[1]=impllist, typeinfo[2]=classname ptr. }
 function TObject_ToString(Self: Pointer): Pointer;
 var
