@@ -30,6 +30,12 @@ type
       built-in and stopped with "Write/WriteLn argument of a type with no
       text form" }
     procedure TestCodegen_MethodNamedWrite_CallsTheMethod;
+    { a nested routine calls a method on a class local of its enclosing
+      routine, with more arguments than the integer registers hold: the
+      receiver is the captured outer slot.  The stack-arguments path of
+      x86-64 loaded it by name, as a global symbol that does not exist
+      (BUG-20261119-x86-stackargs-captured-receiver) }
+    procedure TestCodegen_StackArgsCall_CapturedReceiver_NotGlobal;
     { ------------------------------------------------------------------ }
     { Lexer                                                                }
     { ------------------------------------------------------------------ }
@@ -489,6 +495,48 @@ begin
       'callq TH_Get', 'N(%rip)'));
   AssertTrue('arm64 statement: N loaded after the receiver call',
     LoadBetween(A, 'bl _MkH', 'bl _TH_Put', '_g_N@PAGEOFF'));
+end;
+
+procedure TMethodTests.TestCodegen_StackArgsCall_CapturedReceiver_NotGlobal;
+const
+  Src = '''
+    program P;
+    type
+      TP = class
+        procedure C6(A, B, C, D, E, F: Int);
+        function F6(A, B, C, D, E, F: Int): Int;
+        procedure V6(A, B, C, D, E, F: Int); virtual;
+      end;
+    procedure TP.C6(A, B, C, D, E, F: Int); begin end;
+    function TP.F6(A, B, C, D, E, F: Int): Int; begin Result := A end;
+    procedure TP.V6(A, B, C, D, E, F: Int); begin end;
+    procedure Outer();
+    var
+      Obj: TP;
+      N: Int;
+      procedure Inner();
+      begin
+        Obj.C6(1, 2, 3, 4, 5, 6);
+        N := Obj.F6(1, 2, 3, 4, 5, 6);
+        Obj.V6(1, 2, 3, 4, 5, 6);
+      end;
+    begin
+      Obj := TP.Create();
+      Inner();
+    end;
+    begin
+      Outer();
+    end.
+    ''';
+var
+  X, A: string;
+begin
+  X := GenAsm(Src, TargetX86_64);
+  A := GenAsm(Src, TargetArm64);
+  AssertTrue('x86-64 reads no global Obj', Pos('Obj(%rip)', X) < 0);
+  AssertTrue('arm64 reads no global Obj', Pos('_g_Obj', A) < 0);
+  AssertTrue('x86-64 calls C6', Pos('callq TP_C6', X) >= 0);
+  AssertTrue('x86-64 calls F6', Pos('callq TP_F6', X) >= 0);
 end;
 
 procedure TMethodTests.TestCodegen_MethodNamedWrite_CallsTheMethod;

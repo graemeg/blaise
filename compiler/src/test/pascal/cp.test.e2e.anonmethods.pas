@@ -118,6 +118,11 @@ type
       backends (they previously miscompiled on v0.12.0 and segfaulted the
       native codegen afterwards). }
     procedure TestRun_NestedRoutineInMethod_CapturesLocal;
+    { a nested routine or closure calls methods on captured class, record
+      and var-param receivers with more arguments than the integer registers
+      hold (BUG-20261119-x86-stackargs-captured-receiver: x86-64 loaded a
+      captured class receiver as a global, which did not link) }
+    procedure TestRun_NestedRoutine_StackArgsCall_CapturedReceivers;
     { BUG-032: a nested routine that uses nothing from its enclosing routine
       runs through a plain procedure pointer; one that captures is refused at
       compile time (it used to run and print garbage, or segfault). }
@@ -1280,6 +1285,90 @@ begin
     CompileNativeCLI(SrcCapture, False, '', BinFile, ToolOut) <> 0);
   AssertTrue('explains the capture: ' + ToolOut,
     Pos('''Inner'' uses variables of its enclosing routine', ToolOut) >= 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedRoutine_StackArgsCall_CapturedReceivers;
+const Src =
+  '''
+  program P;
+  type
+    TP = class
+      N: Int;
+      procedure C6(A, B, C, D, E, F: Int);
+      function F6(A, B, C, D, E, F: Int): Int;
+      procedure V6(A, B, C, D, E, F: Int); virtual;
+    end;
+    TR = record
+      N: Int;
+      procedure R6(A, B, C, D, E, F: Int);
+      function G6(A, B, C, D, E, F: Int): Int;
+    end;
+    TProc = reference to procedure;
+  procedure TP.C6(A, B, C, D, E, F: Int);
+  begin
+    WriteLn('C6 ', N + A + B + C + D + E + F)
+  end;
+  function TP.F6(A, B, C, D, E, F: Int): Int;
+  begin
+    Result := N + A + B + C + D + E + F
+  end;
+  procedure TP.V6(A, B, C, D, E, F: Int);
+  begin
+    WriteLn('V6 ', N + A + B + C + D + E + F)
+  end;
+  procedure TR.R6(A, B, C, D, E, F: Int);
+  begin
+    WriteLn('R6 ', N + A + B + C + D + E + F)
+  end;
+  function TR.G6(A, B, C, D, E, F: Int): Int;
+  begin
+    Result := N + A + B + C + D + E + F
+  end;
+  procedure Outer(var VP: TP; var VR: TR);
+  var
+    Obj: TP;
+    R: TR;
+    Q: TProc;
+    procedure Inner();
+    begin
+      Obj.C6(1, 2, 3, 4, 5, 6);
+      WriteLn('F6 ', Obj.F6(1, 2, 3, 4, 5, 6));
+      Obj.V6(1, 2, 3, 4, 5, 6);
+      R.R6(1, 2, 3, 4, 5, 6);
+      WriteLn('G6 ', R.G6(1, 2, 3, 4, 5, 6));
+      VP.C6(1, 2, 3, 4, 5, 6);
+      WriteLn('VF6 ', VP.F6(1, 2, 3, 4, 5, 6));
+      VR.R6(1, 2, 3, 4, 5, 6);
+      WriteLn('VG6 ', VR.G6(1, 2, 3, 4, 5, 6))
+    end;
+  begin
+    Obj := TP.Create();
+    Obj.N := 100;
+    R.N := 200;
+    Inner();
+    Q := procedure
+      begin
+        Obj.C6(2, 2, 3, 4, 5, 6);
+        WriteLn('QF6 ', Obj.F6(2, 2, 3, 4, 5, 6))
+      end;
+    Q()
+  end;
+  var
+    GP: TP;
+    GR: TR;
+  begin
+    GP := TP.Create();
+    GP.N := 300;
+    GR.N := 400;
+    Outer(GP, GR)
+  end.
+  ''';
+begin
+  AssertRunsOnAll(Src,
+    'C6 121' + LineEnding + 'F6 121' + LineEnding + 'V6 121' + LineEnding +
+    'R6 221' + LineEnding + 'G6 221' + LineEnding + 'C6 321' + LineEnding +
+    'VF6 321' + LineEnding + 'R6 421' + LineEnding + 'VG6 421' + LineEnding +
+    'C6 122' + LineEnding + 'QF6 122' + LineEnding, 0)
 end;
 
 procedure TE2EAnonMethodTests.TestRun_NestedRoutineInMethod_CapturesLocal;

@@ -12859,19 +12859,10 @@ begin
         Self.Emit(#9'movq (%r10), %r10');
       end
       else
-      begin
-        if Self.IsCaptured(ACall.ObjectName) then
-        begin
-          { Captured outer class local: _cap_ holds the OUTER slot's
-            address — dereference it for the object pointer.  Falling
-            through to the global path bound a nonexistent global symbol
-            (nested-proc receiver bug, 2026-07-12). }
-          Self.Emit(Format(#9'movq %s, %%r10',
-            [Self.VarOperand('_cap_' + ACall.ObjectName)]));
-          Self.Emit(#9'movq (%r10), %r10');
-        end
-        else Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
-      end;
+        { a local, a global, or a class local captured from an enclosing
+          routine (through its '_cap_' slot; loading the name bound a
+          global symbol that does not exist, 2026-07-12) }
+        Self.EmitVarBaseToReg(ACall.ObjectName, False, '%r10');
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
       Self.Emit(#9'movq %rbx, %r10')      { record-call receiver address }
@@ -12950,9 +12941,10 @@ begin
         Self.Emit(#9'movq (%rax), %rax');
       end
       else
-      begin
-        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
-      end;
+        { as in the register path: a captured class local is reached through
+          its '_cap_' slot, not loaded by name as a global
+          (BUG-20261119-x86-stackargs-captured-receiver) }
+        Self.EmitVarBaseToReg(ACall.ObjectName, False, '%rax');
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
       Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
@@ -15137,15 +15129,7 @@ begin
       Self.Emit(#9'movq (%r10), %r10');
     end
     else if ACall.ObjectName <> '' then
-    begin
-      if Self.IsCaptured(ACall.ObjectName) then
-      begin
-        Self.Emit(Format(#9'movq %s, %%r10',
-          [Self.VarOperand('_cap_' + ACall.ObjectName)]));
-        Self.Emit(#9'movq (%r10), %r10');
-      end
-      else Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
-    end
+      Self.EmitVarBaseToReg(ACall.ObjectName, False, '%r10')
     else if RecvSave <> '' then
       Self.Emit(Format(#9'movq %s, %%r10', [RecvSave]))
     else if ACall.ObjExpr <> nil then
@@ -15212,9 +15196,9 @@ begin
       Self.Emit(#9'movq (%rax), %rax');
     end
     else if ACall.ObjectName <> '' then
-    begin
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
-    end
+      { a captured class local through its '_cap_' slot, as in the register
+        path (BUG-20261119-x86-stackargs-captured-receiver) }
+      Self.EmitVarBaseToReg(ACall.ObjectName, False, '%rax')
     else if RecvSave <> '' then
       Self.Emit(Format(#9'movq %s, %%rax', [RecvSave]))
     else if ACall.ObjExpr <> nil then
