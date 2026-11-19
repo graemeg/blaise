@@ -103,6 +103,7 @@ TBinaryExpr.Op  serialise
 TBinaryExpr.Left  serialise
 TBinaryExpr.Right  serialise
 TBinaryExpr.LoweredCall  safe
+TBinaryExpr.IsPointerStepScaled  safe
 
 # TNotExpr (uAST.pas:279)
 TNotExpr.Expr  serialise
@@ -259,6 +260,7 @@ TProcCall.IsIndirectCall  safe
 TProcCall.IndirectCallIsGlobal  safe
 TProcCall.IsProcFieldCall  safe
 TProcCall.LoweredCall  safe
+TProcCall.IsPointerStepScaled  safe
 
 # TFuncCallExpr (uAST.pas:662)
 TFuncCallExpr.Name  serialise

@@ -860,6 +860,15 @@ type
     procedure AdoptConstOperandType(ABin: TBinaryExpr;
       var LType, RType: TTypeDesc);
     function  AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
+    { Typed-pointer arithmetic steps in elements (GH #262): see
+      docs/language-rationale.adoc, "Pointer Arithmetic". }
+    function  PointerStepSize(APtrType: TTypeDesc): Int;
+    function  ScalePointerOffset(AOffset: TASTExpr; ASize: Int): TASTExpr;
+    function  AnalysePointerStep(ABin: TBinaryExpr; APtrType,
+      AOffsetType: TTypeDesc; AOffsetOnLeft: Boolean): TTypeDesc;
+    function  AnalysePointerDifference(ABin: TBinaryExpr;
+      LType, RType: TTypeDesc): TTypeDesc;
+    procedure ScaleIncDecPointerStep(ACall: TProcCall; APtrType: TTypeDesc);
     function  AnalyseNegExpr(ANeg: TNegExpr): TTypeDesc;
     function  AnalyseFieldAccess(AAccess: TFieldAccessExpr): TTypeDesc;
     function  AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
@@ -19109,6 +19118,8 @@ begin
       if ACall.Args.Count = 2 then
         Self.AnalyseIntegerArg(ACall.Args, 1, ACall.Name, 'Second',
           ACall.Line, ACall.Col);
+      if (ArgType <> nil) and (ArgType.Kind = tyPointer) then
+        Self.ScaleIncDecPointerStep(ACall, ArgType);
     end
     else
     { Include(S, elem) / Exclude(S, elem): validate arg count and types }
@@ -23055,6 +23066,150 @@ begin
     LType := FTable.TypeUInt64;
 end;
 
+{ The bytes one element step of a pointer covers: SizeOf(T) for ^T (the
+  stride of an array of T, so @A[0] + I is @A[I]), one byte for Pointer and
+  PChar. }
+function TSemanticAnalyser.PointerStepSize(APtrType: TTypeDesc): Int;
+begin
+  Result := 1;
+  if (APtrType is TPointerTypeDesc) and
+     (TPointerTypeDesc(APtrType).BaseType <> nil) then
+    Result := TPointerTypeDesc(APtrType).BaseType.RawSize();
+  if Result < 1 then
+    Result := 1;
+end;
+
+{ AOffset * ASize, analysed: the byte offset of AOffset elements.  A literal
+  offset is folded in place, so P + 1 stays an add of an immediate. }
+function TSemanticAnalyser.ScalePointerOffset(AOffset: TASTExpr;
+  ASize: Int): TASTExpr;
+var
+  Lit: TIntLiteral;
+  Mul: TBinaryExpr;
+begin
+  if (AOffset is TIntLiteral) and not TIntLiteral(AOffset).IsUInt64 then
+  begin
+    TIntLiteral(AOffset).Value := TIntLiteral(AOffset).Value * ASize;
+    Self.AnalyseExpr(AOffset);
+    Exit(AOffset);
+  end;
+  Lit := TIntLiteral.Create();
+  Lit.Line := AOffset.Line;
+  Lit.Col := AOffset.Col;
+  Lit.Value := ASize;
+  Mul := TBinaryExpr.Create();
+  Mul.Line := AOffset.Line;
+  Mul.Col := AOffset.Col;
+  Mul.Op := boMul;
+  Mul.Left := AOffset;
+  Mul.Right := Lit;
+  Self.AnalyseExpr(Mul);
+  Result := Mul;
+end;
+
+{ P + N, P - N or N + P: the pointer moves N elements, lowered here to
+  byte arithmetic on the scaled offset so every backend reuses its integer
+  add and subtract. }
+function TSemanticAnalyser.AnalysePointerStep(ABin: TBinaryExpr; APtrType,
+  AOffsetType: TTypeDesc; AOffsetOnLeft: Boolean): TTypeDesc;
+var
+  Size: Int;
+begin
+  if AOffsetType.IsFloat() then
+    SemanticError(
+      Format('A pointer offset must be an integer, not ''%s''',
+        [AOffsetType.Name]),
+      ABin.Line, ABin.Col);
+  Result := APtrType;
+  ABin.ResolvedType := Result;
+  Size := Self.PointerStepSize(APtrType);
+  if (Size = 1) or ABin.IsPointerStepScaled then Exit;
+  if AOffsetOnLeft then
+    ABin.Left := Self.ScalePointerOffset(ABin.Left, Size)
+  else
+    ABin.Right := Self.ScalePointerOffset(ABin.Right, Size);
+  ABin.IsPointerStepScaled := True;
+end;
+
+{ P - Q: the Int64 count of elements from Q to P, lowered to the byte
+  difference divided by the element size.  Both operands must be the same
+  pointer type, so the element size is unambiguous; Pointer and PChar mix,
+  as both count bytes. }
+function TSemanticAnalyser.AnalysePointerDifference(ABin: TBinaryExpr;
+  LType, RType: TTypeDesc): TTypeDesc;
+var
+  LBase, RBase: TTypeDesc;
+  Size: Int;
+  Diff: TBinaryExpr;
+  Lit: TIntLiteral;
+begin
+  LBase := nil;
+  RBase := nil;
+  if LType is TPointerTypeDesc then
+    LBase := TPointerTypeDesc(LType).BaseType;
+  if RType is TPointerTypeDesc then
+    RBase := TPointerTypeDesc(RType).BaseType;
+  if LBase <> RBase then
+    SemanticError(
+      Format('Pointer subtraction needs two pointers of the same type, ' +
+        'got ''%s'' and ''%s''', [LType.Name, RType.Name]),
+      ABin.Line, ABin.Col);
+  Result := FTable.TypeInt64;
+  ABin.ResolvedType := Result;
+  Size := Self.PointerStepSize(LType);
+  if (Size = 1) or ABin.IsPointerStepScaled then
+  begin
+    ABin.IsPointerStepScaled := True;
+    Exit;
+  end;
+  { (P - Q) div Size, built in place: ABin becomes the division, and a new
+    node, already marked as lowered, the byte difference }
+  Diff := TBinaryExpr.Create();
+  Diff.Line := ABin.Line;
+  Diff.Col := ABin.Col;
+  Diff.Op := boSub;
+  Diff.Left := ABin.Left;
+  Diff.Right := ABin.Right;
+  Diff.IsPointerStepScaled := True;
+  Diff.ResolvedType := FTable.TypeInt64;
+  Lit := TIntLiteral.Create();
+  Lit.Line := ABin.Line;
+  Lit.Col := ABin.Col;
+  Lit.Value := Size;
+  Self.AnalyseExpr(Lit);
+  ABin.Op := boDiv;
+  ABin.Left := Diff;
+  ABin.Right := Lit;
+  ABin.IsPointerStepScaled := True;
+end;
+
+{ Inc(P) / Inc(P, N) / Dec(P) / Dec(P, N) of a typed pointer: the step is
+  N elements, so it becomes N * SizeOf(T) bytes (Inc(P) gains the explicit
+  step SizeOf(T)). }
+procedure TSemanticAnalyser.ScaleIncDecPointerStep(ACall: TProcCall;
+  APtrType: TTypeDesc);
+var
+  Size: Int;
+  Lit: TIntLiteral;
+begin
+  if ACall.IsPointerStepScaled then Exit;
+  Size := Self.PointerStepSize(APtrType);
+  if Size = 1 then Exit;
+  if ACall.Args.Count = 1 then
+  begin
+    Lit := TIntLiteral.Create();
+    Lit.Line := ACall.Line;
+    Lit.Col := ACall.Col;
+    Lit.Value := Size;
+    Self.AnalyseExpr(Lit);
+    ACall.Args.Add(Lit);
+  end
+  else
+    ACall.Args.Items[1] := Self.ScalePointerOffset(
+      TASTExpr(ACall.Args.Items[1]), Size);
+  ACall.IsPointerStepScaled := True;
+end;
+
 function TSemanticAnalyser.AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
 var
   LType, RType: TTypeDesc;
@@ -23340,15 +23495,16 @@ begin
       Exit(FTable.TypeString);
     end;
 
-    { Pointer arithmetic: Pointer/PChar + Integer or Integer + Pointer → same type }
+    { Pointer arithmetic: P + N, P - N and N + P are the pointer type, P - Q
+      is the Int64 count of elements between them.  A typed pointer steps
+      SizeOf(T) bytes per element; Pointer and PChar step one byte. }
+    if (ABin.Op = boSub) and (LType.Kind in [tyPointer, tyPChar]) and
+       (RType.Kind in [tyPointer, tyPChar]) then
+      Exit(Self.AnalysePointerDifference(ABin, LType, RType));
     if (ABin.Op in [boAdd, boSub]) and (LType.Kind in [tyPointer, tyPChar]) and RType.IsNumeric() then
-    begin
-      Exit(LType);
-    end;
+      Exit(Self.AnalysePointerStep(ABin, LType, RType, False));
     if (ABin.Op = boAdd) and LType.IsNumeric() and (RType.Kind in [tyPointer, tyPChar]) then
-    begin
-      Exit(RType);
-    end;
+      Exit(Self.AnalysePointerStep(ABin, RType, LType, True));
 
     { Shift operators: result has the left operand's type; right is the shift amount }
     if ABin.Op in [boShl, boShr, boSar] then

@@ -84,9 +84,169 @@ type
       multi-dimensional and a chained element, in a loop and through Inc --
       the statement form did not parse }
     procedure TestRun_SubscriptAfterDeref_Writes;
+    { GH #262: typed-pointer arithmetic is scaled by SizeOf(T), as in FPC
+      and C -- ^T - ^T counts elements, ^T + N and Inc/Dec move N elements;
+      Pointer and PChar keep stepping bytes }
+    procedure TestRun_PointerDifference_Issue262;
+    procedure TestRun_TypedPointerArithmetic_ScalesByElementSize;
   end;
 
 implementation
+
+procedure TE2EPointersTests.TestRun_PointerDifference_Issue262;
+const
+  Src = '''
+    program pm;
+    var
+      s, e: ^Int16;
+      x: Int64;
+      a: array [0..254] of Int16;
+    begin
+      e := @a[254];
+      s := @a[0];
+      x := (e - (s));
+      WriteLn(x);
+      WriteLn(s - e);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '254' + LineEnding + '-254' + LineEnding, 0);
+end;
+
+procedure TE2EPointersTests.TestRun_TypedPointerArithmetic_ScalesByElementSize;
+const
+  Src = '''
+    program PA;
+    type
+      TRec = record A, B, C: Int32; end;   { 12 bytes: not a power of two }
+      PRec = ^TRec;
+      PI32 = ^Int32;
+      PPtr = ^Pointer;
+    var
+      a8: array[0..9] of Int8;
+      a16: array[0..9] of UInt16;
+      a32: array[0..9] of Int32;
+      a64: array[0..9] of Int64;
+      au64: array[0..9] of UInt64;
+      ad: array[0..9] of Float64;
+      recs: array[0..9] of TRec;
+      ap: array[0..9] of Pointer;
+      p8: ^Int8;
+      p16: ^UInt16;
+      p32, q32: PI32;
+      p64: ^Int64;
+      pu64: ^UInt64;
+      pd: ^Float64;
+      pr, pr2: PRec;
+      pp: PPtr;
+      raw: Pointer;
+      pc: PChar;
+      n: Int32;
+      big: Int64;
+      I: Int;
+
+    procedure Step(var P: PI32; N: Int);
+    begin
+      Inc(P, N);
+    end;
+
+    function LocalSum(): Int64;
+    var
+      L: array[0..3] of Int64;
+      Q, E: ^Int64;
+    begin
+      L[0] := 1; L[1] := 20; L[2] := 300; L[3] := 4000;
+      Q := @L[0];
+      E := @L[3];
+      Result := 0;
+      while Q <> E + 1 do
+      begin
+        Result := Result + Q^;
+        Inc(Q);
+      end;
+      Result := Result + (E - @L[0]);
+    end;
+
+    begin
+      for I := 0 to 9 do
+      begin
+        a8[I] := Int8(I - 5);
+        a16[I] := UInt16(65530 + I);
+        a32[I] := I * 10;
+        a64[I] := Int64(I) * 1000000000000;
+        au64[I] := High(UInt64) - UInt64(I);
+        ad[I] := I + 0.5;
+        recs[I].B := I + 100;
+        ap[I] := @a32[I];
+      end;
+      p8 := @a8[0];
+      WriteLn('i8 ', (p8 + 9)^, ' ', (p8 + 9) - p8);
+      p16 := @a16[2];
+      WriteLn('u16 ', (p16 + 3)^, ' ', (p16 - 2)^);
+      p32 := @a32[0];
+      WriteLn('i32 ', (p32 + 3)^, ' ', (4 + p32)^);
+      p32 := p32 + 5;  WriteLn('i32 ', p32^);
+      p32 := p32 - 2;  WriteLn('i32 ', p32^);
+      n := -1;         WriteLn('i32 ', (p32 + n)^);
+      Inc(p32);        WriteLn('inc ', p32^);
+      n := 4;
+      Inc(p32, n);     WriteLn('inc ', p32^);
+      Dec(p32);        WriteLn('dec ', p32^);
+      Dec(p32, 2);     WriteLn('dec ', p32^);
+      Step(p32, 3);    WriteLn('var ', p32^);
+      q32 := @a32[0];
+      WriteLn('diff ', p32 - q32, ' ', q32 - p32);
+      p64 := @a64[1];
+      WriteLn('i64 ', (p64 + 8)^, ' ', (p64 + 8) - p64);
+      pu64 := @au64[9];
+      WriteLn('u64 ', (pu64 - 9)^);
+      pd := @ad[0];
+      WriteLn('dbl ', Trunc((pd + 7)^ * 2));
+      pr := @recs[0];
+      pr2 := pr + 3;   WriteLn('rec ', pr2^.B, ' ', pr2 - pr);
+      Inc(pr2, 2);     WriteLn('rec ', pr2^.B);
+      Dec(pr2);        WriteLn('rec ', pr2^.B, ' ', pr - pr2);
+      pp := @ap[0];
+      WriteLn('ptr ', PI32((pp + 6)^)^);
+      big := 3;
+      WriteLn('big ', (@a64[0] + big)^ div 1000000000000);
+      raw := @a32[0];
+      raw := raw + 4;  WriteLn('raw ', PI32(raw)^);
+      WriteLn('raw ', raw - Pointer(@a32[0]));
+      pc := PChar(@a32[0]);
+      pc := pc + 8;    WriteLn('pch ', PI32(Pointer(pc))^);
+      WriteLn('loc ', LocalSum());
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'i8 4 9' + LineEnding +
+    'u16 65535 65530' + LineEnding +
+    'i32 30 40' + LineEnding +
+    'i32 50' + LineEnding +
+    'i32 30' + LineEnding +
+    'i32 20' + LineEnding +
+    'inc 40' + LineEnding +
+    'inc 80' + LineEnding +
+    'dec 70' + LineEnding +
+    'dec 50' + LineEnding +
+    'var 80' + LineEnding +
+    'diff 8 -8' + LineEnding +
+    'i64 9000000000000 8' + LineEnding +
+    'u64 18446744073709551615' + LineEnding +
+    'dbl 15' + LineEnding +
+    'rec 103 3' + LineEnding +
+    'rec 105' + LineEnding +
+    'rec 104 -4' + LineEnding +
+    'ptr 60' + LineEnding +
+    'big 3' + LineEnding +
+    'raw 10' + LineEnding +
+    'raw 4' + LineEnding +
+    'pch 20' + LineEnding +
+    'loc 4324' + LineEnding, 0);
+end;
 
 procedure TE2EPointersTests.TestRun_SubscriptAfterDeref_Writes;
 const

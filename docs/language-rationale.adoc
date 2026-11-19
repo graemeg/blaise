@@ -2103,6 +2103,74 @@ names the argument and the routine.
 
 ---
 
+=== Pointer Arithmetic
+
+==== Decision
+
+Arithmetic on a typed pointer `^T` counts in elements of `T`, as in FPC,
+Delphi (`{$POINTERMATH ON}`) and C.  `Pointer` and `PChar` count in bytes.
+
+[cols="2,2,3", options="header"]
+|===
+| Expression | Type | Meaning
+
+| `P + N`, `N + P`, `P - N` | the pointer's type | `P` moved `N` elements: `N * SizeOf(T)` bytes
+| `Inc(P)`, `Dec(P)` | — | `P` moved one element
+| `Inc(P, N)`, `Dec(P, N)` | — | `P` moved `N` elements
+| `P - Q` | `Int64` | the number of elements from `Q` to `P` (negative when `P` is below `Q`)
+|===
+
+`N` is any integer type; a floating-point offset is rejected.  `P - Q`
+needs two pointers of the same type: two `^T` with the same `T`, or any
+mix of `Pointer` and `PChar`.  `^Int16 - ^Int32` and `^T - Pointer` are
+rejected, with a message naming both types.  `P + Q` is rejected.
+
+The element size is the stride of an array of `T`, so `@A[0] + I` is
+`@A[I]` and `@A[J] - @A[I]` is `J - I`.  `^Byte` and `^Int8` step one byte,
+as `Pointer` does.  For byte-level access through a typed pointer, convert
+it: `Pointer(P) + 4` is four bytes past `P`.
+
+The semantic pass lowers the scaling to byte arithmetic before codegen:
+`P + N` becomes `P + N * SizeOf(T)` and `P - Q` becomes
+`(P - Q) div SizeOf(T)`, so every backend reuses its integer add, subtract
+and divide.
+
+==== Rationale
+
+Until v0.16 a typed pointer stepped in bytes: with `P: ^Int32`, `P + 1` and
+`Inc(P)` moved one byte, and `P - Q` was not accepted at all (GH #262).
+FPC, Delphi with `{$POINTERMATH ON}`, C and Rust's `ptr.add` scale by the
+element size.  The byte rule therefore changed the meaning of ported code
+without a diagnostic: the program compiled and read misaligned data.
+Scaling matches what code written for those languages expects, and removes
+the `* SizeOf(T)` that byte arithmetic needs at every array walk.
+
+`P - Q` returns `Int64` rather than an unsigned type because the distance
+has a sign: `Q - P` is the negation of `P - Q`.
+
+==== Alternatives rejected
+
+* *Keep bytes and add `P - Q` as a byte difference.*  Rejected.  It answers
+  the issue's compile error but keeps the silent divergence from FPC and C:
+  the issue's own program would print `508`, not `254`.
+* *Allow arithmetic only on `Pointer`, `PChar` and `^Byte`* (Delphi with
+  `{$POINTERMATH OFF}`).  Rejected.  It is safe, but it rejects ported FPC
+  code outright and turns every array walk into a pair of casts.
+* *A `{$POINTERMATH}` switch.*  Rejected.  A directive that changes the
+  meaning of `+` per unit makes a line of code mean different things in
+  different files; Blaise has one rule.
+
+==== Migration
+
+Code that relied on byte steps through a typed pointer, typically
+`P := FData + I * SizeOf(T)` with `FData: ^T`, now moves
+`I * SizeOf(T) * SizeOf(T)` bytes.  Write it as `FData + I` (element
+steps), or as `Pointer(FData) + I * SizeOf(T)` (byte steps, which also
+compiles correctly with a compiler that predates the change).  The stdlib
+and RTL use the second form, so a release compiler still bootstraps them.
+
+---
+
 === Procedural Types (`function`/`procedure` pointers)
 
 ==== Decision

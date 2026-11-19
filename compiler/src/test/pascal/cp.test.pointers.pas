@@ -24,6 +24,8 @@ type
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
+    procedure AssertScaledOffset(const AMsg: string; AExpr: TASTExpr;
+      AScale: Int);
     procedure AnalyseExpectError(const ASrc: string);
   published
     { P^ := Row through a pointer to a static array copies the row; a managed
@@ -77,6 +79,21 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Pointer_FromInt_ReturnsPointerType;
     procedure TestSemantic_PtrUInt_FromPointer_ReturnsUInt64Type;
+
+    { ------------------------------------------------------------------ }
+    { Typed-pointer arithmetic is scaled by SizeOf(T), as in FPC and C     }
+    { (GH #262): ^T + N moves N elements, ^T - ^T counts elements          }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_PointerDifference_IsInt64;
+    procedure TestSemantic_PointerDifference_ScaledByElementSize;
+    procedure TestSemantic_PointerPlusInt_ScaledByElementSize;
+    procedure TestSemantic_IntPlusPointer_ScaledByElementSize;
+    procedure TestSemantic_IncTypedPointer_ScaledByElementSize;
+    procedure TestSemantic_BytePointerPlusInt_NotScaled;
+    procedure TestSemantic_PointerDifference_DifferentBase_Rejected;
+    procedure TestSemantic_PointerDifference_TypedAndUntyped_Rejected;
+    procedure TestSemantic_PointerPlusPointer_Rejected;
+    procedure TestSemantic_PointerPlusFloat_Rejected;
 
     { ------------------------------------------------------------------ }
     { p^.field[index] := value (issue #118)                               }
@@ -618,6 +635,237 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+const
+  SrcPtrDiff =
+    '''
+    program PT;
+    var s, e: ^Int16; a: array[0..254] of Int16; x: Int64;
+    begin
+      e := @a[254];
+      s := @a[0];
+      x := e - s;
+    end.
+    ''';
+
+procedure TPointerTests.TestSemantic_PointerDifference_IsInt64;
+var
+  Prog: TProgram;
+  Assign: TAssignment;
+begin
+  Prog := AnalyseSrc(SrcPtrDiff);
+  try
+    Assign := TAssignment(Prog.Block.Stmts.Items[2]);
+    AssertEquals('^T - ^T is Int64', Ord(tyInt64),
+      Ord(Assign.Expr.ResolvedType.Kind));
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ e - s lowers to (e - s) div SizeOf(Int16): the byte difference divided by
+  the element size }
+procedure TPointerTests.TestSemantic_PointerDifference_ScaledByElementSize;
+var
+  Prog: TProgram;
+  Assign: TAssignment;
+  Bin, Inner: TBinaryExpr;
+begin
+  Prog := AnalyseSrc(SrcPtrDiff);
+  try
+    Assign := TAssignment(Prog.Block.Stmts.Items[2]);
+    AssertTrue('a binary expression', Assign.Expr is TBinaryExpr);
+    Bin := TBinaryExpr(Assign.Expr);
+    AssertEquals('outer op is div', Ord(boDiv), Ord(Bin.Op));
+    AssertTrue('divisor is a literal', Bin.Right is TIntLiteral);
+    AssertEquals('divisor is SizeOf(Int16)', 2, TIntLiteral(Bin.Right).Value);
+    AssertTrue('dividend is the byte difference', Bin.Left is TBinaryExpr);
+    Inner := TBinaryExpr(Bin.Left);
+    AssertEquals('inner op is -', Ord(boSub), Ord(Inner.Op));
+    AssertEquals('byte difference is Int64', Ord(tyInt64),
+      Ord(Inner.ResolvedType.Kind));
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ Asserts AExpr is AOffset * AScale, the scaled offset of a pointer step }
+procedure TPointerTests.AssertScaledOffset(const AMsg: string; AExpr: TASTExpr;
+  AScale: Int);
+var
+  Scale: TBinaryExpr;
+begin
+  AssertTrue(AMsg + ': offset is scaled', AExpr is TBinaryExpr);
+  Scale := TBinaryExpr(AExpr);
+  AssertEquals(AMsg + ': scale op is *', Ord(boMul), Ord(Scale.Op));
+  AssertTrue(AMsg + ': scale factor is a literal', Scale.Right is TIntLiteral);
+  AssertEquals(AMsg + ': scale factor', AScale, TIntLiteral(Scale.Right).Value);
+end;
+
+{ P + N lowers to P + N * SizeOf(T) }
+procedure TPointerTests.TestSemantic_PointerPlusInt_ScaledByElementSize;
+var
+  Prog: TProgram;
+  Bin: TBinaryExpr;
+begin
+  Prog := AnalyseSrc('''
+    program PT;
+    var p, q: ^Int64; n: Int;
+    begin
+      q := p + n;
+      q := p - n;
+    end.
+    ''');
+  try
+    Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
+    AssertEquals('op stays +', Ord(boAdd), Ord(Bin.Op));
+    AssertEquals('result is the pointer type', Ord(tyPointer),
+      Ord(Bin.ResolvedType.Kind));
+    AssertScaledOffset('p + n', Bin.Right, 8);
+    Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[1]).Expr);
+    AssertEquals('op stays -', Ord(boSub), Ord(Bin.Op));
+    AssertScaledOffset('p - n', Bin.Right, 8);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ N + P lowers to N * SizeOf(T) + P }
+procedure TPointerTests.TestSemantic_IntPlusPointer_ScaledByElementSize;
+var
+  Prog: TProgram;
+  Bin: TBinaryExpr;
+begin
+  Prog := AnalyseSrc('''
+    program PT;
+    var p, q: ^Int32; n: Int;
+    begin
+      q := n + p;
+    end.
+    ''');
+  try
+    Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
+    AssertEquals('result is the pointer type', Ord(tyPointer),
+      Ord(Bin.ResolvedType.Kind));
+    AssertScaledOffset('n + p', Bin.Left, 4);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ Inc(P) / Inc(P, N) / Dec on a typed pointer step SizeOf(T) bytes }
+procedure TPointerTests.TestSemantic_IncTypedPointer_ScaledByElementSize;
+var
+  Prog: TProgram;
+  Call: TProcCall;
+begin
+  Prog := AnalyseSrc('''
+    program PT;
+    var p: ^Int32; n: Int;
+    begin
+      Inc(p);
+      Dec(p, n);
+    end.
+    ''');
+  try
+    Call := TProcCall(Prog.Block.Stmts.Items[0]);
+    AssertEquals('Inc(p) gains its step', 2, Call.Args.Count);
+    AssertTrue('Inc(p) steps SizeOf(Int32)',
+      TASTExpr(Call.Args.Items[1]) is TIntLiteral);
+    AssertEquals('Inc(p) step', 4,
+      TIntLiteral(Call.Args.Items[1]).Value);
+    Call := TProcCall(Prog.Block.Stmts.Items[1]);
+    AssertScaledOffset('Dec(p, n)', TASTExpr(Call.Args.Items[1]), 4);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ ^Byte, PChar and untyped Pointer step one byte: no scaling node }
+procedure TPointerTests.TestSemantic_BytePointerPlusInt_NotScaled;
+var
+  Prog: TProgram;
+  I: Int;
+begin
+  Prog := AnalyseSrc('''
+    program PT;
+    var b: ^Byte; r: Pointer; c: PChar; n: Int;
+    begin
+      b := b + n;
+      r := r + n;
+      c := c + n;
+    end.
+    ''');
+  try
+    for I := 0 to 2 do
+      AssertTrue('offset not scaled in statement ' + IntToStr(I),
+        TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[I]).Expr).Right
+          is TIdentExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestSemantic_PointerDifference_DifferentBase_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program PT;
+    var a: ^Int16; b: ^Int32; x: Int;
+    begin
+      x := a - b;
+    end.
+    ''');
+  AssertTrue('different element types: ' + Msg, Pos(
+    'Pointer subtraction needs two pointers of the same type, got ''^Int16'' and ''^Int32''',
+    Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_PointerDifference_TypedAndUntyped_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program PT;
+    var a: ^Int16; r: Pointer; x: Int;
+    begin
+      x := a - r;
+    end.
+    ''');
+  AssertTrue('typed minus untyped: ' + Msg, Pos(
+    'Pointer subtraction needs two pointers of the same type',
+    Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_PointerPlusFloat_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program PT;
+    var a: ^Int16; f: Float64;
+    begin
+      a := a + f;
+    end.
+    ''');
+  AssertTrue('pointer + float: ' + Msg, Pos(
+    'A pointer offset must be an integer, not ''Float64''', Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_PointerPlusPointer_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program PT;
+    var a, b, c: ^Int16;
+    begin
+      c := a + b;
+    end.
+    ''');
+  AssertTrue('pointer + pointer is rejected', Msg <> '');
 end;
 
 const

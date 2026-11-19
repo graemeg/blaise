@@ -276,6 +276,11 @@ type
       being reimplemented per backend. }
     [Unretained] ResolvedOperator: TObject;  { TMethodDecl — not owned }
     LoweredCall: TASTExpr;                   { owned — nil for built-in operators }
+    { Set by uSemantic once it has lowered this typed-pointer step or
+      difference to byte arithmetic (P + N * SizeOf(T), (P - Q) div
+      SizeOf(T)), so a second analysis of the node does not scale it again
+      (GH #262). }
+    IsPointerStepScaled: Boolean;
     destructor Destroy; override;
   end;
 
@@ -676,6 +681,10 @@ type
       SetLength, ...), so nothing may lower it as the built-in: see
       IsBuiltinCall. }
     ResolvesToUserRoutine: Boolean;
+    { set by uSemantic: Inc / Dec of a typed pointer whose step it has
+      already scaled by SizeOf(T), so a second analysis does not scale it
+      again (GH #262) }
+    IsPointerStepScaled: Boolean;
     constructor Create;
     destructor Destroy; override;
   end;

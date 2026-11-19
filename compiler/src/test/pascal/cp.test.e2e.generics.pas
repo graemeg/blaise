@@ -1068,7 +1068,7 @@ const
         end;
         function GetCurrent: T;
         begin
-          Result := (Self.FList + Self.FIndex * SizeOf(T))^
+          Result := (Self.FList + Self.FIndex)^
         end;
         property Current: T read GetCurrent;
       end;
@@ -1079,7 +1079,7 @@ const
         var Slot: ^T;
         begin
           Self.FData := ReallocMem(Self.FData, (Self.FCount + 1) * SizeOf(T));
-          Slot := Self.FData + Self.FCount * SizeOf(T);
+          Slot := Pointer(Self.FData) + Self.FCount * SizeOf(T);
           Slot^ := V;
           Self.FCount := Self.FCount + 1
         end;
