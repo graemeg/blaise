@@ -88,7 +88,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Src := Self.FData + I * SizeOf(Pointer);
+    Src := Pointer(Self.FData) + I * SizeOf(Pointer);
     _ClassRelease(Src^);
     I := I + 1
   end;
@@ -105,7 +105,7 @@ begin
   if Self.FCount = Self.FCapacity then
     Self.Grow();
   _ClassAddRef(AObject);
-  Dest        := Self.FData + Self.FCount * SizeOf(Pointer);
+  Dest        := Pointer(Self.FData) + Self.FCount * SizeOf(Pointer);
   Dest^       := AObject;
   Self.FCount := Self.FCount + 1;
   Result      := Self.FCount - 1
@@ -115,7 +115,7 @@ function TObjectList.Get(AIndex: Int): Pointer;
 var
   Src: ^Pointer;
 begin
-  Src    := Self.FData + AIndex * SizeOf(Pointer);
+  Src    := Pointer(Self.FData) + AIndex * SizeOf(Pointer);
   Result := Src^
 end;
 
@@ -124,7 +124,7 @@ var
   Dest: ^Pointer;
   Old:  Pointer;
 begin
-  Dest  := Self.FData + AIndex * SizeOf(Pointer);
+  Dest  := Pointer(Self.FData) + AIndex * SizeOf(Pointer);
   Old   := Dest^;
   _ClassAddRef(AObject);
   Dest^ := AObject;
@@ -140,7 +140,7 @@ begin
   Result := -1;
   while I < Self.FCount do
   begin
-    Src := Self.FData + I * SizeOf(Pointer);
+    Src := Pointer(Self.FData) + I * SizeOf(Pointer);
     if Src^ = AObject then
     begin
       Result := I;
@@ -156,13 +156,13 @@ var
   Dst: ^Pointer;
   Src: ^Pointer;
 begin
-  Src := Self.FData + AIndex * SizeOf(Pointer);
+  Src := Pointer(Self.FData) + AIndex * SizeOf(Pointer);
   _ClassRelease(Src^);
   I := AIndex;
   while I < Self.FCount - 1 do
   begin
-    Dst  := Self.FData + I * SizeOf(Pointer);
-    Src  := Self.FData + (I + 1) * SizeOf(Pointer);
+    Dst  := Pointer(Self.FData) + I * SizeOf(Pointer);
+    Src  := Pointer(Self.FData) + (I + 1) * SizeOf(Pointer);
     Dst^ := Src^;
     I    := I + 1
   end;
@@ -187,7 +187,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Src := Self.FData + I * SizeOf(Pointer);
+    Src := Pointer(Self.FData) + I * SizeOf(Pointer);
     _ClassRelease(Src^);
     I := I + 1
   end;
@@ -211,8 +211,8 @@ begin
   I := Idx;
   while I < Self.FCount - 1 do
   begin
-    Dst  := Self.FData + I * SizeOf(Pointer);
-    Src  := Self.FData + (I + 1) * SizeOf(Pointer);
+    Dst  := Pointer(Self.FData) + I * SizeOf(Pointer);
+    Src  := Pointer(Self.FData) + (I + 1) * SizeOf(Pointer);
     Dst^ := Src^;
     I    := I + 1
   end;

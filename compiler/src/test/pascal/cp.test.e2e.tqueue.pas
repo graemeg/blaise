@@ -52,8 +52,8 @@ const
           I := 0;
           while I < Self.FCount do
           begin
-            Src  := Self.FData + ((Self.FHead + I) mod OldCap) * SizeOf(Int);
-            Dst  := NewData + I * SizeOf(Int);
+            Src  := Pointer(Self.FData) + ((Self.FHead + I) mod OldCap) * SizeOf(Int);
+            Dst  := Pointer(NewData) + I * SizeOf(Int);
             Dst^ := Src^;
             I    := I + 1
           end;
@@ -67,7 +67,7 @@ const
         var Dest: ^Int;
         begin
           if Self.FCount = Self.FCapacity then Self.Grow();
-          Dest        := Self.FData + Self.FTail * SizeOf(Int);
+          Dest        := Pointer(Self.FData) + Self.FTail * SizeOf(Int);
           Dest^       := Value;
           Self.FTail  := (Self.FTail + 1) mod Self.FCapacity;
           Self.FCount := Self.FCount + 1
@@ -75,7 +75,7 @@ const
         function Dequeue: Int;
         var Src: ^Int;
         begin
-          Src         := Self.FData + Self.FHead * SizeOf(Int);
+          Src         := Pointer(Self.FData) + Self.FHead * SizeOf(Int);
           Result      := Src^;
           Self.FHead  := (Self.FHead + 1) mod Self.FCapacity;
           Self.FCount := Self.FCount - 1
@@ -83,7 +83,7 @@ const
         function Peek: Int;
         var Src: ^Int;
         begin
-          Src    := Self.FData + Self.FHead * SizeOf(Int);
+          Src    := Pointer(Self.FData) + Self.FHead * SizeOf(Int);
           Result := Src^
         end;
         property Count: Int read FCount;

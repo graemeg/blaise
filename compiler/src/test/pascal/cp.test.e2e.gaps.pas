@@ -436,7 +436,7 @@ const Src = '''
       I := 0;
       while I < Self.FCount do
       begin
-        Ptr := Self.FKeys + I * SizeOf(K);
+        Ptr := Pointer(Self.FKeys) + I * SizeOf(K);
         if Ptr^ = Key then begin Result := I; I := Self.FCount end
         else I := I + 1
       end
@@ -446,11 +446,11 @@ const Src = '''
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
-      begin VPtr := Self.FValues + Idx * SizeOf(V); VPtr^ := Value end
+      begin VPtr := Pointer(Self.FValues) + Idx * SizeOf(V); VPtr^ := Value end
       else begin
         if Self.FCount = Self.FCapacity then Self.Grow();
-        KPtr := Self.FKeys + Self.FCount * SizeOf(K);
-        VPtr := Self.FValues + Self.FCount * SizeOf(V);
+        KPtr := Pointer(Self.FKeys) + Self.FCount * SizeOf(K);
+        VPtr := Pointer(Self.FValues) + Self.FCount * SizeOf(V);
         KPtr^ := Key; VPtr^ := Value;
         Self.FCount := Self.FCount + 1
       end
@@ -460,7 +460,7 @@ const Src = '''
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
-      begin VPtr := Self.FValues + Idx * SizeOf(V); Result := VPtr^ end
+      begin VPtr := Pointer(Self.FValues) + Idx * SizeOf(V); Result := VPtr^ end
       else Halt(1)
     end;
     procedure TMap<K, V>.SetItem(Key: K; Value: V);
@@ -517,7 +517,7 @@ const Src = '''
       I := 0;
       while I < Self.FCount do
       begin
-        Ptr := Self.FKeys + I * SizeOf(K);
+        Ptr := Pointer(Self.FKeys) + I * SizeOf(K);
         if Ptr^ = Key then begin Result := I; I := Self.FCount end
         else I := I + 1
       end
@@ -527,11 +527,11 @@ const Src = '''
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
-      begin VPtr := Self.FValues + Idx * SizeOf(V); VPtr^ := Value end
+      begin VPtr := Pointer(Self.FValues) + Idx * SizeOf(V); VPtr^ := Value end
       else begin
         if Self.FCount = Self.FCapacity then Self.Grow();
-        KPtr := Self.FKeys + Self.FCount * SizeOf(K);
-        VPtr := Self.FValues + Self.FCount * SizeOf(V);
+        KPtr := Pointer(Self.FKeys) + Self.FCount * SizeOf(K);
+        VPtr := Pointer(Self.FValues) + Self.FCount * SizeOf(V);
         KPtr^ := Key; VPtr^ := Value;
         Self.FCount := Self.FCount + 1
       end
@@ -541,7 +541,7 @@ const Src = '''
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
-      begin VPtr := Self.FValues + Idx * SizeOf(V); Result := VPtr^ end
+      begin VPtr := Pointer(Self.FValues) + Idx * SizeOf(V); Result := VPtr^ end
       else Halt(1)
     end;
     procedure TMap<K, V>.SetItem(Key: K; Value: V);
@@ -598,7 +598,7 @@ const Src = '''
       I := 0;
       while I < Self.FCount do
       begin
-        Ptr := Self.FKeys + I * SizeOf(K);
+        Ptr := Pointer(Self.FKeys) + I * SizeOf(K);
         if Ptr^ = Key then begin Result := I; I := Self.FCount end
         else I := I + 1
       end
@@ -608,11 +608,11 @@ const Src = '''
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
-      begin VPtr := Self.FValues + Idx * SizeOf(V); VPtr^ := Value end
+      begin VPtr := Pointer(Self.FValues) + Idx * SizeOf(V); VPtr^ := Value end
       else begin
         if Self.FCount = Self.FCapacity then Self.Grow();
-        KPtr := Self.FKeys + Self.FCount * SizeOf(K);
-        VPtr := Self.FValues + Self.FCount * SizeOf(V);
+        KPtr := Pointer(Self.FKeys) + Self.FCount * SizeOf(K);
+        VPtr := Pointer(Self.FValues) + Self.FCount * SizeOf(V);
         KPtr^ := Key; VPtr^ := Value;
         Self.FCount := Self.FCount + 1
       end
@@ -622,7 +622,7 @@ const Src = '''
     begin
       Idx := Self.FindKey(Key);
       if Idx >= 0 then
-      begin VPtr := Self.FValues + Idx * SizeOf(V); Result := VPtr^ end
+      begin VPtr := Pointer(Self.FValues) + Idx * SizeOf(V); Result := VPtr^ end
       else Halt(1)
     end;
     procedure TMap<K, V>.SetItem(Key: K; Value: V);

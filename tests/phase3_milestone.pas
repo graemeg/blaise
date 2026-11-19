@@ -57,7 +57,7 @@ var
 begin
   if Self.FCount = Self.FCapacity then
     Self.Grow();
-  Dest        := Self.FData + Self.FCount * SizeOf(Int);
+  Dest        := Pointer(Self.FData) + Self.FCount * SizeOf(Int);
   Dest^       := Value;
   Self.FCount := Self.FCount + 1
 end;
@@ -66,7 +66,7 @@ function TIntList.Get(AIndex: Int): Int;
 var
   Src: ^Int;
 begin
-  Src    := Self.FData + AIndex * SizeOf(Int);
+  Src    := Pointer(Self.FData) + AIndex * SizeOf(Int);
   Result := Src^
 end;
 
@@ -79,8 +79,8 @@ begin
   I := AIndex;
   while I < Self.FCount - 1 do
   begin
-    Dst  := Self.FData + I * SizeOf(Int);
-    Src  := Self.FData + (I + 1) * SizeOf(Int);
+    Dst  := Pointer(Self.FData) + I * SizeOf(Int);
+    Src  := Pointer(Self.FData) + (I + 1) * SizeOf(Int);
     Dst^ := Src^;
     I    := I + 1
   end;
@@ -107,7 +107,7 @@ begin
     NewCap := OldCap * 2;
   Self.FKeys   := ReallocMem(Self.FKeys,   NewCap * SizeOf(string));
   { Zero-init new string slots so ARC Release of "old" value is safe }
-  ZeroMem(Self.FKeys + OldCap * SizeOf(string),
+  ZeroMem(Pointer(Self.FKeys) + OldCap * SizeOf(string),
           (NewCap - OldCap) * SizeOf(string));
   Self.FValues := ReallocMem(Self.FValues, NewCap * SizeOf(Int));
   Self.FCapacity := NewCap
@@ -122,7 +122,7 @@ begin
   I      := 0;
   while I < Self.FCount do
   begin
-    Ptr := Self.FKeys + I * SizeOf(string);
+    Ptr := Pointer(Self.FKeys) + I * SizeOf(string);
     if Ptr^ = Key then
     begin
       Result := I;
@@ -141,15 +141,15 @@ begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr  := Self.FValues + Idx * SizeOf(Int);
+    VPtr  := Pointer(Self.FValues) + Idx * SizeOf(Int);
     VPtr^ := Value
   end
   else
   begin
     if Self.FCount = Self.FCapacity then
       Self.Grow();
-    KPtr  := Self.FKeys   + Self.FCount * SizeOf(string);
-    VPtr  := Self.FValues + Self.FCount * SizeOf(Int);
+    KPtr  := Pointer(Self.FKeys)   + Self.FCount * SizeOf(string);
+    VPtr  := Pointer(Self.FValues) + Self.FCount * SizeOf(Int);
     KPtr^ := Key;
     VPtr^ := Value;
     Self.FCount := Self.FCount + 1
@@ -164,7 +164,7 @@ begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr   := Self.FValues + Idx * SizeOf(Int);
+    VPtr   := Pointer(Self.FValues) + Idx * SizeOf(Int);
     Value  := VPtr^;
     Result := True
   end
@@ -192,16 +192,16 @@ begin
     I := Idx;
     while I < Self.FCount - 1 do
     begin
-      KDst  := Self.FKeys   + I * SizeOf(string);
-      KSrc  := Self.FKeys   + (I + 1) * SizeOf(string);
-      VDst  := Self.FValues + I * SizeOf(Int);
-      VSrc  := Self.FValues + (I + 1) * SizeOf(Int);
+      KDst  := Pointer(Self.FKeys)   + I * SizeOf(string);
+      KSrc  := Pointer(Self.FKeys)   + (I + 1) * SizeOf(string);
+      VDst  := Pointer(Self.FValues) + I * SizeOf(Int);
+      VSrc  := Pointer(Self.FValues) + (I + 1) * SizeOf(Int);
       KDst^ := KSrc^;
       VDst^ := VSrc^;
       I     := I + 1
     end;
     { Release the duplicate last string slot left behind by the shift }
-    KDst := Self.FKeys + (Self.FCount - 1) * SizeOf(string);
+    KDst := Pointer(Self.FKeys) + (Self.FCount - 1) * SizeOf(string);
     KDst^ := nil;
     Self.FCount := Self.FCount - 1
   end
@@ -216,7 +216,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Ptr  := Self.FKeys + I * SizeOf(string);
+    Ptr  := Pointer(Self.FKeys) + I * SizeOf(string);
     Ptr^ := nil;
     I    := I + 1
   end;

@@ -47,14 +47,14 @@ const
           if OldCap = 0 then NewCap := 4
           else NewCap := OldCap * 2;
           Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Int));
-          ZeroMem(Self.FData + OldCap * SizeOf(Int), (NewCap - OldCap) * SizeOf(Int));
+          ZeroMem(Pointer(Self.FData) + OldCap * SizeOf(Int), (NewCap - OldCap) * SizeOf(Int));
           Self.FCapacity := NewCap
         end;
         procedure Push(Value: Int);
         var Dest: ^Int;
         begin
           if Self.FCount = Self.FCapacity then Self.Grow();
-          Dest        := Self.FData + Self.FCount * SizeOf(Int);
+          Dest        := Pointer(Self.FData) + Self.FCount * SizeOf(Int);
           Dest^       := Value;
           Self.FCount := Self.FCount + 1
         end;
@@ -62,13 +62,13 @@ const
         var Src: ^Int;
         begin
           Self.FCount := Self.FCount - 1;
-          Src         := Self.FData + Self.FCount * SizeOf(Int);
+          Src         := Pointer(Self.FData) + Self.FCount * SizeOf(Int);
           Result      := Src^
         end;
         function Peek: Int;
         var Src: ^Int;
         begin
-          Src    := Self.FData + (Self.FCount - 1) * SizeOf(Int);
+          Src    := Pointer(Self.FData) + (Self.FCount - 1) * SizeOf(Int);
           Result := Src^
         end;
         property Count: Int read FCount;

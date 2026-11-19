@@ -284,7 +284,7 @@ begin
   else
     NewCap := OldCap * 2;
   Self.FChildren := ReallocMem(Self.FChildren, NewCap * SizeOf(Pointer));
-  ZeroMem(Self.FChildren + OldCap * SizeOf(Pointer),
+  ZeroMem(Pointer(Self.FChildren) + OldCap * SizeOf(Pointer),
           (NewCap - OldCap) * SizeOf(Pointer));
   Self.FChildCap := NewCap
 end;
@@ -295,7 +295,7 @@ var
 begin
   if Self.FChildCnt = Self.FChildCap then
     Self.GrowChildren();
-  Slot  := Self.FChildren + Self.FChildCnt * SizeOf(Pointer);
+  Slot  := Pointer(Self.FChildren) + Self.FChildCnt * SizeOf(Pointer);
   Slot^ := Pointer(AComp);
   Self.FChildCnt := Self.FChildCnt + 1;
   { The owner holds a strong reference to each child: that is what keeps the
@@ -315,17 +315,17 @@ begin
   I := 0;
   while I < Self.FChildCnt do
   begin
-    Dst := Self.FChildren + I * SizeOf(Pointer);
+    Dst := Pointer(Self.FChildren) + I * SizeOf(Pointer);
     if Dst^ = Pointer(AComp) then
     begin
       while I < Self.FChildCnt - 1 do
       begin
-        Dst  := Self.FChildren + I * SizeOf(Pointer);
-        Src  := Self.FChildren + (I + 1) * SizeOf(Pointer);
+        Dst  := Pointer(Self.FChildren) + I * SizeOf(Pointer);
+        Src  := Pointer(Self.FChildren) + (I + 1) * SizeOf(Pointer);
         Dst^ := Src^;
         I    := I + 1
       end;
-      Dst  := Self.FChildren + (Self.FChildCnt - 1) * SizeOf(Pointer);
+      Dst  := Pointer(Self.FChildren) + (Self.FChildCnt - 1) * SizeOf(Pointer);
       Dst^ := nil;
       Self.FChildCnt := Self.FChildCnt - 1;
       Exit
@@ -338,7 +338,7 @@ function TComponent.GetComponent(AIndex: Int): TComponent;
 var
   Slot: ^Pointer;
 begin
-  Slot   := Self.FChildren + AIndex * SizeOf(Pointer);
+  Slot   := Pointer(Self.FChildren) + AIndex * SizeOf(Pointer);
   Result := TComponent(Slot^)
 end;
 
@@ -368,7 +368,7 @@ begin
     only drops its hold, it does not force destruction. }
   while Self.FChildCnt > 0 do
   begin
-    Slot   := Self.FChildren + (Self.FChildCnt - 1) * SizeOf(Pointer);
+    Slot   := Pointer(Self.FChildren) + (Self.FChildCnt - 1) * SizeOf(Pointer);
     Child  := TComponent(Slot^);
     Slot^  := nil;
     Self.FChildCnt := Self.FChildCnt - 1;
@@ -431,7 +431,7 @@ begin
   Self.FStrings  := ReallocMem(Self.FStrings, NewCap * SizeOf(string));
   Self.FObjects  := ReallocMem(Self.FObjects, NewCap * SizeOf(Pointer));
   { Zero-initialise new string slots so ARC release of "old" value is safe }
-  ZeroMem(Self.FStrings + OldCap * SizeOf(string),
+  ZeroMem(Pointer(Self.FStrings) + OldCap * SizeOf(string),
           (NewCap - OldCap) * SizeOf(string));
   Self.FCapacity := NewCap
 end;
@@ -492,18 +492,18 @@ var
   SPtr:  ^string;
   NPtr:  ^string;
 begin
-  NPtr := Self.FStrings + AIdx * SizeOf(string);
+  NPtr := Pointer(Self.FStrings) + AIdx * SizeOf(string);
   Slot := Self.HashOf(NPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+    SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
       Self.FHashUsed := Self.FHashUsed + 1;
       Exit;
     end;
-    SPtr := Self.FStrings + SlotP^ * SizeOf(string);
+    SPtr := Pointer(Self.FStrings) + SlotP^ * SizeOf(string);
     if Self.KeyEquals(NPtr^, SPtr^) then
       Exit;   { duplicate key — keep the first-added index }
     Slot := (Slot + 1) and (Self.FHashCap - 1);
@@ -528,7 +528,7 @@ begin
   Self.FHashUsed  := 0;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Int);
+    P  := Pointer(Self.FHashSlots) + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FCount - 1 do
@@ -597,7 +597,7 @@ begin
   while Lo <= Hi do
   begin
     Mid := (Lo + Hi) div 2;
-    Ptr := Self.FStrings + Mid * SizeOf(string);
+    Ptr := Pointer(Self.FStrings) + Mid * SizeOf(string);
     if Self.FCaseSensitive then
       Cmp := CompareStr(S, Ptr^)
     else
@@ -633,7 +633,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Ptr  := Self.FStrings + I * SizeOf(string);
+    Ptr  := Pointer(Self.FStrings) + I * SizeOf(string);
     Ptr^ := nil;
     I    := I + 1
   end;
@@ -659,7 +659,7 @@ begin
        (Idx < Self.FCount) then
     begin
       { Check for exact match at Idx }
-      StrP := Self.FStrings + Idx * SizeOf(string);
+      StrP := Pointer(Self.FStrings) + Idx * SizeOf(string);
       if Self.Compare(S, StrP^) = 0 then
       begin
         Result := Idx;
@@ -673,8 +673,8 @@ begin
   begin
     if Self.FCount = Self.FCapacity then
       Self.Grow();
-    StrP        := Self.FStrings + Self.FCount * SizeOf(string);
-    ObjP        := Self.FObjects + Self.FCount * SizeOf(Pointer);
+    StrP        := Pointer(Self.FStrings) + Self.FCount * SizeOf(string);
+    ObjP        := Pointer(Self.FObjects) + Self.FCount * SizeOf(Pointer);
     StrP^       := S;
     ObjP^       := nil;
     Result      := Self.FCount;
@@ -697,7 +697,7 @@ var
   ObjP: ^Pointer;
 begin
   Idx  := Self.Add(S);
-  ObjP := Self.FObjects + Idx * SizeOf(Pointer);
+  ObjP := Pointer(Self.FObjects) + Idx * SizeOf(Pointer);
   ObjP^ := AObject
 end;
 
@@ -722,13 +722,13 @@ begin
     Slot := Self.HashOf(S) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+      SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
       if SlotP^ = -1 then
       begin
         Index := -1;
         Exit(False);
       end;
-      Ptr := Self.FStrings + SlotP^ * SizeOf(string);
+      Ptr := Pointer(Self.FStrings) + SlotP^ * SizeOf(string);
       if Self.KeyEquals(S, Ptr^) then
       begin
         Index := SlotP^;
@@ -743,7 +743,7 @@ begin
     I := 0;
     while I < Self.FCount do
     begin
-      Ptr := Self.FStrings + I * SizeOf(string);
+      Ptr := Pointer(Self.FStrings) + I * SizeOf(string);
       if Self.Compare(S, Ptr^) = 0 then
       begin
         Index  := I;
@@ -771,7 +771,7 @@ function TStringList.Get(AIndex: Int): string;
 var
   Ptr: ^string;
 begin
-  Ptr    := Self.FStrings + AIndex * SizeOf(string);
+  Ptr    := Pointer(Self.FStrings) + AIndex * SizeOf(string);
   Result := Ptr^
 end;
 
@@ -779,7 +779,7 @@ procedure TStringList.Put(AIndex: Int; S: string);
 var
   Ptr: ^string;
 begin
-  Ptr  := Self.FStrings + AIndex * SizeOf(string);
+  Ptr  := Pointer(Self.FStrings) + AIndex * SizeOf(string);
   Ptr^ := S;
   Self.HashInvalidate()
 end;
@@ -788,7 +788,7 @@ function TStringList.GetObject(AIndex: Int): Pointer;
 var
   Ptr: ^Pointer;
 begin
-  Ptr    := Self.FObjects + AIndex * SizeOf(Pointer);
+  Ptr    := Pointer(Self.FObjects) + AIndex * SizeOf(Pointer);
   Result := Ptr^
 end;
 
@@ -796,7 +796,7 @@ procedure TStringList.SetObject(AIndex: Int; AObject: Pointer);
 var
   Ptr: ^Pointer;
 begin
-  Ptr  := Self.FObjects + AIndex * SizeOf(Pointer);
+  Ptr  := Pointer(Self.FObjects) + AIndex * SizeOf(Pointer);
   Ptr^ := AObject
 end;
 
@@ -811,18 +811,18 @@ begin
   I := AIndex;
   while I < Self.FCount - 1 do
   begin
-    SDst  := Self.FStrings + I * SizeOf(string);
-    SSrc  := Self.FStrings + (I + 1) * SizeOf(string);
-    ODst  := Self.FObjects + I * SizeOf(Pointer);
-    OSrc  := Self.FObjects + (I + 1) * SizeOf(Pointer);
+    SDst  := Pointer(Self.FStrings) + I * SizeOf(string);
+    SSrc  := Pointer(Self.FStrings) + (I + 1) * SizeOf(string);
+    ODst  := Pointer(Self.FObjects) + I * SizeOf(Pointer);
+    OSrc  := Pointer(Self.FObjects) + (I + 1) * SizeOf(Pointer);
     SDst^ := SSrc^;
     ODst^ := OSrc^;
     I     := I + 1
   end;
   { Release the last (duplicate) string slot and clear the object slot }
-  SDst  := Self.FStrings + (Self.FCount - 1) * SizeOf(string);
+  SDst  := Pointer(Self.FStrings) + (Self.FCount - 1) * SizeOf(string);
   SDst^ := nil;
-  ODst  := Self.FObjects + (Self.FCount - 1) * SizeOf(Pointer);
+  ODst  := Pointer(Self.FObjects) + (Self.FCount - 1) * SizeOf(Pointer);
   ODst^ := nil;
   Self.FCount := Self.FCount - 1;
   Self.HashInvalidate()
@@ -836,7 +836,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Ptr  := Self.FStrings + I * SizeOf(string);
+    Ptr  := Pointer(Self.FStrings) + I * SizeOf(string);
     Ptr^ := nil;
     I    := I + 1
   end;
@@ -860,20 +860,20 @@ begin
   I := Self.FCount;
   while I > AIndex do
   begin
-    SDst  := Self.FStrings + I * SizeOf(string);
-    SSrc  := Self.FStrings + (I - 1) * SizeOf(string);
-    ODst  := Self.FObjects + I * SizeOf(Pointer);
-    OSrc  := Self.FObjects + (I - 1) * SizeOf(Pointer);
+    SDst  := Pointer(Self.FStrings) + I * SizeOf(string);
+    SSrc  := Pointer(Self.FStrings) + (I - 1) * SizeOf(string);
+    ODst  := Pointer(Self.FObjects) + I * SizeOf(Pointer);
+    OSrc  := Pointer(Self.FObjects) + (I - 1) * SizeOf(Pointer);
     SDst^ := SSrc^;
     ODst^ := OSrc^;
     I     := I - 1
   end;
   { Zero the source slot that was shifted (now duplicated at AIndex+1) }
-  SSrc  := Self.FStrings + AIndex * SizeOf(string);
+  SSrc  := Pointer(Self.FStrings) + AIndex * SizeOf(string);
   SSrc^ := nil;  { release the "old" value ARC wrote there during shift }
   { Write the new string at AIndex }
-  Ptr   := Self.FStrings + AIndex * SizeOf(string);
-  OPtr  := Self.FObjects + AIndex * SizeOf(Pointer);
+  Ptr   := Pointer(Self.FStrings) + AIndex * SizeOf(string);
+  OPtr  := Pointer(Self.FObjects) + AIndex * SizeOf(Pointer);
   Ptr^  := S;
   OPtr^ := nil;
   Self.FCount := Self.FCount + 1;
@@ -903,7 +903,7 @@ begin
     I := 0;
     while I < Self.FCount do
     begin
-      Ptr := Self.FStrings + I * SizeOf(string);
+      Ptr := Pointer(Self.FStrings) + I * SizeOf(string);
       SB.AppendLine(Ptr^);
       I := I + 1
     end;
@@ -979,22 +979,22 @@ begin
       K := Lo;
       while (I < Mid) and (J < Hi) do
       begin
-        SA := Self.FStrings + I * SizeOf(string);
-        SB := Self.FStrings + J * SizeOf(string);
+        SA := Pointer(Self.FStrings) + I * SizeOf(string);
+        SB := Pointer(Self.FStrings) + J * SizeOf(string);
         if ACompare(SA^, SB^) <= 0 then
         begin
-          WS  := TmpStr + K * SizeOf(string);
-          WO  := TmpObj + K * SizeOf(Pointer);
-          OA  := Self.FObjects + I * SizeOf(Pointer);
+          WS  := Pointer(TmpStr) + K * SizeOf(string);
+          WO  := Pointer(TmpObj) + K * SizeOf(Pointer);
+          OA  := Pointer(Self.FObjects) + I * SizeOf(Pointer);
           WS^ := SA^;
           WO^ := OA^;
           I   := I + 1
         end
         else
         begin
-          WS  := TmpStr + K * SizeOf(string);
-          WO  := TmpObj + K * SizeOf(Pointer);
-          OB  := Self.FObjects + J * SizeOf(Pointer);
+          WS  := Pointer(TmpStr) + K * SizeOf(string);
+          WO  := Pointer(TmpObj) + K * SizeOf(Pointer);
+          OB  := Pointer(Self.FObjects) + J * SizeOf(Pointer);
           WS^ := SB^;
           WO^ := OB^;
           J   := J + 1
@@ -1003,10 +1003,10 @@ begin
       end;
       while I < Mid do
       begin
-        SA  := Self.FStrings + I * SizeOf(string);
-        OA  := Self.FObjects + I * SizeOf(Pointer);
-        WS  := TmpStr + K * SizeOf(string);
-        WO  := TmpObj + K * SizeOf(Pointer);
+        SA  := Pointer(Self.FStrings) + I * SizeOf(string);
+        OA  := Pointer(Self.FObjects) + I * SizeOf(Pointer);
+        WS  := Pointer(TmpStr) + K * SizeOf(string);
+        WO  := Pointer(TmpObj) + K * SizeOf(Pointer);
         WS^ := SA^;
         WO^ := OA^;
         I   := I + 1;
@@ -1014,10 +1014,10 @@ begin
       end;
       while J < Hi do
       begin
-        SB  := Self.FStrings + J * SizeOf(string);
-        OB  := Self.FObjects + J * SizeOf(Pointer);
-        WS  := TmpStr + K * SizeOf(string);
-        WO  := TmpObj + K * SizeOf(Pointer);
+        SB  := Pointer(Self.FStrings) + J * SizeOf(string);
+        OB  := Pointer(Self.FObjects) + J * SizeOf(Pointer);
+        WS  := Pointer(TmpStr) + K * SizeOf(string);
+        WO  := Pointer(TmpObj) + K * SizeOf(Pointer);
         WS^ := SB^;
         WO^ := OB^;
         J   := J + 1;
@@ -1027,10 +1027,10 @@ begin
       K := Lo;
       while K < Hi do
       begin
-        WS  := TmpStr + K * SizeOf(string);
-        WO  := TmpObj + K * SizeOf(Pointer);
-        DS  := Self.FStrings + K * SizeOf(string);
-        DO_ := Self.FObjects + K * SizeOf(Pointer);
+        WS  := Pointer(TmpStr) + K * SizeOf(string);
+        WO  := Pointer(TmpObj) + K * SizeOf(Pointer);
+        DS  := Pointer(Self.FStrings) + K * SizeOf(string);
+        DO_ := Pointer(Self.FObjects) + K * SizeOf(Pointer);
         DS^ := WS^;
         DO_^ := WO^;
         K   := K + 1
@@ -1043,7 +1043,7 @@ begin
   I := 0;
   while I < N do
   begin
-    WS  := TmpStr + I * SizeOf(string);
+    WS  := Pointer(TmpStr) + I * SizeOf(string);
     WS^ := nil;
     I   := I + 1
   end;

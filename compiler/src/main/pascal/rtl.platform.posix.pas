@@ -444,7 +444,7 @@ function ArgvGet(Arr: TPCharArray; Index: Int): PChar;
 var
   Slot: TPCharArray;
 begin
-  Slot := Arr + (Index * SizeOf(Pointer));
+  Slot := Pointer(Arr) + (Index * SizeOf(Pointer));
   Result := Slot^;
 end;
 
@@ -452,7 +452,7 @@ procedure ArgvSet(Arr: TPCharArray; Index: Int; Val: Pointer);
 var
   Slot: TPCharArray;
 begin
-  Slot := Arr + (Index * SizeOf(Pointer));
+  Slot := Pointer(Arr) + (Index * SizeOf(Pointer));
   Slot^ := PChar(Val);
 end;
 
@@ -944,7 +944,7 @@ var
 begin
   if (GArgV = nil) or (AIndex < 0) or (AIndex >= GArgC) then
     begin Result := ''; Exit end;
-  Slot := GArgV + (AIndex * SizeOf(Pointer));
+  Slot := Pointer(GArgV) + (AIndex * SizeOf(Pointer));
   Result := StrAdopt(StrFromCStr(Slot^));
 end;
 

@@ -335,14 +335,14 @@ const
     var Dest: ^Int32;
     begin
       if Self.FCount = Self.FCapacity then Self.Grow();
-      Dest  := Self.FData + Self.FCount * SizeOf(Int32);
+      Dest  := Pointer(Self.FData) + Self.FCount * SizeOf(Int32);
       Dest^ := V;
       Self.FCount := Self.FCount + 1
     end;
     function TList.Get(I: Int32): Int32;
     var Src: ^Int32;
     begin
-      Src    := Self.FData + I * SizeOf(Int32);
+      Src    := Pointer(Self.FData) + I * SizeOf(Int32);
       Result := Src^
     end;
     procedure TList.Destroy;

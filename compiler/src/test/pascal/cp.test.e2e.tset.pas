@@ -46,7 +46,7 @@ const
           OldCap := Self.FCapacity;
           if OldCap = 0 then NewCap := 4 else NewCap := OldCap * 2;
           Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(Int));
-          ZeroMem(Self.FData + OldCap * SizeOf(Int), (NewCap - OldCap) * SizeOf(Int));
+          ZeroMem(Pointer(Self.FData) + OldCap * SizeOf(Int), (NewCap - OldCap) * SizeOf(Int));
           Self.FCapacity := NewCap
         end;
         function IndexOf(Value: Int): Int;
@@ -55,7 +55,7 @@ const
           Result := -1; I := 0;
           while I < Self.FCount do
           begin
-            Ptr := Self.FData + I * SizeOf(Int);
+            Ptr := Pointer(Self.FData) + I * SizeOf(Int);
             if Ptr^ = Value then begin Result := I; break end;
             I := I + 1
           end
@@ -65,7 +65,7 @@ const
         begin
           if Self.IndexOf(Value) >= 0 then Exit;
           if Self.FCount = Self.FCapacity then Self.Grow();
-          Dest        := Self.FData + Self.FCount * SizeOf(Int);
+          Dest        := Pointer(Self.FData) + Self.FCount * SizeOf(Int);
           Dest^       := Value;
           Self.FCount := Self.FCount + 1
         end;
@@ -77,8 +77,8 @@ const
           I := Idx;
           while I < Self.FCount - 1 do
           begin
-            Dst  := Self.FData + I * SizeOf(Int);
-            Src  := Self.FData + (I + 1) * SizeOf(Int);
+            Dst  := Pointer(Self.FData) + I * SizeOf(Int);
+            Src  := Pointer(Self.FData) + (I + 1) * SizeOf(Int);
             Dst^ := Src^;
             I    := I + 1
           end;

@@ -400,7 +400,7 @@ begin
   else
     NewCap := OldCap * 2;
   Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(T));
-  ZeroMem(Self.FData + OldCap * SizeOf(T), (NewCap - OldCap) * SizeOf(T));
+  ZeroMem(Pointer(Self.FData) + OldCap * SizeOf(T), (NewCap - OldCap) * SizeOf(T));
   Self.FCapacity := NewCap
 end;
 
@@ -534,7 +534,7 @@ var
 begin
   if Self.FCount = Self.FCapacity then
     Self.Grow();
-  Dest        := Self.FData + Self.FCount * SizeOf(T);
+  Dest        := Pointer(Self.FData) + Self.FCount * SizeOf(T);
   Dest^       := Value;
   Self.FCount := Self.FCount + 1
 end;
@@ -547,7 +547,7 @@ begin
     read wild memory (and on an EMPTY list FData is nil, so L[0] segfaulted). }
   if (AIndex < 0) or (AIndex >= Self.FCount) then
     raise EListError.Create('TList index out of range: ' + IntToStr(AIndex));
-  Src    := Self.FData + AIndex * SizeOf(T);
+  Src    := Pointer(Self.FData) + AIndex * SizeOf(T);
   Result := Src^
 end;
 
@@ -559,7 +559,7 @@ begin
     raise EListError.Create('TList index out of range: ' + IntToStr(AIndex));
   { The ^T := Value store carries the compiler's ARC discipline for a managed
     T — the previous element is released and the new one retained. }
-  Dest  := Self.FData + AIndex * SizeOf(T);
+  Dest  := Pointer(Self.FData) + AIndex * SizeOf(T);
   Dest^ := Value
 end;
 
@@ -572,7 +572,7 @@ begin
   I      := 0;
   while I < Self.FCount do
   begin
-    Ptr := Self.FData + I * SizeOf(T);
+    Ptr := Pointer(Self.FData) + I * SizeOf(T);
     if Ptr^ = Value then
     begin
       Result := I;
@@ -594,12 +594,12 @@ begin
   I := Self.FCount - 1;
   while I > AIndex do
   begin
-    Dst  := Self.FData + I * SizeOf(T);
-    Src  := Self.FData + (I - 1) * SizeOf(T);
+    Dst  := Pointer(Self.FData) + I * SizeOf(T);
+    Src  := Pointer(Self.FData) + (I - 1) * SizeOf(T);
     Dst^ := Src^;
     I    := I - 1
   end;
-  Dst  := Self.FData + AIndex * SizeOf(T);
+  Dst  := Pointer(Self.FData) + AIndex * SizeOf(T);
   Dst^ := Value
 end;
 
@@ -629,15 +629,15 @@ begin
   I := AIndex;
   while I < Self.FCount - 1 do
   begin
-    Dst  := Self.FData + I * SizeOf(T);
-    Src  := Self.FData + (I + 1) * SizeOf(T);
+    Dst  := Pointer(Self.FData) + I * SizeOf(T);
+    Src  := Pointer(Self.FData) + (I + 1) * SizeOf(T);
     Dst^ := Src^;
     I    := I + 1
   end;
   Self.FCount := Self.FCount - 1;
   { The shift leaves the (now unused) tail slot holding a duplicate of the last
     element; clear it so its managed ref is released, not leaked. }
-  Dst  := Self.FData + Self.FCount * SizeOf(T);
+  Dst  := Pointer(Self.FData) + Self.FCount * SizeOf(T);
   Dst^ := Empty
 end;
 
@@ -651,7 +651,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Slot  := Self.FData + I * SizeOf(T);
+    Slot  := Pointer(Self.FData) + I * SizeOf(T);
     Slot^ := Empty;
     I     := I + 1
   end;
@@ -676,7 +676,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Slot  := Self.FData + I * SizeOf(T);
+    Slot  := Pointer(Self.FData) + I * SizeOf(T);
     Slot^ := Empty;
     I     := I + 1
   end;
@@ -712,7 +712,7 @@ function TListEnumerator<T>.GetCurrent: T;
 var
   Ptr: ^T;
 begin
-  Ptr    := Self.FData + Self.FIndex * SizeOf(T);
+  Ptr    := Pointer(Self.FData) + Self.FIndex * SizeOf(T);
   Result := Ptr^
 end;
 
@@ -731,7 +731,7 @@ begin
   else
     NewCap := OldCap * 2;
   Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(T));
-  ZeroMem(Self.FData + OldCap * SizeOf(T), (NewCap - OldCap) * SizeOf(T));
+  ZeroMem(Pointer(Self.FData) + OldCap * SizeOf(T), (NewCap - OldCap) * SizeOf(T));
   Self.FCapacity := NewCap
 end;
 
@@ -741,7 +741,7 @@ var
 begin
   if Self.FCount = Self.FCapacity then
     Self.Grow();
-  Dest        := Self.FData + Self.FCount * SizeOf(T);
+  Dest        := Pointer(Self.FData) + Self.FCount * SizeOf(T);
   Dest^       := Value;
   Self.FCount := Self.FCount + 1
 end;
@@ -757,7 +757,7 @@ begin
   if Self.FCount = 0 then
     raise EListError.Create('TStack.Pop: stack is empty');
   Self.FCount := Self.FCount - 1;
-  Src         := Self.FData + Self.FCount * SizeOf(T);
+  Src         := Pointer(Self.FData) + Self.FCount * SizeOf(T);
   Result      := Src^;
   { Ownership moves to the caller; clear the vacated slot so its managed ref
     is released rather than stranded (see TList<T>.Delete). }
@@ -774,7 +774,7 @@ begin
     be indistinguishable from a stored '' or 0. }
   if Self.FCount = 0 then
     raise EListError.Create('TStack.Peek: stack is empty');
-  Src    := Self.FData + (Self.FCount - 1) * SizeOf(T);
+  Src    := Pointer(Self.FData) + (Self.FCount - 1) * SizeOf(T);
   Result := Src^
 end;
 
@@ -789,7 +789,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Slot  := Self.FData + I * SizeOf(T);
+    Slot  := Pointer(Self.FData) + I * SizeOf(T);
     Slot^ := Empty;
     I     := I + 1
   end;
@@ -810,7 +810,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Slot  := Self.FData + I * SizeOf(T);
+    Slot  := Pointer(Self.FData) + I * SizeOf(T);
     Slot^ := Empty;
     I     := I + 1
   end;
@@ -844,8 +844,8 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Src  := Self.FData + ((Self.FHead + I) mod OldCap) * SizeOf(T);
-    Dst  := NewData + I * SizeOf(T);
+    Src  := Pointer(Self.FData) + ((Self.FHead + I) mod OldCap) * SizeOf(T);
+    Dst  := Pointer(NewData) + I * SizeOf(T);
     Dst^ := Src^;
     { The copy retained a second managed ref; release the old slot before the
       buffer is freed, or every surviving element leaks a +1. }
@@ -865,7 +865,7 @@ var
 begin
   if Self.FCount = Self.FCapacity then
     Self.Grow();
-  Dest        := Self.FData + Self.FTail * SizeOf(T);
+  Dest        := Pointer(Self.FData) + Self.FTail * SizeOf(T);
   Dest^       := Value;
   Self.FTail  := (Self.FTail + 1) mod Self.FCapacity;
   Self.FCount := Self.FCount + 1
@@ -881,7 +881,7 @@ begin
     -- a divide fault on top of the null deref.  Guard with IsEmpty. }
   if Self.FCount = 0 then
     raise EListError.Create('TQueue.Dequeue: queue is empty');
-  Src         := Self.FData + Self.FHead * SizeOf(T);
+  Src         := Pointer(Self.FData) + Self.FHead * SizeOf(T);
   Result      := Src^;
   { Ownership moves to the caller; clear the vacated slot (see
     TStack<T>.Pop). }
@@ -898,7 +898,7 @@ begin
     sentinel cannot work here the way Java's null does. }
   if Self.FCount = 0 then
     raise EListError.Create('TQueue.Peek: queue is empty');
-  Src    := Self.FData + Self.FHead * SizeOf(T);
+  Src    := Pointer(Self.FData) + Self.FHead * SizeOf(T);
   Result := Src^
 end;
 
@@ -915,7 +915,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Slot  := Self.FData + ((Self.FHead + I) mod Self.FCapacity) * SizeOf(T);
+    Slot  := Pointer(Self.FData) + ((Self.FHead + I) mod Self.FCapacity) * SizeOf(T);
     Slot^ := Empty;
     I     := I + 1
   end
@@ -960,7 +960,7 @@ begin
   else
     NewCap := OldCap * 2;
   Self.FData     := ReallocMem(Self.FData, NewCap * SizeOf(T));
-  ZeroMem(Self.FData + OldCap * SizeOf(T), (NewCap - OldCap) * SizeOf(T));
+  ZeroMem(Pointer(Self.FData) + OldCap * SizeOf(T), (NewCap - OldCap) * SizeOf(T));
   Self.FCapacity := NewCap
 end;
 
@@ -980,11 +980,11 @@ var
   SlotP: ^Int;
   EPtr:  ^T;
 begin
-  EPtr := Self.FData + AIdx * SizeOf(T);
+  EPtr := Pointer(Self.FData) + AIdx * SizeOf(T);
   Slot := GCHashOf(EPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+    SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
@@ -1009,7 +1009,7 @@ begin
   Self.FHashCap   := Cap;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Int);
+    P  := Pointer(Self.FHashSlots) + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FCount - 1 do
@@ -1030,10 +1030,10 @@ begin
     Slot := GCHashOf(Value) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+      SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
       if SlotP^ = -1 then
         Exit(-1);
-      Ptr := Self.FData + SlotP^ * SizeOf(T);
+      Ptr := Pointer(Self.FData) + SlotP^ * SizeOf(T);
       if Ptr^ = Value then
         Exit(SlotP^);
       Slot := (Slot + 1) and (Self.FHashCap - 1);
@@ -1043,7 +1043,7 @@ begin
   I      := 0;
   while I < Self.FCount do
   begin
-    Ptr := Self.FData + I * SizeOf(T);
+    Ptr := Pointer(Self.FData) + I * SizeOf(T);
     if Ptr^ = Value then
     begin
       Result := I;
@@ -1061,7 +1061,7 @@ begin
     Exit;
   if Self.FCount = Self.FCapacity then
     Self.Grow();
-  Dest        := Self.FData + Self.FCount * SizeOf(T);
+  Dest        := Pointer(Self.FData) + Self.FCount * SizeOf(T);
   Dest^       := Value;
   Self.FCount := Self.FCount + 1;
   { The writer keeps the index (see TDictionary.Add). }
@@ -1090,15 +1090,15 @@ begin
   I := Idx;
   while I < Self.FCount - 1 do
   begin
-    Dst  := Self.FData + I * SizeOf(T);
-    Src  := Self.FData + (I + 1) * SizeOf(T);
+    Dst  := Pointer(Self.FData) + I * SizeOf(T);
+    Src  := Pointer(Self.FData) + (I + 1) * SizeOf(T);
     Dst^ := Src^;
     I    := I + 1
   end;
   Self.FCount := Self.FCount - 1;
   { The shift leaves the vacated tail slot holding a duplicate of the last
     element; clear it so its managed ref is released (see TList<T>.Delete). }
-  Dst  := Self.FData + Self.FCount * SizeOf(T);
+  Dst  := Pointer(Self.FData) + Self.FCount * SizeOf(T);
   Dst^ := Empty;
   { Indexes shifted: rebuild now, never in a lookup. }
   Self.HashInvalidate();
@@ -1132,7 +1132,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Slot  := Self.FData + I * SizeOf(T);
+    Slot  := Pointer(Self.FData) + I * SizeOf(T);
     Slot^ := Empty;
     I     := I + 1
   end;
@@ -1154,7 +1154,7 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    Slot  := Self.FData + I * SizeOf(T);
+    Slot  := Pointer(Self.FData) + I * SizeOf(T);
     Slot^ := Empty;
     I     := I + 1
   end;
@@ -1180,9 +1180,9 @@ begin
   else
     NewCap := OldCap * 2;
   Self.FKeys     := ReallocMem(Self.FKeys,   NewCap * SizeOf(K));
-  ZeroMem(Self.FKeys + OldCap * SizeOf(K), (NewCap - OldCap) * SizeOf(K));
+  ZeroMem(Pointer(Self.FKeys) + OldCap * SizeOf(K), (NewCap - OldCap) * SizeOf(K));
   Self.FValues   := ReallocMem(Self.FValues, NewCap * SizeOf(V));
-  ZeroMem(Self.FValues + OldCap * SizeOf(V), (NewCap - OldCap) * SizeOf(V));
+  ZeroMem(Pointer(Self.FValues) + OldCap * SizeOf(V), (NewCap - OldCap) * SizeOf(V));
   Self.FDead     := ReallocMem(Self.FDead, NewCap);
   ZeroMem(Self.FDead + OldCap, NewCap - OldCap);
   Self.FCapacity := NewCap
@@ -1211,21 +1211,21 @@ begin
     begin
       if I <> J then
       begin
-        Raw := Self.FKeys + I * SizeOf(K);
+        Raw := Pointer(Self.FKeys) + I * SizeOf(K);
         BSrc := Raw;
-        Raw := Self.FKeys + J * SizeOf(K);
+        Raw := Pointer(Self.FKeys) + J * SizeOf(K);
         BDst := Raw;
         Move(BSrc^, BDst^, SizeOf(K));
-        Raw := Self.FValues + I * SizeOf(V);
+        Raw := Pointer(Self.FValues) + I * SizeOf(V);
         BSrc := Raw;
-        Raw := Self.FValues + J * SizeOf(V);
+        Raw := Pointer(Self.FValues) + J * SizeOf(V);
         BDst := Raw;
         Move(BSrc^, BDst^, SizeOf(V));
       end;
       J := J + 1;
     end;
-  ZeroMem(Self.FKeys + J * SizeOf(K), (Self.FUsed - J) * SizeOf(K));
-  ZeroMem(Self.FValues + J * SizeOf(V), (Self.FUsed - J) * SizeOf(V));
+  ZeroMem(Pointer(Self.FKeys) + J * SizeOf(K), (Self.FUsed - J) * SizeOf(K));
+  ZeroMem(Pointer(Self.FValues) + J * SizeOf(V), (Self.FUsed - J) * SizeOf(V));
   ZeroMem(Self.FDead, Self.FUsed);
   Self.FUsed := J;
   Self.HashInvalidate();
@@ -1248,11 +1248,11 @@ var
   SlotP: ^Int;
   KPtr:  ^K;
 begin
-  KPtr := Self.FKeys + AIdx * SizeOf(K);
+  KPtr := Pointer(Self.FKeys) + AIdx * SizeOf(K);
   Slot := GCHashOf(KPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+    SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
@@ -1274,11 +1274,11 @@ var
   KPtr: ^K;
 begin
   Mask := Self.FHashCap - 1;
-  KPtr := Self.FKeys + AIdx * SizeOf(K);
+  KPtr := Pointer(Self.FKeys) + AIdx * SizeOf(K);
   Hole := GCHashOf(KPtr^) and Mask;
   while True do
   begin
-    SlotP := Self.FHashSlots + Hole * SizeOf(Int);
+    SlotP := Pointer(Self.FHashSlots) + Hole * SizeOf(Int);
     if SlotP^ = AIdx then
       Break;
     if SlotP^ = -1 then
@@ -1289,22 +1289,22 @@ begin
   while True do
   begin
     J := (J + 1) and Mask;
-    SlotP := Self.FHashSlots + J * SizeOf(Int);
+    SlotP := Pointer(Self.FHashSlots) + J * SizeOf(Int);
     if SlotP^ = -1 then
       Break;
-    KPtr := Self.FKeys + SlotP^ * SizeOf(K);
+    KPtr := Pointer(Self.FKeys) + SlotP^ * SizeOf(K);
     Home := GCHashOf(KPtr^) and Mask;
     { The entry at J may fill the hole when its home is not in (Hole, J],
       cyclically. }
     if ((Hole <= J) and ((Home <= Hole) or (Home > J))) or
        ((Hole > J) and (Home <= Hole) and (Home > J)) then
     begin
-      HoleP := Self.FHashSlots + Hole * SizeOf(Int);
+      HoleP := Pointer(Self.FHashSlots) + Hole * SizeOf(Int);
       HoleP^ := SlotP^;
       Hole := J;
     end;
   end;
-  HoleP := Self.FHashSlots + Hole * SizeOf(Int);
+  HoleP := Pointer(Self.FHashSlots) + Hole * SizeOf(Int);
   HoleP^ := -1;
 end;
 
@@ -1325,7 +1325,7 @@ begin
   Self.FHashCap   := Cap;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Int);
+    P  := Pointer(Self.FHashSlots) + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FUsed - 1 do
@@ -1347,10 +1347,10 @@ begin
     Slot := GCHashOf(Key) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+      SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
       if SlotP^ = -1 then
         Exit(-1);
-      Ptr := Self.FKeys + SlotP^ * SizeOf(K);
+      Ptr := Pointer(Self.FKeys) + SlotP^ * SizeOf(K);
       if Ptr^ = Key then
         Exit(SlotP^);
       Slot := (Slot + 1) and (Self.FHashCap - 1);
@@ -1360,7 +1360,7 @@ begin
   I      := 0;
   while I < Self.FUsed do
   begin
-    Ptr := Self.FKeys + I * SizeOf(K);
+    Ptr := Pointer(Self.FKeys) + I * SizeOf(K);
     if (Ptr^ = Key) and not Self.IsDead(I) then
     begin
       Result := I;
@@ -1399,7 +1399,7 @@ begin
   if Idx >= 0 then
   begin
     { Update existing entry }
-    VPtr  := Self.FValues + Idx * SizeOf(V);
+    VPtr  := Pointer(Self.FValues) + Idx * SizeOf(V);
     VPtr^ := Value
   end
   else
@@ -1410,8 +1410,8 @@ begin
       Self.Compact();
     if Self.FUsed = Self.FCapacity then
       Self.Grow();
-    KPtr  := Self.FKeys   + Self.FUsed * SizeOf(K);
-    VPtr  := Self.FValues + Self.FUsed * SizeOf(V);
+    KPtr  := Pointer(Self.FKeys)   + Self.FUsed * SizeOf(K);
+    VPtr  := Pointer(Self.FValues) + Self.FUsed * SizeOf(V);
     KPtr^ := Key;
     VPtr^ := Value;
     Self.FUsed := Self.FUsed + 1;
@@ -1441,7 +1441,7 @@ begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr   := Self.FValues + Idx * SizeOf(V);
+    VPtr   := Pointer(Self.FValues) + Idx * SizeOf(V);
     Value  := VPtr^;
     Result := True
   end
@@ -1472,7 +1472,7 @@ begin
   for I := 0 to Self.FUsed - 1 do
     if not Self.IsDead(I) then
     begin
-      P := Self.FKeys + I * SizeOf(K);
+      P := Pointer(Self.FKeys) + I * SizeOf(K);
       Result.Add(P^)
     end
 end;
@@ -1486,7 +1486,7 @@ begin
   for I := 0 to Self.FUsed - 1 do
     if not Self.IsDead(I) then
     begin
-      P := Self.FValues + I * SizeOf(V);
+      P := Pointer(Self.FValues) + I * SizeOf(V);
       Result.Add(P^)
     end
 end;
@@ -1512,8 +1512,8 @@ begin
       Self.HashRemoveIdx(Idx);
     { Release the entry and leave a tombstone: the others keep their
       places (and their order). }
-    KDst  := Self.FKeys   + Idx * SizeOf(K);
-    VDst  := Self.FValues + Idx * SizeOf(V);
+    KDst  := Pointer(Self.FKeys)   + Idx * SizeOf(K);
+    VDst  := Pointer(Self.FValues) + Idx * SizeOf(V);
     KDst^ := EmptyKey;
     VDst^ := EmptyVal;
     D     := Self.FDead + Idx;
@@ -1552,7 +1552,7 @@ begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr   := Self.FValues + Idx * SizeOf(V);
+    VPtr   := Pointer(Self.FValues) + Idx * SizeOf(V);
     Result := VPtr^
   end
   else
@@ -1586,8 +1586,8 @@ begin
   I := 0;
   while I < Self.FUsed do
   begin
-    KSlot  := Self.FKeys   + I * SizeOf(K);
-    VSlot  := Self.FValues + I * SizeOf(V);
+    KSlot  := Pointer(Self.FKeys)   + I * SizeOf(K);
+    VSlot  := Pointer(Self.FValues) + I * SizeOf(V);
     KSlot^ := EmptyKey;
     VSlot^ := EmptyVal;
     I      := I + 1
@@ -1629,9 +1629,9 @@ begin
   else
     NewCap := OldCap * 2;
   Self.FKeys     := ReallocMem(Self.FKeys,   NewCap * SizeOf(K));
-  ZeroMem(Self.FKeys + OldCap * SizeOf(K), (NewCap - OldCap) * SizeOf(K));
+  ZeroMem(Pointer(Self.FKeys) + OldCap * SizeOf(K), (NewCap - OldCap) * SizeOf(K));
   Self.FValues   := ReallocMem(Self.FValues, NewCap * SizeOf(V));
-  ZeroMem(Self.FValues + OldCap * SizeOf(V), (NewCap - OldCap) * SizeOf(V));
+  ZeroMem(Pointer(Self.FValues) + OldCap * SizeOf(V), (NewCap - OldCap) * SizeOf(V));
   Self.FCapacity := NewCap
 end;
 
@@ -1651,11 +1651,11 @@ var
   SlotP: ^Int;
   KPtr:  ^K;
 begin
-  KPtr := Self.FKeys + AIdx * SizeOf(K);
+  KPtr := Pointer(Self.FKeys) + AIdx * SizeOf(K);
   Slot := GCHashOf(KPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+    SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
@@ -1680,7 +1680,7 @@ begin
   Self.FHashCap   := Cap;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Int);
+    P  := Pointer(Self.FHashSlots) + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FCount - 1 do
@@ -1701,10 +1701,10 @@ begin
     Slot := GCHashOf(Key) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
+      SlotP := Pointer(Self.FHashSlots) + Slot * SizeOf(Int);
       if SlotP^ = -1 then
         Exit(-1);
-      Ptr := Self.FKeys + SlotP^ * SizeOf(K);
+      Ptr := Pointer(Self.FKeys) + SlotP^ * SizeOf(K);
       if Ptr^ = Key then
         Exit(SlotP^);
       Slot := (Slot + 1) and (Self.FHashCap - 1);
@@ -1714,7 +1714,7 @@ begin
   I      := 0;
   while I < Self.FCount do
   begin
-    Ptr := Self.FKeys + I * SizeOf(K);
+    Ptr := Pointer(Self.FKeys) + I * SizeOf(K);
     if Ptr^ = Key then
     begin
       Result := I;
@@ -1746,15 +1746,15 @@ begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr  := Self.FValues + Idx * SizeOf(V);
+    VPtr  := Pointer(Self.FValues) + Idx * SizeOf(V);
     VPtr^ := Value
   end
   else
   begin
     if Self.FCount = Self.FCapacity then
       Self.Grow();
-    KPtr  := Self.FKeys   + Self.FCount * SizeOf(K);
-    VPtr  := Self.FValues + Self.FCount * SizeOf(V);
+    KPtr  := Pointer(Self.FKeys)   + Self.FCount * SizeOf(K);
+    VPtr  := Pointer(Self.FValues) + Self.FCount * SizeOf(V);
     KPtr^ := Key;
     VPtr^ := Value;
     Self.FCount := Self.FCount + 1;
@@ -1780,7 +1780,7 @@ begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr   := Self.FValues + Idx * SizeOf(V);
+    VPtr   := Pointer(Self.FValues) + Idx * SizeOf(V);
     Value  := VPtr^;
     Result := True
   end
@@ -1814,10 +1814,10 @@ begin
     I := Idx;
     while I < Self.FCount - 1 do
     begin
-      KDst  := Self.FKeys   + I * SizeOf(K);
-      KSrc  := Self.FKeys   + (I + 1) * SizeOf(K);
-      VDst  := Self.FValues + I * SizeOf(V);
-      VSrc  := Self.FValues + (I + 1) * SizeOf(V);
+      KDst  := Pointer(Self.FKeys)   + I * SizeOf(K);
+      KSrc  := Pointer(Self.FKeys)   + (I + 1) * SizeOf(K);
+      VDst  := Pointer(Self.FValues) + I * SizeOf(V);
+      VSrc  := Pointer(Self.FValues) + (I + 1) * SizeOf(V);
       KDst^ := KSrc^;
       VDst^ := VSrc^;
       I     := I + 1
@@ -1825,8 +1825,8 @@ begin
     Self.FCount := Self.FCount - 1;
     { The shift leaves the vacated tail slots holding duplicates of the last
       entry; clear both axes so their managed refs are released. }
-    KDst  := Self.FKeys   + Self.FCount * SizeOf(K);
-    VDst  := Self.FValues + Self.FCount * SizeOf(V);
+    KDst  := Pointer(Self.FKeys)   + Self.FCount * SizeOf(K);
+    VDst  := Pointer(Self.FValues) + Self.FCount * SizeOf(V);
     KDst^ := EmptyKey;
     VDst^ := EmptyVal;
     { Indexes shifted: rebuild now, never in a lookup. }
@@ -1845,7 +1845,7 @@ begin
   if (AIndex < 0) or (AIndex >= Self.FCount) then
     raise EListError.Create(
       'TOrderedDictionary index out of range: ' + IntToStr(AIndex));
-  Ptr    := Self.FKeys + AIndex * SizeOf(K);
+  Ptr    := Pointer(Self.FKeys) + AIndex * SizeOf(K);
   Result := Ptr^
 end;
 
@@ -1856,7 +1856,7 @@ begin
   if (AIndex < 0) or (AIndex >= Self.FCount) then
     raise EListError.Create(
       'TOrderedDictionary index out of range: ' + IntToStr(AIndex));
-  Ptr    := Self.FValues + AIndex * SizeOf(V);
+  Ptr    := Pointer(Self.FValues) + AIndex * SizeOf(V);
   Result := Ptr^
 end;
 
@@ -1868,7 +1868,7 @@ begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
   begin
-    VPtr   := Self.FValues + Idx * SizeOf(V);
+    VPtr   := Pointer(Self.FValues) + Idx * SizeOf(V);
     Result := VPtr^
   end
   else
@@ -1901,8 +1901,8 @@ begin
   I := 0;
   while I < Self.FCount do
   begin
-    KSlot  := Self.FKeys   + I * SizeOf(K);
-    VSlot  := Self.FValues + I * SizeOf(V);
+    KSlot  := Pointer(Self.FKeys)   + I * SizeOf(K);
+    VSlot  := Pointer(Self.FValues) + I * SizeOf(V);
     KSlot^ := EmptyKey;
     VSlot^ := EmptyVal;
     I      := I + 1
