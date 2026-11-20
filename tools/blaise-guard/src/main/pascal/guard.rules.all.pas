@@ -24,6 +24,7 @@ uses
   Guard.Rule.UnusedIdentifiers, { BL-1004 }
   Guard.Rule.RedundantComparison, { BL-1005 }
   Guard.Rule.UnassignedResult,  { BL-1006 }
+  Guard.Rule.DeclarationParentheses, { BL-1007 }
   Guard.Rule.AvoidManualFree,   { BL-2001 }
   Guard.Rule.ReferenceCycles,   { BL-2002 }
   Guard.Rule.StringIndexing,    { BL-2003 }

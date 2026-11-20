@@ -205,6 +205,10 @@ begin
   { BL-1004 (UnusedIdentifiers) is heuristic (closures/shadowing), so the
     built-in default posture leaves it off; a config file can turn it on. }
   Result.RuleConfig('BL-1004').Enabled := False;
+  { BL-1007 (DeclarationParentheses) is a house-style preference, not a
+    defect check: the language accepts both heading spellings, so a project
+    opts in. }
+  Result.RuleConfig('BL-1007').Enabled := False;
 end;
 
 static function TGuardConfig.LoadFromString(const AJson: string): TGuardConfig;

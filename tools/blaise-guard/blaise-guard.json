@@ -7,6 +7,7 @@
     "BL-1004": { "enabled": false, "severity": "warning", "params": { "checkParameters": false } },
     "BL-1005": { "enabled": true, "severity": "warning" },
     "BL-1006": { "enabled": true, "severity": "warning" },
+    "BL-1007": { "enabled": false, "severity": "info" },
     "BL-2001": { "enabled": true, "severity": "warning", "params": { "includeDestroy": true } },
     "BL-2002": { "enabled": true, "severity": "warning", "params": { "includeSelfReference": false } },
     "BL-2003": { "enabled": true, "severity": "info" },

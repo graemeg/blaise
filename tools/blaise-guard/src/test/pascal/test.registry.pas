@@ -32,6 +32,7 @@ uses
   Guard.Rule.EmptyHandler.Tests,
   Guard.Rule.ExhaustiveCase.Tests,
   Guard.Rule.ClassicTypeNames.Tests,
+  Guard.Rule.DeclarationParentheses.Tests,
   Guard.Suppression.Tests,
   Guard.Input.Tests;
 

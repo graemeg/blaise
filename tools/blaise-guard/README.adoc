@@ -207,7 +207,7 @@ always means the same thing.
 | Size and shape limits, and constructs that are simply redundant. Applies to
   Pascal generally, not to Blaise specifically: line length, routine length,
   nesting depth, unused identifiers, `= True`, a function that never assigns
-  `Result`.
+  `Result`, an opt-in `()` on parameterless routine headings.
 
 | `BL-2xxx`
 | Blaise semantics
@@ -246,6 +246,7 @@ correctness checks with none of the style opinions.
 | BL-1004 | UnusedIdentifiers | ✅ implemented (AST expr walker; off by default)
 | BL-1005 | RedundantComparison | ✅ implemented (`= True`, self-assignment)
 | BL-1006 | UnassignedResult | ✅ implemented (function never assigns Result)
+| BL-1007 | DeclarationParentheses | ✅ implemented (`procedure Foo;` → `procedure Foo();`, with a quick-fix; token-based, INFO; off by default)
 | BL-2001 | AvoidManualFree   | ✅ implemented
 | BL-2002 | ReferenceCycles   | ✅ implemented (cross-file strong-ref graph)
 | BL-2003 | StringIndexing    | ✅ implemented (heuristic, token-based, INFO)
@@ -279,6 +280,13 @@ Not expressible in Blaise. The first three are parse errors; `F := x` inside
 The full MVP ruleset and all four report formats (`console`, `json`, `xml`,
 `html`) are implemented.  BL-1004 ships disabled by default: closures and
 shadowing keep it heuristic, so enable it deliberately.
+
+BL-1007 also ships disabled.  It is a house-style preference rather than a
+defect check: Blaise accepts a parameterless routine heading with or without
+`()` (see _Parentheses in routine declarations_ in
+`docs/language-rationale.adoc`, GH #192), and a project that wants the `()`
+form throughout enables it in its config.  The Blaise project's own
+`blaise-guard.json` lists it as disabled.
 
 === Rule lifecycle (cross-file rules)
 

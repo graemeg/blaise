@@ -6729,7 +6729,9 @@ takes `()` is *visibly not a call*; the two syntax classes stay disjoint:
   delimit the value expression, not a call.
 
 Accepting an *optional* empty `()` on these three would have created the
-only place in the language where parentheses are optional, reintroducing
+only place in a statement or expression where parentheses are optional
+(routine *declarations* are a different matter; see _Parentheses in
+routine declarations_ below), reintroducing
 in miniature the two-spellings ambiguity this whole section exists to
 eliminate.  Instead the parser rejects `Exit()`, `Break()` and
 `Continue()` with a diagnostic that names the rule ("'Exit' is a
@@ -6747,6 +6749,53 @@ rather than the generic "Expected expression" that prompted the issue.
   record value parameters in `TMethodCallExpr`, and native backend missing
   `leaq` for record receivers.  All were masked by the old
   `TFieldAccessExpr.IsMethodCall` path.
+
+=== Parentheses in routine declarations
+
+*Decision*: a parameterless routine heading may be written with or without
+an empty parameter list.  `procedure Foo;` and `procedure Foo();`,
+`function Count: Int;` and `function Count(): Int;`, and the same for
+methods, constructors, destructors, forward and external declarations, are
+all accepted and mean the same thing.  The mandatory-parentheses rule
+applies to *calls* only.
+
+Issue #192 proposed extending the rule to declarations, for symmetry with
+call sites and to remove an optional piece of syntax.  The proposal was
+declined.
+
+*Rationale*: the call-site rule exists to resolve an ambiguity, not to make
+calls and declarations look alike.  A bare `Foo` in an expression could be
+a variable, a constant, a call or a read of `Result`, and each of the three
+problems listed above (readability, compiler complexity, grep-ability)
+follows from that.  A declaration has none of them:
+
+* *Nothing to misread.*  The `procedure`, `function`, `constructor` or
+  `destructor` keyword already states that a routine is being declared.
+* *Nothing to infer.*  After the routine name, the next token (`;`, `:` or
+  `(`) determines the shape of the heading.  The parser synthesises no
+  hidden node and the AST records no flag.
+* *Nothing gained for search.*  Requiring `procedure Foo();` does not make
+  call sites of `Foo` any easier to find.
+
+Declaration syntax elsewhere is likewise free of parentheses that carry no
+information (`var X: Int32;`, `property P: Int32 read FP;`,
+`TProc = procedure;`).  Making `()` mandatory in headings would also change
+almost every parameterless routine in existing Object Pascal code, and in
+the compiler, RTL and stdlib, for no change in meaning.
+
+*Alternatives considered*:
+
+* *Require `()` in declarations* (the #192 proposal) — rejected for the
+  reasons above.
+* *Reject `()` in declarations*, so that the traditional bare form is the
+  only spelling — rejected.  It removes an option some authors prefer, and
+  like the proposal it is a style preference rather than a correctness
+  rule.
+
+A project that wants one spelling throughout can enforce it with
+BlaiseGuard rule BL-1007 (DeclarationParentheses), which reports a
+parameterless heading written without `()`.  The rule is disabled by
+default, and the Blaise project itself does not enable it.
 
 == Float32 Evaluation Precision
 
