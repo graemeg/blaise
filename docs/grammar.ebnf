@@ -717,7 +717,21 @@ DefaultValue
  * ResolveStandaloneOverload / ResolveMethodOverload). *)
 
 TypeParamList
-    = IDENT { COMMA IDENT }
+    = TypeParam { COMMA TypeParam }
+    ;
+
+(* A constraint binds only the parameter it follows: in TPair<K, V: class>
+ * K is unconstrained.  A named constraint is satisfied by that type, a
+ * descendant class, or -- for an interface -- any type whose values convert
+ * to it (see language-rationale.adoc, "Generic Type-Parameter Constraints"). *)
+TypeParam
+    = IDENT [ COLON TypeConstraint ]
+    ;
+
+TypeConstraint
+    = CLASS
+    | RECORD
+    | IDENT
     ;
 
 

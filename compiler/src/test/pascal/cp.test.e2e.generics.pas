@@ -67,6 +67,11 @@ type
       interface — class(IVal) on a generic template must wire AddImplements. }
     procedure TestRun_GenericClassImplementsInterface;
     procedure TestRun_GenericClassImplementsInterface_MethodArgs;
+    { Interface constraint <T: IShape>: the instance calls the interface's
+      methods through T, for a direct implementor, an implementor through an
+      ancestor class, an implementor of a derived interface, and the
+      interface type itself; in a generic function, class and method. }
+    procedure TestRun_IntfConstraint_CallsThroughT;
     { Generic METHODS (method-level <T>): a method declaring its own type
       parameter, instantiated per call site (obj.M<Integer>(...)). }
     procedure TestRun_GenericMethod_Pick;
@@ -482,6 +487,83 @@ procedure TE2EGenericsTests.TestRun_GenericClassImplementsInterface_MethodArgs;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcGenericImplementsIntfArgs, '42' + LE, 0);
+end;
+
+const
+  SrcIntfConstraint = '''
+    program Prog;
+    type
+      IShape = interface
+        function Area: Int;
+        function Name: string;
+      end;
+      ISolid = interface(IShape)
+        function Volume: Int;
+      end;
+      TSquare = class(TObject, IShape)
+        FSide: Int;
+        constructor Create(ASide: Int);
+        function Area: Int;
+        function Name: string;
+      end;
+      TBigSquare = class(TSquare)
+        function Name: string;
+      end;
+      TCube = class(TObject, ISolid)
+        function Area: Int;
+        function Name: string;
+        function Volume: Int;
+      end;
+      THolder<T: IShape> = class
+        FItem: T;
+        constructor Create(AItem: T);
+        function Describe: string;
+      end;
+      TUtil = class
+        function Measure<T: IShape>(const S: T): Int;
+      end;
+    constructor TSquare.Create(ASide: Int); begin FSide := ASide end;
+    function TSquare.Area: Int; begin Result := FSide * FSide end;
+    function TSquare.Name: string; begin Result := 'square' end;
+    function TBigSquare.Name: string; begin Result := 'big' end;
+    function TCube.Area: Int; begin Result := 54 end;
+    function TCube.Name: string; begin Result := 'cube' end;
+    function TCube.Volume: Int; begin Result := 27 end;
+    constructor THolder<T>.Create(AItem: T); begin FItem := AItem end;
+    function THolder<T>.Describe: string;
+    begin
+      Result := FItem.Name() + '=' + IntToStr(FItem.Area())
+    end;
+    function TUtil.Measure<T>(const S: T): Int; begin Result := S.Area() + 1 end;
+    function Describe<T: IShape>(const S: T): string;
+    begin
+      Result := S.Name() + ':' + IntToStr(S.Area())
+    end;
+    var
+      Sq: TSquare; Big: TBigSquare; C: TCube; I: IShape; U: TUtil;
+      HB: THolder<TBigSquare>;
+    begin
+      Sq := TSquare.Create(3);
+      Big := TBigSquare.Create(4);
+      C := TCube.Create();
+      I := TSquare.Create(5);
+      WriteLn(Describe<TSquare>(Sq));
+      WriteLn(Describe<TBigSquare>(Big));
+      WriteLn(Describe<TCube>(C));
+      WriteLn(Describe<IShape>(I));
+      HB := THolder<TBigSquare>.Create(Big);
+      WriteLn(HB.Describe());
+      U := TUtil.Create();
+      WriteLn(U.Measure<TCube>(C))
+    end.
+    ''';
+
+procedure TE2EGenericsTests.TestRun_IntfConstraint_CallsThroughT;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcIntfConstraint,
+    'square:9' + LE + 'big:16' + LE + 'cube:54' + LE + 'square:25' + LE +
+    'big=16' + LE + '55' + LE, 0);
 end;
 
 const

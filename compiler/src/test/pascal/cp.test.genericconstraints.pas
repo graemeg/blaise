@@ -17,7 +17,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TGenericConstraintTests = class(TTestCase)
@@ -25,6 +25,8 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
+    procedure AssertIntfConstraintAccepted(const ABody: string);
+    procedure AssertIntfConstraintRejected(const ABody, AArg: string);
   published
     procedure TestParse_GenericType_ClassConstraint;
     procedure TestParse_GenericType_RecordConstraint;
@@ -37,6 +39,19 @@ type
     procedure TestSemantic_GenericType_ClassConstraint_Violation;
     procedure TestSemantic_GenericFunc_NamedConstraint_Violation;
     procedure TestSemantic_GenericFunc_NamedConstraint_Satisfied;
+    { Interface constraints, <T: IShape>.  A type satisfies one exactly when
+      a value of it converts to the interface: the class lists it, an
+      ancestor class lists it, or it lists an interface inheriting from it. }
+    procedure TestSemantic_IntfConstraint_DirectImplementor_Satisfied;
+    procedure TestSemantic_IntfConstraint_NonImplementor_Violation;
+    procedure TestSemantic_IntfConstraint_AncestorImplementor_Satisfied;
+    procedure TestSemantic_IntfConstraint_DerivedIntfImplementor_Satisfied;
+    procedure TestSemantic_IntfConstraint_InterfaceItself_Satisfied;
+    procedure TestSemantic_IntfConstraint_DerivedInterface_Satisfied;
+    procedure TestSemantic_IntfConstraint_UnrelatedInterface_Violation;
+    procedure TestSemantic_IntfConstraint_GenericClass_Satisfied;
+    procedure TestSemantic_IntfConstraint_GenericClass_Violation;
+    procedure TestSemantic_IntfConstraint_GenericMethod_Violation;
   end;
 
 implementation
@@ -273,6 +288,178 @@ begin
         end.
         ''');
   try AssertNotNull(Prog); finally Prog.Free(); end;
+end;
+
+const
+  { Shared declarations for the interface-constraint tests.  TBigSquare
+    implements IShape only through its ancestor TSquare; TCube only through
+    ISolid = interface(IShape); TPlain implements nothing; IOther is
+    unrelated to IShape. }
+  IntfConstraintDecls = '''
+    program Prg;
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+      ISolid = interface(IShape)
+        function Volume: Int;
+      end;
+      IOther = interface
+        function Other: Int;
+      end;
+      TSquare = class(TObject, IShape)
+        function Area: Int;
+      end;
+      TBigSquare = class(TSquare)
+      end;
+      TCube = class(TObject, ISolid)
+        function Area: Int;
+        function Volume: Int;
+      end;
+      TPlain = class(TObject)
+      end;
+      THolder<T: IShape> = class
+        FItem: T;
+      end;
+      TUtil = class
+        function Measure<T: IShape>(const S: T): Int;
+      end;
+    function TSquare.Area: Int; begin Result := 4 end;
+    function TCube.Area: Int; begin Result := 6 end;
+    function TCube.Volume: Int; begin Result := 1 end;
+    function TUtil.Measure<T>(const S: T): Int; begin Result := 0 end;
+    function AreaOf<T: IShape>(const S: T): Int; begin Result := S.Area() end;
+
+    ''';
+
+{ Analyses IntfConstraintDecls followed by ABody as the main program block
+  and fails unless it is accepted. }
+procedure TGenericConstraintTests.AssertIntfConstraintAccepted(const ABody: string);
+var
+  Msg: string;
+begin
+  Msg := SemanticError(IntfConstraintDecls + ABody);
+  AssertEquals('expected the program to be accepted', '', Msg);
+end;
+
+{ As above, but the program must be rejected with the constraint diagnostic
+  naming AArg. }
+procedure TGenericConstraintTests.AssertIntfConstraintRejected(const ABody, AArg: string);
+var
+  Msg: string;
+begin
+  Msg := SemanticError(IntfConstraintDecls + ABody);
+  AssertTrue('names the unsatisfied constraint: ' + Msg,
+    Pos('''' + AArg + ''' does not implement ''IShape'' (constraint ''T: IShape'')', Msg) >= 0);
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_DirectImplementor_Satisfied;
+begin
+  AssertIntfConstraintAccepted('''
+    var S: TSquare; N: Int;
+    begin
+      S := TSquare.Create();
+      N := AreaOf<TSquare>(S)
+    end.
+    ''');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_NonImplementor_Violation;
+begin
+  AssertIntfConstraintRejected('''
+    var P: TPlain; N: Int;
+    begin
+      P := TPlain.Create();
+      N := AreaOf<TPlain>(P)
+    end.
+    ''', 'TPlain');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_AncestorImplementor_Satisfied;
+begin
+  { TBigSquare inherits TSquare's IShape implementation }
+  AssertIntfConstraintAccepted('''
+    var B: TBigSquare; N: Int;
+    begin
+      B := TBigSquare.Create();
+      N := AreaOf<TBigSquare>(B)
+    end.
+    ''');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_DerivedIntfImplementor_Satisfied;
+begin
+  { TCube implements ISolid, and every ISolid is an IShape }
+  AssertIntfConstraintAccepted('''
+    var C: TCube; N: Int;
+    begin
+      C := TCube.Create();
+      N := AreaOf<TCube>(C)
+    end.
+    ''');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_InterfaceItself_Satisfied;
+begin
+  AssertIntfConstraintAccepted('''
+    var I: IShape; N: Int;
+    begin
+      I := TSquare.Create();
+      N := AreaOf<IShape>(I)
+    end.
+    ''');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_DerivedInterface_Satisfied;
+begin
+  AssertIntfConstraintAccepted('''
+    var I: ISolid; N: Int;
+    begin
+      I := TCube.Create();
+      N := AreaOf<ISolid>(I)
+    end.
+    ''');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_UnrelatedInterface_Violation;
+begin
+  AssertIntfConstraintRejected('''
+    var I: IOther; N: Int;
+    begin
+      N := AreaOf<IOther>(I)
+    end.
+    ''', 'IOther');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_GenericClass_Satisfied;
+begin
+  AssertIntfConstraintAccepted('''
+    var H: THolder<TBigSquare>;
+    begin
+      H := THolder<TBigSquare>.Create()
+    end.
+    ''');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_GenericClass_Violation;
+begin
+  AssertIntfConstraintRejected('''
+    var H: THolder<TPlain>;
+    begin
+    end.
+    ''', 'TPlain');
+end;
+
+procedure TGenericConstraintTests.TestSemantic_IntfConstraint_GenericMethod_Violation;
+begin
+  AssertIntfConstraintRejected('''
+    var U: TUtil; P: TPlain; N: Int;
+    begin
+      U := TUtil.Create();
+      P := TPlain.Create();
+      N := U.Measure<TPlain>(P)
+    end.
+    ''', 'TPlain');
 end;
 
 initialization

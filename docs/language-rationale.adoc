@@ -5851,6 +5851,63 @@ inside generic records are handled by the existing record-cleanup logic at
 variable scope exit, not by class-style field cleanup.
 
 
+== Generic Type-Parameter Constraints
+
+=== Decision
+
+A type parameter may carry one constraint, written after a colon:
+
+[source,pascal]
+----
+type
+  TPool<T: class> = class ... end;        // T must be a class type
+  TCell<T: record> = record ... end;      // T must be a value type
+  TPen<T: TAnimal> = class ... end;       // T must be TAnimal or a descendant
+  THolder<T: IShape> = class ... end;     // T must convert to IShape
+
+function AreaOf<T: IShape>(const S: T): Int;
+----
+
+The constraint is checked when the generic is instantiated, and the
+diagnostic names the argument and the constraint it fails.
+
+An interface constraint `T: IShape` is satisfied exactly when a value of the
+argument type is assignable to an `IShape` variable:
+
+* a class that lists `IShape` in its own implements list;
+* a class whose ancestor lists `IShape` (it inherits the implementation);
+* a class that implements an interface inheriting from `IShape`
+  (`ISolid = interface(IShape)`);
+* `IShape` itself, or an interface that inherits from it.
+
+=== Rationale
+
+A constraint promises the generic body that every operation it performs on `T`
+is valid.  For an interface that promise is "a `T` can be used as an
+`IShape`", which is the same question assignment already answers.  Reusing
+the assignment rule keeps the two in agreement: a type accepted by
+`I := X` is accepted by `AreaOf<X>`, and the reverse.  The first
+implementation consulted only the class's own implements list, so a
+descendant of an implementor, or an implementor of a derived interface,
+compiled when assigned to the interface yet was rejected by the constraint.
+
+This matches the other languages with interface-style bounds: a Rust
+`T: Shape` bound is met by any type implementing `Shape`, including through
+a supertrait relationship; Delphi and C# constraints are met by a class that
+inherits the interface from an ancestor.
+
+=== Alternatives considered
+
+*Only the class's own implements list* -- rejected.  It made the constraint
+stricter than assignment for no gain, and it broke the expected substitution
+of a descendant class for its ancestor.
+
+*Several constraints per parameter* (Delphi's `T: class, IShape`) -- not
+supported.  No program in the compiler or stdlib needs it yet.  Blaise
+separates type parameters with a comma, so `<T: class, IShape>` already
+parses as two parameters, `T: class` and an unconstrained `IShape`; adding
+the Delphi form would need a different separator.
+
 == Generic Methods
 
 === Decision

@@ -2463,9 +2463,6 @@ procedure TSemanticAnalyser.CheckTypeParamConstraint(
 var
   ArgType:     TTypeDesc;
   ConstrType:  TTypeDesc;
-  RT:          TRecordTypeDesc;
-  I:           Int;
-  Implements:  Boolean;
 begin
   if AConstraint = '' then Exit;
 
@@ -2513,17 +2510,15 @@ begin
       [AArgName, AConstraint, AParamName, AConstraint, AContext]));
   end;
 
-  if (ConstrType.Kind = tyInterface) and (ArgType.Kind = tyClass) then
+  { An interface constraint is satisfied exactly when a value of the argument
+    type converts to the interface -- the rule assignment uses.  So a class
+    satisfies it through an ancestor's implementation or through a derived
+    interface it implements, and an interface argument through its parent
+    chain.  Scanning only the class's own implements list rejected both. }
+  if (ConstrType.Kind = tyInterface) and
+     (ArgType.Kind in [tyClass, tyInterface]) then
   begin
-    RT := TRecordTypeDesc(ArgType);
-    Implements := False;
-    for I := 0 to RT.ImplementsCount() - 1 do
-      if RT.ImplementsIntfAt(I) = ConstrType then
-      begin
-        Implements := True;
-        Break;
-      end;
-    if not Implements then
+    if not ConvertsToInterface(ArgType, ConstrType) then
       raise ESemanticError.Create(Format(
         'Type ''%s'' does not implement ''%s'' (constraint ''%s: %s'') in %s',
         [AArgName, AConstraint, AParamName, AConstraint, AContext]));
