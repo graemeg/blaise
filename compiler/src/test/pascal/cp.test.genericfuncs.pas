@@ -84,9 +84,32 @@ type
     procedure TestSemantic_GenericMethod_EveryExplicitCallForm;
     procedure TestSemantic_StaticGenericMethod_InstanceIsStatic;
     procedure TestSemantic_StaticGenericMethod_ArgTypeChecked;
-    { type arguments of a generic method are never inferred: a call without
-      them says so, instead of "No matching overload" }
-    procedure TestSemantic_GenericMethod_NoTypeArgs_SaysExplicit;
+    { a generic method whose type arguments cannot be inferred (T appears
+      only in the result) says to give them, instead of "No matching
+      overload" }
+    procedure TestSemantic_GenericMethod_UninferableTypeArgs_SaysExplicit;
+    { ------------------------------------------------------------------ }
+    { Type-argument inference from the arguments                         }
+    { ------------------------------------------------------------------ }
+    { F(C) resolves the same instance as F<TCircle>(C) }
+    procedure TestSemantic_Infer_FromArg_SameInstanceAsExplicit;
+    procedure TestSemantic_Infer_TwoTypeParams;
+    procedure TestSemantic_Infer_StatementCall;
+    { 'array of T' binds T to the argument's element type }
+    procedure TestSemantic_Infer_FromArrayElement;
+    { a literal (or an expression built only from literals) fills T only
+      when no other argument binds it: Max(-1, W) with W: Int32 is
+      Max<Int32> }
+    procedure TestSemantic_Infer_LiteralYieldsToVariable;
+    procedure TestSemantic_Infer_ConflictingArgs_Error;
+    procedure TestSemantic_Infer_ResultOnlyTypeParam_Error;
+    procedure TestSemantic_Infer_NilArg_Error;
+    { the inferred argument is checked against the constraint }
+    procedure TestSemantic_Infer_ConstraintChecked;
+    { a non-generic routine of the same name is not displaced }
+    procedure TestSemantic_Infer_NonGenericSameNameWins;
+    { a static generic method called through its type infers too }
+    procedure TestSemantic_Infer_StaticGenericMethod;
     { a RECORD may declare generic methods too, instance and static (its
       method pre-pass resolved their params eagerly: "Unknown type 'T'") }
     procedure TestSemantic_GenericMethod_OnRecord;
@@ -255,6 +278,22 @@ const
           B.Inner();
           TBox.SInner();
           WriteLn(TBox.Conv<Int>(41) + 1);
+        end.
+        ''';
+
+  SrcStaticGenMethodUninferable =
+    '''
+        program P;
+        type
+          TBox = class
+          public
+            static function Make<T>(): T;
+          end;
+        static function TBox.Make<T>(): T;
+        begin
+        end;
+        begin
+          WriteLn(TBox.Make());
         end.
         ''';
 
@@ -822,11 +861,11 @@ begin
     (Pos('mismatch', Msg) >= 0) or (Pos('No matching', Msg) >= 0));
 end;
 
-procedure TGenericFuncTests.TestSemantic_GenericMethod_NoTypeArgs_SaysExplicit;
+procedure TGenericFuncTests.TestSemantic_GenericMethod_UninferableTypeArgs_SaysExplicit;
 var
   Msg: string;
 begin
-  Msg := SemanticError(SrcStaticGenMethodNoTypeArgs);
+  Msg := SemanticError(SrcStaticGenMethodUninferable);
   AssertTrue('names the missing type arguments: ' + Msg,
     Pos('give its type arguments explicitly', Msg) >= 0);
 end;
@@ -839,6 +878,238 @@ begin
   try
     AssertEquals('both record generic methods instantiated', 2,
       Prog.GenericMethodInstances.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+const
+  { Declarations shared by the inference tests }
+  InferDecls = '''
+    program P;
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+      TCircle = class(TObject, IShape)
+        function Area: Int;
+      end;
+      TPlain = class(TObject)
+      end;
+    function TCircle.Area: Int; begin Result := 3 end;
+    function Id<T>(X: T): T; begin Result := X end;
+    function Max<T>(A, B: T): T;
+    begin if A > B then Result := A else Result := B end;
+    function First<T>(const A: array of T): T; begin Result := A[0] end;
+    function Pair<K, V>(A: K; B: V): Int; begin Result := 0 end;
+    function Make<T>(): T; begin end;
+    function AreaOf<T: IShape>(const S: T): Int; begin Result := S.Area() end;
+    procedure Show<T>(const X: T); begin end;
+
+    ''';
+
+{ The instance names of AProg's generic functions, comma-separated. }
+function InstNames(AProg: TProgram): string;
+var
+  I: Int;
+begin
+  Result := '';
+  for I := 0 to AProg.GenericFuncInstances.Count - 1 do
+  begin
+    if Result <> '' then Result := Result + ',';
+    Result := Result +
+      TGenericFuncInstance(AProg.GenericFuncInstances[I]).InstName;
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_FromArg_SameInstanceAsExplicit;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(InferDecls + '''
+    var C: TCircle; N: Int;
+    begin
+      C := TCircle.Create();
+      N := Id(C).Area();
+      N := Id<TCircle>(C).Area()
+    end.
+    ''');
+  try
+    AssertEquals('one shared instance', 'Id<TCircle>', InstNames(Prog));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_TwoTypeParams;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(InferDecls + '''
+    var C: TCircle; S: string; N: Int;
+    begin
+      C := TCircle.Create();
+      S := 'x';
+      N := Pair(C, S)
+    end.
+    ''');
+  try
+    AssertEquals('both bound', 'Pair<TCircle,string>', InstNames(Prog));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_StatementCall;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(InferDecls + '''
+    var C: TCircle;
+    begin
+      C := TCircle.Create();
+      Show(C)
+    end.
+    ''');
+  try
+    AssertEquals('statement call inferred', 'Show<TCircle>', InstNames(Prog));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_FromArrayElement;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(InferDecls + '''
+    var Names: array of string; S: string;
+    begin
+      SetLength(Names, 1);
+      S := First(Names)
+    end.
+    ''');
+  try
+    AssertEquals('element type', 'First<string>', InstNames(Prog));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_LiteralYieldsToVariable;
+var
+  Prog: TProgram;
+begin
+  { Int32, not Int: an unhinted literal is Int (64-bit), so an Int variable
+    would agree with the literal and prove nothing.  -1 and 3 + 4 are
+    expressions built only from literals and yield the same way. }
+  Prog := Analyse(InferDecls + '''
+    var W, M: Int32;
+    begin
+      W := 7;
+      M := Max(1, W);
+      M := Max(-1, W);
+      M := Max(W, 3 + 4);
+      M := Max<Int32>(W, W)
+    end.
+    ''');
+  try
+    AssertEquals('every call is the Int32 instance', 1,
+      Prog.GenericFuncInstances.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_ConflictingArgs_Error;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(InferDecls + '''
+    var C: TCircle; N: Int64; R: Int64;
+    begin
+      R := Max(N, C)
+    end.
+    ''');
+  AssertTrue('names both types: ' + Msg,
+    Pos('Conflicting types for type argument ''T'' of generic function ' +
+      '''Max'': ''Int64'' (argument 1) and ''TCircle'' (argument 2)', Msg) >= 0);
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_ResultOnlyTypeParam_Error;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(InferDecls + '''
+    var N: Int;
+    begin
+      N := Make()
+    end.
+    ''');
+  AssertTrue('cannot infer: ' + Msg,
+    Pos('Cannot infer type argument ''T'' of generic function ''Make''', Msg) >= 0);
+  AssertTrue('says how to fix it: ' + Msg,
+    Pos('give its type arguments explicitly, as Make<...>(...)', Msg) >= 0);
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_NilArg_Error;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(InferDecls + '''
+    var C: TCircle;
+    begin
+      C := Id(nil)
+    end.
+    ''');
+  AssertTrue('nil binds nothing: ' + Msg,
+    Pos('Cannot infer type argument ''T'' of generic function ''Id''', Msg) >= 0);
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_ConstraintChecked;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(InferDecls + '''
+    var Pl: TPlain; N: Int;
+    begin
+      Pl := TPlain.Create();
+      N := AreaOf(Pl)
+    end.
+    ''');
+  AssertTrue('constraint applies: ' + Msg,
+    Pos('''TPlain'' does not implement ''IShape''', Msg) >= 0);
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_NonGenericSameNameWins;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse('''
+    program P;
+    function F(X: Int): Int; begin Result := 1 end;
+    function F<T>(X: T): Int; begin Result := 2 end;
+    var N: Int;
+    begin
+      N := F(5)
+    end.
+    ''');
+  try
+    AssertEquals('no generic instance made', 0, Prog.GenericFuncInstances.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_Infer_StaticGenericMethod;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(SrcStaticGenMethodNoTypeArgs);
+  try
+    AssertEquals('one instance', 1, Prog.GenericMethodInstances.Count);
+    AssertEquals('inferred from the argument', 'Conv<string>',
+      TGenericMethodInstance(Prog.GenericMethodInstances[0]).InstName);
   finally
     Prog.Free();
   end;

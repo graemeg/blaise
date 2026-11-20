@@ -1600,6 +1600,21 @@ begin
   Result.OperatorKind := ASig.OperatorKind;
   { Carry visibility so cross-unit private/protected method access is enforced. }
   Result.Visibility := ASig.Visibility;
+  { Carry a generic method's type parameters.  Without them the method looks
+    ordinary to ResolveMethodOverload, which then scores the call against
+    params of the unresolved type T: a call relying on type-argument
+    inference was "No matching overload" on a warm rebuild while the cold
+    build compiled. }
+  if ASig.TypeParams <> nil then
+  begin
+    Result.TypeParams := TStringList.Create();
+    Result.TypeParams.AddStrings(ASig.TypeParams);
+    if ASig.TypeParamConstraints <> nil then
+    begin
+      Result.TypeParamConstraints := TStringList.Create();
+      Result.TypeParamConstraints.AddStrings(ASig.TypeParamConstraints);
+    end;
+  end;
   for J := 0 to ASig.Params.Count - 1 do
   begin
     Param := TMethodParam(ASig.Params.Items[J]);

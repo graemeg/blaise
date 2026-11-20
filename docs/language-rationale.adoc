@@ -5765,9 +5765,9 @@ is well understood.
 The restriction to assignment context keeps the implementation minimal and
 unambiguous: the semantic pass has the declared LHS type available at the point
 it encounters the RHS constructor call, so inference requires no lookahead or
-backtracking.  Inference in other contexts (parameter passing, return values)
-would require a more general type-propagation pass and is left to a future
-decision.
+backtracking.  Inference from a call's arguments is covered separately, in
+"Generic Type-Argument Inference from Arguments"; inference from an expected
+result type (parameter or return position) is still not done.
 
 === Alternatives considered
 
@@ -5790,6 +5790,110 @@ which replaces the sentinel with the full concrete type name taken from
 `ResolvedLhsType.Name`.  Subsequent semantic analysis proceeds identically to
 an explicit constructor call.
 
+
+== Generic Type-Argument Inference from Arguments
+
+=== Decision
+
+A call to a generic function or generic method may omit its type arguments.
+The compiler infers them from the types of the value arguments and then
+resolves exactly the instance the explicit call names:
+
+[source,pascal]
+----
+function AreaOf<T: IShape>(const S: T): Int;
+function Max<T>(A, B: T): T;
+function First<T>(const A: array of T): T;
+
+AreaOf(Circle);        // AreaOf<TCircle>(Circle)
+Max(-1, W);            // W: Int32 -- Max<Int32>(-1, W)
+First(Names);          // Names: array of string -- First<string>(Names)
+U.Pick(True, 'a', 'b') // U.Pick<string>(...)
+----
+
+The explicit form stays valid and is required whenever inference cannot
+decide.  The rules:
+
+* *What binds.*  A parameter declared as a bare type parameter (`X: T`,
+  `const X: T`, `var X: T`) binds `T` to the argument's type.  A parameter
+  declared `array of T` binds `T` to the argument's element type (dynamic,
+  static or open array).  A parameter of any other shape (`TList<T>`,
+  `^T`, a procedural type) does not take part.
+* *Literals yield.*  An argument built only from literals -- an integer,
+  float or string literal, a negated one (`-1`), or a built-in operation on
+  such (`3 + 4`) -- binds a type parameter only when no other argument binds
+  it.  `Max(-1, W)` with `W: Int32` is therefore `Max<Int32>`; the `-1` then
+  converts as it would for any `Int32` parameter.  `Max(3, 9)` is
+  `Max<Int>`, the type an unhinted literal has everywhere.
+* *No guessing.*  Two arguments that bind the same type parameter to
+  different types are an error naming both, even when a common ancestor
+  exists: `Max(Circle, Square)` does not become `Max<TShape>`.
+* *Unbound is an error.*  A type parameter that no argument binds -- `nil`,
+  a deferred `->` lambda, or a type parameter used only in the result
+  (`Make<T>(): T`) -- is reported with "give its type arguments explicitly".
+* *Constraints still apply.*  The inferred arguments are checked against the
+  declared constraints exactly as explicit ones are.
+* *Non-generic routines win.*  Inference runs only when the name resolves to
+  nothing but a generic template.  A non-generic `F` declared beside a
+  generic `F<T>` keeps receiving `F(5)`.
+
+There is no `F<>(Args)` form.
+
+=== Rationale
+
+Repeating a type the arguments already carry is the same redundancy the
+diamond operator removed from constructor calls, and it is the more common
+case: every call of a generic utility routine pays it.  Every mainstream
+language with generics infers from arguments -- Rust, Swift, C#, Java -- as
+does Delphi for generic methods.  FPC 3.2.2 does not (it reports "Generics
+without specialization cannot be used as a type for a variable").
+
+Inference from arguments is bottom-up and local.  The arguments are
+analysed first -- which overload resolution already requires -- and their
+types are matched against the template's parameter declarations.  No
+expected-type propagation is needed, which is the difficulty the diamond
+section set aside.  The arguments are analysed once: the call then follows
+the same path as the explicit `F<...>(Args)`, so instantiation, overload
+checking and code generation are shared.
+
+The rules are deliberately conservative.  Each one fails with a diagnostic
+rather than choosing an instance the programmer may not expect; relaxing a
+rule later accepts more programs without changing the meaning of any that
+compile today.
+
+=== Alternatives considered
+
+*The diamond spelling `F<>(Args)`* -- rejected.  The lexer folds `<>` into
+the not-equals token, and `F <> (C)` is already a valid comparison of `F`
+with `C`.  The constructor diamond works only because `TFoo <> .Create`
+cannot be a comparison.  Plain `F(Args)` has no such clash and is the form
+every other language uses.
+
+*Common-supertype inference* (`Max(Circle, Square)` as `Max<TShape>`) --
+rejected for now.  It needs a least-upper-bound over class and interface
+hierarchies, which is ambiguous when two classes share more than one
+interface, and the chosen type changes silently when a hierarchy changes.
+
+*Inference through structured parameter types* (`TList<T>`, `^T`,
+procedural types) -- deferred.  It needs structural unification over
+generic instances; the bare and `array of T` shapes cover the common
+utility routines.
+
+*Inference from the expected result type* (`N: Int64; N := Make()`) --
+deferred, as in the diamond section.
+
+=== Implementation
+
+`InferGenericTypeArgs` (uSemantic.pas) binds the type parameters from the
+analysed arguments in two passes -- arguments not built only from literals
+first (`IsLiteralOnlyExpr`), then literals for any parameter still unbound --
+and returns the canonical
+instance name `F<...>`.  For a free function, `AnalyseFuncCallExpr` and
+`AnalyseProcCall` call it through `InferGenericFuncCall` when the name has
+no symbol but a generic template exists, rename the call to the instance,
+and skip their own argument analysis.  For a generic method,
+`ResolveMethodOverload` infers where it previously reported "give its type
+arguments explicitly", and resolves the inferred instance.
 
 == Generic Records
 
@@ -5931,8 +6035,10 @@ The method is *monomorphised* on first use: each distinct set of explicit type
 arguments at a call site produces one concrete method body, named
 `<Owner>_<Method>_<Args>` (e.g. `TUtil_Pick_Integer`).  The implicit `Self` is
 preserved, so a generic method may read the receiver's fields and call its
-other methods.  Type arguments are explicit at the call site
-(`u.Pick<Int32>(...)`); they are not inferred from the value arguments.
+other methods.  Type arguments may be given at the call site
+(`u.Pick<Int32>(...)`) or inferred from the value arguments
+(`u.Pick(True, 7, 9)`), as for a generic function -- see "Generic
+Type-Argument Inference from Arguments".
 
 This is distinct from a method of a generic *class* (`TBox<T>` and its
 `function Get: T`), where the type parameter `T` is bound by the class
@@ -5969,9 +6075,10 @@ instance's visibility is judged against the unit that declared the template,
 not the one that happened to instantiate it, so a `private` generic method
 stays private however it is reached.
 
-Because the type arguments are not inferred, a call that omits them is
-reported as such ("give its type arguments explicitly") rather than as a
-failed overload match: there is no overload set for it to fail against.
+When the type arguments cannot be inferred (a type parameter used only in
+the result), a call that omits them is reported as such ("give its type
+arguments explicitly") rather than as a failed overload match: there is no
+overload set for it to fail against.
 
 == Platform constants — one name per concept
 

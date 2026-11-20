@@ -420,6 +420,22 @@ type
 
     { Generic function instantiation: resolves 'Identity<Integer>' on demand. }
     function  InstantiateGenericFunc(const AInstName: string): TMethodDecl;
+    { The generic function template named ABaseName ('Identity'), declared
+      here or imported, or nil. }
+    function  FindGenericFuncTemplate(const ABaseName: string): TMethodDecl;
+    { Type-argument inference from the arguments (language-rationale,
+      "Generic Type-Argument Inference from Arguments").  AArgs are already
+      analysed.  Returns 'ABaseName<Arg,...>' with every type parameter of
+      ATempl bound, or raises when one cannot be inferred or two arguments
+      disagree.  AWhat names the routine in diagnostics. }
+    function  InferGenericTypeArgs(ATempl: TMethodDecl; const ABaseName,
+      AWhat: string; AArgs: TObjectList; ALine, ACol: Int): string;
+    { A call F(Args) with no type arguments, where F names only a generic
+      function: analyses Args once and returns the canonical instance name
+      'F<...>' to resolve instead.  '' when F is not such a call, with Args
+      left unanalysed. }
+    function  InferGenericFuncCall(const AName: string; AArgs: TObjectList;
+      ALine, ACol: Int): string;
     { Generic method instantiation: resolves 'Pick<Integer>' on an owner class
       on demand, preserving the implicit Self.  Returns the monomorphised
       TMethodDecl (with ResolvedEmitName set), or nil if not a generic method. }
@@ -6523,6 +6539,144 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.FindGenericFuncTemplate(
+  const ABaseName: string): TMethodDecl;
+var
+  TemplIdx: Int;
+begin
+  TemplIdx := FGenericFuncTemplates.IndexOf(ABaseName);
+  if TemplIdx >= 0 then
+    Exit(TMethodDecl(FGenericFuncTemplates.Objects[TemplIdx]));
+  Result := TMethodDecl(FTable.FindGenericRoutine(ABaseName));
+end;
+
+{ True when AExpr is built only from literals: a numeric or string literal,
+  a negated one (-1), or a built-in binary operation on two such (3 + 4).
+  Type-argument inference lets these yield to a typed argument, since a
+  literal's type is a default rather than something the programmer wrote. }
+function IsLiteralOnlyExpr(AExpr: TASTExpr): Boolean;
+begin
+  if (AExpr is TIntLiteral) or (AExpr is TFloatLiteral) or
+     (AExpr is TStringLiteral) then
+    Exit(True);
+  if AExpr is TNegExpr then
+    Exit((TNegExpr(AExpr).LoweredCall = nil) and
+         IsLiteralOnlyExpr(TNegExpr(AExpr).Expr));
+  if AExpr is TBinaryExpr then
+    Exit((TBinaryExpr(AExpr).LoweredCall = nil) and
+         IsLiteralOnlyExpr(TBinaryExpr(AExpr).Left) and
+         IsLiteralOnlyExpr(TBinaryExpr(AExpr).Right));
+  Result := False;
+end;
+
+function TSemanticAnalyser.InferGenericTypeArgs(ATempl: TMethodDecl;
+  const ABaseName, AWhat: string; AArgs: TObjectList;
+  ALine, ACol: Int): string;
+var
+  Bound:    TObjectList;   { non-owning: TTypeDesc per type parameter, or nil }
+  BoundAt:  TStringList;   { argument number that bound each type parameter }
+  Pass, I, J, ArgNo: Int;
+  Par:      TMethodParam;
+  Arg:      TASTExpr;
+  ArgType:  TTypeDesc;
+  IsLit:    Boolean;
+  Prev:     TTypeDesc;
+  Hint:     string;
+begin
+  Bound := TObjectList.Create(False);
+  BoundAt := TStringList.Create();
+  try
+    for J := 0 to ATempl.TypeParams.Count - 1 do
+    begin
+      Bound.Add(nil);
+      BoundAt.Add('');
+    end;
+    Hint := Format('give its type arguments explicitly, as %s<...>(...)',
+      [ABaseName]);
+    { Pass 0 binds from every argument that is not built only from
+      literals; pass 1 lets a literal fill only a parameter still unbound.
+      So Max(-1, W) with W: Int32 is Max<Int32>, and -1 then converts as it
+      would for any Int32 parameter. }
+    for Pass := 0 to 1 do
+      for I := 0 to AArgs.Count - 1 do
+      begin
+        if I >= ATempl.Params.Count then Break;
+        Par := TMethodParam(ATempl.Params.Items[I]);
+        J := ATempl.TypeParams.IndexOf(Par.TypeName);
+        if J < 0 then Continue;   { not a bare T or 'array of T' parameter }
+        Arg := TASTExpr(AArgs.Items[I]);
+        IsLit := IsLiteralOnlyExpr(Arg);
+        if IsLit <> (Pass = 1) then Continue;
+        if IsLit and (Bound.Items[J] <> nil) then Continue;
+        ArgType := Arg.ResolvedType;
+        { 'array of T' binds T to the argument's element type }
+        if Par.IsOpenArray and (ArgType <> nil) then
+        begin
+          if ArgType is TDynArrayTypeDesc then
+            ArgType := TDynArrayTypeDesc(ArgType).ElementType
+          else if ArgType is TStaticArrayTypeDesc then
+            ArgType := TStaticArrayTypeDesc(ArgType).ElementType
+          else if ArgType is TOpenArrayTypeDesc then
+            ArgType := TOpenArrayTypeDesc(ArgType).ElementType
+          else
+            ArgType := nil;
+        end;
+        { nil, a deferred '->' lambda and an anonymous type say nothing
+          about T }
+        if (ArgType = nil) or (ArgType.Kind = tyNil) or (ArgType.Name = '') then
+          Continue;
+        ArgNo := I + 1;
+        Prev := TTypeDesc(Bound.Items[J]);
+        if Prev = nil then
+        begin
+          Bound.Items[J] := ArgType;
+          BoundAt.Strings[J] := IntToStr(ArgNo);
+        end
+        else if (Prev <> ArgType) and
+                not SameText(TypeKeyName(Prev), TypeKeyName(ArgType)) then
+          SemanticError(
+            Format('Conflicting types for type argument ''%s'' of %s: ' +
+              '''%s'' (argument %s) and ''%s'' (argument %d); %s',
+              [ATempl.TypeParams.Strings[J], AWhat, Prev.Name,
+               BoundAt.Strings[J], ArgType.Name, ArgNo, Hint]),
+            ALine, ACol);
+      end;
+
+    Result := '';
+    for J := 0 to ATempl.TypeParams.Count - 1 do
+    begin
+      if Bound.Items[J] = nil then
+        SemanticError(
+          Format('Cannot infer type argument ''%s'' of %s from its ' +
+            'arguments; %s',
+            [ATempl.TypeParams.Strings[J], AWhat, Hint]),
+          ALine, ACol);
+      if Result <> '' then Result := Result + ',';
+      Result := Result + TypeKeyName(TTypeDesc(Bound.Items[J]));
+    end;
+    Result := ABaseName + '<' + Result + '>';
+  finally
+    BoundAt.Free();
+    Bound.Free();
+  end;
+end;
+
+function TSemanticAnalyser.InferGenericFuncCall(const AName: string;
+  AArgs: TObjectList; ALine, ACol: Int): string;
+var
+  Templ: TMethodDecl;
+  I:     Int;
+begin
+  Result := '';
+  if StrPos('<', AName) >= 0 then Exit;
+  Templ := Self.FindGenericFuncTemplate(AName);
+  if (Templ = nil) or (Templ.TypeParams = nil) then Exit;
+  for I := 0 to AArgs.Count - 1 do
+    Self.AnalyseArgSlot(AArgs, I);
+  Result := CanonGenericArgs(Self.InferGenericTypeArgs(Templ, AName,
+    Format('generic function ''%s''', [AName]), AArgs, ALine, ACol));
+end;
+
 function TSemanticAnalyser.InstantiateGenericMethod(
   const AOwnerType, AInstName: string): TMethodDecl;
 var
@@ -11798,14 +11952,26 @@ begin
     end;
 
     if TotalCnt = 0 then Exit;  { caller treats nil as "no method on class" }
-    { only generic templates by that name: a call without type arguments
-      cannot reach them, since a generic method's type arguments are never
-      inferred (language-rationale, "Generic Methods") }
+    { only generic templates by that name: infer the type arguments from
+      the (already analysed) arguments and resolve that instance, as an
+      explicit M<...>(..) would (language-rationale, "Generic Type-Argument
+      Inference from Arguments").  A generic method is not overloaded, so
+      the one candidate of this arity is the template.  With no arguments to
+      infer from, the type arguments must be given. }
     if AllGeneric then
-      SemanticError(
-        Format('''%s.%s'' is a generic method: give its type arguments ' +
-          'explicitly, as %s<T>(...)', [ATypeName, AMethodName, AMethodName]),
-        ALine, ACol);
+    begin
+      if (AArgs = nil) or (ArityMatch.Count <> 1) then
+        SemanticError(
+          Format('''%s.%s'' is a generic method: give its type arguments ' +
+            'explicitly, as %s<T>(...)', [ATypeName, AMethodName, AMethodName]),
+          ALine, ACol);
+      Cand := TMethodDecl(ArityMatch.Items[0]);
+      Exit(Self.ResolveMethodOverload(ATypeName,
+        Self.InferGenericTypeArgs(Cand, AMethodName,
+          Format('generic method ''%s.%s''', [ATypeName, AMethodName]),
+          AArgs, ALine, ACol),
+        AArgs, ALine, ACol));
+    end;
 
     if ArityMatch.Count = 0 then
       SemanticError(
@@ -18813,6 +18979,7 @@ procedure TSemanticAnalyser.AnalyseProcCall(ACall: TProcCall);
 var
   BareOwner: TRecordTypeDesc;
   InstName: string;
+  ArgsAnalysed: Boolean;
   GProp: TPropertyInfo;
   Sym:     TSymbol;
   MDecl:   TMethodDecl;
@@ -18938,6 +19105,19 @@ begin
       Exit;
     end;
   end;
+  { F(Args) naming only a generic function: infer, as in
+    AnalyseFuncCallExpr }
+  ArgsAnalysed := False;
+  if Sym = nil then
+  begin
+    InstName := Self.InferGenericFuncCall(ACall.Name, ACall.Args,
+      ACall.Line, ACall.Col);
+    if InstName <> '' then
+    begin
+      ACall.Name := InstName;
+      ArgsAnalysed := True;
+    end;
+  end;
   { Try on-demand instantiation of a generic function, under its canonical
     name: Twice<Int32> is the Twice<Integer> instance, not a second one }
   if StrPos('<', ACall.Name) >= 0 then
@@ -19023,9 +19203,12 @@ begin
   begin
     { Steer a bare shared enum member to the enum this proc expects before
       bottom-up analysis pins it by last-wins. }
-    HintBareEnumArgs(ACall.Name, ACall.Args);
-    for I := 0 to ACall.Args.Count - 1 do
-      Self.AnalyseArgSlot(ACall.Args, I);
+    if not ArgsAnalysed then
+    begin
+      HintBareEnumArgs(ACall.Name, ACall.Args);
+      for I := 0 to ACall.Args.Count - 1 do
+        Self.AnalyseArgSlot(ACall.Args, I);
+    end;
 
     MDecl := ResolveStandaloneOverload(ACall.Name, ACall.Args.Count,
       ACall.Args, ACall.Line, ACall.Col, ACall.QualifierUnit);
@@ -19533,6 +19716,7 @@ function TSemanticAnalyser.AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
 var
   BareOwner: TRecordTypeDesc;
   InstName: string;
+  ArgsAnalysed: Boolean;
   GProp: TPropertyInfo;
   Sym:     TSymbol;
   MDecl:   TMethodDecl;
@@ -19911,6 +20095,20 @@ begin
       Result := PT.ReturnType;
       AExpr.ResolvedType := Result;
       Exit;
+    end;
+  end;
+  { F(Args) naming only a generic function: infer its type arguments from
+    the arguments, which are analysed here, once, and then resolve the
+    instance exactly as an explicit F<...>(Args) would. }
+  ArgsAnalysed := False;
+  if Sym = nil then
+  begin
+    InstName := Self.InferGenericFuncCall(AExpr.Name, AExpr.Args,
+      AExpr.Line, AExpr.Col);
+    if InstName <> '' then
+    begin
+      AExpr.Name := InstName;
+      ArgsAnalysed := True;
     end;
   end;
   { Try on-demand instantiation of a generic function, under its canonical
@@ -20707,9 +20905,12 @@ begin
   { Phase B: analyse args first, then score overloads by argument type.
     A bare shared enum member is first steered to the enum the target expects
     at its position, so the right ordinal is pinned before bottom-up analysis. }
-  HintBareEnumArgs(AExpr.Name, AExpr.Args);
-  for I := 0 to AExpr.Args.Count - 1 do
-    Self.AnalyseArgSlot(AExpr.Args, I);
+  if not ArgsAnalysed then
+  begin
+    HintBareEnumArgs(AExpr.Name, AExpr.Args);
+    for I := 0 to AExpr.Args.Count - 1 do
+      Self.AnalyseArgSlot(AExpr.Args, I);
+  end;
 
   MDecl := ResolveStandaloneOverload(AExpr.Name, AExpr.Args.Count,
     AExpr.Args, AExpr.Line, AExpr.Col, AExpr.QualifierUnit);

@@ -1432,7 +1432,13 @@ MethodCall
  * name a type: TOwner.Method<T>(...) calls a static generic method.  Inside
  * the owner's methods the unqualified Method<T>(...) is the generic routine
  * call form (IDENT LESS TypeArgList GREATER LPAREN ...), resolved against the
- * owner's methods first. *)
+ * owner's methods first.
+ *
+ * The type arguments of a generic method or generic function may be omitted:
+ * Obj.Method(args) and Func(args) are the plain call forms, and the semantic
+ * pass infers the type arguments from the argument types (language-rationale,
+ * "Generic Type-Argument Inference from Arguments").  There is no IDENT
+ * NOTEQUALS LPAREN form: 'F <> (X)' is a comparison. *)
 
 (* Semantic disambiguation of  IDENT DOT IDENT  in Stmt:
  *   - Followed by ASSIGN or LBRACKET ASSIGN → FieldAssignment (plain or indexed)

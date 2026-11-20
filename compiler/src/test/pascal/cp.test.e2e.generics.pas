@@ -72,6 +72,11 @@ type
       ancestor class, an implementor of a derived interface, and the
       interface type itself; in a generic function, class and method. }
     procedure TestRun_IntfConstraint_CallsThroughT;
+    { Type-argument inference from the arguments: F(C) runs the F<TCircle>
+      instance -- free functions (expression and statement), two type
+      parameters, 'array of T', a literal yielding to an Int64 variable, and
+      generic methods through an instance, the type, Self and a descendant. }
+    procedure TestRun_InferTypeArgs_EveryCallForm;
     { Generic METHODS (method-level <T>): a method declaring its own type
       parameter, instantiated per call site (obj.M<Integer>(...)). }
     procedure TestRun_GenericMethod_Pick;
@@ -557,6 +562,86 @@ const
       WriteLn(U.Measure<TCube>(C))
     end.
     ''';
+
+const
+  SrcInferTypeArgs = '''
+    program Prog;
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+      TSquare = class(TObject, IShape)
+        FSide: Int;
+        constructor Create(ASide: Int);
+        function Area: Int;
+      end;
+      TUtil = class
+        FTag: string;
+        function Pick<T>(Cond: Boolean; A, B: T): T;
+        static function Make<T>(A: T): T;
+        procedure Show<T>(const X: T);
+        function Inner(): string;
+      end;
+      TSub = class(TUtil)
+      end;
+    constructor TSquare.Create(ASide: Int); begin FSide := ASide end;
+    function TSquare.Area: Int; begin Result := FSide * FSide end;
+    function TUtil.Pick<T>(Cond: Boolean; A, B: T): T;
+    begin if Cond then Result := A else Result := B end;
+    static function TUtil.Make<T>(A: T): T; begin Result := A end;
+    procedure TUtil.Show<T>(const X: T); begin WriteLn(FTag, ':show') end;
+    function TUtil.Inner(): string;
+    begin
+      Show(1);
+      Result := Pick(False, 'x', 'y')
+    end;
+    function AreaOf<T: IShape>(const S: T): Int; begin Result := S.Area() end;
+    function Max<T>(A, B: T): T;
+    begin if A > B then Result := A else Result := B end;
+    function First<T>(const A: array of T): T; begin Result := A[0] end;
+    function Join<K, V>(A: K; B: V): string;
+    begin Result := IntToStr(A) + '/' + B end;
+    procedure Log<T>(const X: T); begin WriteLn('log ', X) end;
+    var
+      Sq: TSquare; N: Int64; W: Int32; Names: array of string; U: TUtil;
+      S: TSub;
+    begin
+      Sq := TSquare.Create(3);
+      WriteLn(AreaOf(Sq));
+      N := 5000000000;
+      WriteLn(Max(1, N));
+      W := -5;
+      WriteLn(Max(-1, W));
+      WriteLn(Max(W, 3 - 10));
+      WriteLn(Max(3, 9));
+      SetLength(Names, 2);
+      Names[0] := 'alpha';
+      Names[1] := 'beta';
+      WriteLn(First(Names));
+      WriteLn(Join(7, 'seven'));
+      Log('stmt');
+      U := TUtil.Create();
+      U.FTag := 'u';
+      WriteLn(U.Pick(True, 'a', 'b'));
+      WriteLn(TUtil.Make(42));
+      U.Show(Sq);
+      WriteLn(U.Inner());
+      S := TSub.Create();
+      S.FTag := 's';
+      WriteLn(S.Pick(False, 10, 20));
+      WriteLn(TSub.Make('inherited'))
+    end.
+    ''';
+
+procedure TE2EGenericsTests.TestRun_InferTypeArgs_EveryCallForm;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcInferTypeArgs,
+    '9' + LE + '5000000000' + LE + '-1' + LE + '-5' + LE + '9' + LE +
+    'alpha' + LE + '7/seven' + LE +
+    'log stmt' + LE + 'a' + LE + '42' + LE + 'u:show' + LE + 'u:show' + LE +
+    'y' + LE + '20' + LE + 'inherited' + LE, 0);
+end;
 
 procedure TE2EGenericsTests.TestRun_IntfConstraint_CallsThroughT;
 begin
