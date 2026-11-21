@@ -990,6 +990,7 @@ type
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
     procedure RejectRecordSelfUse(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
+    procedure AnalysePendingAnonDecl(MD: TMethodDecl; ABlock: TBlock);
     { Whether AThunk's analysed body uses its method's Self: a bare member, an
       explicit Self, inherited, or a nested routine or literal that does. }
     function ThunkUsesSelf(AThunk, AEncl: TMethodDecl): Boolean;
@@ -1584,6 +1585,8 @@ type
     SavedPins:  TStringList;   { the table's previous view pins (not owned) }
     Pins:       TStringList;   { this view's type-argument pins (owned) }
     PinSyms:    TObjectList;   { owns the pinned TSymbols }
+    DeclUnit:   string;        { the unit declaring the generic viewed }
+    InstName:   string;        { the instance (or routine instance) viewed }
   end;
 
 { Split the argument list of a generic instance name -- the text between
@@ -4633,6 +4636,8 @@ begin
   Idx := FUnitChains.IndexOf(ADeclUnit);
   if Idx < 0 then Exit;
   F := TGenericViewFrame.Create();
+  F.DeclUnit := ADeclUnit;
+  F.InstName := AInstName;
   F.Pins := TStringList.Create();
   F.Pins.CaseSensitive := False;
   F.PinSyms := TObjectList.Create(True);
@@ -24608,6 +24613,16 @@ begin
             [AExpr.WeakCaptures.Strings[I]]), AExpr.Line, AExpr.Col);
       MD.WantsWeakSelf := True;
     end;
+    { A literal in a generic instance's body names what the generic's unit
+      sees, not what the module draining the thunk sees: on a warm rebuild an
+      instance made while a cached interface was imported has its bodies
+      repaired in the PROGRAM, whose uses need not include the generic's
+      unit.  Remember the view, so the thunk is analysed in it. }
+    if FGenericViews.Count > 0 then
+    begin
+      MD.AnonViewUnit := TGenericViewFrame(FGenericViews.Items[FGenericViews.Count - 1]).DeclUnit;
+      MD.AnonViewInst := TGenericViewFrame(FGenericViews.Items[FGenericViews.Count - 1]).InstName;
+    end;
     FPendingAnonDecls.Add(MD);
     Self.RecordAnonNestedRoutines(MD);
     { Phase 2/3: capture promotion.  Runs NOW, while the enclosing frame's
@@ -25047,15 +25062,10 @@ begin
   FNestedRoutineAddrs.Clear();
 end;
 
-procedure TSemanticAnalyser.DrainPendingAnonDecls(ABlock: TBlock);
-{ Register and analyse every lifted anonymous-method thunk queued during
-  body analysis.  Runs in MODULE scope (the enclosing routine's locals are
-  no longer visible — see AnalyseAnonMethodExpr).  Appends each thunk to
-  ABlock.ProcDecls so both backends emit it like any standalone routine.
-  A while-loop because a literal nested inside another literal's body
-  queues further thunks during AnalyseStandaloneDecl. }
+procedure TSemanticAnalyser.AnalysePendingAnonDecl(MD: TMethodDecl; ABlock: TBlock);
+{ One lifted thunk of DrainPendingAnonDecls: its signature, its place in
+  ABlock, and its body. }
 var
-  MD:      TMethodDecl;
   Par:     TMethodParam;
   RetType: TTypeDesc;
   Nested:  TObjectList;
@@ -25063,54 +25073,81 @@ var
   Sym:     TSymbol;
   I:       Int;
 begin
+  { The signature facts AnalyseStandaloneDecls would have computed. }
+  for I := 0 to MD.Params.Count - 1 do
+  begin
+    Par := TMethodParam(MD.Params.Items[I]);
+    Par.ResolvedType := ResolveParamType(Par, MD.Line, MD.Col);
+  end;
+  if MD.ReturnTypeName <> '' then
+  begin
+    RetType := FindTypeOrInstantiate(MD.ReturnTypeName);
+    if RetType = nil then
+      SemanticError(Format(
+        'Unknown return type ''%s'' in anonymous method',
+        [MD.ReturnTypeName]), MD.Line, MD.Col);
+    MD.ResolvedReturnType := RetType;
+  end;
+  MD.ResolvedEmitName := CurrentUnitPrefix() + MD.Name;
+  ABlock.ProcDecls.Add(MD);
+  { The enclosing routines' nested routines, visible again for the body
+    (BUG-20261022-anon-calls-nested-routine). }
+  Nested := Self.AnonNestedRoutinesOf(MD);
+  if Nested <> nil then
+  begin
+    FTable.PushScope();
+    for I := Nested.Count - 1 downto 0 do
+    begin
+      ND := TMethodDecl(Nested.Items[I]);
+      if ND.ReturnTypeName <> '' then
+        Sym := TSymbol.Create(ND.Name, skFunction, ND.ResolvedReturnType)
+      else
+        Sym := TSymbol.Create(ND.Name, skProcedure, nil);
+      Sym.IsOverload := ND.IsOverload;
+      Sym.Decl := ND;
+      if not FTable.Define(Sym) then
+        Sym.Free();
+    end;
+  end;
+  try
+    AnalyseStandaloneDecl(MD);
+  finally
+    if Nested <> nil then
+      FTable.PopScope();
+  end;
+  if MD.RecordMethodHost <> nil then
+    RejectRecordSelfUse(MD);
+end;
+
+procedure TSemanticAnalyser.DrainPendingAnonDecls(ABlock: TBlock);
+{ Register and analyse every lifted anonymous-method thunk queued during
+  body analysis.  Runs in MODULE scope (the enclosing routine's locals are
+  no longer visible — see AnalyseAnonMethodExpr).  Appends each thunk to
+  ABlock.ProcDecls so both backends emit it like any standalone routine.
+  A while-loop because a literal nested inside another literal's body
+  queues further thunks during AnalyseStandaloneDecl.
+
+  A thunk lifted from a generic instance's body resolves its names in that
+  generic's view (AnonViewUnit), as the instance's own methods do: on a
+  warm rebuild an instance made while a cached interface was imported is
+  repaired in the program, whose uses need not include the generic's unit. }
+var
+  MD:     TMethodDecl;
+  Viewed, Hidden: Boolean;
+begin
   while FPendingAnonDecls.Count > 0 do
   begin
     MD := TMethodDecl(FPendingAnonDecls.Get(0));
     FPendingAnonDecls.Delete(0);
-    { The signature facts AnalyseStandaloneDecls would have computed. }
-    for I := 0 to MD.Params.Count - 1 do
-    begin
-      Par := TMethodParam(MD.Params.Items[I]);
-      Par.ResolvedType := ResolveParamType(Par, MD.Line, MD.Col);
-    end;
-    if MD.ReturnTypeName <> '' then
-    begin
-      RetType := FindTypeOrInstantiate(MD.ReturnTypeName);
-      if RetType = nil then
-        SemanticError(Format(
-          'Unknown return type ''%s'' in anonymous method',
-          [MD.ReturnTypeName]), MD.Line, MD.Col);
-      MD.ResolvedReturnType := RetType;
-    end;
-    MD.ResolvedEmitName := CurrentUnitPrefix() + MD.Name;
-    ABlock.ProcDecls.Add(MD);
-    { The enclosing routines' nested routines, visible again for the body
-      (BUG-20261022-anon-calls-nested-routine). }
-    Nested := Self.AnonNestedRoutinesOf(MD);
-    if Nested <> nil then
-    begin
-      FTable.PushScope();
-      for I := Nested.Count - 1 downto 0 do
-      begin
-        ND := TMethodDecl(Nested.Items[I]);
-        if ND.ReturnTypeName <> '' then
-          Sym := TSymbol.Create(ND.Name, skFunction, ND.ResolvedReturnType)
-        else
-          Sym := TSymbol.Create(ND.Name, skProcedure, nil);
-        Sym.IsOverload := ND.IsOverload;
-        Sym.Decl := ND;
-        if not FTable.Define(Sym) then
-          Sym.Free();
-      end;
-    end;
+    Viewed := False;
+    if MD.AnonViewUnit <> '' then
+      Viewed := EnterGenericView(MD.AnonViewUnit, MD.AnonViewInst, False, Hidden);
     try
-      AnalyseStandaloneDecl(MD);
+      AnalysePendingAnonDecl(MD, ABlock);
     finally
-      if Nested <> nil then
-        FTable.PopScope();
+      if Viewed then
+        LeaveGenericView();
     end;
-    if MD.RecordMethodHost <> nil then
-      RejectRecordSelfUse(MD);
   end;
   { every literal queued so far is analysed: decide each frame's Self }
   ReleaseUnusedSelfCaptures();

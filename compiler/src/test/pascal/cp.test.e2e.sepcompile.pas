@@ -281,6 +281,16 @@ type
       instance descriptor, and method resolution then filtered out the
       instance's methods, which belong to the unit that instantiated it. }
     procedure TestWarmRebuild_AliasOfGenericInstanceKeepsItsMethods;
+    { An anonymous method in a generic class's method body, naming a type of
+      the generic's own unit (ua.TReport), where the instance (TTask<Int>) is
+      exposed by another cached unit's interface and the program uses only
+      that unit.  On a warm rebuild the instance is made while the cached
+      interfaces are imported, and its lifted closure thunk was analysed at
+      the program's top level outside the generic's view: "Unknown type
+      'TReport' ... which is not in the uses clause ... at line 0 col 0".  The
+      thunk now resolves in the view of the generic it was lifted from, as
+      the instance's own methods do. }
+    procedure TestWarmRebuild_ClosureInImportedGenericInstanceSeesItsUnit;
     { Regression (reported by blaise-canvas-ui): under --no-incremental every
       module is appended to one assembly buffer, and the typeinfo of a generic
       INTERFACE instance (IMap<string, TFoo>, implemented by the dictionary)
@@ -4099,6 +4109,102 @@ begin
                    '--unit-path', Dir], Captured);
   AssertTrue('a private generic method is rejected (out: ' + Captured + ')',
     (Rc <> 0) and (Pos('not accessible', Captured) >= 0))
+end;
+
+procedure TSepCompileTests.TestWarmRebuild_ClosureInImportedGenericInstanceSeesItsUnit;
+const
+  UaSrc =
+    '''
+    unit ua;
+    interface
+    type
+      TReport = class
+      public
+        Done: Int;
+      end;
+      TReportProc = reference to procedure(AReport: TReport);
+      TTask<T> = class
+      public
+        function Reporter(): TReportProc;
+      end;
+    implementation
+    function TTask<T>.Reporter(): TReportProc;
+    begin
+      Result := procedure(AReport: TReport)
+        var
+          R: TReport;
+        begin
+          R := AReport;
+          WriteLn('done ', R.Done);
+        end;
+    end;
+    end.
+    ''';
+  UbSrc =
+    '''
+    unit ub;
+    interface
+    uses
+      ua;
+    type
+      THolder = class
+      public
+        function Make(): TTask<Int>;
+      end;
+    procedure RunIt();
+    implementation
+    function THolder.Make(): TTask<Int>;
+    begin
+      Result := TTask<Int>.Create();
+    end;
+    procedure RunIt();
+    var
+      P: TReport;
+    begin
+      P := TReport.Create();
+      P.Done := 5;
+      THolder.Create().Make().Reporter()(P);
+    end;
+    end.
+    ''';
+  AppSrc =
+    '''
+    program GenClosApp;
+    uses ub;
+    begin
+      RunIt()
+    end.
+    ''';
+var
+  Dir, CacheDir, AppPas, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir      := FScratch + '/generic_closure_view';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  AppPas   := Dir + '/genclosapp.pas';
+  WriteFile(Dir + '/ua.pas', UaSrc);
+  WriteFile(Dir + '/ub.pas', UbSrc);
+  WriteFile(AppPas, AppSrc);
+
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/genclosapp1',
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('cold build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/genclosapp1', Captured);
+  AssertEquals('cold build', 'done 5' + #10, Captured);
+
+  Rc := RunBlaise(['--source', AppPas, '--output', Dir + '/genclosapp2',
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('warm rebuild exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Dir + '/genclosapp2', Captured);
+  AssertEquals('warm rebuild: the closure sees its generic''s unit',
+    'done 5' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestWarmRebuild_InferredGenericCallsOfImportedUnit;

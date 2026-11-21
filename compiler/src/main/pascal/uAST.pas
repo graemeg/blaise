@@ -1259,6 +1259,14 @@ type
                                      literal carried a '[Weak Self]' capture
                                      list (Phase 5): the shared env's Self
                                      field is weak }
+    AnonViewUnit: string;          { set by uSemantic on a THUNK lifted inside
+                                     a generic instantiation's body: the unit
+                                     declaring the generic, and the instance
+                                     (AnonViewInst).  DrainPendingAnonDecls
+                                     analyses the thunk in that generic view,
+                                     as the instance's own methods are; ''
+                                     outside a generic. }
+    AnonViewInst: string;
     [Unretained] RecordMethodHost: TObject; { TMethodDecl — not owned; set by
                                      uSemantic on a THUNK lifted from a RECORD
                                      method: that method.  The thunk may use
