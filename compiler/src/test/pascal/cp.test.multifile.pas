@@ -114,6 +114,10 @@ type
       consumer need not use those units itself. }
     procedure TestUsesVisibility_GenericBodySeesDeclaringUnitUses;
     procedure TestUsesVisibility_GenericFuncBodySeesDeclaringUnitUses;
+    { ...and so does an anonymous method inside a generic body, whose body is
+      analysed later, after the instantiation's view of the declaring unit
+      has closed (BUG-20261119-warm-cache-generic-type-uses). }
+    procedure TestUsesVisibility_GenericClosureBodySeesDeclaringUnitUses;
     { ...while the consumer's own type arguments still resolve. }
     procedure TestUsesVisibility_GenericOverConsumerType;
     { A loaded unit that declares its own PInteger takes the flat slot; a
@@ -1334,6 +1338,71 @@ const
 begin
   AssertEquals('generic function body resolves in its declaring unit', '',
     AnalyseUnitsAndProg([VisHelpSrc, VisGenSrc], ProgSrc));
+end;
+
+procedure TMultifileTests.TestUsesVisibility_GenericClosureBodySeesDeclaringUnitUses;
+const
+  HelpSrc =
+    '''
+        unit GcHelp;
+        interface
+        const
+          GcBase = 40;
+        type
+          TGcNote = class
+            Size: Int;
+          end;
+        implementation
+        end.
+        ''';
+  GenSrc =
+    '''
+        unit GcGen;
+        interface
+        type
+          TGcProc = reference to procedure;
+          TGcBox<T> = class
+            function Step(): TGcProc;
+          end;
+        implementation
+        uses GcHelp;
+        function TGcBox<T>.Step(): TGcProc;
+        begin
+          Result := procedure()
+            var
+              Note: TGcNote;
+              Inner: TGcProc;
+            begin
+              Note := TGcNote.Create();
+              Note.Size := GcBase + SizeOf(T);
+              Inner := procedure()
+                var
+                  Again: TGcNote;
+                begin
+                  Again := TGcNote.Create();
+                  Again.Size := GcBase
+                end;
+              Inner()
+            end
+        end;
+        end.
+        ''';
+  ProgSrc =
+    '''
+        program P;
+        uses GcGen;
+        var
+          B: TGcBox<Int>;
+          Q: TGcProc;
+        begin
+          B := TGcBox<Int>.Create();
+          Q := B.Step();
+          Q()
+        end.
+        ''';
+begin
+  AssertEquals('a closure in a generic body resolves in its declaring unit',
+    '', AnalyseUnitsAndProg([HelpSrc, GenSrc], ProgSrc));
 end;
 
 procedure TMultifileTests.TestUsesVisibility_GenericOverConsumerType;

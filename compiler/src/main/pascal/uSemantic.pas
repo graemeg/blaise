@@ -24505,6 +24505,7 @@ var
   ProcParam: TProcParamInfo;
   ValVD:     TVarDecl;
   I:         Int;
+  ParamSym:  TSymbol;
 begin
   if AExpr.ResolvedType <> nil then Exit(AExpr.ResolvedType);  { idempotent }
   { A literal nested in a '->' body under overload trial would be lifted
@@ -24622,6 +24623,24 @@ begin
     begin
       MD.AnonViewUnit := TGenericViewFrame(FGenericViews.Items[FGenericViews.Count - 1]).DeclUnit;
       MD.AnonViewInst := TGenericViewFrame(FGenericViews.Items[FGenericViews.Count - 1]).InstName;
+    end;
+    { and the type parameters bound here: the body may name one where
+      SubstActiveTypeParamsInAnonDecl does not rewrite it (SizeOf(T)), and by
+      the time the thunk is analysed they are no longer bound }
+    for I := 0 to FActiveTypeParams.Count - 1 do
+    begin
+      ParamSym := FTable.Lookup(FActiveTypeParams.Strings[I]);
+      if (ParamSym <> nil) and (ParamSym.Kind = skType) and (ParamSym.TypeDesc <> nil) then
+      begin
+        if MD.AnonTypeParamNames = nil then
+        begin
+          MD.AnonTypeParamNames := TStringList.Create();
+          MD.AnonTypeParamNames.CaseSensitive := False;
+          MD.AnonTypeParamTypes := TObjectList.Create(False);
+        end;
+        MD.AnonTypeParamNames.Add(FActiveTypeParams.Strings[I]);
+        MD.AnonTypeParamTypes.Add(ParamSym.TypeDesc);
+      end;
     end;
     FPendingAnonDecls.Add(MD);
     Self.RecordAnonNestedRoutines(MD);
@@ -25130,10 +25149,13 @@ procedure TSemanticAnalyser.DrainPendingAnonDecls(ABlock: TBlock);
   A thunk lifted from a generic instance's body resolves its names in that
   generic's view (AnonViewUnit), as the instance's own methods do: on a
   warm rebuild an instance made while a cached interface was imported is
-  repaired in the program, whose uses need not include the generic's unit. }
+  repaired in the program, whose uses need not include the generic's unit.
+  The type parameters bound where it was lifted (AnonTypeParamNames) are
+  bound again around it. }
 var
   MD:     TMethodDecl;
   Viewed, Hidden: Boolean;
+  I:      Int;
 begin
   while FPendingAnonDecls.Count > 0 do
   begin
@@ -25143,7 +25165,19 @@ begin
     if MD.AnonViewUnit <> '' then
       Viewed := EnterGenericView(MD.AnonViewUnit, MD.AnonViewInst, False, Hidden);
     try
-      AnalysePendingAnonDecl(MD, ABlock);
+      if MD.AnonTypeParamNames <> nil then
+      begin
+        FTable.PushScope();
+        for I := 0 to MD.AnonTypeParamNames.Count - 1 do
+          FTable.Define(TSymbol.Create(MD.AnonTypeParamNames.Strings[I],
+            skType, TTypeDesc(MD.AnonTypeParamTypes.Items[I])));
+      end;
+      try
+        AnalysePendingAnonDecl(MD, ABlock);
+      finally
+        if MD.AnonTypeParamNames <> nil then
+          FTable.PopScope();
+      end;
     finally
       if Viewed then
         LeaveGenericView();

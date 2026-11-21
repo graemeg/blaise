@@ -1267,6 +1267,17 @@ type
                                      as the instance's own methods are; ''
                                      outside a generic. }
     AnonViewInst: string;
+    AnonTypeParamNames: TStringList; { set by uSemantic on a THUNK lifted
+                                     while type parameters are bound (a
+                                     generic body): their names, and their
+                                     bound types in AnonTypeParamTypes (a
+                                     non-owning list of TTypeDesc).  The body
+                                     may name a parameter where
+                                     SubstActiveTypeParamsInAnonDecl does not
+                                     rewrite it (SizeOf(T)), so
+                                     DrainPendingAnonDecls binds them again;
+                                     nil outside a generic. }
+    AnonTypeParamTypes: TObjectList;
     [Unretained] RecordMethodHost: TObject; { TMethodDecl — not owned; set by
                                      uSemantic on a THUNK lifted from a RECORD
                                      method: that method.  The thunk may use

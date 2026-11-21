@@ -118,6 +118,11 @@ type
       backends (they previously miscompiled on v0.12.0 and segfaulted the
       native codegen afterwards). }
     procedure TestRun_NestedRoutineInMethod_CapturesLocal;
+    { an anonymous method in a generic body names the type parameter in an
+      expression (SizeOf(T)) and declares a local of it: its body is analysed
+      after the instantiation, where T was no longer bound -- "Undeclared
+      identifier 'T'" (found with BUG-20261119-warm-cache-generic-type-uses) }
+    procedure TestRun_GenericBody_ClosureNamesTypeParam;
     { a nested routine or closure calls methods on captured class, record
       and var-param receivers with more arguments than the integer registers
       hold (BUG-20261119-x86-stackargs-captured-receiver: x86-64 loaded a
@@ -1369,6 +1374,41 @@ begin
     'R6 221' + LineEnding + 'G6 221' + LineEnding + 'C6 321' + LineEnding +
     'VF6 321' + LineEnding + 'R6 421' + LineEnding + 'VG6 421' + LineEnding +
     'C6 122' + LineEnding + 'QF6 122' + LineEnding, 0)
+end;
+
+procedure TE2EAnonMethodTests.TestRun_GenericBody_ClosureNamesTypeParam;
+const Src =
+  '''
+  program P;
+  type
+    TP = reference to procedure;
+    TB<T> = class
+      function Step(): TP;
+    end;
+  function TB<T>.Step(): TP;
+  begin
+    Result := procedure()
+      var
+        X: T;
+      begin
+        WriteLn(SizeOf(X), ' ', SizeOf(T))
+      end
+  end;
+  var
+    B8: TB<Int64>;
+    B2: TB<Int16>;
+    Q: TP;
+  begin
+    B8 := TB<Int64>.Create();
+    Q := B8.Step();
+    Q();
+    B2 := TB<Int16>.Create();
+    Q := B2.Step();
+    Q()
+  end.
+  ''';
+begin
+  AssertRunsOnAll(Src, '8 8' + LineEnding + '2 2' + LineEnding, 0)
 end;
 
 procedure TE2EAnonMethodTests.TestRun_NestedRoutineInMethod_CapturesLocal;

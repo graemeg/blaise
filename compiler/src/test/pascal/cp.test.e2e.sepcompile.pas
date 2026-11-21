@@ -536,6 +536,15 @@ type
       unit, instantiated by a program that uses neither, from source and from
       the cached interface. }
     procedure TestGenericBody_ImplUsesOfDeclaringUnit_Warm;
+    { An anonymous method inside a generic body names types of its declaring
+      unit's implementation uses, and catches a SysUtils exception; the
+      generic is instantiated by a unit the program uses, so from the warm
+      cache the PROGRAM instantiates it.  Its body was analysed in the
+      instantiating scope: "Unknown type" warm, and from source in a unit
+      that did not use SysUtils, "Unknown exception type 'Exception'"
+      (BUG-20261119-warm-cache-generic-type-uses, Blaise Canvas UI's
+      TBackgroundTask<T>). }
+    procedure TestGenericBody_ClosureUsesDeclaringUnit_ColdAndWarm;
     { The consumer's type argument shares its name with a type the generic's
       declaring unit can see: the instance must use the CONSUMER's type. }
     procedure TestGenericBody_TypeArgShadowsDeclaringUnitName;
@@ -8350,6 +8359,111 @@ begin
   AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 stdout', '88' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestGenericBody_ClosureUsesDeclaringUnit_ColdAndWarm;
+const
+  LeafSrc =
+    '''
+    unit GcwLeaf;
+    interface
+    const
+      LeafBase = 40;
+    type
+      TGcwNote = class
+        Size: Int;
+      end;
+    implementation
+    end.
+    ''';
+  GenSrc =
+    '''
+    unit GcwGen;
+    interface
+    type
+      TGcwProc = reference to procedure;
+      TGcwTask<T> = class
+        function Step(): TGcwProc;
+      end;
+    implementation
+    uses SysUtils, GcwLeaf;
+    function TGcwTask<T>.Step(): TGcwProc;
+    begin
+      Result := procedure()
+        var
+          Note: TGcwNote;
+        begin
+          Note := TGcwNote.Create();
+          Note.Size := LeafBase + SizeOf(T);
+          try
+            raise Exception.Create('boom');
+          except
+            on E: Exception do
+              WriteLn(E.Message, ' ', Note.Size);
+          end
+        end
+    end;
+    end.
+    ''';
+  MidSrc =
+    '''
+    unit GcwMid;
+    interface
+    procedure RunTask();
+    implementation
+    uses GcwGen;
+    procedure RunTask();
+    var
+      T: TGcwTask<Int64>;
+      Q: TGcwProc;
+    begin
+      T := TGcwTask<Int64>.Create();
+      Q := T.Step();
+      Q()
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program GcwProg;
+    uses GcwMid;
+    begin
+      RunTask()
+    end.
+    ''';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Int;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  WriteFile(FScratch + '/GcwLeaf.pas', LeafSrc);
+  WriteFile(FScratch + '/GcwGen.pas', GenSrc);
+  WriteFile(FScratch + '/GcwMid.pas', MidSrc);
+  ProgPas  := FScratch + '/gcwprog.pas';
+  ProgBin  := FScratch + '/gcwprog';
+  CacheDir := FScratch + '/units-gcw';
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  { GcwGen uses SysUtils: name the stdlib, as a host without a configured
+    unit path (the FreeBSD cross-check) does not find it otherwise }
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
+  AssertEquals('cold build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('cold stdout', 'boom 48' + #10, Captured);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'], Captured);
+  AssertEquals('warm build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('warm stdout', 'boom 48' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestGenericBody_TypeArgShadowsDeclaringUnitName;
