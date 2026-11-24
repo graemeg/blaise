@@ -15,10 +15,15 @@ if (Test-Path $argFile) {
   $raw = Get-Content -Raw $argFile
   if ($raw) { $argLine = $raw.Trim() }
 }
+# The program starts in its own run directory, beside the files --with copied
+# in, so a relative argument such as a certificate path names one of them.
+# (ssh's working directory is the user's profile, which the run must not
+# depend on or write into.)
+$runDir = Split-Path $Exe
 if ($argLine -ne '') {
-  $p = Start-Process -PassThru -NoNewWindow -FilePath $Exe -ArgumentList $argLine
+  $p = Start-Process -PassThru -NoNewWindow -FilePath $Exe -ArgumentList $argLine -WorkingDirectory $runDir
 } else {
-  $p = Start-Process -PassThru -NoNewWindow -FilePath $Exe
+  $p = Start-Process -PassThru -NoNewWindow -FilePath $Exe -WorkingDirectory $runDir
 }
 $null = $p.Handle
 if (-not $p.WaitForExit($TimeoutSec * 1000)) {

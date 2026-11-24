@@ -40,6 +40,15 @@
 #                                     seconds unless
 #                                     BLAISE_WINDOWS_RUN_TIMEOUT says
 #                                     otherwise
+#   scripts/windows-vm.sh tls-check   the TLS gate: cross-build the TLS
+#                                     loopback programs (raw OpenSSL echo,
+#                                     Net.Tls, https with certificate
+#                                     verification) and run them in the VM
+#                                     against certificates made here with the
+#                                     openssl CLI; prints WINDOWS_TLS_OK.  Needs
+#                                     OpenSSL 3 for x64 in the guest
+#                                     (libssl-3-x64.dll, libcrypto-3-x64.dll
+#                                     on the DLL search path)
 #
 # The guest is installed once by hand (design, "Development-host setup"):
 # a UTM VM running Windows 11 ARM64 with the UTM guest tools, the OpenSSH
@@ -370,6 +379,47 @@ case "$cmd" in
     echo ">> self-built blaise.exe is byte-identical ($((SECONDS - t0))s in the VM)"
     echo "WINDOWS_SELFHOST_OK"
     ;;
+  tls-check)
+    [ -x compiler/target/blaise ] || die "build compiler/target/blaise first"
+    command -v openssl >/dev/null 2>&1 || die "the openssl CLI is needed to make the test certificates"
+    mkdir -p "$OUT"
+    # localhost for the raw and Net.Tls echoes (verify off); 127.0.0.1 for
+    # https, whose client verifies the certificate against the URL's host.
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+      -keyout "$OUT/tls-key.pem" -out "$OUT/tls-cert.pem" -subj /CN=localhost \
+      -addext subjectAltName=DNS:localhost,IP:127.0.0.1 >/dev/null 2>&1 \
+      || die "openssl could not make the test certificate"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+      -keyout "$OUT/https-key.pem" -out "$OUT/https-cert.pem" -subj /CN=127.0.0.1 \
+      -addext subjectAltName=DNS:localhost,IP:127.0.0.1 >/dev/null 2>&1 \
+      || die "openssl could not make the https test certificate"
+    fail=0
+    # <program>:<cert>:<transcript lines that must all appear>
+    for t in "tlsloopback:tls:HS-SERVER-OK HS-CLIENT-OK SERVER-GOT:hello-tls CLIENT-GOT:srv:hello-tls OK" \
+             "nettlsloopback:tls:ECHO:echo:hello-net-tls OK" \
+             "httpsloopback:https:TRUSTED-STATUS:200 TRUSTED-BODY:hello-https UNTRUSTED:rejected INSECURE-STATUS:200 REUSE-BODY1:hello-https REUSE-BODY2:hello-https REDIRECT-STATUS:200 REDIRECT-BODY:hello-https OK"; do
+      name=${t%%:*}; rest=${t#*:}; cert=${rest%%:*}; want=${rest#*:}
+      echo ">> cross-compiling $name (windows-x86_64)"
+      compiler/target/blaise --source "stdlib/src/test/pascal/$name.pas" \
+        --target windows-x86_64 --output "$OUT/$name" \
+        --unit-path stdlib/src/main/pascal \
+        --rtl-src compiler/src/main/pascal > "$OUT/$name.log" 2>&1 \
+        || { grep -v 'note:' "$OUT/$name.log" | head -20; die "CROSS BUILD FAILED: $name"; }
+      echo "=== $name ==="
+      rc=0
+      RUN_WITH=("$OUT/$cert-cert.pem" "$OUT/$cert-key.pem")
+      got=$(run_in_vm "$OUT/$name.exe" "$cert-cert.pem" "$cert-key.pem" | tr -d '\r') || rc=$?
+      RUN_WITH=()
+      echo "$got"
+      [ $rc -eq 0 ] || { echo "FAIL: $name.exe exited $rc"; fail=1; }
+      for line in $want; do
+        printf '%s\n' "$got" | grep -qxF -- "$line" \
+          || { echo "FAIL: $name.exe printed no '$line'"; fail=1; }
+      done
+    done
+    [ $fail -eq 0 ] || exit 1
+    echo "WINDOWS_TLS_OK"
+    ;;
   *)
-    sed -n '2,56p' "$0"; exit 1 ;;
+    sed -n '2,65p' "$0"; exit 1 ;;
 esac

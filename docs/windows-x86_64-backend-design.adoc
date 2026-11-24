@@ -1375,6 +1375,29 @@ powercfg /change monitor-timeout-ac 0
 No x64 emulation package is needed: Windows 11 on ARM runs x64 executables
 out of the box.
 
+=== OpenSSL, for the TLS gate
+
+Blaise's Windows executables are x64, so the TLS programs load the *x64*
+OpenSSL 3 DLLs, `libssl-3-x64.dll` and `libcrypto-3-x64.dll`, even though the
+guest itself is ARM64.  An ARM64 build of OpenSSL, which is what `winget`
+chooses by default on this guest, cannot be loaded into an x64 process, and
+OpenSSL 4 uses different DLL names.  The Shining Light "Light" installer for
+x64 copies both DLLs into `System32`, where any process finds them.  It needs
+the x64 Visual C++ runtime.  The guest was given OpenSSL 3.5.9 (the 3.5 LTS
+line) on 2026-11-24; Shining Light keeps only the newest release of each line
+for download, and lists them with their SHA-256 in
+`github.com/slproweb/opensslhashes`.
+
+[source,powershell]
+----
+winget install --id Microsoft.VCRedist.2015+.x64 --silent --accept-package-agreements
+$f = 'C:\blaise-test\ossl.msi'
+Invoke-WebRequest -Uri 'https://slproweb.com/download/Win64OpenSSL_Light-3_5_9.msi' -OutFile $f
+(Get-FileHash $f -Algorithm SHA256).Hash   # compare with opensslhashes
+Start-Process msiexec.exe -ArgumentList '/i', $f, '/qn', '/norestart' -Wait
+Remove-Item $f
+----
+
 === The SSH key
 
 On the host:
@@ -1402,6 +1425,7 @@ icacls.exe C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /gra
 ----
 ssh -i ~/.ssh/blaise_windows -p 2222 blaise@127.0.0.1 "echo %PROCESSOR_ARCHITECTURE%"   # ARM64
 scripts/windows-vm.sh crosscheck                                                        # WINDOWS_CROSSCHECK_OK
+scripts/windows-vm.sh tls-check                                                         # WINDOWS_TLS_OK
 ----
 
 === Notes
@@ -1704,8 +1728,15 @@ bug noted under _Open_ below; each passes alone.  In detail:
   `ReadDirectoryChangesW` on a completion port, watching each path through
   its parent directory, since that is where a deletion or rename shows.
 * *TLS.*  The Windows toolkit maps `ssl` and `crypto` to OpenSSL 3's
-  `libssl-3-x64.dll` and `libcrypto-3-x64.dll`.  The guest has no OpenSSL,
-  so no handshake has run on Windows yet.
+  `libssl-3-x64.dll` and `libcrypto-3-x64.dll`.  Proven in the guest on
+  2026-11-24 against OpenSSL 3.5.9 by `scripts/windows-vm.sh tls-check`: the
+  raw OpenSSL echo, the `Net.Tls` client and server, and https with
+  certificate verification (a pinned CA accepted, an untrusted certificate
+  rejected, the insecure opt-out, keep-alive reuse, an http to https
+  redirect).  No Blaise change was needed.  The run helper now starts a
+  program in its run directory, beside the files `--with` copies in; it
+  used to start in the user's profile, so a relative certificate path did
+  not resolve.
 * *Unwind data.*  The PE linker writes the exception directory: a
   `RUNTIME_FUNCTION` for every routine that opens with
   `push %rbp; mov %rsp, %rbp`, all naming one `UNWIND_INFO`.  Stack walks
@@ -1721,8 +1752,8 @@ bug noted under _Open_ below; each passes alone.  In detail:
   `ParamStr(0)` gave the command line's first word, so a compiler started
   as a bare `blaise.exe` could not find the `blaise.cfg` beside it -- it is
   now `GetModuleFileNameW`'s full path, as in Delphi and FPC.
-* *Open:* an implementation-section type cannot size itself on an
-  implementation-section constant
+* *Fixed after M7:* an implementation-section type could not size itself
+  on an implementation-section constant
   (`BUG-20261113-impl-type-impl-const-bound`).
 * *Fixed after M7:* a cached unit object depended on whether the program
   used `SysUtils` (`BUG-20261113-unit-object-depends-on-program`): a
