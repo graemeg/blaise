@@ -1004,6 +1004,35 @@ and `PathKind` RTL entry points, so `--scan` and `--project` no longer run
 `FindFirstFileW`/`FindNextFileW` implementation and `PathKind` a
 `GetFileAttributesW` one; nothing above them changes.
 
+== Windows — Beyond the x86-64 Target
+
+=== Saved-register unwind codes in `.pdata` / `.xdata`
+
+*Target.* Only if SEH interoperation is taken on; the Windows x86-64 design
+puts it out of scope.
+
+*What.* The PE linker writes one `RUNTIME_FUNCTION` per routine that opens
+with `push %rbp; mov %rsp, %rbp`, all naming a single shared `UNWIND_INFO`.
+That is enough for a stack walk (a debugger, the `m7unwind` fixture) to pass
+through Blaise frames.  It does not describe the callee-saved registers a
+routine stores into its frame with `MOV`, so the Windows unwinder cannot
+restore them: a structured exception raised in foreign code cannot unwind
+through Blaise frames to a handler further up.
+
+*Why it is deferred.* Blaise exceptions use the `setjmp`-based unwinder and
+never consult `.pdata`.  The only consumer would be SEH interop (a C++ or
+SEH handler above Blaise code), which no current use needs.
+
+*Implementation notes.* Each routine would get its own `UNWIND_INFO`:
+`UWOP_PUSH_NONVOL` for `RBP`, `UWOP_SET_FPREG`, `UWOP_ALLOC_*` for the frame,
+and `UWOP_SAVE_NONVOL` for every callee-saved register the prologue stores,
+with the offsets the backend already knows when it lays out the frame.  It
+needs a Windows-side test that raises an SEH exception in a C DLL called
+through Blaise code and catches it in a C caller above (Layer 3 fixture
+pattern).
+
+*Effort.* Medium.
+
 == Compiler — Backend Architecture
 
 === Route generic class instances through the ordinary class emitters
