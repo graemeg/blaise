@@ -650,8 +650,12 @@ begin
             resolver derives low and high from the type — a full enum spans
             its MIN..MAX declared ordinal, an enum-subrange type spans its
             own ordinal bounds
-            (GH #182; hardcoding low=0 mis-sized a subrange dimension). }
-          if Check(tkIdent) and (PeekKind() <> tkDotDot) then
+            (GH #182; hardcoding low=0 mis-sized a subrange dimension).
+            Only a name that ends the dimension is one: a low bound that
+            starts with a name -- Low(Int8)..High(Int8), N - 1..M -- is a
+            constant expression (BUG-20261124-high-type-array-bound). }
+          if Check(tkIdent) and
+             ((PeekKind() = tkComma) or (PeekKind() = tkRBracket)) then
           begin
             Lows.Add('@L:' + FCurrent.Value);
             Highs.Add('@H:' + FCurrent.Value);
@@ -1877,8 +1881,12 @@ begin
     high from the type: a full enum spans its MIN..MAX declared ordinal (so
     not always 0-based), and an ENUM-SUBRANGE type
     (TSub = a..b) spans its own ordinal bounds SubrangeLow..SubrangeHigh —
-    hardcoding the low to 0 mis-sized a subrange dimension (GH #182). }
-  if Check(tkIdent) and (PeekKind() <> tkDotDot) then
+    hardcoding the low to 0 mis-sized a subrange dimension (GH #182).
+    Only a name that ends the dimension is one: a low bound that starts with
+    a name -- Low(TE)..High(TE) -- is a constant expression, as in the type
+    grammar (BUG-20261124-high-type-array-bound). }
+  if Check(tkIdent) and
+     ((PeekKind() = tkComma) or (PeekKind() = tkRBracket)) then
   begin
     CD.ArrayDimLows.Add('@L:' + FCurrent.Value);
     CD.ArrayDimHighs.Add('@H:' + FCurrent.Value);

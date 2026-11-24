@@ -76,6 +76,10 @@ type
     { Boolean / enum / named-const array-const elements fold to ordinals }
     procedure TestRun_BoolArrayConst_FoldsToOrdinals;
     procedure TestRun_EnumArrayConst_FoldsToOrdinals;
+    { BUG-20261124-high-type-array-bound: an array CONSTANT whose dimension
+      starts with a name -- Low(TE)..High(TE), Low(Int8)..Low(Int8) + 1 --
+      is a range, beside a TE dimension and a High(Boolean) bound. }
+    procedure TestRun_ArrayConst_HighLowBounds;
     { Array-const element widths: Byte/Int64/Word stride matches the read }
     procedure TestRun_ArrayConst_ElementWidths;
     procedure TestRun_ArrayConst_NegativeInts;
@@ -979,6 +983,27 @@ const
 begin
   AssertRunsOnAll(Src,
     'F' + Chr(10) + 'T' + Chr(10) + 'F' + Chr(10) + 'T' + Chr(10), 0);
+end;
+
+procedure TE2EGapTests.TestRun_ArrayConst_HighLowBounds;
+const
+  Src =
+    '''
+    program P;
+    type
+      TE = (eA, eB, eC);
+    const
+      A: array[Low(TE)..High(TE)] of Int32 = (10, 20, 30);
+      B: array[0..High(Boolean)] of string = ('no', 'yes');
+      C: array[TE] of Int32 = (1, 2, 3);
+      M: array[Low(Int8)..Low(Int8) + 1, TE] of Int32 = ((1, 2, 3), (4, 5, 6));
+    begin
+      WriteLn(A[eC], ' ', B[1], ' ', C[eB], ' ', M[-127, eC], ' ', M[-128, eA],
+        ' ', Length(A), ' ', Length(M));
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '30 yes 2 6 1 3 2' + Chr(10), 0);
 end;
 
 procedure TE2EGapTests.TestRun_EnumArrayConst_FoldsToOrdinals;

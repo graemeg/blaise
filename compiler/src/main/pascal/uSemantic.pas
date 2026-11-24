@@ -491,6 +491,19 @@ type
       references are resolved against the symbol table, so this must run after
       the referenced consts are declared. }
     function  EvalConstIntExpr(AExpr: TASTExpr; ALine, ACol: Int): Int64;
+    { High (AHigh) or Low of type AType as a compile-time value: the bound a
+      subrange, enum or static array declares, else the integer kind's range.
+      The same values the backends emit for High(T) / Low(T).  False when
+      AType has no such bound. }
+    function  TypeBoundValue(AType: TTypeDesc; AHigh: Boolean;
+                             out AValue: Int64): Boolean;
+    { The type a SizeOf / High / Low argument names in a constant expression:
+      a type name, or a typed constant's type.  nil when the argument is not
+      a plain name or names nothing typed (yet). }
+    function  ConstArgType(AArg: TASTExpr): TTypeDesc;
+    { Report a SizeOf / High / Low argument name that resolves to nothing
+      typed; returns when the argument is not a plain name. }
+    procedure RejectConstArgName(AFC: TFuncCallExpr; ALine, ACol: Int);
     function  EvalConstFloatExpr(AExpr: TASTExpr; ALine, ACol: Int): string;
     function  IsFloatConstExpr(AExpr: TASTExpr): Boolean;
     function  LookupConstSym(const AName: string): TSymbol;
@@ -8297,6 +8310,75 @@ begin
     Result := Result - (SignBit shl 1);
 end;
 
+function TSemanticAnalyser.TypeBoundValue(AType: TTypeDesc; AHigh: Boolean;
+                                          out AValue: Int64): Boolean;
+begin
+  AValue := 0;
+  Result := True;
+  if AType = nil then
+    Exit(False);
+  if AType.IsSubrange then
+  begin
+    if AHigh then AValue := AType.SubrangeHigh else AValue := AType.SubrangeLow;
+    Exit;
+  end;
+  case AType.Kind of
+    tyStaticArray:
+      if AHigh then AValue := TStaticArrayTypeDesc(AType).HighBound
+      else AValue := TStaticArrayTypeDesc(AType).LowBound;
+    tyEnum:
+      if AHigh then AValue := TEnumTypeDesc(AType).MaxOrdinal()
+      else AValue := TEnumTypeDesc(AType).MinOrdinal();
+    tyBoolean:  if AHigh then AValue := 1;
+    tyByte:     if AHigh then AValue := 255;
+    tyWord:     if AHigh then AValue := 65535;
+    tyUInt32:   if AHigh then AValue := 4294967295;
+    { High(UInt64) is all-ones, the -1 bit pattern of the Int64 the folder
+      carries, as the backends materialise it. }
+    tyUInt64:   if AHigh then AValue := -1;
+    tyInt8:     if AHigh then AValue := 127 else AValue := -128;
+    tySmallInt: if AHigh then AValue := 32767 else AValue := -32768;
+    tyInteger:  if AHigh then AValue := 2147483647 else AValue := -2147483648;
+    tyInt64:
+      if AHigh then AValue := 9223372036854775807
+      else AValue := -9223372036854775807 - 1;
+  else
+    Result := False;
+  end;
+end;
+
+function TSemanticAnalyser.ConstArgType(AArg: TASTExpr): TTypeDesc;
+var
+  Sym: TSymbol;
+begin
+  Result := nil;
+  if not (AArg is TIdentExpr) then
+    Exit;
+  Sym := FTable.Lookup(TIdentExpr(AArg).Name);
+  if (Sym <> nil) and (Sym.Kind in [skType, skConstant]) then
+    Result := Sym.TypeDesc;
+end;
+
+procedure TSemanticAnalyser.RejectConstArgName(AFC: TFuncCallExpr; ALine, ACol: Int);
+var
+  Sym: TSymbol;
+begin
+  if not (TASTExpr(AFC.Args.Items[0]) is TIdentExpr) then
+    Exit;
+  { A variable has no value yet when constants are folded (a block's
+    constants are analysed before its variables), so the constant form
+    takes a type. }
+  Sym := FTable.Lookup(TIdentExpr(AFC.Args.Items[0]).Name);
+  if (Sym <> nil) and (Sym.Kind in [skVariable, skParameter, skVarParameter]) then
+    SemanticError(Format('%s() in a constant expression takes a type, but ''%s'' ' +
+      'is a variable: write %s(<its type>)',
+      [AFC.Name, TIdentExpr(AFC.Args.Items[0]).Name, AFC.Name]), ALine, ACol);
+  { "Unknown type" so a classic name (High(Word)) gets the D11 hint that
+    names its width-stating replacement and ClassicPascalTypes. }
+  SemanticError(Format('Unknown type ''%s'' in %s() of a constant expression',
+    [TIdentExpr(AFC.Args.Items[0]).Name, AFC.Name]), ALine, ACol);
+end;
+
 function TSemanticAnalyser.EvalConstIntExpr(AExpr: TASTExpr;
                                             ALine, ACol: Int): Int64;
 var
@@ -8305,6 +8387,7 @@ var
   EnumRef: TEnumMemberRef;
   FC:      TFuncCallExpr;
   CastSym: TSymbol;
+  ArgType: TTypeDesc;
   L, R:    Int64;
 begin
   Result := 0;
@@ -8369,6 +8452,27 @@ begin
     { Ord(X) of an ordinal constant (Ord(eC), Ord(True)): its ordinal }
     if IsBuiltinCall(FC, 'Ord') and (FC.Args <> nil) and (FC.Args.Count = 1) then
       Exit(EvalConstIntExpr(TASTExpr(FC.Args.Items[0]), ALine, ACol));
+    { SizeOf(T) of a type or typed constant: its byte size,
+      as the backends emit it (BUG-20261124-sizeof-type-in-const). }
+    if IsBuiltinCall(FC, 'SizeOf') and (FC.Args <> nil) and (FC.Args.Count = 1) then
+    begin
+      ArgType := Self.ConstArgType(TASTExpr(FC.Args.Items[0]));
+      if ArgType <> nil then
+        Exit(ArgType.ByteSize());
+      Self.RejectConstArgName(FC, ALine, ACol);
+    end;
+    { High(T) / Low(T) of an ordinal type or static array, so a bound such
+      as array[0..High(Byte)] folds (BUG-20261124-high-type-array-bound). }
+    if (IsBuiltinCall(FC, 'High') or IsBuiltinCall(FC, 'Low')) and
+       (FC.Args <> nil) and (FC.Args.Count = 1) then
+    begin
+      ArgType := Self.ConstArgType(TASTExpr(FC.Args.Items[0]));
+      if (ArgType <> nil) and
+         Self.TypeBoundValue(ArgType, IsBuiltinCall(FC, 'High'), L) then
+        Exit(L);
+      if ArgType = nil then
+        Self.RejectConstArgName(FC, ALine, ACol);
+    end;
     if (FC.Args <> nil) and (FC.Args.Count = 1) then
     begin
       CastSym := FTable.Lookup(FC.Name);
@@ -8670,6 +8774,16 @@ begin
   if (AExpr is TFuncCallExpr) and (TFuncCallExpr(AExpr).Args <> nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) then
   begin
+    { High(T) / Low(T) of an ordinal type is a T, as at run time: so
+      High(UInt64) is the UInt64 18446744073709551615, not the Int64 -1. }
+    if IsBuiltinCall(TFuncCallExpr(AExpr), 'High') or
+       IsBuiltinCall(TFuncCallExpr(AExpr), 'Low') then
+    begin
+      Result := Self.ConstArgType(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      if (Result <> nil) and not Result.IsOrdinal() then
+        Result := nil;
+      Exit;
+    end;
     Sym := FTable.Lookup(TFuncCallExpr(AExpr).Name);
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
        Sym.TypeDesc.IsOrdinal() then
@@ -8705,6 +8819,17 @@ begin
     Exit(Self.ConstExprAwaitsTypes(TNegExpr(AExpr).Expr));
   if AExpr is TFuncCallExpr then
   begin
+    { SizeOf / High / Low of a name: waits only while that name is not
+      declared yet -- a type of this block, registered by AnalyseTypeDecls.
+      SizeOf(Int64) or High(Byte) folds at once, so a later type of the same
+      block can size itself on it. }
+    if (IsBuiltinCall(TFuncCallExpr(AExpr), 'SizeOf') or
+        IsBuiltinCall(TFuncCallExpr(AExpr), 'High') or
+        IsBuiltinCall(TFuncCallExpr(AExpr), 'Low')) and
+       (TFuncCallExpr(AExpr).Args <> nil) and
+       (TFuncCallExpr(AExpr).Args.Count = 1) and
+       (TFuncCallExpr(AExpr).Args.Items[0] is TIdentExpr) then
+      Exit(Self.ConstArgType(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) = nil);
     if not IsBuiltinCall(TFuncCallExpr(AExpr), 'Ord') and
        (FTable.Lookup(TFuncCallExpr(AExpr).Name) = nil) then
       Exit(True);

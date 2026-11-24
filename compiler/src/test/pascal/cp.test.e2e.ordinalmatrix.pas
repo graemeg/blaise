@@ -179,6 +179,16 @@ begin
     'program P;' + LF +
     'type TE = (eA, eB, eC, eD);' + LF +
     'type T = ' + AType + ';' + LF +
+    { High/Low/SizeOf of the type folded as constants, and as the bounds of
+      an array type: the folder's limits must equal the run-time ones
+      (BUG-20261124-sizeof-type-in-const, -high-type-array-bound) }
+    'const' + LF +
+    '  CHi = High(T);' + LF +
+    '  CLo = Low(T);' + LF +
+    '  CSz = SizeOf(T);' + LF;
+  if ASmall then
+    Result := Result + 'type TBounded = array[Low(T)..High(T)] of Byte;' + LF;
+  Result := Result +
     'var' + LF +
     '  GV: T;' + LF +
     '  Mode: string;' + LF +
@@ -259,6 +269,14 @@ begin
     '  F();' + LF +
     'end;' + LF + LF +
     'begin' + LF +
+    '  Mode := ''const'';' + LF +
+    '  Chk(CHi = High(T), ''const-high'');' + LF +
+    '  Chk(CLo = Low(T), ''const-low'');' + LF +
+    '  Chk(CSz = SizeOf(T), ''const-sizeof'');' + LF;
+  if ASmall then
+    Result := Result +
+      '  Chk(SizeOf(TBounded) = ' + ACount + ', ''const-bounded-array'');' + LF;
+  Result := Result +
     '  RunGlobal();' + LF +
     '  RunLocal();' + LF +
     '  RunNested();' + LF +

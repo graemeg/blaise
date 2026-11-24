@@ -4984,9 +4984,48 @@ express `2 + 3 * 4` correctly.
 === Scope
 
 Integer expressions fold as described above; float expressions are covered in
-_Floating-Point Constant Expressions_.  Compile-time constants are not yet
-accepted as static-array bounds (`array[0..N-1]`), which is a separate parser
-limitation in the type grammar, independent of constant-expression folding.
+_Floating-Point Constant Expressions_.  Static-array bounds are constant
+expressions too (`array[0..N - 1]`, `array[Low(Int8)..High(Int8)]`), folded
+by the same evaluator.
+
+=== `SizeOf`, `High` and `Low`
+
+`SizeOf(T)` folds to the byte size of type `T`, and `High(T)` / `Low(T)` to
+the limits of an ordinal type or static array `T` -- the same values those
+calls give at run time:
+
+[source]
+----
+type
+  TR = record A: array[0..2] of Int32; B: Byte; end;
+const
+  RecSize = SizeOf(TR);                       // 16
+  Last = High(UInt16);                        // 65535, an UInt16
+type
+  TByteTable = array[0..High(Byte)] of Int32;
+  TSigned = array[Low(Int8)..High(Int8)] of Byte;
+----
+
+*The argument must be a type, or a typed constant.*  A variable is
+rejected with a message naming the fix, `SizeOf(<its type>)`: a block's
+constants are folded before its variables are declared, so a variable has
+no type yet, and FPC's acceptance of `SizeOf(V)` would mean folding constants
+after variables, which a variable's array bounds then cannot name.  The type
+is the thing whose size is constant; naming it says so.
+
+*`High(T)` and `Low(T)` are typed `T`*, as at run time.  `High(UInt64)` is
+therefore the `UInt64` 18446744073709551615, not the `Int64` -1 that its bit
+pattern would read as.  `SizeOf` is an integer constant like any other.
+
+A classic name hidden in `ClassicPascalTypes` (`High(Word)`) reports
+"Unknown type 'Word'" with the width-stating replacement, as everywhere else
+(D11).
+
+Until 2026-11-24 none of these folded: `SizeOf(TR)` and `High(Byte)` were
+"not a compile-time integer", and a low bound starting with a name
+(`array[Low(Int8)..`) did not even parse, because the parser took any name not
+followed by `..` for an index-type dimension (`array[TColour]`).  A dimension
+name must now end the dimension, being followed by `,` or `]`.
 
 === Typing by Operand
 
@@ -5001,7 +5040,8 @@ FPC:
 | `K = True` | `Boolean`
 | `K = TColour(1)` | `TColour`
 | `K = S + 'x'` (`S` a string constant) | `string`
-| `K = A + 1`, `K = Ord(eGreen)` | an integer type wide enough for the value
+| `K = High(T)`, `K = Low(T)` | `T`
+| `K = A + 1`, `K = Ord(eGreen)`, `K = SizeOf(T)` | an integer type wide enough for the value
 |===
 
 A constant that names an enum member or a type declared in the same block is

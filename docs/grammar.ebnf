@@ -809,8 +809,11 @@ ConstArrayValue
  * named-constant references and types the result BY ITS OPERANDS: a bare
  * named-constant reference is an alias with that constant's type, an enum
  * member gives the enum's type, True / False give Boolean, Ord(X) is X's
- * ordinal, and a typecast T(X) gives T.  A constant naming an enum member or
- * a type declared in the same block is folded after the block's types. *)
+ * ordinal, a typecast T(X) gives T, High(T) / Low(T) of an ordinal type or
+ * static array T give its limits (typed T), and SizeOf(T) gives T's byte
+ * size.  The argument of SizeOf / High / Low names a type or a typed
+ * constant, not a variable.  A constant naming an enum member or a type
+ * declared in the same block is folded after the block's types. *)
 ConstExpr
     = ConstArithExpr
     | ( StrLit | IDENT ) { PLUS ( StrLit | IDENT ) }
@@ -836,7 +839,8 @@ ConstArithFactor
     | IDENT                        (* named integer or float constant, or an
                                       enum member *)
     | IDENT LPAREN ConstArithExpr RPAREN
-                                   (* Ord(X), or an ordinal typecast T(X) *)
+                                   (* Ord(X), an ordinal typecast T(X), or
+                                      SizeOf(T) / High(T) / Low(T) *)
     | MINUS ConstArithFactor       (* unary minus *)
     | LPAREN ConstArithExpr RPAREN
     ;
@@ -955,6 +959,10 @@ ArrayIndex
     = ArrayBound DOTDOT ArrayBound
     | IDENT                                       (* ordinal-indexed *)
     ;
+
+(* The IDENT form is taken only when the name ends the dimension -- it is
+ * followed by COMMA or RBRACKET.  Otherwise the dimension is a range whose
+ * low bound starts with a name: array[Low(Int8)..High(Int8)], array[N-1..M]. *)
 
 (* The IDENT form names an ORDINAL index type.  Three ordinal kinds are admitted:
  *   - an enumeration type (array[TColor] of T folds to array[0..N-1] of T,

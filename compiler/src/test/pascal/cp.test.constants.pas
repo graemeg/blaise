@@ -53,6 +53,19 @@ type
     { Typed constants — const Name: Type = Value }
     procedure TestTypedConst_TypeAnnotationPreserved;
     procedure TestTypedConst_InUnit;
+    { BUG-20261124-sizeof-type-in-const: SizeOf(<type>) folds to the type's
+      byte size, a record declared in the same block included. }
+    procedure TestConstFold_SizeOfType;
+    { BUG-20261124-high-type-array-bound: High/Low of every integer kind,
+      Boolean, an enum and a subrange fold to the type's limits (High(UInt64)
+      typed UInt64), and serve as array bounds, a low bound included. }
+    procedure TestConstFold_HighLowOfTypes;
+    procedure TestArrayBound_HighLowOfType;
+    procedure TestArrayConstBound_HighLowOfType;
+    { a classic name is reported with its replacement (D11), a variable with
+      the fix, rather than "not a compile-time integer" }
+    procedure TestConstFold_HighOfClassicName_Hints;
+    procedure TestConstFold_SizeOfVariable_Rejected;
 
     { Array-of-enum typed constants }
     procedure TestArrayConst_StringElements_Parses;
@@ -785,6 +798,201 @@ begin
   AssertEquals('UInt64', '', AsmMissing(Src, #9'.quad 41', #9'.quad 41'));
   AssertEquals('user alias of Int16', '',
     AsmMissing(Src, #9'.word 51', #9'.hword 51'));
+end;
+
+function ConstIntVal(AProg: TProgram; const AName: string): Int64;
+var
+  I: Int;
+begin
+  for I := 0 to AProg.Block.ConstDecls.Count - 1 do
+    if SameText(TConstDecl(AProg.Block.ConstDecls.Items[I]).Name, AName) then
+      Exit(TConstDecl(AProg.Block.ConstDecls.Items[I]).IntVal);
+  raise Exception.Create('no constant ' + AName);
+end;
+
+function TypeSize(AProg: TProgram; const AName: string): Int;
+var
+  I: Int;
+  TD: TTypeDecl;
+begin
+  for I := 0 to AProg.Block.TypeDecls.Count - 1 do
+  begin
+    TD := TTypeDecl(AProg.Block.TypeDecls.Items[I]);
+    if SameText(TD.Name, AName) and (TD.ResolvedDesc <> nil) then
+      Exit(TTypeDesc(TD.ResolvedDesc).ByteSize());
+  end;
+  raise Exception.Create('no resolved type ' + AName);
+end;
+
+procedure TConstTests.TestConstFold_SizeOfType;
+const
+  Src = '''
+    program P;
+    type
+      TR = record
+        A: array[0..2] of Int32;
+        B: Byte;
+      end;
+    const
+      KR = SizeOf(TR);
+      K64 = SizeOf(Int64);
+      KB = SizeOf(Byte);
+    type
+      TK = array[0..K64 - 1] of Byte;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(Src);
+  try
+    AssertEquals('SizeOf(record)', 16, ConstIntVal(Prog, 'KR'));
+    AssertEquals('SizeOf(Int64)', 8, ConstIntVal(Prog, 'K64'));
+    AssertEquals('SizeOf(Byte)', 1, ConstIntVal(Prog, 'KB'));
+    AssertEquals('array sized on a SizeOf const', 8, TypeSize(Prog, 'TK'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TConstTests.TestConstFold_HighLowOfTypes;
+const
+  Src = '''
+    program P;
+    type
+      TE = (eA = -2, eB, eC = 5);
+      TSub = 3..9;
+    const
+      HI8 = High(Int8);    LI8 = Low(Int8);
+      HU8 = High(Byte);    LU8 = Low(Byte);
+      HI16 = High(Int16);  LI16 = Low(Int16);
+      HU16 = High(UInt16); LU16 = Low(UInt16);
+      HI32 = High(Int32);  LI32 = Low(Int32);
+      HU32 = High(UInt32); LU32 = Low(UInt32);
+      HI64 = High(Int64);  LI64 = Low(Int64);
+      HU64 = High(UInt64); LU64 = Low(UInt64);
+      HB = High(Boolean);  LB = Low(Boolean);
+      HE = High(TE);       LEn = Low(TE);
+      HS = High(TSub);     LS = Low(TSub);
+    begin
+      if HU64 > 0 then WriteLn(HU64);
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(Src);
+  try
+    AssertEquals('High(Int8)', 127, ConstIntVal(Prog, 'HI8'));
+    AssertEquals('Low(Int8)', -128, ConstIntVal(Prog, 'LI8'));
+    AssertEquals('High(Byte)', 255, ConstIntVal(Prog, 'HU8'));
+    AssertEquals('Low(Byte)', 0, ConstIntVal(Prog, 'LU8'));
+    AssertEquals('High(Int16)', 32767, ConstIntVal(Prog, 'HI16'));
+    AssertEquals('Low(Int16)', -32768, ConstIntVal(Prog, 'LI16'));
+    AssertEquals('High(UInt16)', 65535, ConstIntVal(Prog, 'HU16'));
+    AssertEquals('Low(UInt16)', 0, ConstIntVal(Prog, 'LU16'));
+    AssertEquals('High(Int32)', 2147483647, ConstIntVal(Prog, 'HI32'));
+    AssertEquals('Low(Int32)', -2147483648, ConstIntVal(Prog, 'LI32'));
+    AssertEquals('High(UInt32)', 4294967295, ConstIntVal(Prog, 'HU32'));
+    AssertEquals('Low(UInt32)', 0, ConstIntVal(Prog, 'LU32'));
+    AssertEquals('High(Int64)', 9223372036854775807, ConstIntVal(Prog, 'HI64'));
+    AssertTrue('Low(Int64)', ConstIntVal(Prog, 'LI64') = -9223372036854775807 - 1);
+    { the all-ones bit pattern, typed UInt64 (the comparison with 0 above
+      would be False for an Int64 -1) }
+    AssertEquals('High(UInt64) bit pattern', -1, ConstIntVal(Prog, 'HU64'));
+    AssertEquals('Low(UInt64)', 0, ConstIntVal(Prog, 'LU64'));
+    AssertEquals('High(Boolean)', 1, ConstIntVal(Prog, 'HB'));
+    AssertEquals('Low(Boolean)', 0, ConstIntVal(Prog, 'LB'));
+    AssertEquals('High(enum) = its max ordinal', 5, ConstIntVal(Prog, 'HE'));
+    AssertEquals('Low(enum) = its min ordinal', -2, ConstIntVal(Prog, 'LEn'));
+    AssertEquals('High(subrange)', 9, ConstIntVal(Prog, 'HS'));
+    AssertEquals('Low(subrange)', 3, ConstIntVal(Prog, 'LS'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TConstTests.TestArrayBound_HighLowOfType;
+const
+  Src = '''
+    program P;
+    type
+      TE = (eA = -2, eB, eC = 5);
+      TA = array[0..High(Byte)] of Byte;
+      TB = array[Low(Int8)..High(Int8)] of Byte;
+      TC = array[Low(TE)..High(TE)] of Byte;
+      TR = record
+        F: array[1..High(Int8)] of Byte;
+      end;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(Src);
+  try
+    AssertEquals('array[0..High(Byte)]', 256, TypeSize(Prog, 'TA'));
+    AssertEquals('array[Low(Int8)..High(Int8)]', 256, TypeSize(Prog, 'TB'));
+    AssertEquals('array[Low(TE)..High(TE)]', 8, TypeSize(Prog, 'TC'));
+    AssertEquals('record field array[1..High(Int8)]', 127, TypeSize(Prog, 'TR'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TConstTests.TestArrayConstBound_HighLowOfType;
+const
+  Src = '''
+    program P;
+    type
+      TE = (eA, eB, eC);
+    const
+      A: array[Low(TE)..High(TE)] of Int32 = (10, 20, 30);
+      M: array[Low(Int8)..Low(Int8) + 1, TE] of Int32 = ((1, 2, 3), (4, 5, 6));
+    begin
+    end.
+    ''';
+begin
+  { parsed as ranges, not as dimensions named Low; three and two elements }
+  AssertEquals('Low(TE)..High(TE) and Low(Int8).. dimensions', '',
+    SemanticError(Src));
+end;
+
+procedure TConstTests.TestConstFold_HighOfClassicName_Hints;
+var
+  Err: string;
+begin
+  Err := SemanticError('program P; const H = High(Word); begin end.');
+  AssertTrue('names the type: ' + Err, Pos('Unknown type ''Word''', Err) >= 0);
+  AssertTrue('suggests UInt16: ' + Err, Pos('use UInt16', Err) >= 0);
+end;
+
+procedure TConstTests.TestConstFold_SizeOfVariable_Rejected;
+var
+  Err: string;
+begin
+  Err := SemanticError('''
+    program P;
+    procedure Q;
+    var
+      V: Int64;
+    begin
+      V := 0;
+      begin end;
+    end;
+    var
+      G: Int64;
+    procedure R;
+    const
+      K = SizeOf(G);
+    begin
+    end;
+    begin
+    end.
+    ''');
+  AssertTrue('asks for a type: ' + Err, Pos('takes a type, but ''G'' is a variable', Err) >= 0);
 end;
 
 initialization
