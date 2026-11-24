@@ -174,6 +174,11 @@ type
     FGenericSourceUnits:   TStringList;
     FDeferredConsts:       TObjectList;  { not owned: scalar TConstDecls that wait for
                                            the block's types (FoldScalarConst) }
+    FBoundLine, FBoundCol: Int;          { position of the type declaration whose
+                                           array bounds ResolveArrayBound is
+                                           folding (AnalyseTypeDecls), 0 when none:
+                                           the bound is re-parsed from its text,
+                                           which carries no position of its own }
     FRawMemAddrOf:         Boolean;      { AnalyseAddrOfExpr runs for a Move /
                                            FillByte operand, which checks the
                                            operand itself with a better message }
@@ -4153,44 +4158,57 @@ begin
 
     Only TYPES are hoisted.  Impl-section consts stay in the pushed scope below
     (layer-1 visible to the unit's own bodies, never global, so they never need
-    suppression); LinkClassMethodImpls needs only the types.  An impl-section
-    type that sizes itself on an impl-section const is not currently supported
-    and would report "Unknown type" — no codebase unit relies on it. }
+    suppression); LinkClassMethodImpls needs only the types.
+
+    The section's scalar consts are analysed FIRST, into the pushed scope, so
+    a hoisted type can size itself on one (array[0..N - 1] with an impl
+    const N, BUG-20261113-impl-type-impl-const-bound).  While the types are
+    hoisted the table's DefineAtGlobalDepth makes the pushed scope's level
+    define into the global scope, exactly as before the scope existed, while
+    Lookup still finds the consts.  A const that needs the block's types
+    (an enum member, SizeOf an impl type) is deferred to
+    AnalyseArrayConstDecls, as in the interface section. }
   { From here on the implementation is analysed: its own uses clause joins
     the chain (it is private to this unit -- never exported). }
   for I := 0 to AUnit.ImplUsedUnits.Count - 1 do
     if FCurrentUsesChain.IndexOf(AUnit.ImplUsedUnits.Strings[I]) < 0 then
       FCurrentUsesChain.Add(AUnit.ImplUsedUnits.Strings[I]);
 
-  FTable.DefineImplPrivate := True;
-  try
-    AnalyseTypeDecls(AUnit.ImplBlock);
-  finally
-    FTable.DefineImplPrivate := False;
-  end;
-
-  { Link class method bodies from ImplBlock to the class type method decls
-    registered by AnalyseTypeDecls.  Generic-class linking happened earlier
-    so instances can clone bodies at instantiation time. }
-  LinkClassMethodImpls(AUnit.ImplBlock);
-
-  { A concrete class method declared in either section must have an
-    implementation in the impl section (see CheckClassMethodsImplemented). }
-  CheckClassMethodsImplemented(AUnit.IntfBlock);
-  CheckClassMethodsImplemented(AUnit.ImplBlock);
-
   { --- Implementation section -------------------------------------------
     Push a scope so impl-only standalone symbols don't leak globally.
     Class method bodies are analysed inside this scope so they can call
-    impl-only helpers (e.g. TStringList.SetText -> SplitIntoList).
-    (Impl-section type decls were already processed above.) }
+    impl-only helpers (e.g. TStringList.SetText -> SplitIntoList). }
   FTable.PushScope();
   NoteUnitScope();
   try
-    { Register impl-section consts + global variables.  Consts stay in this
-      pushed scope (layer-1 visible to the unit's own bodies); globals are
-      marked IsGlobal so codegen emits them as data-segment slots. }
+    { Impl-section scalar consts stay in this pushed scope (layer-1 visible
+      to the unit's own bodies). }
     AnalyseConstDecls(AUnit.ImplBlock);
+
+    FTable.DefineAtGlobalDepth := FTable.ScopeDepth;
+    try
+      FTable.DefineImplPrivate := True;
+      try
+        AnalyseTypeDecls(AUnit.ImplBlock);
+      finally
+        FTable.DefineImplPrivate := False;
+      end;
+
+      { Link class method bodies from ImplBlock to the class type method decls
+        registered by AnalyseTypeDecls.  Generic-class linking happened earlier
+        so instances can clone bodies at instantiation time. }
+      LinkClassMethodImpls(AUnit.ImplBlock);
+
+      { A concrete class method declared in either section must have an
+        implementation in the impl section (see CheckClassMethodsImplemented). }
+      CheckClassMethodsImplemented(AUnit.IntfBlock);
+      CheckClassMethodsImplemented(AUnit.ImplBlock);
+    finally
+      FTable.DefineAtGlobalDepth := 0;
+    end;
+
+    { Global variables are marked IsGlobal so codegen emits them as
+      data-segment slots. }
     AnalyseArrayConstDecls(AUnit.ImplBlock);
     for I := 0 to AUnit.ImplBlock.Decls.Count - 1 do
     begin
@@ -9252,10 +9270,10 @@ begin
       if CD.IntValueExpr <> nil then
       begin
         Expr := CD.IntValueExpr;
-        Result := Int(EvalConstIntExpr(Expr, 0, 0));
+        Result := Int(EvalConstIntExpr(Expr, FBoundLine, FBoundCol));
       end
       else if CD.IntExprTokens <> nil then
-        Result := Int(FoldConstBitOpExpr(CD.IntExprTokens, 0, 0))
+        Result := Int(FoldConstBitOpExpr(CD.IntExprTokens, FBoundLine, FBoundCol))
       else
         raise ESemanticError.Create(
           Format('Cannot resolve array bound ''%s''', [ABoundText]));
@@ -10401,6 +10419,8 @@ begin
   for I := 0 to ABlock.TypeDecls.Count - 1 do
   begin
     TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
+    FBoundLine := TD.Line;
+    FBoundCol := TD.Col;
     if TD.Def is TRecordTypeDef then
     begin
       RT := FTable.NewRecordType(TD.Name);
@@ -10733,6 +10753,8 @@ begin
   for I := 0 to ABlock.TypeDecls.Count - 1 do
   begin
     TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
+    FBoundLine := TD.Line;
+    FBoundCol := TD.Col;
 
     { Generic templates, enum, set, and type alias need no pass-2 processing }
     if TD.Def is TGenericTypeDef then Continue;
@@ -11601,6 +11623,8 @@ begin
   end;
 
   ForwardDecls.Free();
+  FBoundLine := 0;
+  FBoundCol := 0;
 end;
 
 procedure TSemanticAnalyser.AnalyseMethodBodies(ABlock: TBlock);

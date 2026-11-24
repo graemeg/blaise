@@ -780,6 +780,7 @@ type
                                        so semantic-side Define sites don't
                                        each need to thread the unit name. }
 
+    FDefineAtGlobalDepth: Int;       { see DefineAtGlobalDepth }
     FDefineImplPrivate: Boolean;     { when True, Define()/DefineGlobal() mark the
                                        symbol IsImplPrivate.  Set by the analyser
                                        around impl-section type/const registration
@@ -845,6 +846,16 @@ type
       analyser around implementation-section type/const registration. }
     property DefineImplPrivate: Boolean read FDefineImplPrivate
                                          write FDefineImplPrivate;
+    { Global-define context.  While the scope stack is exactly this deep,
+      CurrentScope is the GLOBAL scope: symbols Define()d there, and the
+      LookupLocal / ExtractLocal checks around them, act as at unit level,
+      while Lookup still walks the pushed scopes.  The analyser sets it while
+      it hoists a unit's implementation-section types, which must be global
+      (codegen resolves them by name) yet may size themselves on that
+      section's constants, which live in the pushed implementation scope.
+      0 = off.  A scope pushed on top of it is an ordinary local scope. }
+    property DefineAtGlobalDepth: Int read FDefineAtGlobalDepth
+                                      write FDefineAtGlobalDepth;
 
     { Hook into the analyser's uses-chain lookup.  When non-nil,
       Lookup() consults the chain after pushed scopes and before the
@@ -2823,7 +2834,10 @@ end;
 
 function TSymbolTable.GetCurrentScope: TScope;
 begin
-  Result := TScope(FScopeStack.Items[FScopeStack.Count - 1]);
+  if (FDefineAtGlobalDepth > 0) and (FScopeStack.Count = FDefineAtGlobalDepth) then
+    Result := TScope(FScopeStack.Items[0])
+  else
+    Result := TScope(FScopeStack.Items[FScopeStack.Count - 1]);
 end;
 
 function TSymbolTable.GetScopeDepth: Int;
@@ -2859,16 +2873,17 @@ end;
 function TSymbolTable.Define(ASymbol: TSymbol): Boolean;
 var
   DOU: string;
+  AtGlobal: Boolean;
 begin
   { Only auto-tag global-scope symbols.  Locals (parameters, var
     blocks inside method bodies, etc.) live in pushed scopes and
     must remain OwningUnit='' — uses-chain visibility doesn't apply
     to them. }
   DOU := Self.GetDefineOwningUnit();
-  if (ASymbol.OwningUnit = '') and (DOU <> '')
-     and (FScopeStack.Count = 1) then
+  AtGlobal := CurrentScope = TScope(FScopeStack.Items[0]);
+  if (ASymbol.OwningUnit = '') and (DOU <> '') and AtGlobal then
     ASymbol.OwningUnit := DOU;
-  if MarksImplPrivate(FDefineImplPrivate, ASymbol) and (FScopeStack.Count = 1) then
+  if MarksImplPrivate(FDefineImplPrivate, ASymbol) and AtGlobal then
     ASymbol.IsImplPrivate := True;
   { Propagate the owning unit onto the type descriptor so codegen can mangle a
     type's storage symbols by the declaring unit even after a same-named type

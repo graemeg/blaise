@@ -35,6 +35,10 @@ type
       issue's own shape: the back-edge must not load A again as a
       dependency of B. }
     procedure TestRun_ImplUseCycle_UnitAsSource;
+    { BUG-20261113-impl-type-impl-const-bound: implementation-section types
+      sized on implementation-section constants have the right size, cold
+      and from the unit cache. }
+    procedure TestRun_ImplTypeSizedOnImplConst_ColdAndWarm;
     procedure TestRun_ImplicitSystem_NoUsesClause_WriteLnInt;
     procedure TestRun_ImplicitSystem_NoUsesClause_IntToStr;
     procedure TestRun_ImplicitSystem_NoUsesClause_Length;
@@ -313,6 +317,50 @@ begin
   AssertTrue('program over the unit objects: ' + Output,
     CompileAndRunInScratch(ProgSrc, Output, RCode));
   AssertEquals('program over the unit objects', 'trouble' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_ImplTypeSizedOnImplConst_ColdAndWarm;
+const
+  USrc = '''
+    unit implconst;
+    interface
+    function Sizes(): string;
+    implementation
+    const
+      N = 32;
+    type
+      TR = record
+        A: array[0..N - 1] of Byte;
+      end;
+      TBare = record
+        A: array[0..N] of Byte;
+      end;
+      TArr = array[0..N - 1] of Int32;
+    function Sizes(): string;
+    var
+      R: TR;
+    begin
+      R.A[N - 1] := 7;
+      Result := IntToStr(SizeOf(TR)) + ' ' + IntToStr(SizeOf(TBare)) + ' ' +
+        IntToStr(SizeOf(TArr)) + ' ' + IntToStr(R.A[N - 1]);
+    end;
+    end.
+    ''';
+  DrvSrc = '''
+    program P;
+    uses implconst;
+    begin
+      WriteLn(Sizes());
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('cold: ' + Output,
+    CompileAndRunWithUnit('implconst', USrc, DrvSrc, Output, RCode));
+  AssertEquals('cold', '32 33 128 7' + LE, Output);
+  AssertTrue('warm: ' + Output, CompileAndRunInScratch(DrvSrc, Output, RCode));
+  AssertEquals('warm', '32 33 128 7' + LE, Output);
 end;
 
 const

@@ -54,6 +54,14 @@ type
       reports the unknown type, as it did before the phases existed. }
     procedure TestSemanticAnalyser_ImplUseCycle_PhasedOrderResolves;
     procedure TestSemanticAnalyser_ImplUseCycle_WholeUnitOrderFails;
+    { BUG-20261113-impl-type-impl-const-bound: a type declared in a unit's
+      implementation section sizes itself on a constant of that section
+      (array[0..N - 1], array[0..N], a named array type); a const that needs
+      the section's types still resolves after them; and an unresolvable bound
+      reports the type declaration's position, not line 0. }
+    procedure TestSemanticAnalyser_ImplTypeSizedOnImplConst;
+    procedure TestSemanticAnalyser_ImplConstAfterImplTypes;
+    procedure TestSemanticAnalyser_ImplTypeBadBound_ReportsDeclPosition;
     { ------------------------------------------------------------------ }
     { AnalyseUnitForExport                                                 }
     { ------------------------------------------------------------------ }
@@ -1628,6 +1636,87 @@ begin
   Err := AnalyseUnitsAndProg([CycBSrc, CycASrc], 'program P; begin end.');
   AssertTrue('whole-unit order cannot see CycA''s type: ' + Err,
     Pos('TColour', Err) >= 0);
+end;
+
+procedure TMultifileTests.TestSemanticAnalyser_ImplTypeSizedOnImplConst;
+const
+  USrc = '''
+    unit ImplConstA;
+    interface
+    function Sizes(): string;
+    implementation
+    const
+      N = 32;
+    type
+      TR = record
+        A: array[0..N - 1] of Byte;
+      end;
+      TBare = record
+        A: array[0..N] of Byte;
+      end;
+      TArr = array[0..N - 1] of Int32;
+    function Sizes(): string;
+    begin
+      Result := IntToStr(SizeOf(TR)) + IntToStr(SizeOf(TBare)) + IntToStr(SizeOf(TArr));
+    end;
+    end.
+    ''';
+begin
+  AssertEquals('impl type sized on impl const', '',
+    AnalyseUnitsAndProg([USrc], 'program P; uses ImplConstA; begin WriteLn(Sizes()); end.'));
+end;
+
+procedure TMultifileTests.TestSemanticAnalyser_ImplConstAfterImplTypes;
+const
+  USrc = '''
+    unit ImplConstB;
+    interface
+    function Pick(): Int;
+    implementation
+    const
+      N = 3;
+    type
+      TE = (eA, eB, eC);
+      TR = record
+        A: array[0..N - 1] of Int32;
+      end;
+    const
+      First: TE = eB;
+      Last = eC;
+    function Pick(): Int;
+    var
+      R: TR;
+    begin
+      R.A[N - 1] := Ord(First) + Ord(Last);
+      Result := R.A[N - 1];
+    end;
+    end.
+    ''';
+begin
+  AssertEquals('impl consts that need impl types still resolve', '',
+    AnalyseUnitsAndProg([USrc], 'program P; uses ImplConstB; begin WriteLn(Pick()); end.'));
+end;
+
+procedure TMultifileTests.TestSemanticAnalyser_ImplTypeBadBound_ReportsDeclPosition;
+const
+  USrc = '''
+    unit ImplConstC;
+    interface
+    implementation
+    const
+      N = 4;
+    type
+      TBad = record
+        A: array[0..M - 1] of Byte;
+      end;
+    end.
+    ''';
+var
+  Err: string;
+begin
+  Err := AnalyseUnitsAndProg([USrc], 'program P; begin end.');
+  AssertTrue('names the undeclared bound: ' + Err, Pos('''M''', Err) >= 0);
+  AssertTrue('at the type declaration, line 7: ' + Err, Pos('line 7 col', Err) >= 0);
 end;
 
 initialization
