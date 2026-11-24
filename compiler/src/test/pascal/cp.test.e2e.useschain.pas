@@ -26,6 +26,15 @@ type
   protected
     procedure SetUp; override;
   published
+    { GH #264: unit A's implementation uses B and B's interface uses A's
+      type -- legal Pascal, and the only valid analysis order interleaves
+      the units (A's interface, B, A's implementation).  Both uses orders,
+      cold and from the unit cache. }
+    procedure TestRun_ImplUseCycle_BothUsesOrders_ColdAndWarm;
+    { ...and with A itself compiled as the top level (--source a.pas), the
+      issue's own shape: the back-edge must not load A again as a
+      dependency of B. }
+    procedure TestRun_ImplUseCycle_UnitAsSource;
     procedure TestRun_ImplicitSystem_NoUsesClause_WriteLnInt;
     procedure TestRun_ImplicitSystem_NoUsesClause_IntToStr;
     procedure TestRun_ImplicitSystem_NoUsesClause_Length;
@@ -141,6 +150,9 @@ type
 
 implementation
 
+uses
+  process, blaise.codegen.target;
+
 procedure TE2EUsesChainTests.SetUp;
 begin
   inherited SetUp();
@@ -150,6 +162,160 @@ end;
 const
   LE = #10;
 
+  { GH #264 fixture: each unit of the cycle uses a symbol of the other. }
+  CycOneSrc = '''
+    unit cycone;
+    interface
+    type
+      TColour = (cRed, cGreen);
+    function Describe(): string;
+    implementation
+    uses cyctwo;
+    function Describe(): string;
+    var
+      T: TTrouble;
+    begin
+      T := TTrouble.Create();
+      T.C := cGreen;
+      Result := T.Name() + ' ' + IntToStr(Ord(T.C));
+    end;
+    end.
+    ''';
+  CycTwoSrc = '''
+    unit cyctwo;
+    interface
+    uses cycone;
+    type
+      TTrouble = class
+        C: TColour;
+        function Name(): string;
+      end;
+    implementation
+    function TTrouble.Name(): string;
+    begin
+      Result := 'trouble';
+    end;
+    end.
+    ''';
+
+procedure TE2EUsesChainTests.TestRun_ImplUseCycle_BothUsesOrders_ColdAndWarm;
+const
+  OneFirstSrc = '''
+    program P;
+    uses cycone;
+    begin
+      WriteLn(Describe());
+    end.
+    ''';
+  TwoFirstSrc = '''
+    program P;
+    uses cyctwo, cycone;
+    var T: TTrouble;
+    begin
+      T := TTrouble.Create();
+      WriteLn(T.Name(), ' ', Describe());
+    end.
+    ''';
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('uses cycone, cold: ' + Output,
+    CompileAndRunWithUnits(CycOneSrc, CycTwoSrc, OneFirstSrc, Output, RCode));
+  AssertEquals('uses cycone, cold', 'trouble 1' + LE, Output);
+  AssertTrue('uses cycone, warm: ' + Output,
+    CompileAndRunInScratch(OneFirstSrc, Output, RCode));
+  AssertEquals('uses cycone, warm', 'trouble 1' + LE, Output);
+  DeleteScratchFile('cycone.o');
+  DeleteScratchFile('cyctwo.o');
+  AssertTrue('uses cyctwo, cycone, cold: ' + Output,
+    CompileAndRunInScratch(TwoFirstSrc, Output, RCode));
+  AssertEquals('uses cyctwo, cycone, cold', 'trouble trouble 1' + LE, Output);
+  AssertTrue('uses cyctwo, cycone, warm: ' + Output,
+    CompileAndRunInScratch(TwoFirstSrc, Output, RCode));
+  AssertEquals('uses cyctwo, cycone, warm', 'trouble trouble 1' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_ImplUseCycle_UnitAsSource;
+const
+  { Distinct names, so this test's unit objects never meet the other's. }
+  ASrc = '''
+    unit cycsrca;
+    interface
+    type
+      TColour = (cRed, cGreen);
+    function Describe(): string;
+    implementation
+    uses cycsrcb;
+    function Describe(): string;
+    var
+      T: TTrouble;
+    begin
+      T := TTrouble.Create();
+      Result := T.Name();
+    end;
+    end.
+    ''';
+  BSrc = '''
+    unit cycsrcb;
+    interface
+    uses cycsrca;
+    type
+      TTrouble = class
+        C: TColour;
+        function Name(): string;
+      end;
+    implementation
+    function TTrouble.Name(): string;
+    begin
+      Result := 'trouble';
+    end;
+    end.
+    ''';
+  ProgSrc = '''
+    program P;
+    uses cycsrca;
+    begin
+      WriteLn(Describe());
+    end.
+    ''';
+var
+  Output, Chunk: string;
+  RCode:  Int;
+  Proc:   TProcess;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  WriteScratchUnit(ASrc);
+  WriteScratchUnit(BSrc);
+  Proc := TProcess.Create(nil);
+  try
+    Proc.Executable := ProjectRoot() + 'compiler/target/blaise';
+    Proc.Parameters.Add('--source');
+    Proc.Parameters.Add(FScratch + '/cycsrca.pas');
+    Proc.Parameters.Add('--unit-path');
+    Proc.Parameters.Add(FScratch);
+    Proc.Parameters.Add('--target');
+    Proc.Parameters.Add(TargetName(E2ETargetDesc()));
+    Proc.Parameters.Add('--output');
+    Proc.Parameters.Add(FScratch + '/cycsrca.o');
+    Proc.Execute();
+    Output := '';
+    repeat
+      Chunk := Proc.ReadOutput();
+      Output := Output + Chunk
+    until (Chunk = '') and not Proc.Running;
+    Proc.WaitOnExit();
+    RCode := Proc.ExitCode
+  finally
+    Proc.Free()
+  end;
+  AssertEquals('unit as --source compiles: ' + Output, 0, RCode);
+  { The objects it left beside the units serve a program that uses them. }
+  AssertTrue('program over the unit objects: ' + Output,
+    CompileAndRunInScratch(ProgSrc, Output, RCode));
+  AssertEquals('program over the unit objects', 'trouble' + LE, Output);
+end;
+
+const
   SrcWriteLnInt = '''
     program P;
     begin

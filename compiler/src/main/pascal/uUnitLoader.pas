@@ -45,6 +45,13 @@ type
       PrebuiltObjectPaths) and the source .pas is *not* parsed.
       Otherwise we fall back to the existing parse+analyse path. }
     function LoadAll(const AUnitNames: TStringList): TObjectList;
+    { LoadAll for a unit compiled as the top level (--source unit.pas).  The
+      root is already parsed, so it is never loaded from the search path: a
+      dependency whose interface uses it back (legal when the root reaches
+      that dependency through its implementation section, GH #264) sees it on
+      the load stack, exactly as a back-edge into any other unit.  The root
+      itself is not in the returned list. }
+    function LoadAllForRoot(ARoot: TUnit): TObjectList;
 
     { Pre-built ifaces discovered during the most recent LoadAll —
       one TUnitInterface per dep that was satisfied via a .o on the
@@ -123,6 +130,13 @@ type
     { True if any interface-use dependency of AIface was taken via the
       source-recompile path (is in FSourceLoadedNames). }
     function DependsOnSourceLoaded(AIface: TUnitInterface): Boolean;
+    { True if an interface-use dependency of AIface is still on the load
+      stack: a back-edge from a unit that reaches AIface through its
+      implementation section (GH #264).  That unit is analysed from source
+      AFTER every cached iface is imported, so AIface's references to its
+      types cannot resolve at import time; AIface must be recompiled from
+      source too, so it is analysed in the scheduled order instead. }
+    function UsesUnitOnLoadStack(AIface: TUnitInterface): Boolean;
     { True if loading AName would take the source-recompile path rather than
       its cached object.  Answers a dependency's staleness WITHOUT loading it,
       for deciding whether a dependent may keep its own cache. }
@@ -784,7 +798,8 @@ begin
           source-ordered analysis phase after its dependency.  (Without source
           on the path we cannot recompile, so the cache is the only option —
           keep it when source is not locatable.) }
-        if DependsOnSourceLoaded(Iface) and (Locate(AName) <> '') then
+        if (DependsOnSourceLoaded(Iface) or UsesUnitOnLoadStack(Iface))
+           and (Locate(AName) <> '') then
         begin
           Iface.Free();
           Iface := nil;   { fall through to the source-compile path below }
@@ -963,6 +978,56 @@ begin
     FResult := nil;
     Result.Free();
     raise;
+  end;
+  FResult := nil;
+  Self.OrderPrebuiltForInit();
+end;
+
+function TUnitLoader.UsesUnitOnLoadStack(AIface: TUnitInterface): Boolean;
+var
+  I: Int;
+begin
+  Result := True;
+  for I := 0 to AIface.UsedUnits.Count - 1 do
+    if (FLoading.IndexOf(AIface.UsedUnits.Strings[I]) >= 0)
+       and not SameText(AIface.UsedUnits.Strings[I], AIface.Name) then
+      Exit;
+  Result := False;
+end;
+
+function TUnitLoader.LoadAllForRoot(ARoot: TUnit): TObjectList;
+var
+  I:          Int;
+  SavedChain: TStringList;
+begin
+  Result  := TObjectList.Create(True);  { owns TUnit items }
+  FResult := Result;
+  FLoading.Add(ARoot.Name);
+  FIfaceChain.Add(ARoot.Name);
+  try
+    try
+      { Mirrors the source path of LoadTransitive: interface uses extend the
+        interface chain, implementation uses start a fresh one. }
+      for I := 0 to ARoot.UsedUnits.Count - 1 do
+        LoadTransitive(ARoot.UsedUnits.Strings[I]);
+      SavedChain  := FIfaceChain;
+      FIfaceChain := TStringList.Create();
+      FIfaceChain.CaseSensitive := False;
+      try
+        for I := 0 to ARoot.ImplUsedUnits.Count - 1 do
+          LoadTransitive(ARoot.ImplUsedUnits.Strings[I]);
+      finally
+        FIfaceChain.Free();
+        FIfaceChain := SavedChain;
+      end;
+    except
+      FResult := nil;
+      Result.Free();
+      raise;
+    end;
+  finally
+    FLoading.Delete(FLoading.IndexOf(ARoot.Name));
+    FIfaceChain.Delete(FIfaceChain.IndexOf(ARoot.Name));
   end;
   FResult := nil;
   Self.OrderPrebuiltForInit();

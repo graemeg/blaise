@@ -23,7 +23,7 @@ program Blaise;
 }
 
 uses
-  SysUtils, Classes, contnrs,
+  SysUtils, Classes, contnrs, Generics.Collections,
   uLexer, uParser, uAST, uSymbolTable, uStrCompat, uSemantic, blaise.codegen,
   blaise.codegen.target,
   blaise.codegen.driver,
@@ -950,6 +950,196 @@ begin
   end;
 end;
 
+{ Position of the unit named AName in AList, or -1. }
+function IndexOfUnit(AList: TObjectList; const AName: string): Int;
+var
+  I: Int;
+begin
+  for I := 0 to AList.Count - 1 do
+    if SameText(TUnit(AList.Items[I]).Name, AName) then
+      Exit(I);
+  Result := -1;
+end;
+
+{ True when every unit of AUses that is in AList is marked in ADone.  A unit
+  outside AList (a cached iface, the RTL) is already imported. }
+function UsesReady(AUses: TStringList; AList: TObjectList;
+                   ADone: TList<Boolean>): Boolean;
+var
+  I, Idx: Int;
+begin
+  Result := False;
+  for I := 0 to AUses.Count - 1 do
+  begin
+    Idx := IndexOfUnit(AList, AUses.Strings[I]);
+    if (Idx >= 0) and not ADone[Idx] then
+      Exit;
+  end;
+  Result := True;
+end;
+
+{ True when AList can be analysed one whole unit at a time in list order:
+  each unit comes after every unit it uses from EITHER section.  The loader's
+  order breaks this only for an implementation-use cycle (GH #264): when A's
+  implementation uses B and B's interface uses A, the loader puts B first
+  (the back-edge to A is skipped), yet B's interface needs A's. }
+function WholeUnitOrderValid(AList: TObjectList): Boolean;
+var
+  I, J, Idx: Int;
+  U: TUnit;
+begin
+  Result := False;
+  for I := 0 to AList.Count - 1 do
+  begin
+    U := TUnit(AList.Items[I]);
+    for J := 0 to U.UsedUnits.Count - 1 do
+    begin
+      Idx := IndexOfUnit(AList, U.UsedUnits.Strings[J]);
+      if Idx > I then Exit;
+    end;
+    for J := 0 to U.ImplUsedUnits.Count - 1 do
+    begin
+      Idx := IndexOfUnit(AList, U.ImplUsedUnits.Strings[J]);
+      if Idx > I then Exit;
+    end;
+  end;
+  Result := True;
+end;
+
+{ Analyse the source-loaded units of AList (the loader's units, plus the
+  top-level unit last in unit-as-source mode) in phases, for an order
+  WholeUnitOrderValid rejects.  A unit's interface is analysed once every
+  unit its interface uses has had its interface analysed, and its
+  implementation once every unit its implementation uses has; this is the
+  order a Pascal compiler follows for an implementation-use cycle (GH #264).
+  The scan restarts from the top after each phase, so units with no cycle
+  are still analysed whole and in loader order.
+
+  The interfaces are exported only once every unit is analysed (an iface
+  carries implementation facts: inline bodies, forward-class completions),
+  in the order the interfaces were analysed, so each export finds every unit
+  its interface references among ADeps.  Until then each analysed interface
+  is registered through a stub, so a later unit's lookups reach its symbols.
+  The analyser keeps raw references to registered ifaces, and the top unit's
+  stub is never replaced, so AStubs (owned by the caller) must outlive it.
+
+  AUnitIfaces receives the loader's units' ifaces aligned with AUnits.  The
+  top unit (ATop, nil for a program) is exported only as an ADeps entry for
+  the units that use it back; the caller exports its own artefact. }
+procedure AnalyseUnitsInPhases(ASemantic: TSemanticAnalyser; ALoader: TUnitLoader;
+  AUnits: TObjectList; ATop: TUnit; AUnitIfaces: TObjectList;
+  AStubs: TObjectList; const AEmitIfaceDir: string);
+var
+  All:       TObjectList;
+  IntfDone:  TList<Boolean>;
+  ImplDone:  TList<Boolean>;
+  IntfOrder: TList<Int>;
+  GenSrc:    TObjectList;       { owned TStringList per unit of All }
+  ByIndex:   TObjectList;       { not owned: export per unit of All, or nil }
+  Built:     TObjectList;       { not owned: ifaces exported so far }
+  TopIface:  TUnitInterface;
+  Stub:      TUnitInterface;
+  Iface:     TUnitInterface;
+  U:         TUnit;
+  I, K:      Int;
+  Progress:  Boolean;
+begin
+  All := TObjectList.Create(False);
+  IntfDone := TList<Boolean>.Create();
+  ImplDone := TList<Boolean>.Create();
+  IntfOrder := TList<Int>.Create();
+  GenSrc := TObjectList.Create(True);
+  ByIndex := TObjectList.Create(False);
+  Built := TObjectList.Create(False);
+  TopIface := nil;
+  try
+    for I := 0 to AUnits.Count - 1 do
+      All.Add(AUnits.Items[I]);
+    if ATop <> nil then
+      All.Add(ATop);
+    for I := 0 to All.Count - 1 do
+    begin
+      IntfDone.Add(False);
+      ImplDone.Add(False);
+      GenSrc.Add(TStringList.Create());
+      ByIndex.Add(nil);
+    end;
+
+    repeat
+      Progress := False;
+      for I := 0 to All.Count - 1 do
+      begin
+        U := TUnit(All.Items[I]);
+        if (not IntfDone[I]) and UsesReady(U.UsedUnits, All, IntfDone) then
+        begin
+          ASemantic.AnalyseUnitInterface(U);
+          TStringList(GenSrc.Items[I]).AddStrings(ASemantic.GenericSourceUnits());
+          Stub := TUnitInterface.Create(U.Name);
+          Stub.UsedUnits.AddStrings(U.UsedUnits);
+          Stub.ImplUsedUnits.AddStrings(U.ImplUsedUnits);
+          AStubs.Add(Stub);
+          ASemantic.RegisterUnitIface(Stub);
+          IntfDone[I] := True;
+          IntfOrder.Add(I);
+          Progress := True;
+          Break;
+        end;
+        if IntfDone[I] and (not ImplDone[I])
+           and UsesReady(U.ImplUsedUnits, All, IntfDone) then
+        begin
+          ASemantic.GenericSourceUnits().Clear();
+          ASemantic.AnalyseUnitImplementation(U);
+          TStringList(GenSrc.Items[I]).AddStrings(ASemantic.GenericSourceUnits());
+          ImplDone[I] := True;
+          Progress := True;
+          Break;
+        end;
+      end;
+    until not Progress;
+
+    { The loader rejects a cycle of interface uses, so every unit is placed. }
+    for I := 0 to All.Count - 1 do
+      if not ImplDone[I] then
+        raise ECircularDependency.Create(Format(
+          'Circular unit dependency: ''%s''', [TUnit(All.Items[I]).Name]));
+
+    for K := 0 to IntfOrder.Count - 1 do
+    begin
+      I := IntfOrder[K];
+      U := TUnit(All.Items[I]);
+      Iface := ExportUnitInterface(U, Built, ASemantic.GetSymbolTable());
+      if U = ATop then
+        TopIface := Iface
+      else
+      begin
+        RecordGenericDepNames(Iface, TStringList(GenSrc.Items[I]));
+        RecordPrebuiltDepHashes(Iface, ALoader.PrebuiltIfaces, Built);
+        ASemantic.RegisterUnitIface(Iface);
+        ByIndex.Items[I] := Iface;
+      end;
+      Built.Add(Iface);
+    end;
+
+    for I := 0 to AUnits.Count - 1 do
+    begin
+      AUnitIfaces.Add(ByIndex.Items[I]);
+      if AEmitIfaceDir <> '' then
+        WriteUnitInterfaceToFile(TUnitInterface(ByIndex.Items[I]),
+          IncludeTrailingPathDelimiter(AEmitIfaceDir) +
+            LowerCase(TUnit(AUnits.Items[I]).Name) + '.bif');
+    end;
+  finally
+    TopIface.Free();
+    Built.Free();
+    ByIndex.Free();
+    GenSrc.Free();
+    IntfOrder.Free();
+    ImplDone.Free();
+    IntfDone.Free();
+    All.Free();
+  end;
+end;
+
 var
   SourceFile, OutputFile: string;
   SearchPaths: TStringList;
@@ -977,11 +1167,14 @@ var
   TopUnit:  TUnit;            { non-nil when the source begins with 'unit',
                                 in which case Prog stays nil and the
                                 pipeline runs in unit-only mode. }
+  TopAnalysed: Boolean;       { the top unit was analysed by AnalyseUnitsInPhases }
+  PhaseList:  TObjectList;
+  PhaseStubs: TObjectList;    { owned stub ifaces of AnalyseUnitsInPhases; the
+                                analyser references them until exit }
   IsUnitMode: Boolean;        { mirrors TopUnit's non-nil status but
                                 survives past TopUnit.Free() in the finally
                                 block, so the post-codegen output dispatch
                                 can pick CompileUnitToObject. }
-  TopUses: TStringList;       { a top-level unit's two uses clauses }
   TopIfacePath: string;       { Temp .bif file produced for the top
                                 unit, embedded into the output .o by
                                 CompileUnitToObject and then deleted.
@@ -1034,6 +1227,8 @@ begin
   OPDFAsmFile    := '';
   TopUnit        := nil;
   IsUnitMode     := False;
+  TopAnalysed    := False;
+  PhaseStubs     := nil;
 
   { Parse the command line into the two opts objects.  ParseArgs populates
     both (front-end state into Front, cross-cutting backend knobs into
@@ -1347,13 +1542,8 @@ begin
         begin
           { Both uses clauses: a unit compiled as the top level needs its
             implementation's units as much as its interface's. }
-          TopUses := TStringList.Create();
-          TopUses.AddStrings(TopUnit.UsedUnits);
-          for I := 0 to TopUnit.ImplUsedUnits.Count - 1 do
-            if TopUses.IndexOf(TopUnit.ImplUsedUnits.Strings[I]) < 0 then
-              TopUses.Add(TopUnit.ImplUsedUnits.Strings[I]);
           Loader := TUnitLoader.Create(SearchPaths, Front.Defines);
-          Units  := Loader.LoadAll(TopUses);
+          Units  := Loader.LoadAllForRoot(TopUnit);
         end
         else if (Prog <> nil) and (Prog.UsedUnits.Count > 0) then
         begin
@@ -1375,6 +1565,27 @@ begin
             Semantic.RegisterUnitIface(
               TUnitInterface(Loader.PrebuiltIfaces.Items[I]));
           end;
+          { An implementation-use cycle (GH #264) cannot be analysed one
+            whole unit at a time; schedule its interface and implementation
+            phases separately. }
+          PhaseList := TObjectList.Create(False);
+          for I := 0 to Units.Count - 1 do
+            PhaseList.Add(Units.Items[I]);
+          if IsUnitMode then
+            PhaseList.Add(TopUnit);
+          if not WholeUnitOrderValid(PhaseList) then
+          begin
+            PhaseStubs := TObjectList.Create(True);
+            if IsUnitMode then
+              AnalyseUnitsInPhases(Semantic, Loader, Units, TopUnit,
+                UnitIfaces, PhaseStubs, EmitIfaceDir)
+            else
+              AnalyseUnitsInPhases(Semantic, Loader, Units, nil,
+                UnitIfaces, PhaseStubs, EmitIfaceDir);
+            TopAnalysed := IsUnitMode;
+          end;
+          PhaseList.Free();
+          if PhaseStubs = nil then
           for I := 0 to Units.Count - 1 do
           begin
             Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
@@ -1419,7 +1630,8 @@ begin
           program 'main' to wrap.  Sym tables and class layouts
           end up in Semantic's FTable just like for a regular dep. }
         Semantic.XrefSource := ExpandFileName(SourceFile);
-        Semantic.AnalyseUnitForExport(TopUnit);
+        if not TopAnalysed then
+          Semantic.AnalyseUnitForExport(TopUnit);
         { Always produce the iface — it's about to be embedded into
           the .o by CompileUnitToObject.  The dedicated --emit-iface
           DIR remains as a debug aid that also writes a loose .bif

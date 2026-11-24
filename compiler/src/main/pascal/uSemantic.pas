@@ -594,6 +594,9 @@ type
       both nil) into the now-current program or unit, so codegen emits their
       method bodies.  Called at the start of Analyse / AnalyseUnit. }
     procedure FlushPendingGenericInstances;
+    { The interface and implementation halves of AnalyseUnitForExport. }
+    procedure AnalyseUnitIntfPart(AUnit: TUnit);
+    procedure AnalyseUnitImplPart(AUnit: TUnit);
     procedure AnalyseMethodBodies(ABlock: TBlock);
     procedure AnalyseMethodDecl(AMethod: TMethodDecl; AClassType: TRecordTypeDesc);
     procedure AnalyseStandaloneDecls(ABlock: TBlock);
@@ -1221,6 +1224,13 @@ type
       scope so that subsequent Analyse(Prog) or AnalyseUnitForExport calls
       can resolve them.  Use this when compiling a unit as a dependency. }
     procedure AnalyseUnitForExport(AUnit: TUnit);
+    { AnalyseUnitForExport in two halves, for units in an implementation-use
+      cycle (GH #264): when unit A's implementation uses B and B's interface
+      uses A, the only valid order is A's interface, B's interface, then A's
+      implementation.  AnalyseUnitImplementation re-establishes the unit's
+      context, so other units' phases may run in between. }
+    procedure AnalyseUnitInterface(AUnit: TUnit);
+    procedure AnalyseUnitImplementation(AUnit: TUnit);
     { Read-only handle to the analyser's symbol table.  Codegen needs it
       in unit-as-top-level mode where no TProgram exists to hand it off.
       Also used by uSemanticExport.ExportUnitInterface to look up resolved
@@ -3961,13 +3971,39 @@ begin
 end;
 
 procedure TSemanticAnalyser.AnalyseUnitForExport(AUnit: TUnit);
+begin
+  Self.AnalyseUnitIntfPart(AUnit);
+  Self.AnalyseUnitImplPart(AUnit);
+end;
+
+procedure TSemanticAnalyser.AnalyseUnitInterface(AUnit: TUnit);
+begin
+  Self.AnalyseUnitIntfPart(AUnit);
+  FCurrentUnit := nil;
+  FTable.DefineOwningUnit := '';
+end;
+
+procedure TSemanticAnalyser.AnalyseUnitImplementation(AUnit: TUnit);
+begin
+  { Re-establish the per-unit context AnalyseUnitIntfPart set up: other
+    units' phases have run since this unit's interface was analysed. }
+  if AUnit.SourceFile <> '' then
+    FXrefSource := AUnit.SourceFile;
+  FCurrentUnitName := AUnit.Name;
+  FCurrentUnit := AUnit;
+  BuildUsesChain(AUnit.UsedUnits);
+  RegisterUnitChain(AUnit.Name, AUnit.UsedUnits, AUnit.ImplUsedUnits);
+  FTable.UsesChainProvider := Self;
+  FTable.DefineOwningUnit := AUnit.Name;
+  Self.AnalyseUnitImplPart(AUnit);
+end;
+
+procedure TSemanticAnalyser.AnalyseUnitIntfPart(AUnit: TUnit);
 var
   I, J:     Int;
   MDecl:    TMethodDecl;
-  ImplDecl: TMethodDecl;
-  ImplIdx:  Int;
-  Par:      TMethodParam;
   ParType:  TTypeDesc;
+  Par:      TMethodParam;
   Sym:      TSymbol;
   VDecl:    TVarDecl;
 begin
@@ -4086,7 +4122,19 @@ begin
           MDecl.Line, MDecl.Col);
     end;
   end;
+end;
 
+procedure TSemanticAnalyser.AnalyseUnitImplPart(AUnit: TUnit);
+var
+  I, J:     Int;
+  MDecl:    TMethodDecl;
+  ImplDecl: TMethodDecl;
+  ImplIdx:  Int;
+  Par:      TMethodParam;
+  ParType:  TTypeDesc;
+  Sym:      TSymbol;
+  VDecl:    TVarDecl;
+begin
   { Register impl-section TYPE declarations BEFORE linking class method bodies,
     so a class declared in the implementation section has its methods registered
     in FMethodGroups when LinkClassMethodImpls looks them up (otherwise every

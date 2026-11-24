@@ -43,6 +43,17 @@ type
     procedure TestUnitLoader_DetectsCycle;
     procedure TestUnitLoader_ImplSectionBackEdge_Tolerated;
     procedure TestUnitLoader_DependencyOrder;
+    { GH #264: a unit compiled as the top level (--source unit.pas) whose
+      implementation uses a unit that interface-uses it back.  The root is
+      already parsed, so the back-edge must not load it a second time from
+      the search path as a dependency. }
+    procedure TestUnitLoader_LoadAllForRoot_BackEdgeDoesNotReloadRoot;
+    { GH #264: CycA's implementation uses CycB, and CycB's interface uses
+      CycA's type.  No whole-unit order works; analysing CycA's interface,
+      then CycB, then CycA's implementation does -- and a whole-unit order
+      reports the unknown type, as it did before the phases existed. }
+    procedure TestSemanticAnalyser_ImplUseCycle_PhasedOrderResolves;
+    procedure TestSemanticAnalyser_ImplUseCycle_WholeUnitOrderFails;
     { ------------------------------------------------------------------ }
     { AnalyseUnitForExport                                                 }
     { ------------------------------------------------------------------ }
@@ -228,6 +239,43 @@ end;
 { ------------------------------------------------------------------ }
 { TUnitLoader tests                                                    }
 { ------------------------------------------------------------------ }
+
+const
+  { GH #264 fixture: an implementation-use cycle in which each side uses a
+    symbol of the other. }
+  CycASrc = '''
+    unit CycA;
+    interface
+    type
+      TColour = (cRed, cGreen);
+    function Describe(): string;
+    implementation
+    uses CycB;
+    function Describe(): string;
+    var
+      T: TTrouble;
+    begin
+      T := TTrouble.Create();
+      Result := T.Name();
+    end;
+    end.
+    ''';
+  CycBSrc = '''
+    unit CycB;
+    interface
+    uses CycA;
+    type
+      TTrouble = class
+        C: TColour;
+        function Name(): string;
+      end;
+    implementation
+    function TTrouble.Name(): string;
+    begin
+      Result := 'trouble';
+    end;
+    end.
+    ''';
 
 procedure TMultifileTests.TestUnitLoader_LocatesUnitInSearchPath;
 const
@@ -1499,6 +1547,87 @@ begin
     AnalyseUnitsAndProg([OwnSrc, MidSrc], NotUsingSrc));
   AssertEquals('the used unit''s PInt32 wins over System''s', '',
     AnalyseUnitsAndProg([OwnSrc], UsingSrc));
+end;
+
+procedure TMultifileTests.TestUnitLoader_LoadAllForRoot_BackEdgeDoesNotReloadRoot;
+var
+  Paths:  TStringList;
+  Loader: TUnitLoader;
+  Root:   TUnit;
+  Units:  TObjectList;
+begin
+  { CycA is on the search path too, as it is beside the file in a real
+    --source compile. }
+  WriteUnit('CycA', CycASrc);
+  WriteUnit('CycB', CycBSrc);
+  Paths  := MakeSearchPaths();
+  Loader := TUnitLoader.Create(Paths);
+  Root   := ParseUnitSrc(CycASrc);
+  try
+    Units := Loader.LoadAllForRoot(Root);
+    try
+      AssertEquals('only the dependency is loaded', 1, Units.Count);
+      AssertEquals('the dependency is CycB', 'CycB', TUnit(Units.Items[0]).Name);
+    finally
+      Units.Free();
+    end;
+  finally
+    Root.Free();
+    Loader.Free();
+    Paths.Free();
+  end;
+end;
+
+procedure TMultifileTests.TestSemanticAnalyser_ImplUseCycle_PhasedOrderResolves;
+const
+  ProgSrc = '''
+    program P;
+    uses CycA;
+    begin
+      WriteLn(Describe());
+    end.
+    ''';
+var
+  UA, UB: TUnit;
+  Prog:   TProgram;
+  SA:     TSemanticAnalyser;
+  Err:    string;
+begin
+  Err := '';
+  UA := ParseUnitSrc(CycASrc);
+  UB := ParseUnitSrc(CycBSrc);
+  Prog := nil;
+  SA := TSemanticAnalyser.Create();
+  try
+    try
+      SA.AnalyseUnitInterface(UA);
+      SA.AnalyseUnitInterface(UB);
+      SA.AnalyseUnitImplementation(UB);
+      SA.AnalyseUnitImplementation(UA);
+      Prog := ParseProg(ProgSrc);
+      SA.Analyse(Prog);
+    except
+      on E: ESemanticError do
+        Err := E.Message;
+    end;
+  finally
+    SA.Free();
+    Prog.Free();
+    UB.Free();
+    UA.Free();
+  end;
+  AssertEquals('phased analysis resolves both directions', '', Err);
+end;
+
+procedure TMultifileTests.TestSemanticAnalyser_ImplUseCycle_WholeUnitOrderFails;
+var
+  Err: string;
+begin
+  { The loader's order for 'uses CycB, CycA' analysed whole units: CycB
+    first, before the CycA type its interface names. }
+  Err := AnalyseUnitsAndProg([CycBSrc, CycASrc], 'program P; begin end.');
+  AssertTrue('whole-unit order cannot see CycA''s type: ' + Err,
+    Pos('TColour', Err) >= 0);
 end;
 
 initialization
