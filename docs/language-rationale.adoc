@@ -3552,12 +3552,23 @@ When candidates still tie, the one with more exact-type arguments wins.
 After that, the *closest* implicit conversions win.  Each widened argument
 has a distance: integer to a wider integer costs twice the growth in bytes,
 plus one for a change of signedness; `Float32` to `Float64` costs one; an
-integer to a float costs more than any integer widening.  The candidate
+integer to a float costs more than any integer widening, and an integer to
+`Float32` costs one more than an integer to `Float64`.  The candidate
 with the smallest total wins, so a `Byte` or `Int8` argument reaches an
 `Int32` overload before an `Int64` one, a `Byte` reaches `UInt16` before
-`Int16`, and an `Int32` reaches `Int64` before `Float64`.  Only an equal
-total is ambiguous — for example an `Int32` argument against `Float32` and
-`Float64` overloads.
+`Int16`, an `Int32` reaches `Int64` before `Float64`, and any integer
+reaches `Float64` before `Float32`.  Only an equal total is ambiguous —
+for example `F(Int64; Int32)` against `F(Int32; Int64)` called with two
+`Int32` arguments.
+
+An integer prefers `Float64` because `Float64` holds every 32-bit integer
+exactly, where `Float32` holds them only up to 2^24, and because the math
+built-ins already widen an integer argument to `Float64` (`Sin(I)` is a
+`Float64`).  Before this rule an integer argument tied the two, so the
+`Math` unit's `Float32`/`Float64` overload pairs (`Frac`, `DegToRad`)
+could not be called with an integer (GH #266).  FPC resolves the same call
+to `Single` for every integer kind, `Int64` included, silently dropping
+precision; Blaise deliberately chooses the lossless candidate.
 
 FPC and Delphi both prefer the closest widening.  Before this rule Blaise
 rated every widening alike and reported such calls as ambiguous — a

@@ -18564,8 +18564,14 @@ begin
   end
   else if (AArg.Kind = tySingle) and (AParam.Kind = tyDouble) then
     Result := 1
+  { An integer reaching a float formal prefers Float64, which holds every
+    32-bit integer exactly and is what the math builtins widen to, so
+    F(Float32) / F(Float64) overloads do not tie on an integer argument
+    (GH #266: Frac(I) with both overloads was ambiguous). }
+  else if ArgInt and (AParam.Kind = tyDouble) then
+    Result := 64
   else if ArgInt and AParam.IsFloat() then
-    Result := 64;
+    Result := 65;
 end;
 
 function TSemanticAnalyser.WideningCost(ACand: TMethodDecl;

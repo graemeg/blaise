@@ -51,6 +51,10 @@ type
     procedure TestSem_NarrowArg_PicksClosestWidening;
     { GH #268: an enum argument against Int32/Int64 overloads picks Int32 }
     procedure TestSem_EnumArg_PicksInt32OverInt64;
+    { an integer argument to F(Float32) / F(Float64) picks Float64, which
+      holds it exactly, for every integer kind and for a constant; a
+      Float32 argument still picks Float32 (GH #266) }
+    procedure TestSem_IntArg_PicksFloat64OverFloat32;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -341,16 +345,19 @@ const
         end.
         ''';
 
+  { each candidate widens exactly one Int32 argument to Int64, so the two
+    cost the same and neither is closer }
   SrcAmbiguousOverload =
     'program P;'                                            + LineEnding +
-    'procedure F(D: Float64); overload;'                     + LineEnding +
+    'var I: Int32;'                                         + LineEnding +
+    'procedure F(A: Int64; B: Int32); overload;'             + LineEnding +
     'begin'                                                 + LineEnding +
     'end;'                                                  + LineEnding +
-    'procedure F(S: Float32); overload;'                     + LineEnding +
+    'procedure F(A: Int32; B: Int64); overload;'             + LineEnding +
     'begin'                                                 + LineEnding +
     'end;'                                                  + LineEnding +
     'begin'                                                 + LineEnding +
-    '  F(42)'                                               + LineEnding +
+    '  F(I, I)'                                             + LineEnding +
     'end.';
 
 { ------------------------------------------------------------------ }
@@ -747,8 +754,9 @@ begin
   AssertEquals('UInt16 -> Int32', '', SemanticError(Head + 'A(''m'', VW, VW) end.'));
   AssertEquals('method: Byte -> Int32', '', SemanticError(Head + 'O.B(VB) end.'));
   AssertEquals('Byte -> UInt16 over Int16', '', SemanticError(Head + 'W(VB) end.'));
-  AssertTrue('Int32 to Float32 or Float64 stays ambiguous',
-    Pos('Ambiguous overload', SemanticError(Head + 'F(VI) end.')) >= 0);
+  { an integer reaches Float64 before Float32, which cannot hold every
+    Int32 (GH #266) }
+  AssertEquals('Int32 -> Float64 over Float32', '', SemanticError(Head + 'F(VI) end.'));
 end;
 
 procedure TOverloadTests.TestSem_EnumArg_PicksInt32OverInt64;
@@ -778,6 +786,35 @@ begin
   AssertEquals('enum var -> Int32', '', SemanticError(Head + 'S := H(C); end.'));
   AssertEquals('enum member -> Int32', '', SemanticError(Head + 'S := H(clBlue); end.'));
   AssertEquals('enum -> Int32 over UInt32', '', SemanticError(Head + 'S := U(C); end.'));
+end;
+
+procedure TOverloadTests.TestSem_IntArg_PicksFloat64OverFloat32;
+const
+  { The Float64 overload returns a string and the Float32 one an Int32,
+    so the assignment to S compiles only when Float64 wins. }
+  Head = '''
+    program p;
+    function F(AValue: Float32): Int32; overload; begin Result := 32; end;
+    function F(AValue: Float64): string; overload; begin Result := 'f64'; end;
+    var
+      I8: Int8; U8: Byte; I16: Int16; U16: UInt16;
+      I32: Int32; U32: UInt32; I64: Int64; U64: UInt64;
+      X: Float32;
+      S: string;
+      N: Int32;
+    begin
+    ''';
+begin
+  AssertEquals('Int8', '', SemanticError(Head + 'S := F(I8); end.'));
+  AssertEquals('Byte', '', SemanticError(Head + 'S := F(U8); end.'));
+  AssertEquals('Int16', '', SemanticError(Head + 'S := F(I16); end.'));
+  AssertEquals('UInt16', '', SemanticError(Head + 'S := F(U16); end.'));
+  AssertEquals('Int32', '', SemanticError(Head + 'S := F(I32); end.'));
+  AssertEquals('UInt32', '', SemanticError(Head + 'S := F(U32); end.'));
+  AssertEquals('Int64', '', SemanticError(Head + 'S := F(I64); end.'));
+  AssertEquals('UInt64', '', SemanticError(Head + 'S := F(U64); end.'));
+  AssertEquals('constant', '', SemanticError(Head + 'S := F(7); end.'));
+  AssertEquals('Float32 keeps Float32', '', SemanticError(Head + 'N := F(X); end.'));
 end;
 
 initialization
