@@ -3565,8 +3565,28 @@ frequent nuisance with the narrow integer types (`AssertEquals(Msg, 1, B)`
 with `B: Int8`).  The rule only decides calls that were previously
 rejected, so no call that compiled before changes its target.
 
+An enumeration argument takes part in the same ranking.  Blaise lets an
+enum value reach an integer formal through the enum/integer ordinal
+crossover, and the distance treats it as the signed 4-byte ordinal it is
+stored as.  So against `Int32`, `Int64` and `UInt32` overloads an enum
+argument reaches `Int32`.  Before this rule an enum tied `Int32` with
+`Int64`, and the hashed generic containers could not take an enum key:
+`TDictionary<TColour, string>` failed inside the template with
+"Ambiguous overload of 'GCHashOf'" (GH #268).  FPC and Delphi do not
+convert an enum to an integer implicitly at all; their containers hash
+through RTTI-driven comparers, so they never face the choice.  Blaise's
+containers hash through `GCHashOf` overloads chosen at monomorphisation,
+which makes this tie-break the natural place to support enum keys: it adds
+no per-enum overload and no special case in the containers.
+
 === Alternatives rejected
 
+* *Hash enum keys with a dedicated `GCHashOf` overload or an `Ord()` in
+  the container bodies.*  An overload cannot be written once for every
+  enum type, and an `Ord()` call in the shared template body would not
+  compile for string or float keys.  Ranking the enum as the ordinal it is
+  fixes the call in the compiler, for every overload set rather than only
+  the containers.
 * *No default values; force explicit overload pyramids.*  Every port
   that wants `AddTest('name', @proc)` short-form would have to either
   add an explicit two-arg overload or rewrite the call site.  For a

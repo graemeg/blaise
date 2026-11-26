@@ -25,6 +25,11 @@ type
     procedure TestRun_TObjectList_Delete;
     procedure TestRun_Collections_Valgrind;
     procedure TestRun_TwoDictInstancesInUnit_BothLink;
+    { GH #268: an enum key type.  GCHashOf(Key) tied between the Int32 and
+      Int64 overloads ("Ambiguous overload of 'GCHashOf'"), so a keyed
+      container over an enum did not compile.  Twenty members, so each
+      container grows past GCHashThreshold and really builds its hash index. }
+    procedure TestRun_EnumKey_DictOrderedDictSet;
     { BUG-20260724 pass-borrowed-string-by-value over-release: a routine
       receives a string as a BORROWED const param and passes it by value into
       TDictionary lookups (ContainsKey / TryGetValue).  The lookup key params
@@ -858,6 +863,57 @@ begin
   AssertRTLRunsOnAll(SrcTListOfInterface,
     '2' + #10 + '1' + #10 + 'cleared g' + #10 + 'd1' + #10 + 'd2' + #10 +
     'done' + #10, 0);
+end;
+
+procedure TE2ECollections2Tests.TestRun_EnumKey_DictOrderedDictSet;
+const
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    type
+      TKey = (k00, k01, k02, k03, k04, k05, k06, k07, k08, k09,
+              k10, k11, k12, k13, k14, k15, k16, k17, k18, k19);
+    var
+      D: TDictionary<TKey, string>;
+      O: TOrderedDictionary<TKey, Int>;
+      S: TSet<TKey>;
+      K: TKey;
+      V: string;
+      N: Int;
+    begin
+      D := TDictionary<TKey, string>.Create();
+      O := TOrderedDictionary<TKey, Int>.Create();
+      S := TSet<TKey>.Create();
+      for K := Low(TKey) to High(TKey) do
+      begin
+        D.Add(K, 'v' + IntToStr(Ord(K)));
+        O.Add(K, Ord(K) * 10);
+        S.Include(K);
+      end;
+      WriteLn(D.Count, ' ', O.Count, ' ', S.Count);
+      WriteLn(D[k00], ' ', D[k19], ' ', D[k07]);
+      WriteLn(O[High(TKey)], ' ', O[Low(TKey)]);
+      D.Remove(k07);
+      WriteLn(D.ContainsKey(k07), ' ', D.TryGetValue(k08, V), ' ', V);
+      WriteLn(S.Contains(k19), ' ', S.Contains(k00));
+      N := 0;
+      for K := Low(TKey) to High(TKey) do
+        if D.ContainsKey(K) then
+          N := N + 1;
+      WriteLn(N);
+      S.Free();
+      O.Free();
+      D.Free();
+    end.
+    ''';
+begin
+  AssertRTLRunsOnAll(Src,
+    '20 20 20' + #10 +
+    'v0 v19 v7' + #10 +
+    '190 0' + #10 +
+    'False True v8' + #10 +
+    'True True' + #10 +
+    '19' + #10, 0);
 end;
 
 initialization

@@ -18533,8 +18533,12 @@ begin
         TASTExpr(TArrayLiteralExpr(AArgExpr).Elements.Items[I]));
     Exit;
   end;
+  { An enum argument reaches an integer formal through the enum/integer
+    ordinal crossover, and ranks as the signed 4-byte ordinal it is stored
+    as, so F(Int32) beats F(Int64) and F(UInt32) for it (GH #268: without
+    this an enum key tied GCHashOf(Int32) with GCHashOf(Int64)). }
   ArgInt := AArg.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8,
-    tySmallInt, tyWord, tyByte];
+    tySmallInt, tyWord, tyByte, tyEnum];
   ParamInt := AParam.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8,
     tySmallInt, tyWord, tyByte];
   if ArgInt and ParamInt then

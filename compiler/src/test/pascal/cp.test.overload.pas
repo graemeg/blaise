@@ -49,6 +49,8 @@ type
       reporting the widenings as equally good (FPC and Delphi agree): routines
       and methods alike; an equidistant pair is still ambiguous }
     procedure TestSem_NarrowArg_PicksClosestWidening;
+    { GH #268: an enum argument against Int32/Int64 overloads picks Int32 }
+    procedure TestSem_EnumArg_PicksInt32OverInt64;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -747,6 +749,35 @@ begin
   AssertEquals('Byte -> UInt16 over Int16', '', SemanticError(Head + 'W(VB) end.'));
   AssertTrue('Int32 to Float32 or Float64 stays ambiguous',
     Pos('Ambiguous overload', SemanticError(Head + 'F(VI) end.')) >= 0);
+end;
+
+procedure TOverloadTests.TestSem_EnumArg_PicksInt32OverInt64;
+const
+  { The Int32 overload returns a string and the Int64 one an Int32, so the
+    assignment to S compiles only when the Int32 overload wins.  An enum is
+    a 4-byte ordinal: Int32 holds it without widening, Int64 widens it. }
+  Head = '''
+    program p;
+    type
+      TColour = (clRed, clGreen, clBlue);
+    function H(AValue: Int32): string; overload; begin Result := 'i32'; end;
+    function H(AValue: Int64): Int32; overload; begin Result := 64; end;
+    function H(AValue: Pointer): Int32; overload; begin Result := 0; end;
+    function H(AValue: Boolean): Int32; overload; begin Result := 0; end;
+    function H(AValue: Float64): Int32; overload; begin Result := 0; end;
+    function H(const AValue: string): Int32; overload; begin Result := 0; end;
+    function U(AValue: UInt32): Int32; overload; begin Result := 0; end;
+    function U(AValue: Int32): string; overload; begin Result := 'i32'; end;
+    var
+      C: TColour;
+      S: string;
+    begin
+      C := clGreen;
+    ''';
+begin
+  AssertEquals('enum var -> Int32', '', SemanticError(Head + 'S := H(C); end.'));
+  AssertEquals('enum member -> Int32', '', SemanticError(Head + 'S := H(clBlue); end.'));
+  AssertEquals('enum -> Int32 over UInt32', '', SemanticError(Head + 'S := U(C); end.'));
 end;
 
 initialization
