@@ -8717,6 +8717,27 @@ begin
       Self.Emit(#9'movsd %xmm0, (%rsp)');
     Self.EmitExprToXmm0(BE.Right);
     Self.EmitXmm0WidthAdjust(BE.Right.ResolvedType, IsS);
+    if BE.Op = boMod then
+    begin
+      { float mod is C fmod: the RTL kernel takes left in %xmm0 and right
+        in %xmm1 as Double.  The remainder of two Single values is exact
+        and representable, so a Single operation widens, calls and
+        narrows (GH #266). }
+      Self.Emit(#9'movaps %xmm0, %xmm1');
+      if IsS then
+      begin
+        Self.Emit(#9'cvtss2sd %xmm1, %xmm1');
+        Self.Emit(#9'movss (%rsp), %xmm0');
+        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
+      end
+      else
+        Self.Emit(#9'movsd (%rsp), %xmm0');
+      Self.Emit(#9'addq $8, %rsp');
+      Self.Emit(#9'callq _BlaiseFMod');
+      if IsS then
+        Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
+      Exit;
+    end;
     if IsS then
     begin
       Self.Emit(#9'movss (%rsp), %xmm1');

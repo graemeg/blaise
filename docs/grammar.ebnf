@@ -1504,6 +1504,9 @@ Additive
     = Term { ( PLUS | MINUS ) Term }
     ;
 
+(* MOD takes integer or float operands; a float X mod Y is the remainder
+ * truncated towards zero (C fmod), typed like the other float arithmetic.
+ * DIV takes integers only; SLASH is real division. *)
 Term
     = Factor { ( STAR | SLASH | DIV | MOD | AND | XOR | SHL | SHR | SAR ) Factor }
     ;

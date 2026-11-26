@@ -5627,6 +5627,92 @@ evaluate `10 / 3` as integer division to `3` before passing it to
 `Round`, so the result would silently be `3` regardless of whether
 the rational answer rounds up or down.
 
+== `mod` on Floating-Point Operands
+
+=== Decision
+
+`mod` accepts floating-point operands as well as integers.  For floats,
+`X mod Y` is the remainder of `X / Y` truncated towards zero -- the same
+operation as C's `fmod`:
+
+[source,pascal]
+----
+R := 7.5 mod 2.0;     { 1.5 }
+R := -7.5 mod 2.0;    { -1.5: the result takes the sign of the dividend }
+R := 1.0e20 mod 3.0;  { 1.0, exactly }
+----
+
+* *Semantics.*  This is the integer `mod` rule extended to every numeric
+  type: Blaise's integer `mod` already truncates towards zero, so the
+  result always has the sign of the dividend whichever type the operands
+  are.  `X mod Y` is equal to `X - Trunc(X / Y) * Y` computed without
+  rounding.  The result is always exact, including for a dividend far
+  past the `Int64` range and for subnormal operands.
+* *Typing.*  A float `mod` is typed like the other float arithmetic:
+  `Float32 mod Float32` is `Float32`; a `Float64` operand, or an integer
+  beside a float, gives `Float64`.  `I mod J` with two integers is
+  unchanged.  `div` stays integer-only, since `/` is real division.
+* *IEEE edge cases.*  A zero divisor, an infinite dividend and a NaN
+  operand give NaN; an infinite divisor returns the dividend; a zero
+  result keeps the dividend's sign.  A float `mod` by zero at run time is
+  NaN, like float `/` by zero giving an infinity, where integer `mod` by
+  zero raises `EDivByZero`.  In a constant expression a zero divisor is a
+  compile-time error for both.
+* *Constants.*  A float `mod` folds in a constant expression
+  (`const C = 7.5 mod 2.0;`), exactly as it computes at run time.
+
+=== Rationale
+
+One spelling for one operation.  With `mod` restricted to integers, a
+developer has to remember that the remainder is `mod` for an integer and
+a library function (`FMod` in FPC and Delphi) for a float, although the
+two compute the same truncated remainder.  Extending `mod` removes the
+second name and the `uses Math` it needs.
+
+Most current languages make the same choice:
+
+[cols="1,2,2"]
+|===
+|Language |Float remainder |Sign of the result
+
+|Java, C#, JavaScript |`%` |dividend (truncated)
+|Rust |`%` (`rem_euclid` for Euclidean) |dividend (truncated)
+|Python |`%` (`math.fmod` for truncated) |divisor (floored)
+|Go |`math.Mod` only |dividend (truncated)
+|Swift |`truncatingRemainder(dividingBy:)` only |dividend (truncated)
+|C, C++ |`fmod` only |dividend (truncated)
+|FPC, Delphi |`FMod` in the `Math` unit only; `mod` rejects floats |dividend (truncated)
+|===
+
+The truncated definition is chosen over Python's floored one because it
+is what Blaise's integer `mod` already does: one operator must not change
+its sign rule with its operand type.
+
+=== Implementation
+
+`uSemantic.pas` (`AnalyseBinaryExpr`) no longer rejects a float operand
+of `mod`; the float-promotion rule types it.  Both backends lower a
+float-typed `mod` to a call to `_BlaiseFMod` in `runtime.math`, a port of
+musl's `fmod`, which divides the significands exactly, one quotient bit
+per exponent step.  A `Float32` operation widens both operands to
+`Float64`, calls the kernel and narrows the result; the remainder of two
+`Float32` values is exact and representable in `Float32`, so nothing is
+lost.  The constant folder (`EvalConstFloatExpr`) computes the same exact
+remainder with `ConstFloatMod`, which is written without a float `mod`
+because the compiler that builds `uSemantic.pas` need not accept one.
+
+=== Alternatives Rejected
+
+* *An `FMod` function in the `Math` unit, as FPC and Delphi have.*  It
+  was implemented first and then removed: it is a second spelling for
+  `mod`, and keeping both invites the question of which one to use.
+* *Floored remainder (Python).*  Would make the sign rule of `mod`
+  depend on the operand type.
+* *`X - Trunc(X / Y) * Y` as the implementation.*  The quotient is
+  rounded, and `Trunc` overflows `Int64` for a quotient past 2^63, so it
+  is wrong for large or finely spaced operands.  The bitwise kernel is
+  exact.
+
 == `Round` — Banker's Rounding
 
 === Decision
@@ -6997,8 +7083,9 @@ dropped.  The rule covers:
 
 * ordinal typecasts of a float -- `Int32(D)`, `Byte(2.5)`, `TColor(S)`,
   `Boolean(D)` -- and `Ord` of a float;
-* the operands of `and`, `or`, `xor`, `shl`, `shr` and `mod` (`div` already
-  required integers);
+* the operands of `and`, `or`, `xor`, `shl` and `shr` (`div` already
+  required integers; `mod` takes floats and gives a float, see _`mod` on
+  Floating-Point Operands_);
 * the integer arguments of the built-ins: the delta of `Inc`/`Dec` (and a
   float variable as their target), the length of `SetLength`, `Chr`,
   `IntToStr`, the index and count of `Copy` and `Delete`, `Halt`, the byte
@@ -8076,8 +8163,9 @@ precisely where a `Float64` stops representing consecutive integers, so folding
 that shift in floating point would silently produce a wrong constant — and
 2^53 is exactly the shift this idiom uses.
 +
-`mod` could theoretically map to `fmod`, but there is still no demonstrated
-need.
+`mod` folds too, since it takes float operands (GH #266): the float
+evaluator computes the exact truncated remainder, as `_BlaiseFMod` does at
+run time (see _`mod` on Floating-Point Operands_).
 
 == Named Constants as Static-Array Bounds
 

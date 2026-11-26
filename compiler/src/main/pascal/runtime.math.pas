@@ -97,6 +97,10 @@ function _BlaiseCeilD(X: Float64): Float64;
 function _BlaiseRoundD(X: Float64): Float64;
 function _BlaiseFabs(X: Float64): Float64;
 function _BlaiseScalbn(X: Float64; N: Int32): Float64;
+{ X mod Y for float operands: C fmod, the remainder truncated towards
+  zero.  The semantic pass types a float `mod` and both backends call this
+  (GH #266). }
+function _BlaiseFMod(X, Y: Float64): Float64;
 
 implementation
 
@@ -211,6 +215,105 @@ begin
     end;
   end;
   Result := Y * BitsToDouble(Int64($3FF + N) shl 52);
+end;
+
+{ ------------------------------------------------------------------ }
+{ fmod (musl fmod.c: exact long division on the significands)          }
+{ ------------------------------------------------------------------ }
+
+{ The result has the sign of X, is smaller than Y in magnitude and is
+  always exact.  Y = 0, a NaN operand or an infinite X give NaN; an
+  infinite Y returns X.  The significands are divided one quotient bit
+  per exponent step, so the cost is linear in the exponent gap. }
+function _BlaiseFMod(X, Y: Float64): Float64;
+var
+  UX, UY, I, SignBit: UInt64;
+  EX, EY: Int;
+begin
+  UX := UInt64(DoubleBits(X));
+  UY := UInt64(DoubleBits(Y));
+  EX := Int((UX shr 52) and $7FF);
+  EY := Int((UY shr 52) and $7FF);
+  SignBit := UX and UInt64($8000000000000000);
+
+  { Y = 0, Y NaN or X not finite: NaN }
+  if ((UY shl 1) = 0) or IsNaND(Y) or (EX = $7FF) then
+    Exit((X * Y) / (X * Y));
+  { |X| <= |Y|: X itself, or a zero with the sign of X }
+  if (UX shl 1) <= (UY shl 1) then
+  begin
+    if (UX shl 1) = (UY shl 1) then
+      Exit(0.0 * X);
+    Exit(X);
+  end;
+
+  { normalise the significands, giving subnormals an explicit exponent }
+  if EX = 0 then
+  begin
+    I := UX shl 12;
+    while (I shr 63) = 0 do
+    begin
+      Dec(EX);
+      I := I shl 1;
+    end;
+    UX := UX shl (1 - EX);
+  end
+  else
+  begin
+    UX := UX and UInt64($000FFFFFFFFFFFFF);
+    UX := UX or UInt64($0010000000000000);
+  end;
+  if EY = 0 then
+  begin
+    I := UY shl 12;
+    while (I shr 63) = 0 do
+    begin
+      Dec(EY);
+      I := I shl 1;
+    end;
+    UY := UY shl (1 - EY);
+  end
+  else
+  begin
+    UY := UY and UInt64($000FFFFFFFFFFFFF);
+    UY := UY or UInt64($0010000000000000);
+  end;
+
+  { X mod Y, one quotient bit per exponent step }
+  while EX > EY do
+  begin
+    I := UX - UY;
+    if (I shr 63) = 0 then
+    begin
+      if I = 0 then
+        Exit(0.0 * X);
+      UX := I;
+    end;
+    UX := UX shl 1;
+    Dec(EX);
+  end;
+  I := UX - UY;
+  if (I shr 63) = 0 then
+  begin
+    if I = 0 then
+      Exit(0.0 * X);
+    UX := I;
+  end;
+  while (UX shr 52) = 0 do
+  begin
+    UX := UX shl 1;
+    Dec(EX);
+  end;
+
+  { rebuild the result, subnormal if the exponent ran out }
+  if EX > 0 then
+  begin
+    UX := UX - UInt64($0010000000000000);
+    UX := UX or (UInt64(EX) shl 52);
+  end
+  else
+    UX := UX shr (1 - EX);
+  Result := BitsToDouble(Int64(UX or SignBit));
 end;
 
 { ------------------------------------------------------------------ }

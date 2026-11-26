@@ -164,6 +164,19 @@ type
     { Pi constant }
     procedure TestSemantic_Pi_UsableInExpr;
 
+    { `mod` takes float operands (C fmod) and is typed like the other
+      float arithmetic: Float32 mod Float32 is Float32, anything with a
+      Float64 or an integer beside a float is Float64; integer mod stays
+      integer; a float mod folds in a constant (GH #266) }
+    procedure TestSemantic_FloatMod_Float64_ReturnsFloat64;
+    procedure TestSemantic_FloatMod_Float32_ReturnsFloat32;
+    procedure TestSemantic_FloatMod_IntAndFloat_ReturnsFloat64;
+    procedure TestSemantic_IntMod_StaysInteger;
+    procedure TestSemantic_FloatMod_ConstFolds;
+    procedure TestSemantic_FloatMod_ConstByZero_Rejected;
+    { both ISAs call the RTL kernel, for Float64 and Float32 }
+    procedure TestCodegen_FloatMod_CallsFModBothISAs;
+
     { Codegen — RTL functions appear in IR }
 
     { Float → Integer assignment must be rejected }
@@ -1583,6 +1596,73 @@ begin
     AsmMissing(Src, #9'callq _BlaiseArcTan2', #9'bl __BlaiseArcTan2'));
   AssertEquals('Power', '',
     AsmMissing(Src, #9'callq _BlaisePow', #9'bl __BlaisePow'));
+end;
+
+
+{ ------------------------------------------------------------------ }
+{ Float mod (GH #266)                                                  }
+{ ------------------------------------------------------------------ }
+
+function ProgResultType(const ASrc: string): string;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(ASrc);
+  try
+    Result := TAssignment(Prog.Block.Stmts.Items[0]).Expr.ResolvedType.Name;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TMathTests.TestSemantic_FloatMod_Float64_ReturnsFloat64;
+begin
+  AssertEquals('Float64 mod Float64', 'Float64', ProgResultType(
+    'program P; var X, Y, R: Float64; begin R := X mod Y end.'));
+end;
+
+procedure TMathTests.TestSemantic_FloatMod_Float32_ReturnsFloat32;
+begin
+  AssertEquals('Float32 mod Float32', 'Float32', ProgResultType(
+    'program P; var X, Y, R: Float32; begin R := X mod Y end.'));
+end;
+
+procedure TMathTests.TestSemantic_FloatMod_IntAndFloat_ReturnsFloat64;
+begin
+  AssertEquals('Int mod Float32', 'Float64', ProgResultType(
+    'program P; var I: Int; Y: Float32; R: Float64; begin R := I mod Y end.'));
+  AssertEquals('Float64 mod literal', 'Float64', ProgResultType(
+    'program P; var X, R: Float64; begin R := X mod 2 end.'));
+end;
+
+procedure TMathTests.TestSemantic_IntMod_StaysInteger;
+begin
+  AssertEquals('Int64 mod Int64', 'Int64', ProgResultType(
+    'program P; var I, J, R: Int64; begin R := I mod J end.'));
+end;
+
+procedure TMathTests.TestSemantic_FloatMod_ConstFolds;
+begin
+  AssertEquals('const float mod', '', cp.test.harness.SemanticError(
+    'program P; const C = 7.5 mod 2.0; D = -7.5 mod 2; ' +
+    'var R: Float64; begin R := C + D end.'));
+end;
+
+procedure TMathTests.TestSemantic_FloatMod_ConstByZero_Rejected;
+begin
+  AssertTrue('const float mod by zero', Pos('Division by zero',
+    cp.test.harness.SemanticError(
+      'program P; const C = 7.5 mod 0.0; begin end.')) >= 0);
+end;
+
+procedure TMathTests.TestCodegen_FloatMod_CallsFModBothISAs;
+begin
+  AssertEquals('Float64 mod', '', AsmMissing(
+    'program P; var X, Y, R: Float64; begin R := X mod Y end.',
+    #9'callq _BlaiseFMod', #9'bl __BlaiseFMod'));
+  AssertEquals('Float32 mod', '', AsmMissing(
+    'program P; var X, Y, R: Float32; begin R := X mod Y end.',
+    #9'callq _BlaiseFMod', #9'bl __BlaiseFMod'));
 end;
 
 initialization

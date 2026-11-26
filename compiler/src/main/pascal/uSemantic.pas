@@ -1688,6 +1688,37 @@ begin
   Result := _DoubleToStr(V);
 end;
 
+{ X mod Y for a float constant expression, exactly as the RTL's
+  _BlaiseFMod computes it at run time.  Written without a float `mod`, which
+  the compiler that builds this unit may not accept yet.  Subtracting the
+  largest Y * 2^k not above the remainder is exact at every step (the two
+  are within a factor of two), so the result is the exact remainder.  The
+  caller has rejected Y = 0; a NaN or infinite operand gives NaN, and an
+  infinite Y returns X, as fmod does. }
+function ConstFloatMod(X, Y: Float64): Float64;
+var
+  R, T: Float64;
+begin
+  if IsNaN(X) or IsNaN(Y) or IsInfinite(X) then
+    Exit((X - X) / (X - X));
+  if IsInfinite(Y) then
+    Exit(X);
+  R := Abs(X);
+  Y := Abs(Y);
+  while R >= Y do
+  begin
+    T := Y;
+    while T * 2.0 <= R do
+      T := T * 2.0;
+    R := R - T;
+  end;
+  if X < 0.0 then
+    R := -R
+  else if (X = 0.0) or (R = 0.0) then
+    R := 0.0 * X;
+  Result := R;
+end;
+
 function RawStrToDouble(const S: string): Float64;
 begin
   Result := _StrToDouble(PChar(S));
@@ -9301,6 +9332,15 @@ begin
             Exit;
           end;
           L := L / R;
+        end;
+      boMod:
+        begin
+          if R = 0.0 then
+          begin
+            SemanticError('Division by zero in constant expression', ALine, ACol);
+            Exit;
+          end;
+          L := ConstFloatMod(L, R);
         end;
     else
       SemanticError(
@@ -23984,11 +24024,10 @@ begin
       SemanticError(
         '''div'' requires integer operands; use ''/'' for real division',
         ABin.Line, ABin.Col);
-    if (ABin.Op = boMod) and (LType.IsFloat() or RType.IsFloat()) then
-      SemanticError(
-        Format('''mod'' requires integer operands, not ''%s''',
-          [FloatOperandName(LType, RType)]),
-        ABin.Line, ABin.Col);
+    { `mod` takes float operands too: X mod Y is the remainder truncated
+      towards zero (C fmod), the integer `mod` rule extended to every
+      numeric type, and is typed by the float promotion below (GH #266).
+      See docs/language-rationale.adoc, "mod on floating-point operands". }
     { `/` is real division: always yields a float, even with Integer operands.
       Result is Single when both operands are Single, Double otherwise. }
     if ABin.Op = boSlash then

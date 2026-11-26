@@ -16,7 +16,9 @@ unit cp.test.e2e.math;
     IsNaN, IsInfinite.
 
   Math RTL unit (requires 'uses Math'):
-    Min, Max, Sign, DivMod, InRange, EnsureRange, Pi. }
+    Min, Max, Sign, DivMod, InRange, EnsureRange, Pi.
+
+  The mod operator on float operands (C fmod, GH #266). }
 
 interface
 
@@ -155,6 +157,16 @@ type
 
     { Pi constant }
     procedure TestRun_Pi_Approx;
+
+    { float mod (GH #266) }
+    { float mod is C fmod: the result has the dividend's sign and is
+      EXACT, even for a dividend far past the Int64 range; Float32,
+      mixed integer/float and a folded constant agree with run time }
+    procedure TestRun_FloatMod_Values;
+    { IEEE edge cases: zero divisor, infinite dividend and NaN give NaN;
+      an infinite divisor returns the dividend; a zero result keeps the
+      dividend's sign; subnormal operands are exact }
+    procedure TestRun_FloatMod_EdgeCases;
 
     { Int64 → Double promotion }
     procedure TestRun_Int64MulDouble_LargeValue;
@@ -2408,6 +2420,97 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { rounding Sqrt only when R was stored gave 3266851329 }
   AssertRunsOnAll(Src, '3266851328' + LineEnding, 0);
+end;
+
+
+{ ------------------------------------------------------------------ }
+{ Float mod (GH #266)                                                  }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EMathTests.TestRun_FloatMod_Values;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P;
+    const CPos = 7.5 mod 2.0; CNeg = -7.5 mod 2; CBig = 1.0e20 mod 3.0;
+    var X, Y: Float64; S, T: Float32; I, J: Int;
+    begin
+      X := 7.5; Y := 2.0;
+      WriteLn(Round((X mod Y) * 10.0));
+      WriteLn(Round((-X mod Y) * 10.0));
+      WriteLn(Round((X mod (-Y)) * 10.0));
+      WriteLn(Round((-X mod (-Y)) * 10.0));
+      X := 1.25; Y := 3.0;
+      if (X mod Y) = 1.25 then WriteLn('smaller') else WriteLn('fail');
+      { 10^20 is exact in Float64 and 10^20 mod 3 = 1: the naive
+        X - Trunc(X / Y) * Y overflows Int64 here }
+      X := 1.0e20; Y := 3.0;
+      if (X mod Y) = 1.0 then WriteLn('exact') else WriteLn('fail');
+      { 1e300 is exact in Float64; its exact remainder mod 7 is 1 }
+      X := 1.0e300; Y := 7.0;
+      WriteLn(Round((X mod Y)));
+      S := 7.5; T := 2.0;
+      S := (S mod T);
+      WriteLn(Round(S * 10.0));
+      { an integer mod stays integer arithmetic }
+      I := 17; J := 5;
+      WriteLn(I mod J);
+      { integer beside a float: Float64 }
+      Y := 5.0;
+      WriteLn(Round((I mod Y) * 10.0));
+      { constants fold exactly as run time computes }
+      X := 7.5; Y := 2.0;
+      if (CPos = (X mod Y)) and (CNeg = (-X mod Y)) and (CBig = 1.0) then
+        WriteLn('const') else WriteLn('fail')
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('float mod values',
+    '15' + LineEnding + '-15' + LineEnding + '15' + LineEnding + '-15' + LineEnding +
+    'smaller' + LineEnding + 'exact' + LineEnding + '1' + LineEnding +
+    '15' + LineEnding + '2' + LineEnding + '20' + LineEnding + 'const',
+    Trim(Output));
+end;
+
+procedure TE2EMathTests.TestRun_FloatMod_EdgeCases;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P;
+    var X, Z, PosInf, QNaN, D, R: Float64; K: Int;
+    begin
+      Z := 0.0;
+      PosInf := 1.0 / Z;
+      QNaN := Z / Z;
+      X := 5.0;
+      if IsNaN((X mod Z)) then WriteLn('zero-divisor') else WriteLn('fail');
+      if IsNaN((PosInf mod X)) then WriteLn('inf-dividend') else WriteLn('fail');
+      if (X mod PosInf) = 5.0 then WriteLn('inf-divisor') else WriteLn('fail');
+      if IsNaN((QNaN mod X)) then WriteLn('nan-dividend') else WriteLn('fail');
+      if IsNaN((X mod QNaN)) then WriteLn('nan-divisor') else WriteLn('fail');
+      X := 6.0;
+      R := (X mod 3.0);
+      if (R = 0.0) and (1.0 / R > 0.0) then WriteLn('pos-zero') else WriteLn('fail');
+      R := (-X mod 3.0);
+      if (R = 0.0) and (1.0 / R < 0.0) then WriteLn('neg-zero') else WriteLn('fail');
+      { D = 2^-1074, the smallest subnormal }
+      D := 1.0;
+      for K := 1 to 1074 do D := D / 2.0;
+      if ((7.0 * D) mod (2.0 * D)) = D then WriteLn('subnormal') else WriteLn('fail');
+      { 2^1074 mod 3 = 1, so 1.0 mod 3*2^-1074 = 2^-1074 }
+      if (1.0 mod (3.0 * D)) = D then WriteLn('wide-exponents') else WriteLn('fail')
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('float mod edge cases',
+    'zero-divisor' + LineEnding + 'inf-dividend' + LineEnding +
+    'inf-divisor' + LineEnding + 'nan-dividend' + LineEnding +
+    'nan-divisor' + LineEnding + 'pos-zero' + LineEnding + 'neg-zero' +
+    LineEnding + 'subnormal' + LineEnding + 'wide-exponents', Trim(Output));
 end;
 
 initialization

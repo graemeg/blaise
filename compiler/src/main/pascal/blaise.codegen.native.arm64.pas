@@ -8826,8 +8826,11 @@ begin
       boSub:   Self.Emit(#9'fsub d0, d0, d1');
       boMul:   Self.Emit(#9'fmul d0, d0, d1');
       boSlash: Self.Emit(#9'fdiv d0, d0, d1');
+      { float mod is C fmod, in the RTL: left in d0, right in d1, both
+        Double; a Single result is exact and is rounded below (GH #266) }
+      boMod:   EmitCallSym('_BlaiseFMod');
     else
-      { the semantic pass types only + - * / as a float }
+      { the semantic pass types only + - * / and mod as a float }
       InternalError('float-typed binary operator ' + IntToStr(Ord(BE.Op)),
         AExpr);
     end;

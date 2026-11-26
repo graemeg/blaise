@@ -971,7 +971,8 @@ begin
   Rejected('J := I or 2.5', '''or'' requires integer or Boolean operands');
   Rejected('J := I xor (I / 2)', '''xor'' requires integer or Boolean');
   Rejected('J := I shl D', '''shl'' requires integer operands');
-  Rejected('J := I mod 2.0', '''mod'' requires integer operands');
+  { a float mod is a float (GH #266), so it does not fit an integer }
+  Rejected('J := I mod 2.0', 'expected ''Int64'' but got ''Float64''');
   Rejected('Inc(J, D)', 'Second argument of ''Inc'' must be an integer');
   Rejected('Dec(J, I / 2)', 'Second argument of ''Dec'' must be an integer');
   Rejected('Inc(D)', '''Inc'' needs an ordinal or pointer variable');
