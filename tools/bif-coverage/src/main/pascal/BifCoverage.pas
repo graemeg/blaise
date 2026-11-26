@@ -763,13 +763,13 @@ begin
       if InDecoder then DecSB.AppendLine(Line)
                    else EncSB.AppendLine(Line);
     end;
-    Body := ExtractFunctionBody(Cleaned, 'EncodeExpr');
+    Body := ExtractFunctionBody(Cleaned, 'EncodeExprNode');
     CarveEncodeBlocks(Body, GEncodeNames, GEncodeObjs);
-    Body := ExtractFunctionBody(Cleaned, 'EncodeStmt');
+    Body := ExtractFunctionBody(Cleaned, 'EncodeStmtNode');
     CarveEncodeBlocks(Body, GEncodeNames, GEncodeObjs);
-    Body := ExtractFunctionBody(Cleaned, 'ReadExpr');
+    Body := ExtractFunctionBody(Cleaned, 'ReadExprNode');
     CarveDecodeBlocks(Body, GDecodeNames, GDecodeObjs);
-    Body := ExtractFunctionBody(Cleaned, 'ReadStmt');
+    Body := ExtractFunctionBody(Cleaned, 'ReadStmtNode');
     CarveDecodeBlocks(Body, GDecodeNames, GDecodeObjs);
     GIoEncodeText := EncSB.ToString();
     GIoDecodeText := DecSB.ToString();
@@ -910,7 +910,7 @@ begin
     for I := 0 to Lines.Count - 1 do
     begin
       Line := Lines.Strings[I];
-      if (Pos('function ReadExpr(', Line) >= 0) and
+      if (Pos('function ReadExprNode(', Line) >= 0) and
          (Pos('forward', Line) < 0) then
       begin
         Result := I;

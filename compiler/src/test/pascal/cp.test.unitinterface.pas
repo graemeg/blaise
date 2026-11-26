@@ -288,6 +288,9 @@ type
       preserves statements/expressions through write+read. }
     procedure TestDiskPath_GenericRoutine_BodyPreserved;
     procedure TestRoundTrip_InlineBody_Preserved;
+    { GH #268: body nodes keep their source Line/Col through write+read, so
+      an error in a body re-read from a cached unit names the real line. }
+    procedure TestRoundTrip_InlineBody_KeepsSourcePositions;
     { Static (class-level) member facts must survive export-clone → encode →
       decode.  The export clone previously dropped TFieldDecl.IsClassVar /
       ClassVarEmitName, TMethodDecl.IsStatic and TPropertyDecl.IsStatic, so
@@ -3046,7 +3049,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 37', Buf) = 0);
+      Pos('BLAISE-IFACE 38', Buf) = 0);
   finally
     Iface.Free();
   end;
@@ -4185,6 +4188,51 @@ begin
       AssertTrue('Square inline body present', IB <> nil);
       AssertTrue('block carried', IB.Block <> nil);
       AssertTrue('has at least one stmt', IB.Block.Stmts.Count >= 1);
+    finally
+      Round.Free();
+    end;
+  finally
+    Iface.Free();
+  end;
+end;
+
+procedure TIfaceIOTests.TestRoundTrip_InlineBody_KeepsSourcePositions;
+const
+  SRC =
+    'unit U;' + #10 +
+    'interface' + #10 +
+    'function Square(N: Int): Int; inline;' + #10 +
+    'implementation' + #10 +
+    'function Square(N: Int): Int; inline;' + #10 +
+    'begin' + #10 +
+    '  Result :=' + #10 +
+    '     N * N;' + #10 +
+    'end;' + #10 +
+    'end.' + #10;
+var
+  Iface, Round: TUnitInterface;
+  Buf:          string;
+  IB:           TInlineBody;
+  Stmt:         TASTStmt;
+  Expr:         TASTExpr;
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  try
+    Buf   := WriteUnitInterface(Iface);
+    Round := ReadUnitInterface(Buf);
+    try
+      IB := Round.FindInlineBody('Square');
+      AssertTrue('Square inline body present', IB <> nil);
+      AssertTrue('has a stmt', IB.Block.Stmts.Count >= 1);
+      Stmt := TASTStmt(IB.Block.Stmts.Items[0]);
+      AssertTrue('stmt is the assignment', Stmt is TAssignment);
+      AssertEquals('assignment line', 7, Stmt.Line);
+      AssertTrue('assignment col set', Stmt.Col > 0);
+      Expr := TAssignment(Stmt).Expr;
+      AssertEquals('rhs line', 8, Expr.Line);
+      AssertTrue('rhs col set', Expr.Col > 0);
+      AssertEquals('rhs operand line', 8,
+        TBinaryExpr(Expr).Left.Line);
     finally
       Round.Free();
     end;

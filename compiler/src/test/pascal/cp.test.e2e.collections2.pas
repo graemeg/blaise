@@ -31,7 +31,9 @@ type
       container grows past GCHashThreshold and really builds its hash index. }
     procedure TestRun_EnumKey_DictOrderedDictSet;
     { GH #268: an error inside a generic body names the template's unit and
-      the instantiation (it named the instantiating program as the file). }
+      the instantiation, and keeps its real line when that unit is re-read
+      from the cache a previous build left (it said 'line 0 col 0', and named
+      the instantiating program as the file). }
     procedure TestCompile_GenericBodyError_FromCachedUnit_NamesRealPosition;
     { BUG-20260724 pass-borrowed-string-by-value over-release: a routine
       receives a string as a BORROWED const param and passes it by value into
@@ -957,6 +959,8 @@ begin
   AssertTrue('names the template unit and the instantiation: ' + ToolOut,
     Pos(' in Generics.Collections (instantiated as TDictionary<TPt,string> in ',
       ToolOut) >= 0);
+  AssertTrue('keeps the real line from the cached unit: ' + ToolOut,
+    Pos(' at line 0 col 0', ToolOut) < 0);
 end;
 
 initialization

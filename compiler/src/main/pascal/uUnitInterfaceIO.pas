@@ -54,7 +54,12 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 37; { v37: TObject gains a third built-in virtual,
+  IFACE_VERSION = 38; { v38: every serialised expression and statement node
+                          carries its source Line and Col after its payload,
+                          so a diagnostic inside a generic body instantiated
+                          from a cached unit names the real position (it
+                          read 'line 0 col 0', GH #268).
+                        v37: TObject gains a third built-in virtual,
                           AfterConstruction (slot 2), so every class's own
                           vtable slots -- recorded in a cached interface --
                           start one later.
@@ -1236,7 +1241,7 @@ begin
     Result := Result + EncodeStmt(TASTStmt(AList.Items[I]));
 end;
 
-function EncodeExpr(AE: TASTExpr): string;
+function EncodeExprNode(AE: TASTExpr): string;
 begin
   if AE = nil then begin Result := EncodeLpstr('nil'); Exit; end;
 
@@ -1349,6 +1354,18 @@ begin
       'EncodeExpr: unhandled expression node ' + AE.ClassName);
 end;
 
+{ A node's source position follows its payload (v38).  Every diagnostic
+  raised while analysing a body re-read from a cached interface quotes
+  these, so without them an error in a cached generic said 'line 0'.
+  A nil node encodes as the bare 'nil' kind and carries no position;
+  ReadExpr mirrors that. }
+function EncodeExpr(AE: TASTExpr): string;
+begin
+  Result := EncodeExprNode(AE);
+  if AE <> nil then
+    Result := Result + EncodeCount(AE.Line) + EncodeCount(AE.Col);
+end;
+
 function EncodeExceptHandler(AH: TExceptHandlerClause): string;
 begin
   Result := EncodeLpstr(AH.VarName) +
@@ -1362,7 +1379,7 @@ begin
             EncodeStmt(AB.Stmt);
 end;
 
-function EncodeStmt(AStmt: TASTStmt): string;
+function EncodeStmtNode(AStmt: TASTStmt): string;
 var
   I: Int;
   TES: TTryExceptStmt;
@@ -1491,6 +1508,14 @@ begin
   else
     raise EIfaceFormatError.Create(
       'EncodeStmt: unhandled statement node ' + AStmt.ClassName);
+end;
+
+{ Source position after the payload, as for EncodeExpr. }
+function EncodeStmt(AStmt: TASTStmt): string;
+begin
+  Result := EncodeStmtNode(AStmt);
+  if AStmt <> nil then
+    Result := Result + EncodeCount(AStmt.Line) + EncodeCount(AStmt.Col);
 end;
 
 { Block payload: flag, then a flattened list of statements.  Local
@@ -1962,7 +1987,7 @@ begin
   Result.Stmt := ReadStmt(AText, APos);
 end;
 
-function ReadExpr(const AText: string; var APos: Int): TASTExpr;
+function ReadExprNode(const AText: string; var APos: Int): TASTExpr;
 var
   Kind: string;
   IL:   TIntLiteral;
@@ -2158,7 +2183,18 @@ begin
       'ReadExpr: unknown expression kind ''' + Kind + '''');
 end;
 
-function ReadStmt(const AText: string; var APos: Int): TASTStmt;
+{ The node, then the source position EncodeExpr appended to it. }
+function ReadExpr(const AText: string; var APos: Int): TASTExpr;
+begin
+  Result := ReadExprNode(AText, APos);
+  if Result <> nil then
+  begin
+    Result.Line := StrToInt(ReadLpstrAt(AText, APos));
+    Result.Col := StrToInt(ReadLpstrAt(AText, APos));
+  end;
+end;
+
+function ReadStmtNode(const AText: string; var APos: Int): TASTStmt;
 var
   Kind: string;
   ASn:  TAssignment;
@@ -2376,6 +2412,17 @@ begin
   else
     raise EIfaceFormatError.Create(
       'ReadStmt: unknown statement kind ''' + Kind + '''');
+end;
+
+{ The node, then the source position EncodeStmt appended to it. }
+function ReadStmt(const AText: string; var APos: Int): TASTStmt;
+begin
+  Result := ReadStmtNode(AText, APos);
+  if Result <> nil then
+  begin
+    Result.Line := StrToInt(ReadLpstrAt(AText, APos));
+    Result.Col := StrToInt(ReadLpstrAt(AText, APos));
+  end;
 end;
 
 function ReadBlock(const AText: string; var APos: Int): TBlock;
