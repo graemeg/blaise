@@ -5713,6 +5713,27 @@ because the compiler that builds `uSemantic.pas` need not accept one.
   is wrong for large or finely spaced operands.  The bitwise kernel is
   exact.
 
+== `Frac`, and No Float-Valued `Int`
+
+=== Decision
+
+The `Math` unit provides `Frac(X)`, the fractional part of `X` with the
+sign of `X` (`Frac(-2.75) = -0.75`), with `Float32` and `Float64`
+overloads.  It is exact, and correct for every finite `X`: past 2^52 a
+`Float64` has no fraction and `Frac` returns zero, where `X - Trunc(X)`
+would overflow `Int64` past 2^63.  `Frac` of an infinity or a NaN is NaN.
+
+Blaise deliberately has no float-valued `Int(X)`, which FPC and Delphi
+provide alongside `Trunc`.  `Trunc` already drops the fraction and its
+name says how; a second spelling of the same truncation adds nothing.
+The float-valued integral part, when it is wanted, is `X - Frac(X)`.
+`Int` is also the name of Blaise's native-width integer type, so
+`Int(X)` reads as a type cast -- and a float-to-integer cast is rejected
+(see _A Float Never Stands In for an Integer_).
+
+`DegToRad` and `RadToDeg` join `Frac` in the `Math` unit, with the same
+`Float32`/`Float64` overloads.
+
 == `Round` — Banker's Rounding
 
 === Decision

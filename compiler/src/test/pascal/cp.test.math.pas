@@ -31,6 +31,7 @@ type
     procedure SemanticOK(const ASrc: string);
     procedure SemanticOKBuiltin(const ASrc: string);
     procedure SemanticError(const ASrc: string);
+    function MathResultType(const ASrc: string): string;
   protected
     procedure SetUp; override;
   published
@@ -164,6 +165,16 @@ type
     { Pi constant }
     procedure TestSemantic_Pi_UsableInExpr;
 
+    { Frac / DegToRad / RadToDeg (GH #266): each has a Float32 and a
+      Float64 overload, so the result keeps the argument's precision, and
+      an integer argument widens to Float64 }
+    procedure TestSemantic_Frac_Float64_ReturnsFloat64;
+    procedure TestSemantic_Frac_Float32_ReturnsFloat32;
+    procedure TestSemantic_Frac_IntegerArg_ReturnsFloat64;
+    procedure TestSemantic_Frac_StringArg_Rejected;
+    procedure TestSemantic_DegToRad_ReturnsFloat64;
+    procedure TestSemantic_DegToRad_Float32_ReturnsFloat32;
+    procedure TestSemantic_RadToDeg_ReturnsFloat64;
     { `mod` takes float operands (C fmod) and is typed like the other
       float arithmetic: Float32 mod Float32 is Float32, anything with a
       Float64 or an integer beside a float is Float64; integer mod stays
@@ -289,6 +300,46 @@ begin
     end;
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
+  end;
+end;
+
+{ Analyses ASrc with the Math unit loaded and returns the name of the
+  resolved type of the first statement, which must be an assignment. }
+function TMathTests.MathResultType(const ASrc: string): string;
+var
+  Lexer: TLexer;
+  Parser: TParser;
+  Prog: TProgram;
+  Semantic: TSemanticAnalyser;
+  Loader: TUnitLoader;
+  Units: TObjectList;
+  SearchPaths: TStringList;
+  Assign: TAssignment;
+  I: Int;
+begin
+  Result := '';
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
+  Loader := nil; Units := nil; SearchPaths := nil;
+  try
+    Lexer := TLexer.Create(ASrc);
+    Parser := TParser.Create(Lexer);
+    Prog := Parser.Parse();
+    Semantic := TSemanticAnalyser.Create();
+    SearchPaths := TStringList.Create();
+    SearchPaths.Add(FRTLUnitPath);
+    SearchPaths.Add(FStdlibUnitPath);
+    Loader := TUnitLoader.Create(SearchPaths);
+    Units := Loader.LoadAll(Prog.UsedUnits);
+    for I := 0 to Units.Count - 1 do
+      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
+    Semantic.Analyse(Prog);
+    Assign := TAssignment(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('resolved type', Assign.Expr.ResolvedType);
+    Result := Assign.Expr.ResolvedType.Name;
+  finally
+    Semantic.Free();
+    Units.Free(); Loader.Free(); SearchPaths.Free();
+    Prog.Free(); Parser.Free(); Lexer.Free();
   end;
 end;
 
@@ -1598,6 +1649,59 @@ begin
     AsmMissing(Src, #9'callq _BlaisePow', #9'bl __BlaisePow'));
 end;
 
+
+{ ------------------------------------------------------------------ }
+{ Frac / DegToRad / RadToDeg (GH #266)                                 }
+{ ------------------------------------------------------------------ }
+
+procedure TMathTests.TestSemantic_Frac_Float64_ReturnsFloat64;
+begin
+  AssertEquals('Frac(Float64)', 'Float64', MathResultType(
+    'program P; uses Math; var X, R: Float64; begin R := Frac(X) end.'));
+end;
+
+procedure TMathTests.TestSemantic_Frac_Float32_ReturnsFloat32;
+begin
+  AssertEquals('Frac(Float32)', 'Float32', MathResultType(
+    'program P; uses Math; var X, R: Float32; begin R := Frac(X) end.'));
+end;
+
+procedure TMathTests.TestSemantic_Frac_IntegerArg_ReturnsFloat64;
+begin
+  AssertEquals('Frac(Int)', 'Float64', MathResultType(
+    'program P; uses Math; var I: Int; R: Float64; begin R := Frac(I) end.'));
+end;
+
+procedure TMathTests.TestSemantic_Frac_StringArg_Rejected;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    SemanticOK('program P; uses Math; var R: Float64; begin R := Frac(''x'') end.');
+  except
+    on E: ESemanticError do Raised := True;
+  end;
+  AssertTrue('Frac(string) is rejected', Raised);
+end;
+
+procedure TMathTests.TestSemantic_DegToRad_ReturnsFloat64;
+begin
+  AssertEquals('DegToRad(Float64)', 'Float64', MathResultType(
+    'program P; uses Math; var X, R: Float64; begin R := DegToRad(X) end.'));
+end;
+
+procedure TMathTests.TestSemantic_DegToRad_Float32_ReturnsFloat32;
+begin
+  AssertEquals('DegToRad(Float32)', 'Float32', MathResultType(
+    'program P; uses Math; var X, R: Float32; begin R := DegToRad(X) end.'));
+end;
+
+procedure TMathTests.TestSemantic_RadToDeg_ReturnsFloat64;
+begin
+  AssertEquals('RadToDeg(Float64)', 'Float64', MathResultType(
+    'program P; uses Math; var X, R: Float64; begin R := RadToDeg(X) end.'));
+end;
 
 { ------------------------------------------------------------------ }
 { Float mod (GH #266)                                                  }

@@ -16,7 +16,8 @@ unit cp.test.e2e.math;
     IsNaN, IsInfinite.
 
   Math RTL unit (requires 'uses Math'):
-    Min, Max, Sign, DivMod, InRange, EnsureRange, Pi.
+    Min, Max, Sign, DivMod, InRange, EnsureRange, Frac, DegToRad,
+    RadToDeg, Pi.
 
   The mod operator on float operands (C fmod, GH #266). }
 
@@ -157,6 +158,15 @@ type
 
     { Pi constant }
     procedure TestRun_Pi_Approx;
+
+    { Frac / DegToRad / RadToDeg (GH #266) }
+    { Frac keeps the sign, is exact, and stays correct past the Int64
+      range where X - Trunc(X) would overflow; Frac(Inf) and Frac(NaN)
+      are NaN; the Float32 overload stays Float32 }
+    procedure TestRun_Frac_Values;
+    procedure TestRun_Frac_EdgeCases;
+    { DegToRad and RadToDeg are inverses and agree with Pi }
+    procedure TestRun_DegToRad_RadToDeg;
 
     { float mod (GH #266) }
     { float mod is C fmod: the result has the dividend's sign and is
@@ -2422,6 +2432,99 @@ begin
   AssertRunsOnAll(Src, '3266851328' + LineEnding, 0);
 end;
 
+
+{ ------------------------------------------------------------------ }
+{ Frac / DegToRad / RadToDeg (GH #266)                                 }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EMathTests.TestRun_Frac_Values;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Math;
+    var X: Float64; S: Float32; I: Int;
+    begin
+      X := 123.456;
+      WriteLn(Round(Frac(X) * 1000.0));
+      WriteLn(Round(Frac(-X) * 1000.0));
+      X := 5.0;
+      if Frac(X) = 0.0 then WriteLn('whole') else WriteLn('fail');
+      X := 0.25;
+      if Frac(X) = 0.25 then WriteLn('below-one') else WriteLn('fail');
+      { the largest Float64 with a fraction: 2^52 - 0.5 }
+      X := 4503599627370495.5;
+      if Frac(X) = 0.5 then WriteLn('exact') else WriteLn('fail');
+      S := 2.75;
+      S := Frac(S);
+      WriteLn(Round(S * 100.0));
+      I := 7;
+      if Frac(I) = 0.0 then WriteLn('int') else WriteLn('fail')
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('frac values',
+    '456' + LineEnding + '-456' + LineEnding + 'whole' + LineEnding +
+    'below-one' + LineEnding + 'exact' + LineEnding + '75' + LineEnding +
+    'int', Trim(Output));
+end;
+
+procedure TE2EMathTests.TestRun_Frac_EdgeCases;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Math;
+    var X, Z: Float64;
+    begin
+      Z := 0.0;
+      X := 1.0e20;
+      if Frac(X) = 0.0 then WriteLn('big') else WriteLn('fail');
+      X := -1.0e300;
+      if Frac(X) = 0.0 then WriteLn('negbig') else WriteLn('fail');
+      X := 1.0 / Z;
+      if IsNaN(Frac(X)) then WriteLn('inf') else WriteLn('fail');
+      X := -1.0 / Z;
+      if IsNaN(Frac(X)) then WriteLn('neginf') else WriteLn('fail');
+      X := Z / Z;
+      if IsNaN(Frac(X)) then WriteLn('nan') else WriteLn('fail')
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('frac edge cases',
+    'big' + LineEnding + 'negbig' + LineEnding + 'inf' + LineEnding +
+    'neginf' + LineEnding + 'nan', Trim(Output));
+end;
+
+procedure TE2EMathTests.TestRun_DegToRad_RadToDeg;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Math;
+    var X: Float64; S: Float32;
+    begin
+      X := 180.0;
+      WriteLn(Round(DegToRad(X) * 1000000000.0));
+      X := -90.0;
+      if Abs(DegToRad(X) + Pi / 2.0) < 1.0e-15 then WriteLn('neg') else WriteLn('fail');
+      X := Pi;
+      WriteLn(Round(RadToDeg(X) * 1000000.0));
+      X := 37.5;
+      if Abs(RadToDeg(DegToRad(X)) - X) < 1.0e-12 then WriteLn('roundtrip') else WriteLn('fail');
+      S := 180.0;
+      S := DegToRad(S);
+      WriteLn(Round(S * 1000000.0))
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('deg/rad',
+    '3141592654' + LineEnding + 'neg' + LineEnding + '180000000' + LineEnding +
+    'roundtrip' + LineEnding + '3141593', Trim(Output));
+end;
 
 { ------------------------------------------------------------------ }
 { Float mod (GH #266)                                                  }

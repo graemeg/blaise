@@ -24,7 +24,11 @@ unit Math;
 //   Sign (Integer / Int64 / Double overloads)
 //   DivMod
 //   InRange, EnsureRange (Integer / Double overloads)
+//   Frac, DegToRad, RadToDeg (Float32 / Float64 overloads)
 //   Pi constant
+//
+// There is no FMod: the mod operator takes float operands (X mod Y is
+// C fmod), and no float-valued Int: use Trunc, or X - Frac(X).
 
 interface
 
@@ -75,6 +79,28 @@ function InRange(Value, Low, High: Float64): Boolean; overload;
 { Returns Value clamped to [Low..High] (both inclusive). }
 function EnsureRange(Value, Low, High: Int): Int; overload;
 function EnsureRange(Value, Low, High: Float64): Float64; overload;
+
+{ ------------------------------------------------------------------ }
+{ Frac                                                                 }
+{ ------------------------------------------------------------------ }
+
+{ Returns the fractional part of X, with the sign of X:
+  Frac(2.75) = 0.75, Frac(-2.75) = -0.75.  X = Trunc(X) + Frac(X) for
+  every finite X, and the result is exact.  Frac of an infinity or a NaN
+  is NaN.  There is deliberately no float-returning Int(X): Trunc says
+  what it does, and the integral part is X - Frac(X). }
+function Frac(X: Float64): Float64; overload;
+function Frac(X: Float32): Float32; overload;
+
+{ ------------------------------------------------------------------ }
+{ DegToRad / RadToDeg                                                  }
+{ ------------------------------------------------------------------ }
+
+{ Converts an angle from degrees to radians, and back. }
+function DegToRad(Degrees: Float64): Float64; overload;
+function DegToRad(Degrees: Float32): Float32; overload;
+function RadToDeg(Radians: Float64): Float64; overload;
+function RadToDeg(Radians: Float32): Float32; overload;
 
 implementation
 
@@ -177,6 +203,57 @@ begin
   if Value < Low then Result := Low
   else if Value > High then Result := High
   else Result := Value
+end;
+
+
+{ ------------------------------------------------------------------ }
+{ Frac                                                                 }
+{ ------------------------------------------------------------------ }
+
+const
+  { 2^52: every Float64 of at least this magnitude is an integer }
+  TwoPow52 = 4503599627370496.0;
+
+function Frac(X: Float64): Float64;
+begin
+  { Past 2^52 there is no fraction, and Trunc would overflow Int64 past
+    2^63; X - X is 0 for a finite X and NaN for an infinity or a NaN.
+    The test is written so that a NaN takes this branch too. }
+  if not (Abs(X) < TwoPow52) then
+    Exit(X - X);
+  { exact: X and its integral part share an exponent range }
+  Result := X - Trunc(X);
+end;
+
+{ A Float32 widens to Float64 exactly, and its fraction is representable
+  in Float32, so narrowing the Float64 result loses nothing. }
+function Frac(X: Float32): Float32;
+begin
+  Result := Frac(Float64(X));
+end;
+
+{ ------------------------------------------------------------------ }
+{ DegToRad / RadToDeg                                                  }
+{ ------------------------------------------------------------------ }
+
+function DegToRad(Degrees: Float64): Float64;
+begin
+  Result := Degrees * (Pi / 180.0);
+end;
+
+function DegToRad(Degrees: Float32): Float32;
+begin
+  Result := DegToRad(Float64(Degrees));
+end;
+
+function RadToDeg(Radians: Float64): Float64;
+begin
+  Result := Radians * (180.0 / Pi);
+end;
+
+function RadToDeg(Radians: Float32): Float32;
+begin
+  Result := RadToDeg(Float64(Radians));
 end;
 
 end.
