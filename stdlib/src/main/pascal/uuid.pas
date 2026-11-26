@@ -144,11 +144,6 @@ implementation
 uses
   StrUtils;   { TStringBuilder }
 
-{ The operating system's CSPRNG, through the platform port (getentropy on
-  POSIX, BCryptGenRandom on Windows): 1 on success, 0 on failure. }
-function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
-  external name '_RandomBytes';
-
 function HexDigit(AValue: Int): Byte;
 begin
   { 0-9 -> '0'..'9' (48..57), 10-15 -> 'a'..'f' (97..102) }
@@ -220,7 +215,7 @@ var
   Msb, Lsb: Int64;
   I: Int;
 begin
-  if _RandomBytes(@Buf[0], 16) <> 1 then
+  if not SecureRandomBytes(@Buf[0], 16) then
     raise EUuidRandomFailure.Create(
       'TUuid.RandomUuid: the system CSPRNG failed to supply 16 random bytes');
 

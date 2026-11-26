@@ -62,7 +62,7 @@ function EncodeFrame(AOpcode: Int; const APayload: string): string;
 { Build a MASKED frame with an explicit opcode (client->server).  RFC 6455 5.3
   requires every client frame to be masked: the MASK bit is set, a fresh 4-byte
   masking key is prepended, and the payload is XORed with it.  The key comes
-  from the system CSPRNG (_RandomBytes) so it varies per frame; the value is only
+  from the system CSPRNG (SecureRandomBytes) so it varies per frame; the value is only
   used for framing, not confidentiality.  DecodeFrame reverses it. }
 function EncodeMaskedFrame(AOpcode: Int; const APayload: string): string;
 
@@ -76,17 +76,11 @@ function DecodeFrame(const ABuffer: string): TWsFrame;
 implementation
 
 uses
-  Security.Crypto, Encoding.Base64, StrUtils;
+  SysUtils, Security.Crypto, Encoding.Base64, StrUtils;
 
 const
   { the RFC 6455 magic GUID appended to the key before hashing }
   WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-
-{ The operating system's CSPRNG, through the platform port (getentropy on
-  POSIX, BCryptGenRandom on Windows): 1 on success, 0 on failure.  Used to
-  pick a per-frame masking key. }
-function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
-  external name '_RandomBytes';
 
 { A monotonically-increasing counter mixed into the masking key so that even if
   the CSPRNG ever fails (it should not for 4 bytes), successive frames on a
@@ -142,11 +136,11 @@ procedure NextMaskKey(var AMask: array of Byte);
 var
   Buf: array[0..3] of Byte;
   I: Int;
-  Got: Int32;
+  Got: Boolean;
 begin
-  Got := _RandomBytes(@Buf[0], 4);
+  Got := SecureRandomBytes(@Buf[0], 4);
   GMaskCounter := (GMaskCounter * 1664525) + 1013904223;   { LCG step }
-  if Got <> 1 then
+  if not Got then
   begin
     { the CSPRNG failed: derive the key entirely from the counter. }
     Buf[0] := Byte(GMaskCounter and $FF);

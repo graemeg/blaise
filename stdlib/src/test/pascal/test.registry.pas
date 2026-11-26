@@ -67,7 +67,8 @@ uses
   FileSystem.Tests,
   IOProcess.Tests,
   IOWatch.Tests,
-  ClassicPascalTypes.Tests;
+  ClassicPascalTypes.Tests,
+  SysUtils.Tests;
 
 implementation
 

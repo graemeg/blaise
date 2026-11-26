@@ -137,6 +137,14 @@ function SameFileName(const S1, S2: string): Boolean;
 function GetEnvironmentVariableCount(): Int;
 function GetEnvironmentString(AIndex: Int): string;
 
+{ Fills ACount bytes at ABuf from the operating system's cryptographically
+  secure random number generator (getentropy on POSIX, BCryptGenRandom on
+  Windows) and returns True, or returns False if the generator failed.
+  Use it for keys, tokens, nonces and UUIDs.  For simulations, games and
+  procedural content use the Math unit's Random and TRandom instead: they
+  are much faster, and TRandom can be seeded to repeat a sequence. }
+function SecureRandomBytes(ABuf: Pointer; ACount: Int): Boolean;
+
 implementation
 
 function _EnvVector: Pointer; external name '_EnvVector';
@@ -144,6 +152,14 @@ procedure _SetRuntimeErrorHooks(ADivByZero, AInvalidCast: Pointer);
   external name '_SetRuntimeErrorHooks';
 procedure _SetConvertErrorHook(AHook: Pointer);
   external name '_SetConvertErrorHook';
+{ the platform port's CSPRNG: 1 on success, 0 on failure }
+function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
+  external name '_RandomBytes';
+
+function SecureRandomBytes(ABuf: Pointer; ACount: Int): Boolean;
+begin
+  Result := _RandomBytes(ABuf, ACount) = 1;
+end;
 
 { The RTL's convert-error hook: StrToInt was handed S, which is not a whole
   integer. }
