@@ -1912,6 +1912,7 @@ end;
 procedure TSemanticAnalyser.SemanticError(const AMsg: string; ALine, ACol: Int);
 var
   Msg: string;
+  View: TGenericViewFrame;
 begin
   Msg := AMsg;
   { A name that failed only because its unit is not in the uses clause (GH
@@ -1928,7 +1929,20 @@ begin
       [FTable.LastHiddenName, FTable.LastHiddenUnit])
   else
     Msg := Msg + ClassicTypeHint(Msg);
-  if FCurrentUnitName <> '' then
+  { Inside a generic body the line and column belong to the unit that
+    DECLARES the template, not the one being analysed: name both, so the
+    position can be found and the instantiation that triggered it is clear
+    (GH #268 reported 'line 1252 in tc' for a generics.collections line). }
+  if (FGenericViews <> nil) and (FGenericViews.Count > 0) then
+  begin
+    View := TGenericViewFrame(FGenericViews.Items[FGenericViews.Count - 1]);
+    Msg := Format('%s at line %d col %d in %s (instantiated as %s',
+      [Msg, ALine, ACol, View.DeclUnit, View.InstName]);
+    if FCurrentUnitName <> '' then
+      Msg := Msg + ' in ' + FCurrentUnitName;
+    raise ESemanticError.Create(Msg + ')');
+  end
+  else if FCurrentUnitName <> '' then
     raise ESemanticError.Create(Format('%s at line %d col %d in %s', [Msg, ALine, ACol, FCurrentUnitName]))
   else
     raise ESemanticError.Create(Format('%s at line %d col %d', [Msg, ALine, ACol]));

@@ -30,6 +30,9 @@ type
       container over an enum did not compile.  Twenty members, so each
       container grows past GCHashThreshold and really builds its hash index. }
     procedure TestRun_EnumKey_DictOrderedDictSet;
+    { GH #268: an error inside a generic body names the template's unit and
+      the instantiation (it named the instantiating program as the file). }
+    procedure TestCompile_GenericBodyError_FromCachedUnit_NamesRealPosition;
     { BUG-20260724 pass-borrowed-string-by-value over-release: a routine
       receives a string as a BORROWED const param and passes it by value into
       TDictionary lookups (ContainsKey / TryGetValue).  The lookup key params
@@ -914,6 +917,46 @@ begin
     'False True v8' + #10 +
     'True True' + #10 +
     '19' + #10, 0);
+end;
+
+procedure TE2ECollections2Tests.TestCompile_GenericBodyError_FromCachedUnit_NamesRealPosition;
+const
+  { Compiles cleanly, and leaves Generics.Collections cached beside the
+    output for the next compile to re-read. }
+  WarmSrc = '''
+    program Warm;
+    uses Generics.Collections;
+    var D: TDictionary<string, string>;
+    begin
+      D := TDictionary<string, string>.Create();
+      D.Free();
+    end.
+    ''';
+  { A record key has no GCHashOf overload: the error is in the template. }
+  BadSrc = '''
+    program Bad;
+    uses Generics.Collections;
+    type
+      TPt = record X, Y: Int32; end;
+    var D: TDictionary<TPt, string>;
+    begin
+      D := TDictionary<TPt, string>.Create();
+      D.Free();
+    end.
+    ''';
+var
+  BinFile, ToolOut: string;
+begin
+  if not ToolchainAvailable() then Exit;
+  AssertEquals('warm-up program compiles: ' + ToolOut, 0,
+    CompileNativeCLI(WarmSrc, False, '', BinFile, ToolOut));
+  AssertTrue('record key is rejected',
+    CompileNativeCLI(BadSrc, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names the missing overload: ' + ToolOut,
+    Pos('No matching overload for ''GCHashOf''', ToolOut) >= 0);
+  AssertTrue('names the template unit and the instantiation: ' + ToolOut,
+    Pos(' in Generics.Collections (instantiated as TDictionary<TPt,string> in ',
+      ToolOut) >= 0);
 end;
 
 initialization
