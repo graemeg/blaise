@@ -102,6 +102,9 @@ type
     { ------------------------------------------------------------------ }
     procedure TestCodegen_Unit_NoMainFunction;
     procedure TestCodegen_Unit_ExportsInterfaceRoutinesOnly;
+    { GH #269: an implementation spelt in a different case from its interface
+      declaration is still the interface routine, so it is still exported }
+    procedure TestCodegen_Unit_ImplCaseDiffers_StillExported;
 
     { ------------------------------------------------------------------ }
     { Unit loader                                                          }
@@ -558,6 +561,29 @@ begin
   { arm64 exports every routine; the unit-prefixed name cannot collide, so
     only its definition is pinned there }
   AssertTrue('arm64: Internals_Helper defined', Pos(#10 + '_Internals_Helper:', A64) >= 0);
+end;
+
+procedure TUnitTests.TestCodegen_Unit_ImplCaseDiffers_StillExported;
+const
+  USrc = '''
+    unit CaseU;
+    interface
+    procedure Capitalized(A: Int16);
+    implementation
+    procedure capitalized(A: Int16);
+    begin
+    end;
+    end.
+    ''';
+var
+  X86, A64: string;
+begin
+  X86 := GenUnitAsm(USrc, TargetX86_64);
+  A64 := GenUnitAsm(USrc, TargetArm64);
+  AssertTrue('x86-64: CaseU_Capitalized exported',
+    Pos('.globl CaseU_Capitalized', X86) >= 0);
+  AssertTrue('arm64: CaseU_Capitalized exported',
+    Pos('.globl _CaseU_Capitalized', A64) >= 0);
 end;
 
 procedure TUnitTests.TestSemantic_Unit_IntfVarVisibleInImpl;

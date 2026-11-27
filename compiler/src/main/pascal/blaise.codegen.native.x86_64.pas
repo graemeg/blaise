@@ -28564,6 +28564,9 @@ begin
     .globl — implementation-only helpers stay local to avoid collisions with
     the same symbols in the RTL archive. }
   IntfNames := TStringList.Create();
+  { Pascal identifiers are case-insensitive: 'procedure capitalized' in the
+    implementation IS the interface's 'Capitalized' (GH #269) }
+  IntfNames.CaseSensitive := False;
   try
     for I := 0 to AUnit.IntfBlock.ProcDecls.Count - 1 do
       IntfNames.Add(TMethodDecl(AUnit.IntfBlock.ProcDecls.Items[I]).Name);

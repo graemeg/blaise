@@ -23,6 +23,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { GH #269: a unit routine whose implementation is spelt in a different
+      case from its interface declaration was emitted local on x86-64, so
+      the program's call to it failed to link }
+    procedure TestRun_UnitImplCaseDiffersFromIntf;
     { Exit(X) in a nested routine reading the enclosing routine's record:
       x86-64 linked a symbol named after the variable and crashed, arm64
       refused it }
@@ -5384,6 +5388,43 @@ begin
     CompileAndRunWithUnit('indirclone', UnitSrc, Src, Output, ExitCode));
   AssertEquals('exit code', 0, ExitCode);
   AssertEquals('stdout', '42' + LineEnding + 'abc 5' + LineEnding, Output);
+end;
+
+procedure TE2EMiscTests.TestRun_UnitImplCaseDiffersFromIntf;
+const
+  UnitSrc = '''
+    unit implcase;
+    interface
+    procedure Capitalized(A: Int16);
+    function MixedCase(A: Int): Int;
+    implementation
+    procedure capitalized(A: Int16);
+    begin
+      WriteLn('called ', A);
+    end;
+    function MIXEDCASE(A: Int): Int;
+    begin
+      Result := A * 2;
+    end;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses implcase;
+    begin
+      capitalized(10);
+      WriteLn(mixedcase(21));
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile + run: ' + Output,
+    CompileAndRunWithUnit('implcase', UnitSrc, Src, Output, ExitCode));
+  AssertEquals('exit code', 0, ExitCode);
+  AssertEquals('stdout', 'called 10' + LineEnding + '42' + LineEnding, Output);
 end;
 
 procedure TE2EMiscTests.TestRun_SetConstantParamDefault;
