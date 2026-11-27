@@ -81,6 +81,7 @@ type
     procedure TestRun_StrToIntDef_ValidAndInvalid;
     procedure TestRun_StrToInt64Def_ValidAndInvalid;
     procedure TestRun_StrToInt_RaisesOnInvalid;
+    procedure TestRun_StrToInt_SurroundingWhitespace_Raises;
     procedure TestRun_StrToInt64_RaisesOnInvalid;
   end;
 
@@ -1322,6 +1323,55 @@ const
           end
         end.
         ''';
+
+procedure TE2ESysUtilsTests.TestRun_StrToInt_SurroundingWhitespace_Raises;
+const
+  { BUG-025: StrToInt and StrToInt64 are strict -- whitespace around the
+    digits is not part of an integer, so it raises EConvertError, leading or
+    trailing, space or tab (docs/language-rationale.adoc, "StrToInt Does
+    Not Skip Whitespace").  Trim first to accept it. }
+  Src = '''
+    program P;
+    uses SysUtils;
+    procedure Try32(const S, ALabel: string);
+    var N: Int32;
+    begin
+      try
+        N := StrToInt(S);
+        WriteLn('NO-RAISE ', N)
+      except
+        on E: EConvertError do WriteLn('caught: ', ALabel)
+      end
+    end;
+    procedure Try64(const S, ALabel: string);
+    var N: Int64;
+    begin
+      try
+        N := StrToInt64(S);
+        WriteLn('NO-RAISE ', N)
+      except
+        on E: EConvertError do WriteLn('caught64: ', ALabel)
+      end
+    end;
+    begin
+      Try32(' 42', 'leading space');
+      Try32('42 ', 'trailing space');
+      Try32(#9 + '42', 'leading tab');
+      Try32(' ', 'blank');
+      Try64(' 1234567890123', 'leading space');
+      Try64('1234567890123 ', 'trailing space');
+      WriteLn(StrToInt(Trim(' 42 ')));
+      WriteLn(StrToInt64(Trim(#9 + '-1234567890123' + #9)))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(Src,
+    'caught: leading space' + #10 + 'caught: trailing space' + #10 +
+    'caught: leading tab' + #10 + 'caught: blank' + #10 +
+    'caught64: leading space' + #10 + 'caught64: trailing space' + #10 +
+    '42' + #10 + '-1234567890123' + #10, 0);
+end;
 
 procedure TE2ESysUtilsTests.TestRun_StrToInt_RaisesOnInvalid;
 var

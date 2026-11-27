@@ -3150,6 +3150,42 @@ surface as stdlib exception classes.
   same reason as `EDivByZero`: exception classes are a stdlib concern and
   the runtime carries no class machinery.
 
+=== StrToInt Does Not Skip Whitespace
+
+==== Decision
+
+`StrToInt` and `StrToInt64` accept exactly an optional sign followed by
+decimal digits, or `$` and hexadecimal digits.  Whitespace before or after
+the number -- a space, a tab, a line break -- makes the string invalid:
+with `SysUtils` in the program it raises `EConvertError`, like any other
+character that is not part of the number.  A caller that wants to accept
+padded input writes `StrToInt(Trim(S))`.
+
+The runtime parser and the `SysUtils` validator (`IsValidIntStr`) accept
+the same set of strings, so a string is valid or invalid whichever path
+converts it.
+
+==== Rationale
+
+* *One rule, with no exceptions to remember.*  A string either is an
+  integer or it is not.  Treating some characters as ignorable, and only
+  in some positions, is a rule every reader has to look up.
+* *Padding is usually a sign of an unparsed field.*  Input that still
+  carries the spaces or the line break around a number has not been split
+  properly yet; reporting it finds that bug instead of hiding it.
+* *Accepting it is one call away.*  `Trim` states the intent at the call
+  site, at no cost to callers that do not need it.
+
+==== Alternatives Rejected
+
+* *Skip leading whitespace, as Delphi and FPC do.*  Both convert through
+  `Val`, which skips leading blanks; code ported from them that relies on
+  that raises `EConvertError` and needs a `Trim`.  Rejected: the
+  convenience does not justify an asymmetric rule (leading accepted,
+  trailing rejected).
+* *Trim both sides.*  Rejected: more lenient than either dialect, and it
+  hides the unparsed-input bugs described above.
+
 ---
 
 == Project Governance
