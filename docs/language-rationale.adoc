@@ -10171,8 +10171,10 @@ statement, so `Pointer(MakeArr())` is rejected.
 An element write to a dynamic array -- `A[I] := V`, `R.Arr[I] := V`,
 `F()[I] := V`, `M[I][J] := V` -- runs in this order on every target:
 
-. The array and the index `I` are evaluated, each exactly once.  The order
-  of these two relative to each other is not specified.
+. The array, then the index `I`, are evaluated, left to right, each
+  exactly once: in `F()[G()] := V`, `F` runs before `G`, and in
+  `M[I()][J()] := V` the order is `I`, `J`.  A field array's receiver comes
+  first too: `MakeObj().Arr[Next()] := V` calls `MakeObj`, then `Next`.
 . `I` is checked against the array's current length.  Out of range, the
   write raises `ERangeError` here: `V` is never evaluated, so
   `A[99] := F()` does not call `F`.
@@ -10215,17 +10217,21 @@ A multi-level write checks each level as it is reached: in `M[I][J] := V`
 the read of `M[I]` is checked first, then `J` against the inner array,
 both before `V`.
 
-One shape keeps the older order: an array field reached through a receiver
-expression that may itself run code, such as `MakeObj().Arr[I] := V` or
-`Items[Next()].Arr[I] := V`.  Its receiver is evaluated once, after `V`,
-so `I` is checked only in step 4 (step 2 would need the receiver
-evaluated a second time).
+Reads follow the same order: `X := F()[G()]` calls `F`, then `G`, and the
+array an expression produced is kept alive while the index is evaluated.
+A named array is read where it is used -- after the index -- so
+`X := A[Shrink()]` reads the array as `Shrink` left it.
 
-An owned value (a string, an object, a dynamic array returned by a call)
-whose evaluation *shrinks* the array so that the step 4 check fails is not
-released: it is a statement temporary, outside the unwind cleanup that
-releases a routine's variables when an exception passes through
-(BUG-20261028).
+One shape keeps an older order: an array field of a *record* returned by
+a call, `MkRec().Arr[I] := V`.  The record lives in a result buffer that
+evaluating `V` may reuse, so it cannot be held from step 1; it is
+evaluated once, after `V`, and `I` is checked only in step 4.  (A class
+receiver, `MakeObj().Arr[I]`, is an object reference and is held.)
+
+When the step 4 check fails, an owned value -- a string, an object, an
+interface, a closure, a record with managed fields, a dynamic array
+returned by a call -- is released before `ERangeError` is raised: the
+store that would have taken it over does not happen.
 
 ===== Rationale
 
@@ -10269,10 +10275,12 @@ releases a routine's variables when an exception passes through
 * *Re-evaluate the array expression of a chained write after `V`.*
   Rejected: `M[I]` -- and `I` -- would be evaluated twice, so a side effect
   in either runs twice.
-* *Specify the order of the array and index expressions too.*  Not done:
-  the backends differ (x86-64 evaluates a chained base before the index,
-  arm64 the index first), a program that depends on it is fragile, and
-  neither Delphi nor FPC specifies it.
+* *Leave the order of the array and the index unspecified*, as Delphi and
+  FPC do.  Rejected (2026-11-27): the backends differed -- x86-64
+  evaluated a chained array before its index, arm64 the index first, and
+  a class receiver came after the value on both -- so a program with side
+  effects in both printed different output per CPU.  Left to right is the
+  order the source is read in.
 
 === Rationale
 

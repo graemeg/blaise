@@ -236,6 +236,23 @@ type
       that checked index (EmitFieldElemAddrToX0 reloads it) }
     [Unretained] FFieldIdxStmt: TFieldAssignment;
     FFieldIdxSlot: string;
+    { the field write whose class receiver expression was evaluated first,
+      once (MakeObj().Arr[I] := V), and the slot holding it }
+    [Unretained] FFieldRecvStmt: TFieldAssignment;
+    FFieldRecvSlot: string;
+    { what the NEXT dynamic-array index check releases before it raises:
+      an owned value parked for a store (A[I] := V where V shrank A).
+      FRngFailLoad loads it into FRngFailReg; then FRngFailSym is called on
+      it, or the managed fields of FRngFailRec are released at it }
+    { a field-array store's owned parked value, armed by
+      EmitFieldElemAddrToX0 just before its own index check }
+    FFieldArmSet: Boolean;
+    FFieldArmRec: Boolean;
+    [Unretained] FFieldArmElem: TTypeDesc;
+    FRngFailLoad: string;
+    FRngFailReg: string;
+    FRngFailSym: string;
+    [Unretained] FRngFailRec: TRecordTypeDesc;
     { A[I] := V on a named dynamic array: the write whose element address,
       parked before V is evaluated, EmitElemStoreStacked re-derives after V
       (V may resize or replace the array), and the slot holding its index }
@@ -580,6 +597,11 @@ type
     { x0 := the data pointer of the named dynamic array AStmt writes (a
       field of Self, a captured, local, var-parameter or global array) }
     procedure EmitDynNamedBaseToX0(AStmt: TStaticSubscriptAssign);
+    { arm the next index check to release the owned value of element type
+      AElem parked at [sp, #AOff] (its second word at +8) if it raises;
+      AOwnedRec: a record value whose +1 fields sit at the parked address }
+    procedure ArmRngFailRelease(AElem: TTypeDesc; AOff: Int; AOwnedRec: Boolean);
+    procedure DisarmRngFailRelease;
     { Re-derive the element address parked at [sp, #AOff] for ARef after
       its value was evaluated (x0/x1 preserved); no-op when ARef is nil }
     procedure EmitRefreshParkedElemAddr(ARef: TStaticSubscriptAssign;
@@ -5154,12 +5176,33 @@ begin
   SavedSlot := FFieldIdxSlot;
   FFieldIdxStmt := nil;
   FFieldIdxSlot := '';
-  { (a receiver expression that may run code -- MakeObj().Arr[I] -- is
-    evaluated only once, after the value, so it skips the early check) }
+  { left to right: a class receiver expression that may run code
+    (MakeObj().Arr[I]) is evaluated first, once, and parked; the slot
+    address is derived from it from here on.  A record returned by a call
+    cannot be parked (its result buffer may be reused while the value is
+    evaluated), so that receiver is still evaluated after the value and
+    skips the early check. }
+  if (AStmt.FieldInfo <> nil) and (AStmt.ObjExpr <> nil) and
+     ExprMayCall(AStmt.ObjExpr) and (AStmt.ObjExpr.ResolvedType <> nil) and
+     (AStmt.ObjExpr.ResolvedType.Kind = tyClass) and
+     (AStmt.FieldInfo.TypeDesc <> nil) and
+     not AStmt.FieldInfo.TypeDesc.IsString() then
+  begin
+    Self.EmitExprToX0(AStmt.ObjExpr);
+    if ArcExprOwnsRef(AStmt.ObjExpr) then
+      DeferNativeClassRelease();
+    FFieldRecvSlot := '__frecv_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(FFieldRecvSlot) then
+      AddLocal(FFieldRecvSlot, 8);
+    EmitStoreSlot('x0', FFieldRecvSlot);
+    FFieldRecvStmt := AStmt;
+  end;
   if (AStmt.FieldInfo <> nil) and (AStmt.FieldInfo.TypeDesc <> nil) and
      (AStmt.FieldInfo.TypeDesc.Kind = tyDynArray) and
      (AStmt.PropIndexExpr <> nil) and
-     not ((AStmt.ObjExpr <> nil) and ExprMayCall(AStmt.ObjExpr)) then
+     not ((AStmt.ObjExpr <> nil) and ExprMayCall(AStmt.ObjExpr) and
+          (AStmt <> FFieldRecvStmt)) then
   begin
     FFieldIdxSlot := '__fidx_' + IntToStr(FJArgN);
     FJArgN := FJArgN + 1;
@@ -5247,6 +5290,7 @@ begin
       pair first (value-first rule), then the fresh element address }
     EmitFatPairToX0X1(AStmt.Expr, Elem);
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [pair] }
+    FFieldArmSet := True; FFieldArmElem := Elem; FFieldArmRec := False;
     EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);
     EmitPushX0();                                 { [pair][elemaddr] }
     if ArcTypeIsRefClosure(Elem) then
@@ -5276,6 +5320,7 @@ begin
       EmitPopTo('x0');
     end;
     EmitPushX0();                              { [val] }
+    FFieldArmSet := True; FFieldArmElem := Elem; FFieldArmRec := False;
     EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);  { x0 = &element (fresh) }
     EmitPushX0();                              { [val][elemaddr] }
     Self.Emit(#9'ldr x0, [x0]');               { old element value }
@@ -5324,6 +5369,7 @@ begin
         Mirrors the x86-64 field path's value-first ordering. }
       EmitRecCallToRret(AStmt.Expr);   { x0 = the result's scratch; +1 transfers }
       EmitPushX0();                                    { [result] }
+      FFieldArmSet := True; FFieldArmElem := Elem; FFieldArmRec := True;
       EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);  { x0 = &element (fresh) }
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       Self.Emit(#9'mov x22, x0');                      { x22 = element addr }
@@ -5369,6 +5415,7 @@ begin
       Self.Emit(#9'ldp x0, x1, [sp], #16');
     end;
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');          { [pair] }
+    FFieldArmSet := True; FFieldArmElem := Elem; FFieldArmRec := False;
     EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);
     EmitPushX0();                                     { [pair][elemaddr] }
     Self.Emit(#9'ldr x0, [x0]');                      { old obj }
@@ -5463,7 +5510,15 @@ begin
     Self.Emit(#9'ldr x0, [x0]');               { dyn-array: slot holds data ptr }
   EmitPopTo('x1');                             { index }
   if AIsDyn then
+  begin
+    { the caller's owned value, parked at [sp], is released if this check
+      raises (the value may have shrunk the array) }
+    if FFieldArmSet then
+      ArmRngFailRelease(FFieldArmElem, 0, FFieldArmRec);
     EmitDynIndexCheck('x0', 'x1');
+    DisarmRngFailRelease();
+  end;
+  FFieldArmSet := False;
   EmitIntLiteral('x2', AElem.RawSize());
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');               { x0 = element address }
@@ -5471,7 +5526,11 @@ end;
 
 procedure TArm64Backend.EmitFieldAssignSlotAddrToX0(AStmt: TFieldAssignment);
 begin
-  if AStmt.ObjExpr <> nil then
+  if (AStmt.ObjExpr <> nil) and (AStmt = FFieldRecvStmt) and
+     (FFieldRecvSlot <> '') then
+    { the receiver evaluated up front (left to right) }
+    EmitLoadSlot('x0', FFieldRecvSlot)
+  else if AStmt.ObjExpr <> nil then
   begin
     { a chained base (A.B.Arr[I], P^.Arr[I], R.Items[J].Arr[I]): a class-typed
       base yields the instance pointer, a record-typed one its address }
@@ -7654,10 +7713,12 @@ begin
   begin
     { S[I] / P[I]: byte at data-pointer+index (Blaise strings are
       0-based and the value IS the data pointer) }
-    Self.EmitExprToX0(TStringSubscriptExpr(AExpr).IndexExpr);
-    EmitPushX0();
+    { left to right: the string, then the index }
     Self.EmitExprToX0(TStringSubscriptExpr(AExpr).StrExpr);
-    EmitPopTo('x1');
+    EmitPushX0();
+    Self.EmitExprToX0(TStringSubscriptExpr(AExpr).IndexExpr);
+    Self.Emit(#9'mov x1, x0');
+    EmitPopTo('x0');
     Self.Emit(#9'add x0, x0, x1');
     Self.Emit(#9'ldrb w0, [x0]');
     Exit;
@@ -11378,6 +11439,7 @@ begin
       Self.Emit(#9'ldp x0, x1, [sp], #16');
     end;
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [addr][obj,itab] }
+    ArmRngFailRelease(Elem, 0, False);
     EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
     Self.Emit(#9'ldr x9, [sp, #16]');
     Self.Emit(#9'ldr x0, [x9]');
@@ -11405,6 +11467,7 @@ begin
       EmitPopTo('x0');
     end;
     EmitPushX0();                              { [addr][val] }
+    ArmRngFailRelease(Elem, 0, False);
     EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
     Self.Emit(#9'ldr x9, [sp, #16]');
     Self.Emit(#9'ldr x0, [x9]');
@@ -11445,6 +11508,7 @@ begin
       retained by EmitFatPairToX0X1, the old one released here). }
     EmitFatPairToX0X1(AValue, Elem);
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [elemaddr][pair] }
+    ArmRngFailRelease(Elem, 0, False);
     EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
     if ArcTypeIsRefClosure(Elem) then
     begin
@@ -11482,6 +11546,7 @@ begin
     if IsRecordCallArg(AValue) then
     begin
       EmitRecCallToRret(AValue);   { x0 = result addr; +1 transfers }
+      ArmRngFailRelease(Elem, 0, True);
       EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 0);
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       Self.Emit(#9'mov x19, x0');           { the result, across the walk }
@@ -11713,24 +11778,28 @@ begin
     Elem := TOpenArrayTypeDesc(AStmt.ResolvedArrayType).ElementType
   else
     Elem := TStaticArrayTypeDesc(AStmt.ResolvedArrayType).ElementType;
-  Self.EmitExprToX0(AStmt.IndexExpr);
-  { static array with a non-zero LowBound: rebase the index to 0 before
-    scaling (BUG-050) — a[5] of array[5..9] is element 0.  Dyn arrays are
-    always 0-based.  A negative low bound rebases via `add` (subtracting a
-    negative) to avoid an invalid `sub #-N` immediate. }
-  if (AStmt.ResolvedArrayType.Kind = tyStaticArray) and
-     (TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound <> 0) then
+  if AStmt.BaseExpr = nil then
   begin
-    if TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound > 0 then
-      EmitAddSubImm('sub', 'x0', 'x0',
-        TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound)
-    else
-      EmitAddSubImm('add', 'x0', 'x0',
-        -TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound);
+    Self.EmitExprToX0(AStmt.IndexExpr);
+    { static array with a non-zero LowBound: rebase the index to 0 before
+      scaling (BUG-050) — a[5] of array[5..9] is element 0.  Dyn arrays are
+      always 0-based.  A negative low bound rebases via `add` (subtracting a
+      negative) to avoid an invalid `sub #-N` immediate. }
+    if (AStmt.ResolvedArrayType.Kind = tyStaticArray) and
+       (TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound <> 0) then
+    begin
+      if TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound > 0 then
+        EmitAddSubImm('sub', 'x0', 'x0',
+          TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound)
+      else
+        EmitAddSubImm('add', 'x0', 'x0',
+          -TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound);
+    end;
+    EmitPushX0();
   end;
-  EmitPushX0();
   if AStmt.BaseExpr <> nil then
   begin
+    { left to right: the inner array, then the index (then the value) }
     { a chained / multi-dimensional write G[I][J] := V (and the desugared
       G[I, J]): BaseExpr yields the inner array -- its storage address for a
       static array, its data pointer (the value) for a dyn array }
@@ -11745,7 +11814,7 @@ begin
         code: V could resize M[I] and free the block the store targets }
       if ArcExprOwnsRef(AStmt.BaseExpr) then
         DeferNativeRelease('_DynArrayRelease')
-      else if ExprMayCall(AStmt.ValueExpr) then
+      else if ExprMayCall(AStmt.ValueExpr) or ExprMayCall(AStmt.IndexExpr) then
       begin
         EmitPushX0();
         EmitCallSym('_DynArrayAddRef');
@@ -11753,6 +11822,24 @@ begin
         DeferNativeRelease('_DynArrayRelease');
       end;
     end;
+    EmitPushX0();                              { [base] }
+    Self.EmitExprToX0(AStmt.IndexExpr);
+    { static array with a non-zero LowBound: rebase the index to 0 before
+      scaling (BUG-050) — a[5] of array[5..9] is element 0.  Dyn arrays are
+      always 0-based.  A negative low bound rebases via `add` (subtracting a
+      negative) to avoid an invalid `sub #-N` immediate. }
+    if (AStmt.ResolvedArrayType.Kind = tyStaticArray) and
+       (TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound <> 0) then
+    begin
+      if TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound > 0 then
+        EmitAddSubImm('sub', 'x0', 'x0',
+          TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound)
+      else
+        EmitAddSubImm('add', 'x0', 'x0',
+          -TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound);
+    end;
+    Self.Emit(#9'mov x1, x0');                 { index }
+    EmitPopTo('x0');                           { base }
   end
   else if AStmt.IsImplicitSelf then
   begin
@@ -11804,7 +11891,8 @@ begin
     EmitLoadSlot('x0', AStmt.ArrayName)
   else
     EmitSlotAddr('x0', AStmt.ArrayName);
-  EmitPopTo('x1');
+  if AStmt.BaseExpr = nil then
+    EmitPopTo('x1');
   if AStmt.ResolvedArrayType.Kind = tyDynArray then
     EmitDynIndexCheck('x0', 'x1');
   { a named dynamic array: the address parked below is re-derived after the
@@ -11869,11 +11957,15 @@ begin
   { the array as it is now: base, the checked index, a second check (the
     value may have shrunk it), the element address over the parked one }
   if ARef = nil then
+  begin
+    DisarmRngFailRelease();
     Exit;
+  end;
   Self.Emit(#9'stp x0, x1, [sp, #-16]!');
   EmitDynNamedBaseToX0(ARef);
   EmitLoadSlot('x1', AIdx);
   EmitDynIndexCheck('x0', 'x1');
+  DisarmRngFailRelease();
   EmitIntLiteral('x2', AElemSize);
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');
@@ -14189,6 +14281,9 @@ begin
     { any other base -- an element of an outer array (G[I][J], the
       desugared G[I, J]), an array field, P^, a var array parameter: the
       base is the inner array's storage address }
+    { left to right: the array's storage, then the index }
+    EmitArrayStorageAddr(ASub.StrExpr);
+    EmitPushX0();
     Self.EmitExprToX0(ASub.IndexExpr);
     if TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType).LowBound > 0 then
       EmitAddSubImm('sub', 'x0', 'x0',
@@ -14196,9 +14291,8 @@ begin
     else if TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType).LowBound < 0 then
       EmitAddSubImm('add', 'x0', 'x0',
         -TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType).LowBound);
-    EmitPushX0();
-    EmitArrayStorageAddr(ASub.StrExpr);
-    EmitPopTo('x1');
+    Self.Emit(#9'mov x1, x0');
+    EmitPopTo('x0');
     EmitIntLiteral('x2', ESz);
     Self.Emit(#9'mul x1, x1, x2');
     Self.Emit(#9'add x0, x0, x1');
@@ -14327,12 +14421,24 @@ begin
       reference, so its release is deferred to the statement boundary, after
       the element has been consumed -- releasing it here would leave the
       element address dangling }
-    Self.EmitExprToX0(ASub.IndexExpr);
-    EmitPushX0();
+    { left to right: the array, then the index.  A borrowed array is
+      pinned while an index that may run code is evaluated (it could resize
+      the array and free the block) }
     Self.EmitExprToX0(ASub.StrExpr);
     if ArcExprOwnsRef(ASub.StrExpr) then
+      DeferNativeRelease('_DynArrayRelease')
+    else if (ASub.StrExpr.ResolvedType.Kind = tyDynArray) and
+            ExprMayCall(ASub.IndexExpr) then
+    begin
+      EmitPushX0();
+      EmitCallSym('_DynArrayAddRef');
+      EmitPopTo('x0');
       DeferNativeRelease('_DynArrayRelease');
-    EmitPopTo('x1');
+    end;
+    EmitPushX0();
+    Self.EmitExprToX0(ASub.IndexExpr);
+    Self.Emit(#9'mov x1, x0');
+    EmitPopTo('x0');
     if ASub.StrExpr.ResolvedType.Kind = tyDynArray then
       EmitDynIndexCheck('x0', 'x1');
     EmitIntLiteral('x2', ESz);
@@ -19819,9 +19925,63 @@ begin
   Self.Emit(Format(#9'cmp %s, x16', [AIdx]));
   Self.Emit(Format(#9'b.lo %s', [OkL]));
   Self.Emit(FailL + ':');
+  { an owned value parked for the store this check guards is released
+    first: the raise skips the store that would have taken it over }
+  if FRngFailLoad <> '' then
+  begin
+    Self.Emit(FRngFailLoad);
+    if FRngFailRec <> nil then
+      Self.EmitRecordFieldReleases(FRngFailRec, FRngFailReg, False)
+    else
+      EmitCallSym(FRngFailSym);
+  end;
   EmitCallSym('_Raise_RangeError');
   Self.Emit(#9'brk #1');
   Self.Emit(OkL + ':');
+end;
+
+procedure TArm64Backend.ArmRngFailRelease(AElem: TTypeDesc; AOff: Int;
+  AOwnedRec: Boolean);
+begin
+  DisarmRngFailRelease();
+  if AElem = nil then
+    Exit;
+  if AOwnedRec then
+  begin
+    if (AElem.Kind <> tyRecord) or
+       RecretManagedClean(TRecordTypeDesc(AElem)) then
+      Exit;
+    FRngFailLoad := Format(#9'ldr x19, [sp, #%d]', [AOff]);
+    FRngFailReg := 'x19';
+    FRngFailRec := TRecordTypeDesc(AElem);
+    Exit;
+  end;
+  if AElem.IsString() then
+    FRngFailSym := '_StringRelease'
+  else if AElem.Kind in [tyClass, tyInterface] then
+    FRngFailSym := '_ClassRelease'
+  else if AElem.Kind = tyDynArray then
+    FRngFailSym := '_DynArrayRelease'
+  else if ArcTypeIsRefClosure(AElem) then
+  begin
+    { the Env half, retained by the value's evaluation }
+    FRngFailSym := '_ClassRelease';
+    FRngFailLoad := Format(#9'ldr x0, [sp, #%d]', [AOff + 8]);
+    FRngFailReg := 'x0';
+    Exit;
+  end
+  else
+    Exit;
+  FRngFailLoad := Format(#9'ldr x0, [sp, #%d]', [AOff]);
+  FRngFailReg := 'x0';
+end;
+
+procedure TArm64Backend.DisarmRngFailRelease;
+begin
+  FRngFailLoad := '';
+  FRngFailReg := '';
+  FRngFailSym := '';
+  FRngFailRec := nil;
 end;
 
 { ClassCreate(Cls, args...): construction from a metaclass VALUE.  The

@@ -58,6 +58,12 @@ type
       array fails the check after it; the chained pin holds for an
       interface-method and a getter-property value }
     procedure TestRun_EvaluatedOnce_Shrink_GetterPins;
+    { left to right: the array (receiver), then the index, then the value,
+      for reads and writes, on every ISA }
+    procedure TestRun_LeftToRight_ArrayIndexValue;
+    { an owned value whose evaluation shrinks the array so the check after
+      it raises is released, not leaked }
+    procedure TestDebug_ShrinkingValue_NoLeak;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -815,6 +821,101 @@ begin
   AssertRTLRunsOnAll(Src,
     'made 1 stored 7' + LE + 'index evaluated 2 4 5' + LE + 'shrink 1' + LE +
     'intf 3 50000' + LE + 'getter 3 60000' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestRun_LeftToRight_ArrayIndexValue;
+const
+  Src = '''
+    program LeftToRight;
+    uses SysUtils;
+    type
+      TIntArr = array of Int32;
+      TSA = array[0..2] of Int32;
+      THold = class Arr: TIntArr; end;
+      TRec = record Arr: TIntArr; end;
+    var
+      G: TIntArr; M: array of TIntArr; H: THold; R: TRec; S: String;
+      T: String; X: Int32; C: Int32;
+    function Tr(const AWhat: string; AN: Int32): Int32;
+    begin T := T + AWhat; Result := AN end;
+    function F: TIntArr; begin T := T + 'F'; Result := G end;
+    function GetM: array of TIntArr; begin T := T + 'M'; Result := M end;
+    function MakeObj: THold; begin T := T + 'O'; Result := H end;
+    function GetSA: TSA; begin T := T + 'S'; Result[1] := 4 end;
+    function GetStr: String; begin T := T + 'S'; Result := S end;
+    procedure Show(const AName: string); begin WriteLn(AName, ' ', T); T := '' end;
+    begin
+      SetLength(G, 3); SetLength(M, 3); SetLength(M[1], 3);
+      H := THold.Create(); SetLength(H.Arr, 3); SetLength(R.Arr, 3);
+      S := 'abc';
+      F()[Tr('i', 1)] := Tr('v', 5); Show('w-call');
+      M[Tr('i', 1)][Tr('j', 2)] := Tr('v', 6); Show('w-chain');
+      GetM()[Tr('i', 1)][Tr('j', 2)] := Tr('v', 7); Show('w-callchain');
+      MakeObj().Arr[Tr('i', 1)] := Tr('v', 8); Show('w-recv');
+      R.Arr[Tr('i', 1)] := Tr('v', 9); Show('w-field');
+      G[Tr('i', 0)] := Tr('v', 3); Show('w-named');
+      X := F()[Tr('i', 1)]; Show('r-call');
+      X := M[Tr('i', 1)][Tr('j', 2)]; Show('r-chain');
+      X := GetM()[Tr('i', 1)][Tr('j', 2)]; Show('r-callchain');
+      X := MakeObj().Arr[Tr('i', 1)]; Show('r-recv');
+      X := GetSA()[Tr('i', 1)]; Show('r-static');
+      C := Ord(GetStr()[Tr('i', 1)]); Show('r-string');
+      X := F()[Tr('i', 1)] + Tr('k', 1); Show('r-sum');
+      WriteLn(G[0], G[1], M[1][2], H.Arr[1], R.Arr[1], X, C);
+      H.Free()
+    end.
+    ''';
+begin
+  AssertRTLRunsOnAll(Src,
+    'w-call Fiv' + LE + 'w-chain ijv' + LE + 'w-callchain Mijv' + LE +
+    'w-recv Oiv' + LE + 'w-field iv' + LE + 'w-named iv' + LE +
+    'r-call Fi' + LE + 'r-chain ij' + LE + 'r-callchain Mij' + LE +
+    'r-recv Oi' + LE + 'r-static Si' + LE + 'r-string Si' + LE +
+    'r-sum Fik' + LE + '35789698' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestDebug_ShrinkingValue_NoLeak;
+begin
+  AssertLeakFreeOnAll('''
+    program ShrinkNoLeak;
+    uses SysUtils;
+    type
+      TProc = reference to procedure;
+      TRec = record N: Int32; S: String; end;
+      IFoo = interface function Get: Int32; end;
+      TFoo = class(TObject, IFoo) function Get: Int32; end;
+      TBox = class N: Int32; end;
+      TIntArr = array of Int32;
+      THold = record SA: array of String; end;
+    var
+      SA: array of String; BA: array of TBox; DA: array of TIntArr;
+      XA: array of IFoo; CA: array of TProc; RA: array of TRec; H: THold;
+      Caught: Int32;
+    function TFoo.Get: Int32; begin Result := 1 end;
+    function VS: String; begin SetLength(SA, 1); Result := IntToStr(7) + 's' end;
+    function VB: TBox; begin SetLength(BA, 1); Result := TBox.Create() end;
+    function VD: TIntArr; begin SetLength(DA, 1); SetLength(Result, 2) end;
+    function VX: IFoo; begin SetLength(XA, 1); Result := TFoo.Create() end;
+    function VC: TProc; var K: Int32;
+    begin SetLength(CA, 1); K := 3; Result := procedure begin K := K + 1 end end;
+    function VR: TRec; begin SetLength(RA, 1); Result.S := IntToStr(8) + 'r' end;
+    function VH: String; begin SetLength(H.SA, 1); Result := IntToStr(9) + 'h' end;
+    procedure Probe(AP: TProc);
+    begin
+      try AP() except on E: ERangeError do Caught := Caught + 1 end
+    end;
+    begin
+      SetLength(SA, 3); Probe(procedure begin SA[2] := VS() end);
+      SetLength(BA, 3); Probe(procedure begin BA[2] := VB() end);
+      SetLength(DA, 3); Probe(procedure begin DA[2] := VD() end);
+      SetLength(XA, 3); Probe(procedure begin XA[2] := VX() end);
+      SetLength(CA, 3); Probe(procedure begin CA[2] := VC() end);
+      SetLength(RA, 3); Probe(procedure begin RA[2] := VR() end);
+      SetLength(H.SA, 3); Probe(procedure begin H.SA[2] := VH() end);
+      WriteLn('caught ', Caught);
+      SA := nil; BA := nil; DA := nil; XA := nil; CA := nil; RA := nil; H.SA := nil
+    end.
+    ''', 'caught 7');
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;

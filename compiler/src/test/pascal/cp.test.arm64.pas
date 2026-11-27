@@ -4980,7 +4980,8 @@ var
 begin
   { G[I, J] desugars to G[I][J]: the inner row's storage address is the
     outer element's address (row stride 12 for array[1..3] of Integer), then
-    the column index (rebased by its low bound 1) scales by 4.  Both the
+    the column index (rebased by its low bound 1) scales by 4 -- the row
+    first, then the column index, left to right.  Both the
     write (a BaseExpr chain, was NotYet) and the read (a nested subscript,
     was NotYet) take that path. }
   AsmT := GenAsm(
@@ -4997,7 +4998,8 @@ begin
     ''', TargetArm64);
   AssertTrue('row stride then column stride',
     Pos(#9'movz x2, #12'#10#9'mul x1, x1, x2'#10#9'add x0, x0, x1'#10 +
-        #9'ldr x1, [sp], #16'#10#9'movz x2, #4', AsmT) >= 0);
+        #9'str x0, [sp, #-16]!'#10#9'movz x0, #3'#10#9'sub x0, x0, #1'#10 +
+        #9'mov x1, x0'#10#9'ldr x0, [sp], #16'#10#9'movz x2, #4', AsmT) >= 0);
   AssertTrue('column index rebased by its low bound',
     Pos(#9'sub x0, x0, #1', AsmT) >= 0);
   AssertTrue('element stored as a word', Pos(#9'str w0, [x9]', AsmT) >= 0);
