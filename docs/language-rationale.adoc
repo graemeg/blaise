@@ -10166,13 +10166,101 @@ in Delphi and FPC).  Its argument must be a variable, field or element; the
 data of a dynamic array returned by a call is released at the end of the
 statement, so `Pointer(MakeArr())` is rejected.
 
-In an element write `A[I] := V` the index is checked before `V` is
-evaluated, on every target: with `I` out of range, `A[I] := F()` raises
-without calling `F`.  The element's address is still computed after `V`,
-which may resize the array, and is checked again there.  (x86-64 evaluated
-`V` first until 2026-11-27, so `F` ran and an owned result it returned
-leaked when the check raised; arm64 did the same for a record's
-dynamic-array field.)
+==== Order of evaluation in an element write
+
+An element write to a dynamic array -- `A[I] := V`, `R.Arr[I] := V`,
+`F()[I] := V`, `M[I][J] := V` -- runs in this order on every target:
+
+. The array and the index `I` are evaluated, each exactly once.  The order
+  of these two relative to each other is not specified.
+. `I` is checked against the array's current length.  Out of range, the
+  write raises `ERangeError` here: `V` is never evaluated, so
+  `A[99] := F()` does not call `F`.
+. `V` is evaluated.
+. The element's address is taken, and `I` is checked again against the
+  array's length at that moment.  A failure here raises `ERangeError` too,
+  after `V`'s side effects.
+. The value is stored.
+
+[source,pascal]
+----
+function Next: Int;
+begin
+  WriteLn('Next called');
+  Result := 1
+end;
+
+SetLength(A, 2);
+A[5] := Next();     // ERangeError; 'Next called' is not printed
+----
+
+Evaluating `V` may run code that resizes or replaces the array being
+written (`A[I] := Grow()`, where `Grow` calls `SetLength(A, ...)`).  What
+step 4 sees then depends on what the array is:
+
+* *A named array* -- a variable, a parameter, a field (`A`, `R.Arr`,
+  `Self.FArr`, a `var` parameter, a captured variable) -- is a storage
+  location, so it is read again after `V`: the value is stored in the array
+  as `V` left it.
+* *An array produced by an expression* -- an element of an outer array
+  (`M[I]` in `M[I][J] := V`) or a call result (`F()` in `F()[I] := V`) --
+  is evaluated once, in step 1, and kept alive until the store.  The value
+  is stored in that array, the one the statement started with.  If `V`
+  replaced it (`SetLength(M[I], ...)` copies a block that is shared), the
+  write lands in the old array and is lost along with it.
+
+Either way the store never reaches memory that has been freed.
+
+A multi-level write checks each level as it is reached: in `M[I][J] := V`
+the read of `M[I]` is checked first, then `J` against the inner array,
+both before `V`.
+
+===== Rationale
+
+* *A failed write has no side effects of its own.*  Evaluating `V` first
+  would run a call whose result is then discarded -- a log line written, a
+  counter bumped, an object created -- for a statement that did nothing.
+  Checking first means an out-of-range write raises with the program's
+  state exactly as the statement found it.
+* *No leak on the error path.*  An owned result of `V` (a string, an object,
+  a dynamic array returned by a call) is held in a temporary until it is
+  stored.  If the check raised after `V`, that temporary was never released:
+  the unwind cleanup releases a routine's variables, not the transient
+  values parked in the middle of a statement.
+* *The same program behaves the same on every target.*  Before 2026-11-27
+  x86-64 evaluated `V` before checking and arm64 checked first, except for
+  a record's dynamic-array field, where both evaluated `V` first.  The
+  observable difference -- whether `F` ran -- depended on the CPU.
+* *The write is memory-safe whatever `V` does.*  The length checked in
+  step 2 can be stale by step 4, so the address is taken afresh there and
+  the index re-checked.  Until 2026-11-27 arm64 took a named array's
+  element address before evaluating `V`, and x86-64 did so for a record
+  call or an interface value, so `A[0] := Grow()` stored into the block
+  `Grow` had just freed; a chained write did the same on both.
+* *A named array follows its variable; an expression's array is kept.*
+  Re-reading a variable after `V` is free of side effects and gives the
+  answer a reader expects (the write is visible in `A`).  Re-evaluating an
+  expression such as `M[I]` or `F()` would evaluate it, and its index, a
+  second time, breaking step 1; keeping the array alive instead costs one
+  retain and release, paid only when `V` contains a call.
+
+===== Alternatives considered
+
+* *Evaluate the value first, then check (Rust's order for `a[i] = f()`).*
+  Rejected: it runs `F` for a write that then fails and needs a cleanup of
+  `F`'s result on the failure path.  Rust can afford that order because its
+  values are dropped on unwind; Blaise's transients are not.
+* *Check only after the value.*  The earlier x86-64 behaviour; rejected for
+  the reasons above.
+* *Check only before the value.*  Rejected: a value that shrinks the array
+  would turn the store into an unchecked out-of-bounds write.
+* *Re-evaluate the array expression of a chained write after `V`.*
+  Rejected: `M[I]` -- and `I` -- would be evaluated twice, so a side effect
+  in either runs twice.
+* *Specify the order of the array and index expressions too.*  Not done:
+  the backends differ (x86-64 evaluates a chained base before the index,
+  arm64 the index first), a program that depends on it is fragile, and
+  neither Delphi nor FPC specifies it.
 
 === Rationale
 

@@ -48,6 +48,10 @@ type
     procedure TestSemantic_PointerOfDynArray;
     { x86-64: the index of A[I] := F() is checked before F is called }
     procedure TestCodegen_BadIndexWrite_CheckPrecedesValue;
+    { the element address of A[I] := V is taken after V (which may resize
+      A) and the index checked again there, on both ISAs and for the
+      record-call and interface arms }
+    procedure TestCodegen_ValueFirst_ThenAddress;
     procedure TestParse_DynArray_InlineVarDecl_AcceptsDecl;
     procedure TestParse_DynArray_Combined_TypeAndVar;
     procedure TestParse_DynArray_TypeName_EncodesCorrectly;
@@ -779,6 +783,51 @@ begin
   AssertTrue('the string write checks before calling VS',
     (Pos('callq _Raise_RangeError', Main) >= 0) and
     (Pos('callq _Raise_RangeError', Main) < Pos('callq VS', Main)));
+end;
+
+
+procedure TDynArrayTests.TestCodegen_ValueFirst_ThenAddress;
+const
+  Src = '''
+    program P;
+    type TRec = record N: Int32; S: String; end;
+      IFoo = interface end;
+    var IA: array of Int32; RA: array of TRec; XA: array of IFoo; F: IFoo;
+    function GI: Int32; begin Result := 1 end;
+    function GR: TRec; begin Result.N := 1 end;
+    function GX: IFoo; begin Result := F end;
+    begin
+      IA[0] := GI();
+      RA[0] := GR();
+      XA[0] := GX()
+    end.
+    ''';
+
+  procedure CheckAfter(const AAsm, ACall, ARaise, AWhat: string);
+  var
+    Rest: string;
+    P: Int;
+  begin
+    P := Pos(ACall, AAsm);
+    AssertTrue(AWhat + ': the value call is emitted', P >= 0);
+    Rest := Copy(AAsm, P + Length(ACall), Length(AAsm));
+    AssertTrue(AWhat + ': the index is checked again after the value',
+      Pos(ARaise, Rest) >= 0);
+  end;
+
+var
+  X86, A64: string;
+begin
+  X86 := GenAsm(Src, TargetX86_64);
+  X86 := Copy(X86, Pos(#10'main:', X86), Length(X86));
+  A64 := GenAsm(Src, TargetArm64);
+  A64 := Copy(A64, Pos(#10'_main:', A64), Length(A64));
+  CheckAfter(X86, 'callq GI', 'callq _Raise_RangeError', 'x86-64 Int32');
+  CheckAfter(X86, 'callq GR', 'callq _Raise_RangeError', 'x86-64 record call');
+  CheckAfter(X86, 'callq GX', 'callq _Raise_RangeError', 'x86-64 interface');
+  CheckAfter(A64, 'bl _GI', 'bl __Raise_RangeError', 'arm64 Int32');
+  CheckAfter(A64, 'bl _GR', 'bl __Raise_RangeError', 'arm64 record call');
+  CheckAfter(A64, 'bl _GX', 'bl __Raise_RangeError', 'arm64 interface');
 end;
 
 initialization

@@ -17589,6 +17589,7 @@ var
   PropRelStr: Boolean;
   PtrSlot: string;
   IdxTmp: string;
+  RecBuf: string;
   RetT: TTypeDesc;
 begin
   { An empty statement (e.g. the body of `for x := 0 to N do;`) parses to a nil
@@ -21051,9 +21052,104 @@ begin
       begin
         Self.EmitExprToEax(SSA.BaseExpr);
         { F()[I] := V: the call's owned reference is released at the
-          statement boundary, after the store (BUG-20261017; it leaked) }
-        Self.DeferOwnedDynArrayBase(SSA.BaseExpr);
+          statement boundary, after the store (BUG-20261017; it leaked).
+          A borrowed inner array (M[I][J] := V) is pinned the same way
+          when V may run code: V could resize M[I] and free the block the
+          store targets }
+        if NativeExprOwnsRef(SSA.BaseExpr) then
+          Self.DeferOwnedDynArrayBase(SSA.BaseExpr)
+        else if (SSA.ResolvedArrayType.Kind = tyDynArray) and
+                ExprMayCall(SSA.ValueExpr) then
+        begin
+          Self.Emit(#9'pushq %rax');
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _DynArrayAddRef');
+          Self.Emit(#9'popq %rax');
+          Self.DeferNativeRelease('_DynArrayRelease');
+        end;
         Self.Emit(#9'pushq %rax');             { stack: [baseptr] }
+      end;
+      { A dynamic array's index is checked BEFORE the value is evaluated,
+        as on arm64: A[I] := F() with I out of range raises without calling
+        F (an owned result F returned leaked when the check raised).  The
+        checked index is parked in a scratch slot so it is evaluated once.
+        Every arm below then evaluates the value BEFORE it derives the
+        element's address, and checks the index again there: the value may
+        resize or replace the array, and an address taken first would point
+        into the block it freed. }
+      IdxTmp := '';
+      if SSA.ResolvedArrayType.Kind = tyDynArray then
+      begin
+        IdxTmp := Self.NewScratchOperand(8);
+        Self.EmitExprToEax(SSA.IndexExpr);
+        Self.EmitDynWriteBaseToRcx(SSA, 0);
+        Self.EmitDynIndexCheck('%rcx');
+        Self.Emit(Format(#9'movq %%rax, %s', [IdxTmp]));
+      end;
+      { Record-returning call into a DYNAMIC array: the call writes its
+        result into a scratch buffer first (it may resize the array), then
+        the element is derived fresh, its old fields released and the
+        result moved in -- its +1 references transfer. }
+      if (DAElemType.Kind = tyRecord) and Self.IsNativeRecordCall(SSA.ValueExpr) and
+         (IdxTmp <> '') then
+      begin
+        RecBuf := Self.NewScratchOperand(DAElemType.RawSize());
+        Self.Emit(#9'pushq %rbx');
+        Self.Emit(#9'pushq %r15');
+        Self.Emit(Format(#9'leaq %s, %%rbx', [RecBuf]));
+        Self.Emit(#9'movq %rbx, %rdi');
+        Self.Emit(#9'xorl %esi, %esi');
+        Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
+        Self.Emit(#9'callq memset');
+        Self.EmitRecordCallSretAt(SSA.ValueExpr, '(%rbx)');
+        Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]));
+        Self.EmitDynWriteBaseToRcx(SSA, 16);
+        Self.EmitDynIndexCheck('%rcx');
+        Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
+        Self.Emit(#9'addq %rcx, %rax');
+        Self.Emit(#9'movq %rax, %r15');           { element address }
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
+        Self.Emit(#9'movq %r15, %rdi');
+        Self.Emit(#9'movq %rbx, %rsi');
+        Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
+        Self.Emit(#9'callq memcpy');
+        Self.Emit(#9'popq %r15');
+        Self.Emit(#9'popq %rbx');
+        if SSA.BaseExpr <> nil then
+          Self.Emit(#9'addq $8, %rsp');         { drop stashed base ptr }
+        Exit;
+      end;
+      { Interface element into a DYNAMIC array: the value goes into a zeroed
+        16-byte stack temp first (retain-new against a nil old, as the
+        array-field arm does), then the element is derived fresh, its old
+        obj released and the owned pair moved in. }
+      if (DAElemType.Kind = tyInterface) and (IdxTmp <> '') then
+      begin
+        Self.Emit(#9'pushq %rbx');
+        Self.Emit(#9'subq $16, %rsp');
+        Self.Emit(#9'movq $0, (%rsp)');
+        Self.Emit(#9'movq $0, 8(%rsp)');
+        Self.Emit(#9'movq %rsp, %rbx');           { temp pair address }
+        Self.EmitInterfaceToFieldSlotsAt(SSA.ValueExpr, '%rbx', 0, DAElemType);
+        Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]));
+        Self.EmitDynWriteBaseToRcx(SSA, 24);
+        Self.EmitDynIndexCheck('%rcx');
+        Self.Emit(#9'imulq $16, %rax');
+        Self.Emit(#9'addq %rax, %rcx');           { element address }
+        Self.Emit(#9'pushq %rcx');
+        Self.Emit(#9'movq (%rcx), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'popq %rcx');
+        Self.Emit(#9'movq %rsp, %rbx');           { re-derive temp (rsp unmoved) }
+        Self.Emit(#9'movq (%rbx), %rax');
+        Self.Emit(#9'movq %rax, (%rcx)');
+        Self.Emit(#9'movq 8(%rbx), %rax');
+        Self.Emit(#9'movq %rax, 8(%rcx)');
+        Self.Emit(#9'addq $16, %rsp');
+        Self.Emit(#9'popq %rbx');
+        if SSA.BaseExpr <> nil then
+          Self.Emit(#9'addq $8, %rsp');           { drop stashed base ptr }
+        Exit;
       end;
       { Record-returning call as the RHS: sret directly into the element —
         EmitExprToEax cannot evaluate a record call (the callee writes its
@@ -21150,21 +21246,6 @@ begin
         width, then spill the bit pattern through %rax onto the stack (x86 has
         no push for xmm regs).  EmitExprToEax cannot evaluate a float
         expression; the integer store path (movq) would store garbage. }
-      { A dynamic array's index is checked BEFORE the value is evaluated,
-        as on arm64: A[I] := F() with I out of range raises without calling
-        F (an owned result F returned leaked when the check raised).  The
-        checked index is parked in a scratch slot so it is evaluated once;
-        the check after the value stays, since the value may resize the
-        array. }
-      IdxTmp := '';
-      if SSA.ResolvedArrayType.Kind = tyDynArray then
-      begin
-        IdxTmp := Self.NewScratchOperand(8);
-        Self.EmitExprToEax(SSA.IndexExpr);
-        Self.EmitDynWriteBaseToRcx(SSA, 0);
-        Self.EmitDynIndexCheck('%rcx');
-        Self.Emit(Format(#9'movq %%rax, %s', [IdxTmp]));
-      end;
       if IsFloatFamily(DAElemType) then
       begin
         Self.EmitExprToXmm0(SSA.ValueExpr);

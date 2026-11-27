@@ -236,6 +236,11 @@ type
       that checked index (EmitFieldElemAddrToX0 reloads it) }
     [Unretained] FFieldIdxStmt: TFieldAssignment;
     FFieldIdxSlot: string;
+    { A[I] := V on a named dynamic array: the write whose element address,
+      parked before V is evaluated, EmitElemStoreStacked re-derives after V
+      (V may resize or replace the array), and the slot holding its index }
+    [Unretained] FElemRefresh: TStaticSubscriptAssign;
+    FElemRefreshIdx: string;
     { '__opnd_<n>' park slots in use by the string operators being emitted
       (unwind design D4: an operand held across a later call lives at a
       fixed x29 offset the unwind tables can name, not in an sp push) }
@@ -572,6 +577,13 @@ type
       top, dropping the park (see the body for the ARC discipline). }
     procedure EmitElemStoreStacked(AElem: TTypeDesc; AValue: TASTExpr;
       ANode: TASTNode);
+    { x0 := the data pointer of the named dynamic array AStmt writes (a
+      field of Self, a captured, local, var-parameter or global array) }
+    procedure EmitDynNamedBaseToX0(AStmt: TStaticSubscriptAssign);
+    { Re-derive the element address parked at [sp, #AOff] for ARef after
+      its value was evaluated (x0/x1 preserved); no-op when ARef is nil }
+    procedure EmitRefreshParkedElemAddr(ARef: TStaticSubscriptAssign;
+      const AIdx: string; AElemSize, AOff: Int);
     procedure EmitRaise(AStmt: TRaiseStmt);
     procedure EmitRepeat(AStmt: TRepeatStmt);
     procedure EmitCase(AStmt: TCaseStmt);
@@ -11332,13 +11344,45 @@ procedure TArm64Backend.EmitElemStoreStacked(AElem: TTypeDesc; AValue: TASTExpr;
 var
   Elem: TTypeDesc;
   NL: Int;
+  Ref: TStaticSubscriptAssign;
+  RefIdx: string;
+  ESz: Int;
 begin
   Elem := AElem;
+  ESz := Elem.RawSize();
+  { the write whose parked address is re-derived after the value: taken
+    here and cleared, so a store emitted while the value is evaluated does
+    not see it }
+  Ref := FElemRefresh;
+  RefIdx := FElemRefreshIdx;
+  FElemRefresh := nil;
+  FElemRefreshIdx := '';
   if Elem.Kind = tyInterface then
   begin
-    { the element IS an (obj, itab) pair: the shared pair store retains the
-      new obj, releases the old one and writes both halves }
-    EmitIntfStoreStacked(0, AValue, Elem);
+    if Ref = nil then
+    begin
+      { the element IS an (obj, itab) pair: the shared pair store retains
+        the new obj, releases the old one and writes both halves }
+      EmitIntfStoreStacked(0, AValue, Elem);
+      Exit;
+    end;
+    { the same pair store, with the element address re-derived once the
+      value has been evaluated }
+    if not EmitIntfPairToX0X1(AValue, Elem) then
+    begin
+      Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+      EmitCallSym('_ClassAddRef');
+      Self.Emit(#9'ldp x0, x1, [sp], #16');
+    end;
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [addr][obj,itab] }
+    EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    Self.Emit(#9'ldr x0, [x9]');
+    EmitCallSym('_ClassRelease');
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    Self.Emit(#9'stp x0, x1, [x9]');
+    Self.Emit(#9'add sp, sp, #16');               { drop the address }
     Exit;
   end;
   if Elem.IsString() or (Elem.Kind in [tyClass, tyDynArray]) then
@@ -11358,6 +11402,7 @@ begin
       EmitPopTo('x0');
     end;
     EmitPushX0();                              { [addr][val] }
+    EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
     Self.Emit(#9'ldr x9, [sp, #16]');
     Self.Emit(#9'ldr x0, [x9]');
     if Elem.IsString() then
@@ -11379,6 +11424,7 @@ begin
       the parked element address is read from above it, and both go. }
     NL := JumboSetLiteralBytes(AValue);
     Self.EmitExprToX0(AValue);         { source bitmap address }
+    EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, NL);
     Self.Emit(#9'mov x1, x0');
     if NL = 0 then
       Self.Emit(#9'ldr x0, [sp]')
@@ -11396,6 +11442,7 @@ begin
       retained by EmitFatPairToX0X1, the old one released here). }
     EmitFatPairToX0X1(AValue, Elem);
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [elemaddr][pair] }
+    EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
     if ArcTypeIsRefClosure(Elem) then
     begin
       Self.Emit(#9'ldr x9, [sp, #16]');
@@ -11416,6 +11463,7 @@ begin
   begin
     Self.EmitExprToD0OrConvert(AValue);
     Self.Emit(#9'fcvt s0, d0');
+    EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 0);
     Self.Emit(#9'ldr x9, [sp], #16');
     Self.Emit(#9'str s0, [x9]');
     Exit;
@@ -11431,6 +11479,7 @@ begin
     if IsRecordCallArg(AValue) then
     begin
       EmitRecCallToRret(AValue);   { x0 = result addr; +1 transfers }
+      EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 0);
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       Self.Emit(#9'mov x19, x0');           { the result, across the walk }
       Self.Emit(#9'ldr x22, [sp, #16]');    { the parked element address }
@@ -11449,6 +11498,7 @@ begin
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       EmitRecAddrToX0(AValue);
       Self.Emit(#9'mov x19, x0');
+      EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
       Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
       Self.EmitRecordFieldRetains(TRecordTypeDesc(Elem), 'x19');
       { copy site: no-zero release (BUG-20260720-managed-record-self-assign) }
@@ -11462,6 +11512,7 @@ begin
       Exit;
     end;
     EmitRecAddrToX0(AValue);
+    EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 0);
     Self.Emit(#9'mov x1, x0');
     Self.Emit(#9'ldr x0, [sp], #16');      { the parked element address }
     EmitIntLiteral('x2', Elem.RawSize());
@@ -11492,6 +11543,7 @@ begin
     Self.Emit(#9'stp x19, x22, [sp, #-16]!');
     EmitRecAddrToX0(AValue);
     Self.Emit(#9'mov x19, x0');
+    EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 16);
     Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
     if AggHasManaged(Elem) then
     begin
@@ -11509,6 +11561,7 @@ begin
   else
     { every element kind the front end admits has an arm above }
     InternalError('array element of an unhandled type', ANode);
+  EmitRefreshParkedElemAddr(Ref, RefIdx, ESz, 0);
   Self.Emit(#9'ldr x9, [sp], #16');
   case Elem.RawSize() of
     1: Self.Emit(#9'strb w0, [x9]');
@@ -11523,6 +11576,8 @@ end;
 procedure TArm64Backend.EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
 var
   Elem: TTypeDesc;
+  RefSlot, SavedRefIdx: string;
+  SavedRef: TStaticSubscriptAssign;
 begin
   if AStmt.PropWriteInfo <> nil then
   begin
@@ -11682,9 +11737,18 @@ begin
     begin
       Self.EmitExprToX0(AStmt.BaseExpr);
       { F()[I] := V: the call's owned reference is released at the
-        statement boundary, after the store (BUG-20261017) }
+        statement boundary, after the store (BUG-20261017).  A borrowed
+        inner array (M[I][J] := V) is pinned the same way when V may run
+        code: V could resize M[I] and free the block the store targets }
       if ArcExprOwnsRef(AStmt.BaseExpr) then
+        DeferNativeRelease('_DynArrayRelease')
+      else if ExprMayCall(AStmt.ValueExpr) then
+      begin
+        EmitPushX0();
+        EmitCallSym('_DynArrayAddRef');
+        EmitPopTo('x0');
         DeferNativeRelease('_DynArrayRelease');
+      end;
     end;
   end
   else if AStmt.IsImplicitSelf then
@@ -11740,11 +11804,79 @@ begin
   EmitPopTo('x1');
   if AStmt.ResolvedArrayType.Kind = tyDynArray then
     EmitDynIndexCheck('x0', 'x1');
+  { a named dynamic array: the address parked below is re-derived after the
+    value, which may resize or replace the array (the store landed in the
+    block it freed); the checked index is kept for that }
+  RefSlot := '';
+  if (AStmt.ResolvedArrayType.Kind = tyDynArray) and (AStmt.BaseExpr = nil) then
+  begin
+    RefSlot := '__eidx_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(RefSlot) then
+      AddLocal(RefSlot, 8);
+    EmitStoreSlot('x1', RefSlot);
+  end;
   EmitIntLiteral('x2', Elem.RawSize());
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');
   EmitPushX0();                                { [elemaddr] }
+  SavedRef := FElemRefresh;
+  SavedRefIdx := FElemRefreshIdx;
+  if RefSlot <> '' then
+  begin
+    FElemRefresh := AStmt;
+    FElemRefreshIdx := RefSlot;
+  end
+  else
+  begin
+    FElemRefresh := nil;
+    FElemRefreshIdx := '';
+  end;
   EmitElemStoreStacked(Elem, AStmt.ValueExpr, AStmt);
+  FElemRefresh := SavedRef;
+  FElemRefreshIdx := SavedRefIdx;
+end;
+
+procedure TArm64Backend.EmitDynNamedBaseToX0(AStmt: TStaticSubscriptAssign);
+begin
+  if AStmt.IsImplicitSelf then
+  begin
+    EmitLoadSlot('x0', 'Self');
+    Self.Emit(Format(#9'ldr x0, [x0, #%d]',
+      [TFieldInfo(AStmt.ImplicitFieldInfo).Offset]));
+  end
+  else if IsCaptured(AStmt.ArrayName) then
+  begin
+    EmitLoadSlot('x0', '_cap_' + AStmt.ArrayName);
+    if AStmt.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+    Self.Emit(#9'ldr x0, [x0]');
+  end
+  else
+  begin
+    EmitLoadSlot('x0', AStmt.ArrayName);
+    if AStmt.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+  end;
+end;
+
+procedure TArm64Backend.EmitRefreshParkedElemAddr(ARef: TStaticSubscriptAssign;
+  const AIdx: string; AElemSize, AOff: Int);
+begin
+  { the array as it is now: base, the checked index, a second check (the
+    value may have shrunk it), the element address over the parked one }
+  if ARef = nil then
+    Exit;
+  Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+  EmitDynNamedBaseToX0(ARef);
+  EmitLoadSlot('x1', AIdx);
+  EmitDynIndexCheck('x0', 'x1');
+  EmitIntLiteral('x2', AElemSize);
+  Self.Emit(#9'mul x1, x1, x2');
+  Self.Emit(#9'add x0, x0, x1');
+  EmitAddSubImm('add', 'x9', 'sp', AOff + 16);
+  Self.Emit(#9'str x0, [x9]');
+  Self.Emit(#9'ldp x0, x1, [sp], #16');
 end;
 
 procedure TArm64Backend.EmitRaise(AStmt: TRaiseStmt);

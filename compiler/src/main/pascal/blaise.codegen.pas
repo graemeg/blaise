@@ -223,6 +223,11 @@ function IsAggCallValue(AExpr: TASTExpr): Boolean;
   a dynamic array instead, and passes as any dynamic array does. }
 function IsOALitBlock(AExpr: TASTExpr): Boolean;
 function AccessPathHasCall(AExpr: TASTExpr): Boolean;
+{ True unless AExpr is plainly free of calls: a literal, a variable, or
+  fields / elements / operators over those.  Conservative -- an unknown
+  node counts as a call, and so does a property getter or a method call
+  reached through a field -- since a call can run arbitrary code. }
+function ExprMayCall(AExpr: TASTExpr): Boolean;
 
 { The setter call a property-write statement was lowered to by the semantic
   pass (TAssignment / TFieldAssignment / TStaticSubscriptAssign.SetterCall),
@@ -885,6 +890,40 @@ begin
   Result := (AExpr is TArrayLiteralExpr) and
     not ((AExpr.ResolvedType <> nil) and
          (AExpr.ResolvedType.Kind = tyDynArray));
+end;
+
+function ExprMayCall(AExpr: TASTExpr): Boolean;
+var
+  FA: TFieldAccessExpr;
+begin
+  if AExpr = nil then
+    Exit(False);
+  if (AExpr is TIntLiteral) or (AExpr is TFloatLiteral) or
+     (AExpr is TStringLiteral) or (AExpr is TNilLiteral) or
+     (AExpr is TIdentExpr) then
+    Exit(False);
+  if AExpr is TFieldAccessExpr then
+  begin
+    FA := TFieldAccessExpr(AExpr);
+    if FA.IsMethodCall or (FA.PropRead <> nil) or FA.IsStaticPropGet then
+      Exit(True);
+    Exit(ExprMayCall(FA.Base) or ExprMayCall(FA.PropIndexExpr));
+  end;
+  if AExpr is TStringSubscriptExpr then
+    Exit(ExprMayCall(TStringSubscriptExpr(AExpr).StrExpr) or
+         ExprMayCall(TStringSubscriptExpr(AExpr).IndexExpr));
+  if AExpr is TDerefExpr then
+    Exit(ExprMayCall(TDerefExpr(AExpr).Expr));
+  if AExpr is TBinaryExpr then
+    Exit((TBinaryExpr(AExpr).LoweredCall <> nil) or
+         ExprMayCall(TBinaryExpr(AExpr).Left) or
+         ExprMayCall(TBinaryExpr(AExpr).Right));
+  if AExpr is TNotExpr then
+    Exit(ExprMayCall(TNotExpr(AExpr).Expr));
+  if AExpr is TNegExpr then
+    Exit((TNegExpr(AExpr).LoweredCall <> nil) or
+         ExprMayCall(TNegExpr(AExpr).Expr));
+  Result := True;
 end;
 
 function AccessPathHasCall(AExpr: TASTExpr): Boolean;

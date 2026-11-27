@@ -49,6 +49,10 @@ type
     { Pointer(A) on a dynamic array is its data pointer, nil when empty,
       and never checked }
     procedure TestRun_PointerOfDynArray;
+    { A[I] := V where evaluating V resizes A: the store lands in the
+      array as it is after V, never in the block V freed (arm64 parked the
+      element address before evaluating V) }
+    procedure TestRun_ValueResizesTheArray;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -664,6 +668,88 @@ const
     ''';
 begin
   AssertRTLRunsOnAll(Src, 'True' + LE + '7' + LE + 'True' + LE + 'True' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestRun_ValueResizesTheArray;
+const
+  Src = '''
+    program DynResize;
+    uses SysUtils;
+    type
+      TProc = reference to procedure;
+      TBig = set of 0..127;
+      TRec = record N: Int32; S: String; end;
+      TPair = array[0..1] of String;
+      IFoo = interface function Get: Int32; end;
+      TFoo = class(TObject, IFoo) N: Int32; function Get: Int32; end;
+      TBox = class N: Int32; end;
+      TOwner = class FA: array of Int32; procedure Run; function GrowSelf: Int32; end;
+      TIntArr = array of Int32;
+    var
+      IA: array of Int32; SA: array of String; DA: array of Float64;
+      GA: array of Float32; RA: array of TRec; PA: array of TPair;
+      CA: array of TProc; JA: array of TBig; XA: array of IFoo;
+      BA: array of TBox; MA: array of TIntArr; Ow: TOwner;
+    const BIG = 50000;
+    function TFoo.Get: Int32; begin Result := N end;
+    function GI: Int32; begin SetLength(IA, BIG); Result := 5 end;
+    function GS: String; begin SetLength(SA, BIG); Result := IntToStr(6) + 's' end;
+    function GD: Float64; begin SetLength(DA, BIG); Result := 2.5 end;
+    function GG: Float32; begin SetLength(GA, BIG); Result := 1.5 end;
+    function GR: TRec; begin SetLength(RA, BIG); Result.N := 7; Result.S := IntToStr(7) + 'r' end;
+    function GP: TPair; begin SetLength(PA, BIG); Result[0] := IntToStr(8) + 'p'; Result[1] := 'q' end;
+    function GC: TProc; begin SetLength(CA, BIG); Result := procedure begin WriteLn('closure ran') end end;
+    function GJ: TBig; begin SetLength(JA, BIG); Result := [100] end;
+    function GX: IFoo; var F: TFoo; begin SetLength(XA, BIG); F := TFoo.Create(); F.N := 9; Result := F end;
+    function GB: TBox; begin SetLength(BA, BIG); Result := TBox.Create(); Result.N := 10 end;
+    function GM: TIntArr; begin SetLength(MA, BIG); SetLength(Result, 1); Result[0] := 11 end;
+    { M[I][J] := V where V resizes M[I]: the inner array is pinned from its
+      read to the store, so the write lands in it -- the array as the
+      statement found it -- and is lost with it, never in freed memory.
+      SetLength copied the pinned block, so the new array keeps the old
+      value 3 }
+    function GMI: Int32; begin SetLength(MA[0], BIG); Result := 15 end;
+    function TOwner.GrowSelf: Int32; begin SetLength(FA, BIG); Result := 12 end;
+    procedure TOwner.Run; begin FA[0] := GrowSelf(); WriteLn(FA[0]) end;
+    procedure ByVar(var V: TIntArr);
+      function GV: Int32; begin SetLength(V, BIG); Result := 13 end;
+    begin
+      V[0] := GV(); WriteLn(V[0])
+    end;
+    procedure Captured;
+    var L: TIntArr;
+      function GL: Int32; begin SetLength(L, BIG); Result := 14 end;
+    begin
+      SetLength(L, 1); L[0] := GL(); WriteLn(L[0])
+    end;
+    var T: TIntArr;
+    begin
+      SetLength(IA, 1); IA[0] := GI(); WriteLn(IA[0]);
+      SetLength(SA, 1); SA[0] := GS(); WriteLn(SA[0]);
+      SetLength(DA, 1); DA[0] := GD(); WriteLn(Trunc(DA[0] * 2));
+      SetLength(GA, 1); GA[0] := GG(); WriteLn(Trunc(GA[0] * 2));
+      SetLength(RA, 1); RA[0] := GR(); WriteLn(RA[0].N, RA[0].S);
+      SetLength(PA, 1); PA[0] := GP(); WriteLn(PA[0][0], PA[0][1]);
+      SetLength(CA, 1); CA[0] := GC(); CA[0]();
+      SetLength(JA, 1); JA[0] := GJ(); WriteLn(100 in JA[0]);
+      SetLength(XA, 1); XA[0] := GX(); WriteLn(XA[0].Get());
+      SetLength(BA, 1); BA[0] := GB(); WriteLn(BA[0].N); BA[0].Free();
+      SetLength(MA, 1); MA[0] := GM(); WriteLn(MA[0][0]);
+      Ow := TOwner.Create(); SetLength(Ow.FA, 1); Ow.Run(); Ow.Free();
+      SetLength(T, 1); ByVar(T); WriteLn(Length(T));
+      Captured();
+      SetLength(MA, 1); SetLength(MA[0], 1); MA[0][0] := 3;
+      MA[0][0] := GMI();
+      WriteLn(MA[0][0], ' ', Length(MA[0]));
+      WriteLn(Length(IA), ' done')
+    end.
+    ''';
+begin
+  AssertRTLRunsOnAll(Src,
+    '5' + LE + '6s' + LE + '5' + LE + '3' + LE + '77r' + LE + '8pq' + LE +
+    'closure ran' + LE + 'True' + LE + '9' + LE + '10' + LE + '11' + LE +
+    '12' + LE + '13' + LE + '50000' + LE + '14' + LE + '3 50000' + LE +
+    '50000 done' + LE, 0);
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;
