@@ -484,10 +484,23 @@ begin
   begin
     CD := TConstDecl(AConstDecls.Items[J]);
     if CD.IsArrayConst then Continue;  { array static consts not yet imported }
-    if CD.IsString then
-      Par := ATable.FindType('string')
-    else
-      Par := ATable.FindType('Int32');
+    { The type the cold path folded (recorded in TypeName), else the
+      literal kind -- mirroring RegisterConsts for a unit-level const.
+      Typing every member const Int32 lost a Float64 one's value (0). }
+    Par := nil;
+    if CD.TypeName <> '' then
+      Par := ResolveTypeName(CD.TypeName, ATable);
+    if Par = nil then
+    begin
+      if CD.IsString then
+        Par := ATable.FindType('string')
+      else if CD.IsFloat then
+        Par := ATable.FindType('Float64')
+      else if CD.IsUInt64 then
+        Par := ATable.FindType('UInt64')
+      else
+        Par := ATable.FindType('Int32');
+    end;
     { Qualified name only — TFoo.Tag.  This mirrors the from-source
       registration in uSemantic.AnalyseTypeDecls: the bare member name is NOT
       defined globally (it is resolved through the owning type's scope), and

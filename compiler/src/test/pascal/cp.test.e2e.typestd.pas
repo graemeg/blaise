@@ -28,6 +28,10 @@ type
       read back from a cached unit interface
       (BUG-20261113-uint64-cast-const-type) }
     procedure TestRun_ConstCast_BoundaryValuesAndType;
+    { a class's member constants keep their type and value when the unit
+      comes from the cache: a Float64 one read back as 0 and every one was
+      typed Int32 (BUG-20261127-cached-member-const-type) }
+    procedure TestRun_CachedMemberConsts_KeepTypeAndValue;
     { SizeOf, wrap-around and signedness of every new integer name }
     procedure TestRun_IntegerNames_WidthAndArithmetic;
     { Float is Float64 (full double precision), Float32 rounds to single }
@@ -921,6 +925,10 @@ const
       E = Int16(-32769);
       F = UInt16(-1);
       G = Int32(4294967295);
+      UDiv = UInt64(-1) div 2;
+      UMod = UInt64(-1) mod 10;
+      UXor = UInt64(-1) xor 1;
+      UHi = High(UInt64);
     var
       X: UInt64; Y: UInt32; Z: Int8; W: Byte; V: Int16; U: UInt16; T: Int32;
     begin
@@ -930,7 +938,9 @@ const
       X := UAll;
       WriteLn(X, ' ', UTop = UInt64(High(Int64)));
       X := A - 1;
-      WriteLn(X)
+      WriteLn(X);
+      X := UDiv;
+      WriteLn(X, ' ', UMod, ' ', UXor, ' ', UHi div 3)
     end.
     ''';
 var
@@ -948,7 +958,70 @@ begin
     '18446744073709551615 4294967286 -56 44 32767 65535 -1' + #10 +
     'True True' + #10 +
     '18446744073709551615 True' + #10 +
-    '18446744073709551614' + #10, Output);
+    '18446744073709551614' + #10 +
+    '9223372036854775807 5 18446744073709551614 6148914691236517205' + #10,
+    Output);
+end;
+
+procedure TE2ETypeStdTests.TestRun_CachedMemberConsts_KeepTypeAndValue;
+const
+  USrc = '''
+    unit mconsts;
+    interface
+    type
+      TFoo = class
+      public
+        const Big = UInt64(-1);
+        const Lit = 18446744073709551615;
+        const Half = 1.5;
+        const Neg = Int8(200);
+        const Wide = 5000000000;
+        const Name = 'foo';
+        const On = True;
+      end;
+    implementation
+    end.
+    ''';
+  PSrc = '''
+    program P;
+    uses mconsts;
+    var
+      U: UInt64;
+      D: Float64;
+      I: Int8;
+      W: Int64;
+      B: Boolean;
+    begin
+      U := TFoo.Big;
+      WriteLn(U);
+      U := TFoo.Lit;
+      WriteLn(U);
+      D := TFoo.Half;
+      WriteLn(D * 2.0);
+      I := TFoo.Neg;
+      WriteLn(I);
+      W := TFoo.Wide;
+      WriteLn(W);
+      B := TFoo.On;
+      WriteLn(TFoo.Name, ' ', B)
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+  Ok: Boolean;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Ok := CompileAndRunWithUnitNative('mconsts', USrc, PSrc, Output, RCode);
+  AssertTrue('cold compile+run: ' + Output, Ok);
+  AssertEquals('cold', '18446744073709551615' + #10 + '18446744073709551615' +
+    #10 + '3' + #10 + '-56' + #10 + '5000000000' + #10 + 'foo True' + #10,
+    Output);
+  Ok := CompileAndRunInScratch(PSrc, Output, RCode);
+  AssertTrue('warm compile+run: ' + Output, Ok);
+  AssertEquals('warm', '18446744073709551615' + #10 + '18446744073709551615' +
+    #10 + '3' + #10 + '-56' + #10 + '5000000000' + #10 + 'foo True' + #10,
+    Output);
 end;
 
 initialization

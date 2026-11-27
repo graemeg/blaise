@@ -11982,6 +11982,14 @@ begin
           end;
           if ParType = nil then
             ParType := FTable.TypeInteger;   { a set member const }
+          { Record the folded type on an untyped constant, as DefineScalarConst
+            does for a unit-level one, so the cached .bif re-types it the
+            same (RegisterImportedTypeConsts typed every member const Int32,
+            and a Float64 one read back as 0). }
+          if (CD.TypeName = '') and (ParType <> FTable.TypeString) and
+             (ParType <> FTable.TypeDouble) and
+             (ParType <> FTable.TypeInteger) then
+            CD.TypeName := ParType.Name;
           { Qualified name only — TFoo.MaxItems.  The unqualified form is
             resolved through the owning type's scope (see AnalyseIdent), not
             by defining the bare member name globally. }
