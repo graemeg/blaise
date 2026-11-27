@@ -74,6 +74,14 @@ type
       a PChar write and a static-array field write -- left to right, and
       never through a freed block }
     procedure TestDebug_RemainingShapes_LeftToRight_NoLeak;
+    { a value that changes a call-free index (a global) or reassigns the
+      pointer being written: the index is read before the value, a named
+      pointer after it -- the same element on every ISA }
+    procedure TestRun_ValueChangesIndexOrPointer;
+    { a string byte write whose string is reached through a call is left to
+      right; an owned value is released when the value shrinks the array
+      that holds the target, so locating it again raises }
+    procedure TestDebug_StringElemOrder_RelocationRaise_NoLeak;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -1037,6 +1045,72 @@ begin
       'w-sfield iv' + #10 + '5' + #10 + 'w-static-named iv' + #10 +
       'w-strfield-named iv' + #10 + 'w-str-named iv' + #10 + 'x0abc 1zybc' + #10 +
       'w-pchar-named iv' + #10 + '23113' + #10 + 'done');
+end;
+
+procedure TE2EDynBoundsTests.TestRun_ValueChangesIndexOrPointer;
+const
+  Src = '''
+    program ValueChanges;
+    type
+      TSA = array[0..3] of Int32;
+      TRec = record SA: TSA; end;
+    var
+      G: Int32; SA: TSA; R: TRec; A: array of Int32; Buf1, Buf2: TSA;
+      P: PChar; X: Int32;
+    function Next: Int32; begin G := 3; Result := 7 end;
+    function Swap: Int32; begin P := PChar(@Buf2); Result := 5 end;
+    function SwapIdx: Int32; begin P := PChar(@Buf2); Result := 0 end;
+    begin
+      G := 1; SA[G] := Next(); WriteLn(SA[1], SA[3]);
+      G := 1; R.SA[G] := Next(); WriteLn(R.SA[1], R.SA[3]);
+      SetLength(A, 4); G := 1; A[G] := Next(); WriteLn(A[1], A[3]);
+      P := PChar(@Buf1); P[0] := Chr(Swap()); WriteLn(Buf1[0], Buf2[0]);
+      Buf2[0] := 66; P := PChar(@Buf1); Buf1[0] := 65;
+      X := Ord(P[SwapIdx()]); WriteLn(X)
+    end.
+    ''';
+begin
+  { the index is taken before the value (element 1, not 3); a named pointer
+    is read where it is used: after the value (Buf2), after the index
+    (Buf2's 66) }
+  AssertRunsOnAll(Src, '70' + LE + '70' + LE + '70' + LE + '05' + LE + '66' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestDebug_StringElemOrder_RelocationRaise_NoLeak;
+begin
+  AssertLeakFreeOnAll('''
+    program RelocRaise;
+    uses SysUtils;
+    type
+      TSS = array[0..1] of String;
+      TItem = record SA: array of String; end;
+    var
+      Strs: array of String; T: String; DA: array of TSS; Items: array of TItem;
+      Caught: Int32;
+    function Tr(const AWhat: string; AN: Int32): Int32;
+    begin T := T + AWhat; Result := AN end;
+    function VS: String; begin SetLength(DA, 1); Result := IntToStr(7) + 's' end;
+    function VI: String; begin SetLength(Items, 1); Result := IntToStr(8) + 'i' end;
+    begin
+      SetLength(Strs, 2); Strs[1] := IntToStr(10) + 'abc';
+      Strs[Tr('K', 1)][Tr('J', 0)] := Chr(Tr('V', 120));
+      WriteLn(T, ' ', Strs[1]);
+      SetLength(DA, 2);
+      try
+        DA[1][0] := VS()
+      except
+        on E: ERangeError do Caught := Caught + 1
+      end;
+      SetLength(Items, 2); SetLength(Items[1].SA, 1);
+      try
+        Items[1].SA[0] := VI()
+      except
+        on E: ERangeError do Caught := Caught + 1
+      end;
+      WriteLn('caught ', Caught);
+      Strs := nil; DA := nil; Items := nil
+    end.
+    ''', 'KJV x0abc' + #10 + 'caught 2');
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;

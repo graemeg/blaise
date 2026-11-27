@@ -319,6 +319,9 @@ type
     FRngFailReg: string;
     FRngFailSym: string;
     [Unretained] FRngFailRec: TRecordTypeDesc;
+    { set: the armed value was copied to this scratch operand, and every
+      check until DisarmRngFailRelease releases it (not only the next) }
+    FRngFailSlot: string;
     { Rec.Arr[I] read whose index (which may run code) was evaluated before
       its call-free receiver, and the slot holding it }
     [Unretained] FFieldIdxReadFA: TFieldAccessExpr;
@@ -455,6 +458,9 @@ type
     procedure ArmRngFailRelease(AElem: TTypeDesc; const AOperand: string;
       ARecAddr: Boolean);
     procedure DisarmRngFailRelease;
+    { as ArmRngFailRelease for a scalar / interface value at AOperand, copied
+      to a scratch slot: every check up to the disarm releases it }
+    procedure ArmRngFailReleaseSticky(AElem: TTypeDesc; const AOperand: string);
     procedure EmitDynWriteBaseToRcx(SSA: TStaticSubscriptAssign; ABaseOff: Int);
     { As EmitDynIndexCheck with the data pointer on top of the stack (the
       shape every element read parks it in); clobbers %rcx, which those
@@ -2178,7 +2184,20 @@ begin
   end;
   Self.Emit(#9'callq _Raise_RangeError');
   Self.Emit(OkL + ':');
-  DisarmRngFailRelease();
+  if FRngFailSlot = '' then
+    DisarmRngFailRelease();
+end;
+
+procedure TX86_64Backend.ArmRngFailReleaseSticky(AElem: TTypeDesc;
+  const AOperand: string);
+begin
+  Self.ArmRngFailRelease(AElem, AOperand, False);
+  if FRngFailLoad = '' then
+    Exit;
+  FRngFailSlot := Self.NewScratchOperand(8);
+  Self.Emit(Format(#9'movq %s, %%r11', [AOperand]));
+  Self.Emit(Format(#9'movq %%r11, %s', [FRngFailSlot]));
+  FRngFailLoad := Format(#9'movq %s, %%rdi', [FRngFailSlot]);
 end;
 
 procedure TX86_64Backend.ArmRngFailRelease(AElem: TTypeDesc;
@@ -2211,6 +2230,7 @@ end;
 
 procedure TX86_64Backend.DisarmRngFailRelease;
 begin
+  FRngFailSlot := '';
   FRngFailLoad := '';
   FRngFailReg := '';
   FRngFailSym := '';
@@ -11559,9 +11579,9 @@ begin
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyPChar) then
   begin
     SAE := TStringSubscriptExpr(AExpr);
-    Self.EmitExprToEax(SAE.StrExpr);
-    Self.Emit(#9'pushq %rax');
-    Self.EmitExprToEax(SAE.IndexExpr);
+    { the pointer, then the index -- a pointer free of calls is loaded after
+      an index that may run code (which could reassign it), as on arm64 }
+    Self.EmitStaticBaseThenIndex(SAE.StrExpr, SAE.IndexExpr);
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
     Self.Emit(#9'movzbl (%rax), %eax');
@@ -20141,7 +20161,7 @@ begin
       { a static-array field: its index is evaluated before the value too
         (left to right), parked for the arms below }
       if (IdxTmp = '') and (FA.FieldInfo.TypeDesc.Kind = tyStaticArray) and
-         ExprMayCall(FA.PropIndexExpr) and ExprMayCall(FA.Expr) and
+         ExprMayCall(FA.Expr) and not (FA.PropIndexExpr is TIntLiteral) and
          not ((FA.ObjExpr <> nil) and ExprMayCall(FA.ObjExpr) and
               (FA <> FFieldRecvFA)) then
       begin
@@ -20166,6 +20186,10 @@ begin
         Self.Emit(#9'movq $0, 8(%rsp)');
         Self.Emit(#9'movq %rsp, %rbx');    { temp pair address }
         Self.EmitInterfaceToFieldSlotsAt(FA.Expr, '%rbx', 0, DAElemType);
+        { the owned pair is released by any check up to the store: the
+          receiver's (located now) and the element's }
+        if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
+          Self.ArmRngFailReleaseSticky(DAElemType, '(%rsp)');
         { Element address → %rcx, fresh (post-RHS), per receiver shape. }
         if IdxTmp <> '' then
           Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
@@ -20181,10 +20205,8 @@ begin
           Self.Emit(#9'movq (%rcx), %rcx'); { heap data pointer (fresh) }
         Self.Emit(#9'popq %rax');
         if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
-        begin
-          Self.ArmRngFailRelease(DAElemType, '(%rsp)', False);
           Self.EmitDynIndexCheck('%rcx');
-        end;
+        Self.DisarmRngFailRelease();
         Self.Emit(#9'imulq $16, %rax');
         Self.Emit(#9'addq %rax, %rcx');     { element address }
         { Release the element's old obj, then move the owned pair in. }
@@ -20217,6 +20239,10 @@ begin
       else
         Self.EmitExprToEax(FA.Expr);
       Self.Emit(#9'pushq %rax');           { value (or record src addr) }
+      { an owned value is released by any check up to the store: the
+        receiver's (located after the value) and the element's }
+      if (FA.FieldInfo.TypeDesc.Kind = tyDynArray) and NativeExprOwnsRef(FA.Expr) then
+        Self.ArmRngFailReleaseSticky(DAElemType, '(%rsp)');
       if IdxTmp <> '' then
         Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
       else
@@ -20231,12 +20257,8 @@ begin
         Self.Emit(#9'movq (%rdx), %rdx');  { data pointer }
       Self.Emit(#9'popq %rax');            { element index }
       if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
-      begin
-        { an owned value, parked at (%rsp), is released if this raises }
-        if NativeExprOwnsRef(FA.Expr) then
-          Self.ArmRngFailRelease(DAElemType, '(%rsp)', False);
         Self.EmitDynIndexCheck('%rdx');
-      end;
+      Self.DisarmRngFailRelease();
       Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
       Self.Emit(#9'addq %rax, %rdx');
       Self.Emit(#9'movq %rdx, %rcx');      { element address }
@@ -21241,6 +21263,55 @@ begin
         pointer (releasing the old one when it copies); store it back so the
         slot keeps exactly one owned reference, then storeb into it.  Without
         the COW, writing a literal-backed string would hit read-only memory. }
+      if (SSA.BaseExpr <> nil) and ExprMayCall(SSA.BaseExpr) then
+      begin
+        { a string held in an element whose access runs code
+          (Strs[K()][J()] := B): left to right, its slot first -- the array
+          holding it pinned to the statement end, so the index and the byte
+          cannot free the slot -- then the index, the byte, the store }
+        if (SSA.BaseExpr is TStringSubscriptExpr) and
+           (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType <> nil) and
+           (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
+        begin
+          Self.EmitExprToEax(TStringSubscriptExpr(SSA.BaseExpr).StrExpr);
+          if NativeExprOwnsRef(TStringSubscriptExpr(SSA.BaseExpr).StrExpr) then
+            Self.DeferOwnedDynArrayBase(TStringSubscriptExpr(SSA.BaseExpr).StrExpr)
+          else
+          begin
+            Self.Emit(#9'pushq %rax');
+            Self.Emit(#9'movq %rax, %rdi');
+            Self.Emit(#9'callq _DynArrayAddRef');
+            Self.Emit(#9'popq %rax');
+            Self.DeferNativeRelease('_DynArrayRelease');
+          end;
+          Self.Emit(#9'pushq %rax');
+          Self.EmitExprToEax(TStringSubscriptExpr(SSA.BaseExpr).IndexExpr);
+          Self.EmitDynIndexCheckTOS();
+          Self.Emit(#9'imulq $8, %rax');
+          Self.Emit(#9'popq %rcx');
+          Self.Emit(#9'addq %rcx, %rax');
+        end
+        else
+          Self.EmitVarArgAddrToRax(SSA.BaseExpr);
+        Self.Emit(#9'pushq %rax');                { [slot] }
+        Self.EmitExprToEax(SSA.IndexExpr);
+        Self.Emit(#9'pushq %rax');                { [slot][index] }
+        Self.EmitByteRhsToEax(SSA.ValueExpr);
+        Self.Emit(#9'pushq %rax');                { [slot][index][byte] }
+        Self.Emit(#9'pushq %rbx');
+        Self.Emit(#9'movq 24(%rsp), %rbx');       { the slot }
+        Self.Emit(#9'movq (%rbx), %rdi');
+        Self.Emit(#9'callq _StringUnique');
+        Self.Emit(#9'movq %rax, (%rbx)');
+        Self.Emit(#9'movq %rax, %rcx');
+        Self.Emit(#9'popq %rbx');
+        Self.Emit(#9'popq %rdx');                 { byte value }
+        Self.Emit(#9'popq %rax');                 { index }
+        Self.Emit(#9'addq $8, %rsp');             { drop the slot }
+        Self.Emit(#9'addq %rax, %rcx');
+        Self.Emit(#9'movb %dl, (%rcx)');
+        Exit;
+      end;
       { left to right: the index, then the byte; the slot is located last }
       Self.EmitExprToEax(SSA.IndexExpr);
       Self.Emit(#9'pushq %rax');                  { [rsp] = index }
@@ -21773,7 +21844,9 @@ begin
       Self.Emit(#9'pushq %rax');             { stack: [baseaddr] }
     end;
     IdxTmp := '';
-    if ExprMayCall(SSA.ValueExpr) and ExprMayCall(SSA.IndexExpr) then
+    { a value that may run code can change what the index reads (a global
+      it names), so the index is taken first whenever it is not a literal }
+    if ExprMayCall(SSA.ValueExpr) and not (SSA.IndexExpr is TIntLiteral) then
     begin
       IdxTmp := Self.NewScratchOperand(8);
       Self.EmitExprToEax(SSA.IndexExpr);
@@ -21811,11 +21884,16 @@ begin
     end
     else if SSA.BaseExpr <> nil then
     begin
-      { a chained base free of calls, located now (after the value) }
+      { a chained base free of calls, located now (after the value); an
+        owned value parked at (%rsp) is released if locating it raises (the
+        value may have shrunk the dynamic array it lives in) }
+      if NativeExprOwnsRef(SSA.ValueExpr) then
+        Self.ArmRngFailReleaseSticky(DAElemType, '(%rsp)');
       Self.Emit(#9'pushq %rax');
       Self.EmitExprToEax(SSA.BaseExpr);
       Self.Emit(#9'movq %rax, %rcx');
       Self.Emit(#9'popq %rax');
+      Self.DisarmRngFailRelease();
     end
     else if SSA.IsImplicitSelf then
     begin

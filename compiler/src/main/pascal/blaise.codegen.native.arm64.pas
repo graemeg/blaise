@@ -253,6 +253,10 @@ type
     FRngFailReg: string;
     FRngFailSym: string;
     [Unretained] FRngFailRec: TRecordTypeDesc;
+    { set: the armed value was copied to this frame slot, and every check
+      until DisarmRngFailRelease releases it from there (the checks a
+      relocated base or receiver emits run at unknown stack depths) }
+    FRngFailSlot: string;
     { A[I] := V on a named dynamic array: the write whose element address,
       parked before V is evaluated, EmitElemStoreStacked re-derives after V
       (V may resize or replace the array), and the slot holding its index }
@@ -602,6 +606,10 @@ type
       AOwnedRec: a record value whose +1 fields sit at the parked address }
     procedure ArmRngFailRelease(AElem: TTypeDesc; AOff: Int; AOwnedRec: Boolean);
     procedure DisarmRngFailRelease;
+    { as ArmRngFailRelease, then copy the value to a frame slot so every
+      check up to the disarm releases it }
+    procedure ArmRngFailReleaseSticky(AElem: TTypeDesc; AOff: Int;
+      AOwnedRec: Boolean);
     { Re-derive the element address parked at [sp, #AOff] for ARef after
       its value was evaluated (x0/x1 preserved); no-op when ARef is nil }
     procedure EmitRefreshParkedElemAddr(ARef: TStaticSubscriptAssign;
@@ -5524,6 +5532,11 @@ begin
   ArmRec := FFieldArmRec;
   ArmElem := FFieldArmElem;
   FFieldArmSet := False;
+  { the caller's owned value, parked at [sp], is released by any check
+    from here to the store: the receiver's (located after the value) and
+    this element's own (the value may have shrunk the array) }
+  if ArmSet then
+    ArmRngFailReleaseSticky(ArmElem, 0, ArmRec);
   { x0 := address of Rec.Field[Index].  Evaluated AFTER the value expression
     (its caller parks the value), so a value that reallocates the dyn-array
     field cannot leave a stale data pointer.  Index → scaled offset, parked;
@@ -5547,11 +5560,9 @@ begin
   begin
     { the caller's owned value, parked at [sp], is released if this check
       raises (the value may have shrunk the array) }
-    if ArmSet then
-      ArmRngFailRelease(ArmElem, 0, ArmRec);
     EmitDynIndexCheck('x0', 'x1');
-    DisarmRngFailRelease();
   end;
+  DisarmRngFailRelease();
   EmitIntLiteral('x2', AElem.RawSize());
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');               { x0 = element address }
@@ -11750,6 +11761,54 @@ begin
       store it back so the slot keeps exactly one owned reference, then storeb
       into it.  Without the COW, writing a literal-backed string would hit
       read-only memory.  Mirrors x86-64 (:16340) and QBE (:17676). }
+    if (AStmt.BaseExpr <> nil) and ExprMayCall(AStmt.BaseExpr) then
+    begin
+      { a string held in an element whose access runs code
+        (Strs[K()][J()] := B): left to right, its slot first -- the array
+        holding it pinned to the statement end, so the index and the byte
+        cannot free the slot -- then the index, the byte, the store }
+      if (AStmt.BaseExpr is TStringSubscriptExpr) and
+         (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType <> nil) and
+         (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
+      begin
+        Self.EmitExprToX0(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr);
+        if not ArcExprOwnsRef(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr) then
+        begin
+          EmitPushX0();
+          EmitCallSym('_DynArrayAddRef');
+          EmitPopTo('x0');
+        end;
+        DeferNativeRelease('_DynArrayRelease');
+        EmitPushX0();
+        Self.EmitExprToX0(TStringSubscriptExpr(AStmt.BaseExpr).IndexExpr);
+        Self.Emit(#9'mov x1, x0');
+        EmitPopTo('x0');
+        EmitDynIndexCheck('x0', 'x1');
+        EmitIntLiteral('x2', 8);
+        Self.Emit(#9'mul x1, x1, x2');
+        Self.Emit(#9'add x0, x0, x1');
+      end
+      else
+        EmitLValueAddrToX0(AStmt.BaseExpr);
+      EmitPushX0();                                { [slot] }
+      Self.EmitExprToX0(AStmt.IndexExpr);
+      EmitPushX0();                                { [slot][index] }
+      EmitByteRhsToX0(AStmt.ValueExpr);
+      EmitPushX0();                                { [slot][index][byte] }
+      Self.Emit(#9'str x19, [sp, #-16]!');
+      Self.Emit(#9'ldr x19, [sp, #48]');           { the slot }
+      Self.Emit(#9'ldr x0, [x19]');
+      EmitCallSym('_StringUnique');
+      Self.Emit(#9'str x0, [x19]');
+      Self.Emit(#9'mov x9, x0');
+      Self.Emit(#9'ldr x19, [sp], #16');
+      EmitPopTo('x0');                             { byte value }
+      EmitPopTo('x1');                             { index }
+      Self.Emit(#9'add sp, sp, #16');              { drop the slot }
+      Self.Emit(#9'add x9, x9, x1');
+      Self.Emit(#9'strb w0, [x9]');
+      Exit;
+    end;
     { left to right: the index, then the byte (the string's slot, located
       last, has no side effect) }
     Self.EmitExprToX0(AStmt.IndexExpr);
@@ -11807,13 +11866,31 @@ begin
     end
     else
     begin
+      { a named PChar: the index, then the byte, then the pointer (loading
+        a variable has no side effect; the value may reassign it), as on
+        x86-64 }
       Self.EmitExprToX0(AStmt.IndexExpr);
-      EmitPushX0();
+      EmitPushX0();                                { [index] }
+      if (AStmt.ValueExpr is TStringLiteral) then
+      begin
+        if Length(TStringLiteral(AStmt.ValueExpr).Value) = 0 then
+          Self.Emit(#9'movz x0, #0')
+        else
+          EmitIntLiteral('x0',
+            OrdAt(TStringLiteral(AStmt.ValueExpr).Value, 0));
+      end
+      else
+        EmitByteRhsToX0(AStmt.ValueExpr);
+      EmitPushX0();                                { [index][byte] }
       EmitLoadSlot('x0', AStmt.ArrayName);
       if AStmt.IsVarParam then
         { var PChar parameter: the slot holds the caller variable's address }
         Self.Emit(#9'ldr x0, [x0]');
-      EmitPopTo('x1');
+      EmitPopTo('x2');                             { byte }
+      EmitPopTo('x1');                             { index }
+      Self.Emit(#9'add x9, x0, x1');
+      Self.Emit(#9'strb w2, [x9]');
+      Exit;
     end;
     Self.Emit(#9'add x9, x0, x1');
     if (AStmt.ValueExpr is TStringLiteral) then
@@ -12097,6 +12174,25 @@ begin
   SRec := FRngFailRec;
   DisarmRngFailRelease();
   Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+  if (ARef.BaseExpr <> nil) and (SLoad <> '') then
+  begin
+    { locating a static array inside a dynamic one emits that array's
+      own checks (DA[I]): the parked value is released by any of them }
+    FRngFailLoad := SLoad;
+    FRngFailReg := SReg;
+    FRngFailSym := SSym;
+    FRngFailRec := SRec;
+    FRngFailSlot := '__rngv_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(FRngFailSlot) then
+      AddLocal(FRngFailSlot, 8);
+    if (SRec = nil) and (Pos('#8]', SLoad) >= 0) then
+      Self.Emit(#9'ldr x0, [sp, #8]')            { a closure's Env half }
+    else
+      Self.Emit(#9'ldr x0, [sp]');
+    EmitStoreSlot('x0', FRngFailSlot);
+    Self.Emit(#9'ldr x0, [sp]');                 { restore the value }
+  end;
   EmitDynNamedBaseToX0(ARef);
   EmitLoadSlot('x1', AIdx);
   if ARef.ResolvedArrayType.Kind = tyDynArray then
@@ -20148,7 +20244,10 @@ begin
     first: the raise skips the store that would have taken it over }
   if FRngFailLoad <> '' then
   begin
-    Self.Emit(FRngFailLoad);
+    if FRngFailSlot <> '' then
+      EmitLoadSlot(FRngFailReg, FRngFailSlot)
+    else
+      Self.Emit(FRngFailLoad);
     if FRngFailRec <> nil then
       Self.EmitRecordFieldReleases(FRngFailRec, FRngFailReg, False)
     else
@@ -20195,8 +20294,29 @@ begin
   FRngFailReg := 'x0';
 end;
 
+procedure TArm64Backend.ArmRngFailReleaseSticky(AElem: TTypeDesc; AOff: Int;
+  AOwnedRec: Boolean);
+var
+  SrcOff: Int;
+begin
+  ArmRngFailRelease(AElem, AOff, AOwnedRec);
+  if FRngFailLoad = '' then
+    Exit;
+  SrcOff := AOff;
+  if (not AOwnedRec) and ArcTypeIsRefClosure(AElem) then
+    SrcOff := AOff + 8;                         { the Env half }
+  FRngFailSlot := '__rngv_' + IntToStr(FJArgN);
+  FJArgN := FJArgN + 1;
+  if not FFrame.ContainsKey(FRngFailSlot) then
+    AddLocal(FRngFailSlot, 8);
+  { copied through x0 (x19 belongs to the caller here) }
+  Self.Emit(Format(#9'ldr x0, [sp, #%d]', [SrcOff]));
+  EmitStoreSlot('x0', FRngFailSlot);
+end;
+
 procedure TArm64Backend.DisarmRngFailRelease;
 begin
+  FRngFailSlot := '';
   FRngFailLoad := '';
   FRngFailReg := '';
   FRngFailSym := '';
