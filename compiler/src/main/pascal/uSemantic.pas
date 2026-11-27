@@ -1218,6 +1218,8 @@ type
     { IFoo(X): a checked conversion, accepted where X converts to IFoo }
     procedure AnalyseInterfaceCast(AExpr: TFuncCallExpr; AIntf: TTypeDesc);
     procedure UseSiteError(const AMsg: string);
+    procedure RejectBareIntfMethod(AAccess: TFieldAccessExpr;
+      AIntf: TInterfaceTypeDesc);
     { Validates a generic type parameter's constraint against a concrete type
       argument name.  Raises ESemanticError on constraint violation.
       AConstraint: '' (no constraint), 'class', 'record', or a type name. }
@@ -2614,6 +2616,22 @@ begin
   MD.Body.Stmts.Add(Asn);
   Sink.ProcDecls.Add(MD);
   AUse.ThunkDecl := MD;
+end;
+
+{ X.M through an interface, M a parameterless METHOD written without ():
+  rejected as on any other receiver -- a call needs its parentheses, only a
+  property reads bare.  A node analysed before (IsInterfaceCall set) may
+  already hold a property's getter name, so it is not checked again. }
+procedure TSemanticAnalyser.RejectBareIntfMethod(AAccess: TFieldAccessExpr;
+  AIntf: TInterfaceTypeDesc);
+begin
+  if AAccess.IsInterfaceCall then Exit;
+  if AIntf.HasMethod(AAccess.FieldName) and
+     (AIntf.FindProperty(AAccess.FieldName) = nil) then
+    SemanticError(
+      Format('Bare reference to ''%s'' requires () for a call',
+        [AAccess.FieldName]),
+      AAccess.Line, AAccess.Col);
 end;
 
 { Raises AMsg at the use being analysed (FUseLine/FUseCol) -- for a check
@@ -22981,6 +22999,7 @@ begin
     if BaseType.Kind = tyInterface then
     begin
       IntfDesc := TInterfaceTypeDesc(BaseType);
+      Self.RejectBareIntfMethod(AAccess, IntfDesc);
       if not IntfDesc.HasMethod(AAccess.FieldName) then
       begin
         PropInfo := IntfDesc.FindProperty(AAccess.FieldName);
@@ -23412,6 +23431,7 @@ begin
   if RecSym.TypeDesc.Kind = tyInterface then
   begin
     IntfDesc := TInterfaceTypeDesc(RecSym.TypeDesc);
+    Self.RejectBareIntfMethod(AAccess, IntfDesc);
     if not IntfDesc.HasMethod(AAccess.FieldName) then
     begin
       { Property read: lower to the getter — pure sugar over the

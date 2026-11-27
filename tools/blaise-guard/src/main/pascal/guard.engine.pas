@@ -76,11 +76,11 @@ begin
   for I := 0 to RegisteredRuleCount() - 1 do
   begin
     Rule := RegisteredRule(I);
-    if not FConfig.IsEnabled(Rule.Id) then
+    if not FConfig.IsEnabled(Rule.Id()) then
       Continue;
-    Sev := FConfig.EffectiveSeverity(Rule.Id, Rule.DefaultSeverity);
-    Ctx := TRuleContext.Create(Rule.Id, AModel,
-                               FConfig.RuleConfig(Rule.Id), AReport, Sev);
+    Sev := FConfig.EffectiveSeverity(Rule.Id(), Rule.DefaultSeverity());
+    Ctx := TRuleContext.Create(Rule.Id(), AModel,
+                               FConfig.RuleConfig(Rule.Id()), AReport, Sev);
     Rule.Analyse(Ctx);
   end;
 end;
@@ -93,7 +93,7 @@ begin
   for I := 0 to RegisteredRuleCount() - 1 do
   begin
     Rule := RegisteredRule(I);
-    if FConfig.IsEnabled(Rule.Id) then
+    if FConfig.IsEnabled(Rule.Id()) then
       Rule.Reset();
   end;
 end;
@@ -108,12 +108,12 @@ begin
   for I := 0 to RegisteredRuleCount() - 1 do
   begin
     Rule := RegisteredRule(I);
-    if not FConfig.IsEnabled(Rule.Id) then
+    if not FConfig.IsEnabled(Rule.Id()) then
       Continue;
-    Sev := FConfig.EffectiveSeverity(Rule.Id, Rule.DefaultSeverity);
+    Sev := FConfig.EffectiveSeverity(Rule.Id(), Rule.DefaultSeverity());
     { A finalize context has no per-file model - cross-file rules supply their
       own locations from accumulated state. }
-    Ctx := TRuleContext.Create(Rule.Id, nil, FConfig.RuleConfig(Rule.Id),
+    Ctx := TRuleContext.Create(Rule.Id(), nil, FConfig.RuleConfig(Rule.Id()),
                                AReport, Sev);
     Rule.Finalize(Ctx);
   end;

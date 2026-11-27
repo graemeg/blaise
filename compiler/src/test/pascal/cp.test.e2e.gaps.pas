@@ -1220,7 +1220,7 @@ const
     begin
       F := TFoo.Create();
       R := F.Make(1, 2, 3, 4, 5, 6);
-      WriteLn(R.Sum)
+      WriteLn(R.Sum())
     end.
     ''';
 begin
@@ -1259,7 +1259,7 @@ const
     begin
       F := TFoo.Create();
       R := F.Make(10, 20, 30, 40, 50, 60);
-      WriteLn(R.Sum)
+      WriteLn(R.Sum())
     end.
     ''';
 begin
@@ -1297,7 +1297,7 @@ const
     begin
       F := TFoo.Create();
       R := F.Make(1, 2, 3, 4, 5, 6, 7);
-      WriteLn(R.Sum)
+      WriteLn(R.Sum())
     end.
     ''';
 begin

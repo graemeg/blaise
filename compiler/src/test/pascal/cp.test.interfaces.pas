@@ -24,6 +24,14 @@ type
     { an interface or metaclass field read off a call result (MkObj().FI,
       MkObj().FC): arm64 stopped with 'read of a field of this type' }
     procedure TestCodegen_IntfAndMetaclassFieldOfCallResult;
+    { A parameterless interface method needs () like any other call: a bare
+      S.Area through an interface was accepted, while the same bare call on
+      a class receiver or a constrained T was rejected
+      (BUG-20261120-generic-T-bare-method-call).  A property reads bare. }
+    procedure TestSemantic_BareIntfMethod_Variable_Rejected;
+    procedure TestSemantic_BareIntfMethod_ChainedBase_Rejected;
+    procedure TestSemantic_BareIntfMethod_GenericT_Rejected;
+    procedure TestSemantic_IntfMethodCallAndPropertyRead_Accepted;
     { a var/out interface parameter is ONE pointer register: the frame
       layout counted it as a two-register fat value, so the parameters after
       it were mapped one slot late and the last register parameter was
@@ -1582,6 +1590,91 @@ begin
     Pos(#9'movq %r9, -', AsmT) >= 0);
   AssertTrue('nothing is spilled over the caller''s frame',
     Pos(#9'movq %r9, 16(%rbp)', AsmT) < 0);
+end;
+
+const
+  BareIntfDecls = '''
+    program P;
+    type
+      IShape = interface
+        function Area: Int;
+        function GetSides: Int;
+        property Sides: Int read GetSides;
+      end;
+      TSquare = class(TObject, IShape)
+        function Area: Int;
+        function GetSides: Int;
+      end;
+      THolder = record
+        F: IShape;
+      end;
+    function TSquare.Area: Int; begin Result := 4 end;
+    function TSquare.GetSides: Int; begin Result := 4 end;
+
+    ''';
+
+procedure TInterfaceTests.TestSemantic_BareIntfMethod_Variable_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(BareIntfDecls + '''
+    function ViaIntf(const S: IShape): Int; begin Result := S.Area end;
+    begin
+    end.
+    ''');
+  AssertTrue('bare interface method rejected, got: ' + Msg,
+    Pos('Bare reference to ''Area'' requires () for a call', Msg) >= 0);
+end;
+
+procedure TInterfaceTests.TestSemantic_BareIntfMethod_ChainedBase_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(BareIntfDecls + '''
+    function ViaRec(const R: THolder): Int; begin Result := R.F.Area end;
+    begin
+    end.
+    ''');
+  AssertTrue('bare interface method on a chained base rejected, got: ' + Msg,
+    Pos('Bare reference to ''Area'' requires () for a call', Msg) >= 0);
+end;
+
+procedure TInterfaceTests.TestSemantic_BareIntfMethod_GenericT_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(BareIntfDecls + '''
+    function ViaT<T: IShape>(const S: T): Int; begin Result := S.Area end;
+    var Q: TSquare;
+    begin
+      Q := TSquare.Create();
+      WriteLn(ViaT<TSquare>(Q))
+    end.
+    ''');
+  AssertTrue('bare method on a constrained T rejected, got: ' + Msg,
+    Pos('Bare reference to ''Area'' requires () for a call', Msg) >= 0);
+end;
+
+procedure TInterfaceTests.TestSemantic_IntfMethodCallAndPropertyRead_Accepted;
+begin
+  AssertEquals('() call and bare property read accepted', '',
+    SemanticError(BareIntfDecls + '''
+    function ViaIntf(const S: IShape): Int;
+    begin
+      Result := S.Area() + S.Sides + S.GetSides()
+    end;
+    function ViaRec(const R: THolder): Int;
+    begin
+      Result := R.F.Area() + R.F.Sides
+    end;
+    function ViaT<T: IShape>(const S: T): Int; begin Result := S.Area() end;
+    var Q: TSquare; H: THolder;
+    begin
+      Q := TSquare.Create();
+      H.F := Q;
+      WriteLn(ViaIntf(Q), ViaRec(H), ViaT<TSquare>(Q))
+    end.
+    '''));
 end;
 
 initialization

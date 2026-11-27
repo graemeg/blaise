@@ -3089,7 +3089,7 @@ const
       B := TBox.Create();
       S := B;
       S2 := S;
-      WriteLn(S2.Area)
+      WriteLn(S2.Area())
     end.
     ''';
 

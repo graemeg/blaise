@@ -7042,6 +7042,13 @@ parameterless calls slipped through and built a paren-less `TProcCall` /
 `TMethodCallStmt`.  Both now raise the same "requires () for a call"
 diagnostic the `inherited` and expression-position paths use.
 
+The receiver's kind makes no difference.  A bare `S.Area` through an
+*interface* (a variable, or a chained base such as `R.F.Area`) was once
+accepted and dispatched as a call, while the same text on a class receiver
+or on a value of a constrained type parameter `T: IShape` was rejected.  An
+interface receiver now follows the rule too: a parameterless interface
+method is called `S.Area()`, and only an interface *property* reads bare.
+
 === Statement keywords take no parentheses
 
 The rule cuts the other way for `Exit`, `Break`, and `Continue` (issue

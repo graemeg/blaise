@@ -780,7 +780,7 @@ const
       D := TDictionary<string, Int>.Create; D.Add('a', 1);
       F(D.Count);
       M := D;
-      F(M.GetCount);
+      F(M.GetCount());
       OD := TOrderedDictionary<string, Int>.Create; OD.Add('a', 1);
       F(OD.Count);
       SL := TStringList.Create;
