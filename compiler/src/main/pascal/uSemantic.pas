@@ -20921,7 +20921,10 @@ begin
 
   { Pointer(intOrPtrExpr) — reinterpret any integer or pointer value as
     an untyped Pointer.  Integer sources are treated as raw addresses (no
-    sign-extension guarantee beyond what the source type provides). }
+    sign-extension guarantee beyond what the source type provides).  A
+    string or dynamic array gives its data pointer, nil when empty; for a
+    dynamic array it is the unchecked way to the data of a possibly empty
+    array, where @A[0] raises ERangeError. }
   if SameText(AExpr.Name, 'Pointer') then
   begin
     if AExpr.Args.Count <> 1 then
@@ -20929,11 +20932,20 @@ begin
     ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
     if not (ArgType.Kind in [tyInteger, tyInt64, tyUInt64, tyUInt32, tyByte,
                               tyInt8, tySmallInt, tyWord, tyPointer, tyPChar, tyString,
-                              tyClass, tyMetaClass, tyProcedural, tyNil]) then
+                              tyDynArray, tyClass, tyMetaClass, tyProcedural,
+                              tyNil]) then
       SemanticError(
-        Format('Pointer cast requires an integer, pointer, or class expression, got ''%s''',
+        Format('Pointer cast requires an integer, pointer, string, dynamic ' +
+          'array or class expression, got ''%s''',
           [ArgType.Name]),
         AExpr.Line, AExpr.Col);
+    { the data pointer of a dynamic array returned by a call would dangle
+      once that reference is released at the end of the statement }
+    if (ArgType.Kind = tyDynArray) and
+       not Self.IsVarArgLValue(TASTExpr(AExpr.Args.Items[0])) then
+      SemanticError('Pointer() of a dynamic array needs a variable, field ' +
+        'or element: the data of a call result is released at the end of ' +
+        'the statement', AExpr.Line, AExpr.Col);
     Result := FTable.TypePointer;
     AExpr.ResolvedType := Result;
     Exit;

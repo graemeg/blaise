@@ -10160,8 +10160,19 @@ itself keeps its index within `0..High`.
 
 Taking an element's address is an access too, so `@A[0]` on an empty array
 and the one-past-the-end `@A[Length(A)]` raise.  Code that hands the data of
-a possibly empty array to a routine taking a pointer and a count guards the
-address: `if Length(A) > 0 then P := @A[0] else P := nil`.
+a possibly empty array to a routine taking a pointer and a count writes
+`Pointer(A)`: the data pointer, `nil` for an empty array, never checked (as
+in Delphi and FPC).  Its argument must be a variable, field or element; the
+data of a dynamic array returned by a call is released at the end of the
+statement, so `Pointer(MakeArr())` is rejected.
+
+In an element write `A[I] := V` the index is checked before `V` is
+evaluated, on every target: with `I` out of range, `A[I] := F()` raises
+without calling `F`.  The element's address is still computed after `V`,
+which may resize the array, and is checked again there.  (x86-64 evaluated
+`V` first until 2026-11-27, so `F` ran and an owned result it returned
+leaked when the check raised; arm64 did the same for a record's
+dynamic-array field.)
 
 === Rationale
 

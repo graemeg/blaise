@@ -431,6 +431,7 @@ type
       0 <= index < Length; otherwise calls the RTL's _Raise_RangeError,
       which never returns.  Every register is preserved. }
     procedure EmitDynIndexCheck(const ABaseReg: string);
+    procedure EmitDynWriteBaseToRcx(SSA: TStaticSubscriptAssign; ABaseOff: Int);
     { As EmitDynIndexCheck with the data pointer on top of the stack (the
       shape every element read parks it in); clobbers %rcx, which those
       readers pop the base into next. }
@@ -2060,6 +2061,46 @@ begin
     depth was odd (a failed `as` deep in an expression), leaving the call
     8 bytes off; the call never returns, so nothing restores %rsp }
   Self.Emit(#9'callq _Raise_InvalidCast');
+end;
+
+procedure TX86_64Backend.EmitDynWriteBaseToRcx(SSA: TStaticSubscriptAssign;
+  ABaseOff: Int);
+begin
+  { %rcx := the data pointer of the dynamic / open array an element write
+    targets: the pushed base of a chained write, a field of Self, a
+    captured, local, var-parameter or global array }
+  if SSA.BaseExpr <> nil then
+    { the base pointer pushed by the caller, ABaseOff above the top }
+    Self.Emit(Format(#9'movq %d(%%rsp), %%rcx', [ABaseOff]))
+  else if SSA.IsImplicitSelf then
+  begin
+    { ArrayName is a dyn-array field of Self: Self + offset holds the
+      data pointer. }
+    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Self')]));
+    if SSA.ImplicitFieldInfo.Offset > 0 then
+      Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
+    Self.Emit(#9'movq (%rcx), %rcx');
+  end
+  else if Self.IsCaptured(SSA.ArrayName) then
+  begin
+    { a dyn array captured from the enclosing routine: '_cap_' holds
+      the address of its slot (one load gives the data pointer); the
+      global fallback below named a symbol that does not exist }
+    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + SSA.ArrayName)]));
+    Self.Emit(#9'movq (%rcx), %rcx');
+  end
+  else if Self.IsLocal(SSA.ArrayName) then
+  begin
+    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
+    { An open-array param slot already holds the data pointer, so it is NOT
+      dereferenced again (a var dynamic-array slot holds the caller-var
+      address and does need the extra load). }
+    if SSA.IsVarParam and (SSA.ResolvedArrayType.Kind <> tyOpenArray) then
+      { var/out param: slot -> caller var -> data pointer. }
+      Self.Emit(#9'movq (%rcx), %rcx');
+  end
+  else
+    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
 end;
 
 procedure TX86_64Backend.EmitDynIndexCheck(const ABaseReg: string);
@@ -17547,6 +17588,7 @@ var
   DiscMShim: TMethodCallExpr;
   PropRelStr: Boolean;
   PtrSlot: string;
+  IdxTmp: string;
   RetT: TTypeDesc;
 begin
   { An empty statement (e.g. the body of `for x := 0 to N do;`) parses to a nil
@@ -19822,6 +19864,23 @@ begin
         DAElemType := TDynArrayTypeDesc(FA.FieldInfo.TypeDesc).ElementType
       else
         DAElemType := TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).ElementType;
+      { A dynamic-array field's index is evaluated once and checked BEFORE
+        the value, so Rec.Arr[I] := F() with I out of range raises without
+        calling F (as on arm64).  The arms below still derive the element
+        address after the value -- it may resize the array -- and check
+        again; they reload the parked index. }
+      IdxTmp := '';
+      if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
+      begin
+        IdxTmp := Self.NewScratchOperand(8);
+        Self.EmitExprToEax(FA.PropIndexExpr);
+        Self.Emit(#9'pushq %rax');
+        Self.EmitFieldAssignSlotAddrToReg(FA, '%rdx');
+        Self.Emit(#9'movq (%rdx), %rdx');
+        Self.Emit(#9'popq %rax');
+        Self.EmitDynIndexCheck('%rdx');
+        Self.Emit(Format(#9'movq %%rax, %s', [IdxTmp]));
+      end;
       { Interface element: a two-slot fat pointer — the generic path below
         stored only 8 bytes (the obj), leaving the element's itab garbage
         (BUG-20260721-fieldaccess-intf-array-elem-read).  VALUE-FIRST: the
@@ -19840,7 +19899,10 @@ begin
         Self.Emit(#9'movq %rsp, %rbx');    { temp pair address }
         Self.EmitInterfaceToFieldSlotsAt(FA.Expr, '%rbx', 0, DAElemType);
         { Element address → %rcx, fresh (post-RHS), per receiver shape. }
-        Self.EmitExprToEax(FA.PropIndexExpr);
+        if IdxTmp <> '' then
+          Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
+        else
+          Self.EmitExprToEax(FA.PropIndexExpr);
         if (FA.FieldInfo.TypeDesc.Kind = tyStaticArray) and
            (TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound <> 0) then
           Self.Emit(Format(#9'subq $%d, %%rax',
@@ -19884,7 +19946,10 @@ begin
       else
         Self.EmitExprToEax(FA.Expr);
       Self.Emit(#9'pushq %rax');           { value (or record src addr) }
-      Self.EmitExprToEax(FA.PropIndexExpr);
+      if IdxTmp <> '' then
+        Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
+      else
+        Self.EmitExprToEax(FA.PropIndexExpr);
       if (FA.FieldInfo.TypeDesc.Kind = tyStaticArray) and
          (TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound <> 0) then
         Self.Emit(Format(#9'subq $%d, %%rax',
@@ -21085,6 +21150,21 @@ begin
         width, then spill the bit pattern through %rax onto the stack (x86 has
         no push for xmm regs).  EmitExprToEax cannot evaluate a float
         expression; the integer store path (movq) would store garbage. }
+      { A dynamic array's index is checked BEFORE the value is evaluated,
+        as on arm64: A[I] := F() with I out of range raises without calling
+        F (an owned result F returned leaked when the check raised).  The
+        checked index is parked in a scratch slot so it is evaluated once;
+        the check after the value stays, since the value may resize the
+        array. }
+      IdxTmp := '';
+      if SSA.ResolvedArrayType.Kind = tyDynArray then
+      begin
+        IdxTmp := Self.NewScratchOperand(8);
+        Self.EmitExprToEax(SSA.IndexExpr);
+        Self.EmitDynWriteBaseToRcx(SSA, 0);
+        Self.EmitDynIndexCheck('%rcx');
+        Self.Emit(Format(#9'movq %%rax, %s', [IdxTmp]));
+      end;
       if IsFloatFamily(DAElemType) then
       begin
         Self.EmitExprToXmm0(SSA.ValueExpr);
@@ -21099,40 +21179,12 @@ begin
       else
         Self.EmitExprToEax(SSA.ValueExpr);
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(SSA.IndexExpr);
-      if SSA.BaseExpr <> nil then
-        { Base ptr pushed before the value: value is on top, so the base
-          sits at 8(%rsp). }
-        Self.Emit(#9'movq 8(%rsp), %rcx')
-      else if SSA.IsImplicitSelf then
-      begin
-        { ArrayName is a dyn-array field of Self: Self + offset holds the
-          data pointer. }
-        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Self')]));
-        if SSA.ImplicitFieldInfo.Offset > 0 then
-          Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
-        Self.Emit(#9'movq (%rcx), %rcx');
-      end
-      else if Self.IsCaptured(SSA.ArrayName) then
-      begin
-        { a dyn array captured from the enclosing routine: '_cap_' holds
-          the address of its slot (one load gives the data pointer); the
-          global fallback below named a symbol that does not exist }
-        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + SSA.ArrayName)]));
-        Self.Emit(#9'movq (%rcx), %rcx');
-      end
-      else if Self.IsLocal(SSA.ArrayName) then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
-        { An open-array param slot already holds the data pointer, so it is NOT
-          dereferenced again (a var dynamic-array slot holds the caller-var
-          address and does need the extra load). }
-        if SSA.IsVarParam and (SSA.ResolvedArrayType.Kind <> tyOpenArray) then
-          { var/out param: slot -> caller var -> data pointer. }
-          Self.Emit(#9'movq (%rcx), %rcx');
-      end
+      if IdxTmp <> '' then
+        Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
       else
-        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
+        Self.EmitExprToEax(SSA.IndexExpr);
+      { the base pointer pushed before the value sits at 8(%rsp) }
+      Self.EmitDynWriteBaseToRcx(SSA, 8);
       if SSA.ResolvedArrayType.Kind = tyDynArray then
         Self.EmitDynIndexCheck('%rcx');
       Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));

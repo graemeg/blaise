@@ -231,6 +231,11 @@ type
                                    address of the procedural value to call }
     FJArgN: Int;             { counter for '__jarg_<n>' jumbo-set
                                    argument snapshots }
+    { Rec.Arr[I] := V on a dynamic-array field: the statement whose index
+      was evaluated and range-checked BEFORE its value, and the slot holding
+      that checked index (EmitFieldElemAddrToX0 reloads it) }
+    [Unretained] FFieldIdxStmt: TFieldAssignment;
+    FFieldIdxSlot: string;
     { '__opnd_<n>' park slots in use by the string operators being emitted
       (unwind design D4: an operand held across a later call lives at a
       fixed x29 offset the unwind tables can name, not in an sp push) }
@@ -476,6 +481,7 @@ type
       element-store logic as EmitStaticElemAssign, sourcing the array from a
       record field slot instead of a plain variable. }
     procedure EmitFieldElemAssign(AStmt: TFieldAssignment);
+    procedure EmitFieldElemAssignBody(AStmt: TFieldAssignment);
     { Compute the address of Rec.Field[Index] into x0 — called AFTER the value
       expression is materialised so a value that reallocates the field's
       dyn-array cannot leave a stale data pointer. }
@@ -5122,6 +5128,44 @@ end;
 
 procedure TArm64Backend.EmitFieldElemAssign(AStmt: TFieldAssignment);
 var
+  SavedStmt: TFieldAssignment;
+  SavedSlot: string;
+begin
+  { A dynamic-array field's index is evaluated once and checked BEFORE the
+    value, so Rec.Arr[I] := F() with I out of range raises without calling
+    F, as every other element write does.  The body still computes the
+    element address after the value (which may resize the array) and
+    checks again there; it reloads the parked index instead of evaluating
+    it a second time.  Saved and restored: a value expression may emit a
+    field write of its own. }
+  SavedStmt := FFieldIdxStmt;
+  SavedSlot := FFieldIdxSlot;
+  FFieldIdxStmt := nil;
+  FFieldIdxSlot := '';
+  if (AStmt.FieldInfo <> nil) and (AStmt.FieldInfo.TypeDesc <> nil) and
+     (AStmt.FieldInfo.TypeDesc.Kind = tyDynArray) and
+     (AStmt.PropIndexExpr <> nil) then
+  begin
+    FFieldIdxSlot := '__fidx_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(FFieldIdxSlot) then
+      AddLocal(FFieldIdxSlot, 8);
+    Self.EmitExprToX0(AStmt.PropIndexExpr);
+    EmitPushX0();                                { [index] }
+    EmitFieldAssignSlotAddrToX0(AStmt);
+    Self.Emit(#9'ldr x0, [x0]');                 { the data pointer }
+    EmitPopTo('x1');
+    EmitDynIndexCheck('x0', 'x1');
+    EmitStoreSlot('x1', FFieldIdxSlot);
+    FFieldIdxStmt := AStmt;
+  end;
+  EmitFieldElemAssignBody(AStmt);
+  FFieldIdxStmt := SavedStmt;
+  FFieldIdxSlot := SavedSlot;
+end;
+
+procedure TArm64Backend.EmitFieldElemAssignBody(AStmt: TFieldAssignment);
+var
   Elem: TTypeDesc;
   IsDyn: Boolean;
   Low: Int;
@@ -5387,8 +5431,13 @@ begin
   { x0 := address of Rec.Field[Index].  Evaluated AFTER the value expression
     (its caller parks the value), so a value that reallocates the dyn-array
     field cannot leave a stale data pointer.  Index → scaled offset, parked;
-    field data pointer (deref for dyn-array) + scaled index. }
-  Self.EmitExprToX0(AStmt.PropIndexExpr);
+    field data pointer (deref for dyn-array) + scaled index.  A dynamic-array
+    field's index was evaluated and checked before the value
+    (EmitFieldElemAssign): reload it rather than evaluate it twice. }
+  if (FFieldIdxStmt = AStmt) and (FFieldIdxSlot <> '') then
+    EmitLoadSlot('x0', FFieldIdxSlot)
+  else
+    Self.EmitExprToX0(AStmt.PropIndexExpr);
   if ALow > 0 then
     EmitAddSubImm('sub', 'x0', 'x0', ALow)
   else if ALow < 0 then

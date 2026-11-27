@@ -42,6 +42,13 @@ type
       right-hand side, a field chain, closure and jumbo-set elements, and
       the address of element 0 of an empty array }
     procedure TestRun_MoreShapes_RaiseERangeError;
+    { A[I] := F() with I out of range raises before F runs, on every ISA
+      and element kind: x86-64 evaluated the value first, so F ran and an
+      owned result it returned leaked when the check raised }
+    procedure TestRun_BadIndexWrite_ValueNotEvaluated;
+    { Pointer(A) on a dynamic array is its data pointer, nil when empty,
+      and never checked }
+    procedure TestRun_PointerOfDynArray;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -551,6 +558,112 @@ begin
     'rec-field-write' + LE + 'rec-elem-call-rhs' + LE + 'chain-write' + LE +
     'chain-read' + LE + 'closure-write' + LE + 'closure-call' + LE +
     'jumbo-write' + LE + 'addr-empty' + LE + '4 5 5x 3' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestRun_BadIndexWrite_ValueNotEvaluated;
+const
+  Src = '''
+    program DynBoundsOrder;
+    uses SysUtils;
+    type
+      TProc = reference to procedure;
+      TRec = record N: Int32; S: String; end;
+      TBox = class N: Int32; end;
+      THolder = record IA: array of Int32; FA: array of Float64; end;
+      TOwner = class FArr: array of String; procedure Probe; end;
+      TStrArr = array of String;
+    var
+      IA: array of Int32; SA: array of String; FA: array of Float64;
+      RA: array of TRec; BA: array of TBox; CA: array of TProc;
+      M: array of array of Int32; H: THolder; Ow: TOwner; Calls: Int32;
+    function VI: Int32; begin Calls := Calls + 1; Result := 1 end;
+    function VS: String; begin Calls := Calls + 1; Result := IntToStr(Calls) + 's' end;
+    function VF: Float64; begin Calls := Calls + 1; Result := 1.5 end;
+    function VR: TRec; begin Calls := Calls + 1; Result.S := IntToStr(Calls) + 'r' end;
+    function VB: TBox; begin Calls := Calls + 1; Result := TBox.Create() end;
+    function VC: TProc; begin Calls := Calls + 1; Result := procedure begin end end;
+    function GetIA: array of Int32; begin Result := IA end;
+    procedure Hit(const AName: string; AP: TProc);
+    var Before: Int32;
+    begin
+      Before := Calls;
+      try
+        AP();
+        WriteLn('miss ', AName)
+      except
+        on Ex: ERangeError do
+          if Calls = Before then WriteLn(AName) else WriteLn(AName, ' evaluated the value')
+      end
+    end;
+    procedure TOwner.Probe;
+    begin
+      Hit('self-string', procedure begin FArr[3] := VS() end)
+    end;
+    procedure ByVar(var V: TStrArr);
+    var Before: Int32;
+    begin
+      Before := Calls;
+      try
+        V[3] := VS();
+        WriteLn('miss var-string')
+      except
+        on Ex: ERangeError do
+          if Calls = Before then WriteLn('var-string')
+          else WriteLn('var-string evaluated the value')
+      end
+    end;
+    begin
+      SetLength(IA, 1); SetLength(SA, 1); SetLength(FA, 1); SetLength(RA, 1);
+      SetLength(BA, 1); SetLength(CA, 1); SetLength(M, 1); SetLength(M[0], 1);
+      SetLength(H.IA, 1); SetLength(H.FA, 1);
+      Ow := TOwner.Create(); SetLength(Ow.FArr, 1);
+      Hit('int', procedure begin IA[5] := VI() end);
+      Hit('string', procedure begin SA[5] := VS() end);
+      Hit('float', procedure begin FA[5] := VF() end);
+      Hit('record', procedure begin RA[5] := VR() end);
+      Hit('class', procedure begin BA[5] := VB() end);
+      Hit('closure', procedure begin CA[5] := VC() end);
+      Hit('outer', procedure begin M[5][0] := VI() end);
+      Hit('inner', procedure begin M[0][5] := VI() end);
+      Hit('call-base', procedure begin GetIA()[5] := VI() end);
+      Hit('field-int', procedure begin H.IA[5] := VI() end);
+      Hit('field-float', procedure begin H.FA[5] := VF() end);
+      Hit('negative', procedure begin IA[-1] := VI() end);
+      Ow.Probe();
+      ByVar(SA);
+      SA[0] := VS(); IA[0] := VI();
+      WriteLn(SA[0], ' ', IA[0], ' ', Calls);
+      Ow.Free()
+    end.
+    ''';
+begin
+  AssertRTLRunsOnAll(Src,
+    'int' + LE + 'string' + LE + 'float' + LE + 'record' + LE + 'class' + LE +
+    'closure' + LE + 'outer' + LE + 'inner' + LE + 'call-base' + LE +
+    'field-int' + LE + 'field-float' + LE + 'negative' + LE + 'self-string' + LE +
+    'var-string' + LE + '1s 1 2' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestRun_PointerOfDynArray;
+const
+  Src = '''
+    program PtrOfDyn;
+    type TRec = record A: array of Int32; end;
+    var A: array of Int32; Q: Pointer; R: TRec;
+    begin
+      Q := Pointer(A);
+      WriteLn(Q = nil);
+      SetLength(A, 2); A[0] := 7; A[1] := 8;
+      Q := Pointer(A);
+      WriteLn(PInt32(Q)^);
+      R.A := A;
+      WriteLn(Pointer(R.A) = Pointer(A));
+      SetLength(A, 0);
+      WriteLn(Pointer(A) = nil)
+    end.
+    ''';
+begin
+  AssertRTLRunsOnAll(Src, 'True' + LE + '7' + LE + 'True' + LE + 'True' + LE, 0);
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;

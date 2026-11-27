@@ -43,6 +43,11 @@ type
       change a temporary copy and is rejected }
     procedure TestSemantic_WriteThroughCallResult_DynArrayOnly;
     procedure TestCodegen_WriteThroughCallResult_ReleasesTheResult;
+    { Pointer(A) is the data pointer of a dynamic-array variable, field or
+      element; of a call result it would dangle and is rejected }
+    procedure TestSemantic_PointerOfDynArray;
+    { x86-64: the index of A[I] := F() is checked before F is called }
+    procedure TestCodegen_BadIndexWrite_CheckPrecedesValue;
     procedure TestParse_DynArray_InlineVarDecl_AcceptsDecl;
     procedure TestParse_DynArray_Combined_TypeAndVar;
     procedure TestParse_DynArray_TypeName_EncodesCorrectly;
@@ -720,6 +725,60 @@ begin
     AsmMissing(SrcWriteThroughCall,
       #9'movq _pendrel_0(%rip), %rdi' + #10 + #9'callq _DynArrayRelease',
       #9'bl __DynArrayRelease' + #10 + #9'stur xzr, [x29, #-'));
+end;
+
+
+procedure TDynArrayTests.TestSemantic_PointerOfDynArray;
+const
+  SrcOk = '''
+    program P;
+    type TRec = record A: array of Int32; end;
+    var A: array of Int32; R: TRec; M: array of array of Int32; Q: Pointer;
+    begin
+      Q := Pointer(A); Q := Pointer(R.A); Q := Pointer(M[0])
+    end.
+    ''';
+  SrcCall = '''
+    program P;
+    var A: array of Int32; Q: Pointer;
+    function MkArr: array of Int32; begin Result := A end;
+    begin
+      Q := Pointer(MkArr())
+    end.
+    ''';
+begin
+  AssertEquals('variable, field and element accepted', '', SemanticError(SrcOk));
+  AssertTrue('a call result is rejected: ' + SemanticError(SrcCall),
+    Pos('needs a variable, field or element', SemanticError(SrcCall)) >= 0);
+end;
+
+procedure TDynArrayTests.TestCodegen_BadIndexWrite_CheckPrecedesValue;
+const
+  Src = '''
+    program P;
+    var IA: array of Int32; SA: array of String;
+    function VI: Int32; begin Result := 1 end;
+    function VS: String; begin Result := 'x' end;
+    begin
+      IA[5] := VI();
+      SA[5] := VS()
+    end.
+    ''';
+var
+  A, Main: string;
+  M: Int;
+begin
+  A := GenAsm(Src, TargetX86_64);
+  M := Pos(#10'main:', A);
+  AssertTrue('main found', M >= 0);
+  Main := Copy(A, M, Length(A) - M);
+  AssertTrue('the int write checks before calling VI: ' + Main,
+    (Pos('callq _Raise_RangeError', Main) >= 0) and
+    (Pos('callq _Raise_RangeError', Main) < Pos('callq VI', Main)));
+  Main := Copy(Main, Pos('callq VI', Main), Length(Main));
+  AssertTrue('the string write checks before calling VS',
+    (Pos('callq _Raise_RangeError', Main) >= 0) and
+    (Pos('callq _Raise_RangeError', Main) < Pos('callq VS', Main)));
 end;
 
 initialization
