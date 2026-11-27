@@ -30,6 +30,16 @@ type
     { a classic name (Word) is a type only with ClassicPascalTypes, in a
       constant cast as anywhere else: the hint names the unit }
     procedure TestConstCast_ClassicNameWithoutUnit_Hints;
+    { an expression over a UInt64 constant is a UInt64 and folds unsigned:
+      UInt64(-1) div 2 was 0 (a signed -1 div 2) and UInt64(-1) xor 1 an
+      Int64 (BUG-20261127-uint64-const-expr-signed) }
+    procedure TestConstExpr_UInt64Operand_TypedAndFoldedUnsigned;
+    { an ident-led bit-op constant follows operator precedence, as a
+      literal-led one does: A or 2 and 0 is A or (2 and 0) }
+    procedure TestConstExpr_IdentLedBitOps_FollowPrecedence;
+    { a logical expression over Boolean constants is a Boolean, and not is
+      the logical not }
+    procedure TestConstExpr_BooleanOps_TypedBoolean;
     { a const array's data directive follows the element type's real width
       for EVERY spelling of it -- builtin aliases (Int16, UInt16, QWord,
       PtrUInt) and user aliases alike; arm64 matched only the classic names
@@ -1079,6 +1089,92 @@ begin
   AssertTrue('unknown type with the ClassicPascalTypes hint, got: ' + Msg,
     (Pos('Unknown type ''Word''', Msg) >= 0) and
     (Pos('ClassicPascalTypes', Msg) >= 0));
+end;
+
+procedure TConstTests.TestConstExpr_UInt64Operand_TypedAndFoldedUnsigned;
+var
+  Prog: TProgram;
+  I: Int;
+  CD: TConstDecl;
+  Want: string;
+begin
+  Prog := Analyse('''
+    program P;
+    const
+      M = High(UInt64);
+      A = UInt64(-1) div 2;
+      B = UInt64(-1) mod 10;
+      C = UInt64(-1) xor 1;
+      D = M div 3;
+      E = M shr 60;
+    var X: UInt64;
+    begin
+      X := A; X := B; X := C; X := D; X := E
+    end.
+    ''');
+  try
+    for I := 0 to Prog.Block.ConstDecls.Count - 1 do
+    begin
+      CD := TConstDecl(Prog.Block.ConstDecls.Items[I]);
+      AssertEquals(CD.Name + ' typed', 'UInt64', CD.TypeName);
+      if CD.Name = 'A' then Want := '9223372036854775807'
+      else if CD.Name = 'B' then Want := '5'
+      else if CD.Name = 'C' then Want := '-2'
+      else if CD.Name = 'D' then Want := '6148914691236517205'
+      else if CD.Name = 'E' then Want := '15'
+      else Want := '-1';
+      AssertEquals(CD.Name + ' value bits', Want, IntToStr(CD.IntVal));
+    end;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TConstTests.TestConstExpr_IdentLedBitOps_FollowPrecedence;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse('''
+    program P;
+    const
+      A = 1;
+      B = A or 2 and 0;
+      C = 1 or 2 and 0;
+    begin
+    end.
+    ''');
+  try
+    AssertEquals('ident-led', 1, TConstDecl(Prog.Block.ConstDecls.Items[1]).IntVal);
+    AssertEquals('literal-led', 1, TConstDecl(Prog.Block.ConstDecls.Items[2]).IntVal);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TConstTests.TestConstExpr_BooleanOps_TypedBoolean;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse('''
+    program P;
+    const
+      T = True;
+      F = False;
+      X = T or F;
+      Y = T and not F;
+      Z = not T;
+    var B: Boolean;
+    begin
+      B := X; B := Y; B := Z
+    end.
+    ''');
+  try
+    AssertEquals('X', 1, TConstDecl(Prog.Block.ConstDecls.Items[2]).IntVal);
+    AssertEquals('Y', 1, TConstDecl(Prog.Block.ConstDecls.Items[3]).IntVal);
+    AssertEquals('Z', 0, TConstDecl(Prog.Block.ConstDecls.Items[4]).IntVal);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

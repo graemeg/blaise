@@ -1709,6 +1709,10 @@ begin
   Result := False;
   if Check(tkLParen) then
     Result := True
+  { not X: a logical (Boolean) or bitwise (integer) constant expression --
+    it did not parse at all }
+  else if Check(tkNot) then
+    Result := True
   else if Check(tkIntLit) and Self.IsConstExprOp(PeekKind()) then
     Result := True
   else if Check(tkFloatLit) and Self.IsConstExprOp(PeekKind()) then
@@ -1726,14 +1730,18 @@ begin
   else if Check(tkIdent) and (PeekKind() = tkLParen) and
           Self.IsConstIntTypecastName(FCurrent.Value) then
     Result := True
-  { Ident-led integer expression (e.g. BASE * 2).  Only the unambiguously
-    numeric operators trigger this — '+' is left to the string path so that
-    string-concat consts ('a' + b) keep their existing behaviour, and the
-    legacy ident-bitop chain handles or/and/xor/shl/shr starting on an ident. }
+  { Ident-led integer expression (e.g. BASE * 2, M shr 60).  '+' is left to
+    the string path so that string-concat consts ('a' + b) keep their
+    existing behaviour.  A bit operator after an ident takes this path too,
+    as it does after a literal: the legacy ident-bitop chain folded left to
+    right with no operator precedence and lost the operand's type, so
+    High(UInt64)-typed M shr 60 was an Int64. }
   else if Check(tkIdent) and
           ((PeekKind() = tkStar) or (PeekKind() = tkSlash) or
            (PeekKind() = tkDiv)  or (PeekKind() = tkMod) or
-           (PeekKind() = tkMinus)) then
+           (PeekKind() = tkMinus) or (PeekKind() = tkOr) or
+           (PeekKind() = tkAnd) or (PeekKind() = tkXor) or
+           (PeekKind() = tkShl) or (PeekKind() = tkShr)) then
     Result := True;
 end;
 

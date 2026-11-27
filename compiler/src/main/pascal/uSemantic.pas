@@ -546,6 +546,8 @@ type
       ALine, ACol: Int);
     function  IsStringConstExpr(AExpr: TASTExpr): Boolean;
     function  EvalConstStrExpr(AExpr: TASTExpr; ALine, ACol: Int): string;
+    function  ConstExprIsUInt64(ABin: TBinaryExpr): Boolean;
+    function  ConstIsBoolean(AExpr: TASTExpr): Boolean;
     function  ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
     function  ConstExprAwaitsTypes(AExpr: TASTExpr): Boolean;
     function  ConstAwaitsTypes(CD: TConstDecl): Boolean;
@@ -8698,7 +8700,12 @@ begin
   end;
 
   if AExpr is TNotExpr then
+  begin
+    { not of a Boolean constant is the logical not (bitwise, not 1 is -2) }
+    if Self.ConstIsBoolean(TNotExpr(AExpr).Expr) then
+      Exit(Ord(EvalConstIntExpr(TNotExpr(AExpr).Expr, ALine, ACol) = 0));
     Exit(not EvalConstIntExpr(TNotExpr(AExpr).Expr, ALine, ACol));
+  end;
   if AExpr is TNegExpr then
     Exit(-EvalConstIntExpr(TNegExpr(AExpr).Expr, ALine, ACol));
 
@@ -8767,6 +8774,10 @@ begin
             SemanticError('Division by zero in constant expression', ALine, ACol);
             Exit;
           end;
+          { a UInt64 operand divides unsigned, as at run time: UInt64(-1)
+            div 2 is High(Int64), not 0 }
+          if Self.ConstExprIsUInt64(Bin) then
+            Exit(Int64(UInt64(L) div UInt64(R)));
           Exit(L div R);
         end;
       boMod:
@@ -8776,6 +8787,8 @@ begin
             SemanticError('Division by zero in constant expression', ALine, ACol);
             Exit;
           end;
+          if Self.ConstExprIsUInt64(Bin) then
+            Exit(Int64(UInt64(L) mod UInt64(R)));
           Exit(L mod R);
         end;
       boAnd: Exit(L and R);
@@ -9025,12 +9038,51 @@ end;
   initialises: a bare constant reference keeps its referent's type (an
   alias), an enum member its enum, True / False Boolean, and a typecast its
   target type.  nil -- any other integer expression is typed by magnitude. }
+{ True when a constant expression is a Boolean (True, False, a Boolean
+  constant, or a logical expression over them). }
+function TSemanticAnalyser.ConstIsBoolean(AExpr: TASTExpr): Boolean;
+var
+  T: TTypeDesc;
+begin
+  T := Self.ConstExprOrdinalType(AExpr);
+  Result := (T <> nil) and (T.Kind = tyBoolean);
+end;
+
+{ True when a constant arithmetic or bit expression has a UInt64 operand,
+  so it is a UInt64 and folds unsigned (div, mod). }
+function TSemanticAnalyser.ConstExprIsUInt64(ABin: TBinaryExpr): Boolean;
+var
+  T: TTypeDesc;
+begin
+  Result := False;
+  if not (ABin.Op in [boAdd, boSub, boMul, boDiv, boMod, boAnd, boOr, boXor,
+                      boShl, boShr]) then
+    Exit;
+  T := Self.ConstExprOrdinalType(ABin.Left);
+  if (T <> nil) and (T.Kind = tyUInt64) then
+    Exit(True);
+  { a shift count does not make the value unsigned }
+  if ABin.Op in [boShl, boShr] then
+    Exit;
+  T := Self.ConstExprOrdinalType(ABin.Right);
+  Result := (T <> nil) and (T.Kind = tyUInt64);
+end;
+
 function TSemanticAnalyser.ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
 var
   Sym: TSymbol;
   EnumRef: TEnumMemberRef;
 begin
   Result := nil;
+  if (AExpr is TBinaryExpr) and Self.ConstExprIsUInt64(TBinaryExpr(AExpr)) then
+    Exit(FTable.TypeUInt64);
+  { and / or / xor / not over Boolean constants is a Boolean }
+  if ((AExpr is TBinaryExpr) and
+      (TBinaryExpr(AExpr).Op in [boAnd, boOr, boXor]) and
+      Self.ConstIsBoolean(TBinaryExpr(AExpr).Left) and
+      Self.ConstIsBoolean(TBinaryExpr(AExpr).Right)) or
+     ((AExpr is TNotExpr) and Self.ConstIsBoolean(TNotExpr(AExpr).Expr)) then
+    Exit(FTable.TypeBoolean);
   if AExpr is TIdentExpr then
   begin
     if SameText(TIdentExpr(AExpr).Name, 'True') or
