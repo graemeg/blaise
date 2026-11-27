@@ -91,6 +91,11 @@ type
 
     { --- TDictionary<K,V>: core operations --- }
     procedure TestDict_AddAndLookup;
+    { an enum key: GCHashOf found several integer overloads equally good
+      and the instance failed to compile
+      (BUG-20261102-dict-enum-key-gchashof-ambiguous); 20 keys reach the
+      hash path }
+    procedure TestDict_EnumKey_AddLookupRemove;
     procedure TestDict_SetItemOverwrites;
     procedure TestDict_TryGetValue_HitAndMiss;
     procedure TestDict_TryGetValue_Miss_ClearsManagedValue;
@@ -169,6 +174,11 @@ implementation
 
 uses
   SysUtils, Generics.Collections;
+
+type
+  TDictEnumKey = (dk0, dk1, dk2, dk3, dk4, dk5, dk6, dk7, dk8, dk9, dk10,
+    dk11, dk12, dk13, dk14, dk15, dk16, dk17, dk18, dk19);
+
 
 { ------------------------------------------------------------------ }
 { Core membership                                                      }
@@ -1581,6 +1591,28 @@ begin
       S.Contains(J);
     AssertTrue('a lookup changed nothing at count ' + IntToStr(S.Count),
       S.FHashSlots = Slots);
+  end;
+end;
+
+procedure TCollectionsTests.TestDict_EnumKey_AddLookupRemove;
+var
+  D: TDictionary<TDictEnumKey, Int>;
+  K: TDictEnumKey;
+  V: Int;
+begin
+  D := TDictionary<TDictEnumKey, Int>.Create();
+  try
+    for K := Low(TDictEnumKey) to High(TDictEnumKey) do
+      D.Add(K, Ord(K) * 10);
+    AssertEquals('count', 20, D.Count);
+    for K := Low(TDictEnumKey) to High(TDictEnumKey) do
+      AssertEquals('lookup', Ord(K) * 10, D.GetItem(K));
+    D.Remove(dk7);
+    AssertFalse('removed key gone', D.ContainsKey(dk7));
+    AssertTrue('other key kept', D.TryGetValue(dk19, V));
+    AssertEquals('kept value', 190, V);
+  finally
+    D.Free();
   end;
 end;
 
