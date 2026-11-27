@@ -2797,6 +2797,13 @@ begin
     MD.TypeParams := TStringList.Create();
     for J := 0 to G.TypeParams.Count - 1 do
       MD.TypeParams.Add(G.TypeParams.Strings[J]);
+    { the constraints too: instantiation checks the template's, and a
+      cached routine without them took any argument type }
+    if G.Constraints.Count > 0 then
+    begin
+      MD.TypeParamConstraints := TStringList.Create();
+      MD.TypeParamConstraints.AddStrings(G.Constraints);
+    end;
     MD.Body := ReadBlock(AText, APos);
     if MD.Body <> nil then MD.OwnBody := True;
     G.MethodDecl := MD;

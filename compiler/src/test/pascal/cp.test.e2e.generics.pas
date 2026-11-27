@@ -26,6 +26,10 @@ type
     { array-of-T fields of a generic class and record hold managed and plain
       elements }
     procedure TestRun_ArrayOfTypeParamFields;
+    { A generic routine read back from a cached unit interface keeps its
+      constraints: the .bif reader dropped them, so once the unit was
+      cached any argument type was accepted and the body failed }
+    procedure TestCompile_CachedGenericRoutine_KeepsConstraint;
     { BUG-20261022-generic-type-method-overloads: overloaded methods,
       constructors and virtual methods of generic classes and records, the
       generic declared in a unit; one virtual overload is overridden, and
@@ -1912,6 +1916,57 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'v 1' + LE + '14 1' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestCompile_CachedGenericRoutine_KeepsConstraint;
+const
+  USrc = '''
+    unit cshape4;
+    interface
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+    function AreaOf<T: IShape>(const S: T): Int;
+    implementation
+    function AreaOf<T: IShape>(const S: T): Int;
+    begin
+      Result := S.Area()
+    end;
+    end.
+    ''';
+  PSrcPlain = '''
+    program cuse4;
+    uses cshape4;
+    begin
+      WriteLn(1)
+    end.
+    ''';
+  PSrcBad = '''
+    program cuse4;
+    uses cshape4;
+    type
+      TPlain = class
+      end;
+    var
+      P: TPlain;
+    begin
+      P := TPlain.Create();
+      WriteLn(AreaOf(P))
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { the first build caches the unit; the second reads its interface back }
+  AssertTrue('unit compiles and caches: ' + Output,
+    CompileAndRunWithUnitNative('cshape4', USrc, PSrcPlain, Output, RCode));
+  AssertFalse('violated: rejected',
+    CompileAndRunInScratch(PSrcBad, Output, RCode));
+  AssertTrue('violated: the constraint is reported: ' + Output,
+    Pos('''TPlain'' does not implement ''IShape''', Output) >= 0);
 end;
 
 initialization
