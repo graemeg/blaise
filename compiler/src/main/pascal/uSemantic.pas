@@ -3232,6 +3232,13 @@ begin
       Format('''%s'': varargs requires cdecl (write ''cdecl'', or name ' +
         'the library with external ''<lib>'')', [ADecl.Name]),
       ADecl.Line, ADecl.Col);
+  { Also here, not in AnalyseStandaloneDecl: the only routines that may be
+    varargs are externals, and those are never analysed as bodies. }
+  if ADecl.IsVarArgs and ADecl.IsOverload then
+    SemanticError(
+      Format('''%s'': varargs cannot be combined with overload',
+        [ADecl.Name]),
+      ADecl.Line, ADecl.Col);
   if (ADecl.OwningUnit = '') and (FCurrentUnitName <> '') then
     ADecl.OwningUnit := FCurrentUnitName;
   FProcIndex.AddObject(AName, ADecl);
@@ -13477,11 +13484,6 @@ begin
     if ADecl.IsVarArgs and not ADecl.IsExternal then
       SemanticError(
         Format('''%s'': varargs is only valid on external declarations',
-          [ADecl.Name]),
-        ADecl.Line, ADecl.Col);
-    if ADecl.IsVarArgs and ADecl.IsOverload then
-      SemanticError(
-        Format('''%s'': varargs cannot be combined with overload',
           [ADecl.Name]),
         ADecl.Line, ADecl.Col);
     if (not ADecl.IsExternal) and (ADecl.Body <> nil) then

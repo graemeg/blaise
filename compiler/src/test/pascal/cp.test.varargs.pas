@@ -47,6 +47,9 @@ type
     procedure TestSemantic_TooFewArgs_RaisesError;
     procedure TestSemantic_StringExtra_RaisesError;
     procedure TestSemantic_SingleExtra_RaisesError;
+    { varargs cannot combine with overload -- the rule must reach an
+      external, which has no body (BUG-20261110-varargs-rules-skip-externals). }
+    procedure TestSemantic_VarArgsOverloadExternal_RaisesError;
   end;
 
   [Threaded]
@@ -170,6 +173,23 @@ begin
         begin
         end.
         ''');
+end;
+
+procedure TVarArgsTests.TestSemantic_VarArgsOverloadExternal_RaisesError;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(
+    '''
+        program P;
+        function c_printf(F: PChar): Int32; cdecl; overload; varargs; external 'c' name 'printf';
+        function c_printf(F: PChar; A: Int32): Int32; cdecl; overload; external 'c' name 'printf';
+        begin
+          c_printf(PChar('x'));
+        end.
+        ''');
+  AssertTrue('varargs + overload rejected on an external, got: ' + Msg,
+    Pos('varargs cannot be combined with overload', Msg) >= 0);
 end;
 
 procedure TVarArgsTests.TestSemantic_TooFewArgs_RaisesError;
