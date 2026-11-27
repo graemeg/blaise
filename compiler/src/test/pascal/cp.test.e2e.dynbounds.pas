@@ -53,6 +53,11 @@ type
       array as it is after V, never in the block V freed (arm64 parked the
       element address before evaluating V) }
     procedure TestRun_ValueResizesTheArray;
+    { each part of an element write is evaluated once: the receiver of a
+      field array (MakeObj().Arr[I]), the index; a value that SHRINKS the
+      array fails the check after it; the chained pin holds for an
+      interface-method and a getter-property value }
+    procedure TestRun_EvaluatedOnce_Shrink_GetterPins;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -653,7 +658,7 @@ const
   Src = '''
     program PtrOfDyn;
     type TRec = record A: array of Int32; end;
-    var A: array of Int32; Q: Pointer; R: TRec;
+    var A: array of Int32; Q: Pointer; R: TRec; M: array of array of Int32;
     begin
       Q := Pointer(A);
       WriteLn(Q = nil);
@@ -663,11 +668,14 @@ const
       R.A := A;
       WriteLn(Pointer(R.A) = Pointer(A));
       SetLength(A, 0);
-      WriteLn(Pointer(A) = nil)
+      WriteLn(Pointer(A) = nil);
+      SetLength(M, 1); SetLength(M[0], 1); M[0][0] := 6;
+      WriteLn(PInt32(Pointer(M[0]))^)
     end.
     ''';
 begin
-  AssertRTLRunsOnAll(Src, 'True' + LE + '7' + LE + 'True' + LE + 'True' + LE, 0);
+  AssertRTLRunsOnAll(Src, 'True' + LE + '7' + LE + 'True' + LE + 'True' + LE +
+    '6' + LE, 0);
 end;
 
 procedure TE2EDynBoundsTests.TestRun_ValueResizesTheArray;
@@ -750,6 +758,63 @@ begin
     'closure ran' + LE + 'True' + LE + '9' + LE + '10' + LE + '11' + LE +
     '12' + LE + '13' + LE + '50000' + LE + '14' + LE + '3 50000' + LE +
     '50000 done' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestRun_EvaluatedOnce_Shrink_GetterPins;
+const
+  Src = '''
+    program DynOnce;
+    uses SysUtils;
+    type
+      TIntArr = array of Int32;
+      THold = class Arr: TIntArr; end;
+      IGrow = interface function Grow: Int32; end;
+      TGrow = class(TObject, IGrow) function Grow: Int32; end;
+      TProps = class function GetG: Int32; property G: Int32 read GetG; end;
+    var
+      Made, Idx: Int32; Last: THold; A: TIntArr; M: array of TIntArr;
+      Gi: IGrow; Pr: TProps; R: THold;
+    function MakeObj: THold;
+    begin
+      Made := Made + 1;
+      Last := THold.Create(); SetLength(Last.Arr, 2);
+      Result := Last
+    end;
+    function Next: Int32; begin Idx := Idx + 1; Result := 1 end;
+    function Shrink: Int32; begin SetLength(A, 1); Result := 9 end;
+    function TGrow.Grow: Int32; begin SetLength(M[0], 50000); Result := 5 end;
+    function TProps.GetG: Int32; begin SetLength(M[0], 60000); Result := 6 end;
+    begin
+      MakeObj().Arr[1] := 7;
+      WriteLn('made ', Made, ' stored ', Last.Arr[1]);
+      Last.Free();
+      SetLength(A, 3);
+      A[Next()] := 4;
+      R := THold.Create(); SetLength(R.Arr, 3);
+      R.Arr[Next()] := 5;
+      WriteLn('index evaluated ', Idx, ' ', A[1], ' ', R.Arr[1]);
+      R.Free();
+      SetLength(A, 3);
+      try
+        A[2] := Shrink();
+        WriteLn('miss shrink')
+      except
+        on E: ERangeError do WriteLn('shrink ', Length(A))
+      end;
+      SetLength(M, 1); SetLength(M[0], 1); M[0][0] := 3;
+      Gi := TGrow.Create();
+      M[0][0] := Gi.Grow();
+      WriteLn('intf ', M[0][0], ' ', Length(M[0]));
+      Pr := TProps.Create();
+      M[0][0] := Pr.G;
+      WriteLn('getter ', M[0][0], ' ', Length(M[0]));
+      Pr.Free()
+    end.
+    ''';
+begin
+  AssertRTLRunsOnAll(Src,
+    'made 1 stored 7' + LE + 'index evaluated 2 4 5' + LE + 'shrink 1' + LE +
+    'intf 3 50000' + LE + 'getter 3 60000' + LE, 0);
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;

@@ -10215,6 +10215,18 @@ A multi-level write checks each level as it is reached: in `M[I][J] := V`
 the read of `M[I]` is checked first, then `J` against the inner array,
 both before `V`.
 
+One shape keeps the older order: an array field reached through a receiver
+expression that may itself run code, such as `MakeObj().Arr[I] := V` or
+`Items[Next()].Arr[I] := V`.  Its receiver is evaluated once, after `V`,
+so `I` is checked only in step 4 (step 2 would need the receiver
+evaluated a second time).
+
+An owned value (a string, an object, a dynamic array returned by a call)
+whose evaluation *shrinks* the array so that the step 4 check fails is not
+released: it is a statement temporary, outside the unwind cleanup that
+releases a routine's variables when an exception passes through
+(BUG-20261028).
+
 ===== Rationale
 
 * *A failed write has no side effects of its own.*  Evaluating `V` first

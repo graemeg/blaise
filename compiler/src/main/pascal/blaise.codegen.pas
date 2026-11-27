@@ -899,14 +899,24 @@ begin
   if AExpr = nil then
     Exit(False);
   if (AExpr is TIntLiteral) or (AExpr is TFloatLiteral) or
-     (AExpr is TStringLiteral) or (AExpr is TNilLiteral) or
-     (AExpr is TIdentExpr) then
+     (AExpr is TStringLiteral) or (AExpr is TNilLiteral) then
     Exit(False);
+  if AExpr is TIdentExpr then
+  begin
+    { a bare getter property or zero-arg method of Self is a call; a lowered
+      identifier is whatever it was lowered to }
+    if TIdentExpr(AExpr).IsImplicitSelfMethod then
+      Exit(True);
+    Exit(ExprMayCall(TIdentExpr(AExpr).LoweredExpr));
+  end;
   if AExpr is TFieldAccessExpr then
   begin
     FA := TFieldAccessExpr(AExpr);
-    if FA.IsMethodCall or (FA.PropRead <> nil) or FA.IsStaticPropGet then
+    if FA.IsMethodCall or FA.IsInterfaceCall or FA.IsConstructorCall or
+       FA.IsBuiltinToString or (FA.PropRead <> nil) or FA.IsStaticPropGet then
       Exit(True);
+    if FA.LoweredSubscript <> nil then
+      Exit(ExprMayCall(FA.LoweredSubscript));
     Exit(ExprMayCall(FA.Base) or ExprMayCall(FA.PropIndexExpr));
   end;
   if AExpr is TStringSubscriptExpr then

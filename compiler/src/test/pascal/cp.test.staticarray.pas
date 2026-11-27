@@ -1855,8 +1855,13 @@ begin
       #9'callq _DynArrayAddRef' + #10 + #9'movq (%rsp), %rcx' + #10 +
         #9'movq (%rcx), %rdi' + #10 + #9'callq _DynArrayRelease',
       #9'bl __DynArrayAddRef' + #10 + #9'ldr x0, [sp], #16' + #10 +
-        #9'str x0, [sp, #-16]!' + #10 + #9'ldr x9, [sp, #16]' + #10 +
-        #9'ldr x0, [x9]' + #10 + #9'bl __DynArrayRelease'));
+        #9'str x0, [sp, #-16]!'));
+  { arm64 re-derives the element address between the push and the release
+    of the old element (BUG-20261127-elem-write-value-resizes-array) }
+  AssertEquals('the old element is released through the fresh address', '',
+    AsmMissing(Src, #9'callq _DynArrayRelease',
+      #9'ldr x9, [sp, #16]' + #10 + #9'ldr x0, [x9]' + #10 +
+        #9'bl __DynArrayRelease'));
 end;
 
 procedure TStaticArrayTests.TestNative_FloatArrayFieldElement_LoadsElement;

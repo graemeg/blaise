@@ -754,6 +754,16 @@ begin
   AssertEquals('variable, field and element accepted', '', SemanticError(SrcOk));
   AssertTrue('a call result is rejected: ' + SemanticError(SrcCall),
     Pos('needs a variable, field or element', SemanticError(SrcCall)) >= 0);
+  AssertTrue('a field of a record call result is rejected',
+    Pos('needs a variable, field or element', SemanticError('''
+      program P;
+      type TRec = record A: array of Int32; end;
+      var Q: Pointer;
+      function MkRec: TRec; begin SetLength(Result.A, 1) end;
+      begin
+        Q := Pointer(MkRec().A)
+      end.
+      ''')) >= 0);
 end;
 
 procedure TDynArrayTests.TestCodegen_BadIndexWrite_CheckPrecedesValue;

@@ -5154,9 +5154,12 @@ begin
   SavedSlot := FFieldIdxSlot;
   FFieldIdxStmt := nil;
   FFieldIdxSlot := '';
+  { (a receiver expression that may run code -- MakeObj().Arr[I] -- is
+    evaluated only once, after the value, so it skips the early check) }
   if (AStmt.FieldInfo <> nil) and (AStmt.FieldInfo.TypeDesc <> nil) and
      (AStmt.FieldInfo.TypeDesc.Kind = tyDynArray) and
-     (AStmt.PropIndexExpr <> nil) then
+     (AStmt.PropIndexExpr <> nil) and
+     not ((AStmt.ObjExpr <> nil) and ExprMayCall(AStmt.ObjExpr)) then
   begin
     FFieldIdxSlot := '__fidx_' + IntToStr(FJArgN);
     FJArgN := FJArgN + 1;

@@ -19871,7 +19871,10 @@ begin
         address after the value -- it may resize the array -- and check
         again; they reload the parked index. }
       IdxTmp := '';
-      if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
+      { (a receiver expression that may run code -- MakeObj().Arr[I] -- is
+        evaluated only once, after the value, so it skips the early check) }
+      if (FA.FieldInfo.TypeDesc.Kind = tyDynArray) and
+         not ((FA.ObjExpr <> nil) and ExprMayCall(FA.ObjExpr)) then
       begin
         IdxTmp := Self.NewScratchOperand(8);
         Self.EmitExprToEax(FA.PropIndexExpr);
