@@ -292,6 +292,9 @@ type
     { The FProcIndex entry of the current unit's body-less overloaded forward
       that ABody implements (same mangled signature), or -1. }
     function IndexOfOverloadForward(ABody: TMethodDecl): Int;
+    { the FProcIndex entry that implements interface declaration ADecl:
+      for an overload, the one with ADecl's parameter signature }
+    function  IndexOfImplFor(ADecl: TMethodDecl): Int;
 
     { The emitted/imported link symbol for a standalone routine: the
       `external name` for an external binding (defaulting to the Pascal name),
@@ -3224,6 +3227,28 @@ begin
   Result := -1;
 end;
 
+function TSemanticAnalyser.IndexOfImplFor(ADecl: TMethodDecl): Int;
+var
+  I: Int;
+  Sig: string;
+begin
+  if not ADecl.IsOverload then
+    Exit(IndexOfProcInUnit(ADecl.Name, FCurrentUnitName));
+  { an overload set shares its name, so the bare-name lookup found its
+    first member: an external sibling (no body) failed an implemented
+    overload, and an implemented first member hid a later one with no
+    body.  Match the signature, as the implementation did when it
+    replaced this entry. }
+  Sig := MangleParamSig(ADecl);
+  for I := 0 to FProcIndex.Count - 1 do
+    if SameText(FProcIndex.Strings[I], ADecl.Name) and
+       SameText(TMethodDecl(FProcIndex.Objects[I]).OwningUnit, FCurrentUnitName) and
+       TMethodDecl(FProcIndex.Objects[I]).IsOverload and
+       (MangleParamSig(TMethodDecl(FProcIndex.Objects[I])) = Sig) then
+      Exit(I);
+  Result := -1;
+end;
+
 function TSemanticAnalyser.IndexOfOverloadForward(ABody: TMethodDecl): Int;
 var
   I:   Int;
@@ -3692,7 +3717,7 @@ begin
       { Generic free routines live in FGenericFuncTemplates, not FProcIndex —
         their impl is checked by AnalyseStandaloneDecl. }
       if MDecl.TypeParams <> nil then Continue;
-      ImplIdx := IndexOfProcInUnit(MDecl.Name, FCurrentUnitName);
+      ImplIdx := IndexOfImplFor(MDecl);
       if (ImplIdx < 0) or
          (TMethodDecl(FProcIndex.Objects[ImplIdx]).Body = nil) then
         SemanticError(
@@ -4421,7 +4446,7 @@ begin
       if MDecl.IsExternal then Continue;
       { Generic free routines: impl lives in FGenericFuncTemplates. }
       if MDecl.TypeParams <> nil then Continue;
-      ImplIdx := IndexOfProcInUnit(MDecl.Name, FCurrentUnitName);
+      ImplIdx := IndexOfImplFor(MDecl);
       if (ImplIdx < 0) or
          (TMethodDecl(FProcIndex.Objects[ImplIdx]).Body = nil) then
         SemanticError(

@@ -21,7 +21,18 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function ParseUnit(const ASrc: string): TUnit;
     procedure AssertCodegenRefused(const AWhat, ASrc, ATarget: string);
+    function UnitSemanticError(const ASrc: string): string;
   published
+    { An interface overload set may mix an external member with ones the
+      implementation section defines: each declaration is checked against
+      the body with ITS signature.  The check looked the set up by name,
+      found the bodiless external first and reported the implemented
+      sibling as missing (the Math unit's Sin(Float64) external beside
+      Sin(Float32)). }
+    procedure TestSemantic_ExternalOverloadBesideImplementedOverload_OK;
+    { ...and, for the same reason, a later overload with no body at all was
+      never reported: the first overload's body satisfied the lookup }
+    procedure TestSemantic_MissingSecondOverloadBody_Reported;
     { @Routine of an external routine is the address of its external name:
       @c_strlen is strlen's address (it named the Pascal symbol c_strlen,
       which nothing defines) }
@@ -764,6 +775,68 @@ const
 begin
   AssertEquals('', AsmMissing(SRC, 'leaq strlen(%rip), %rax',
     'adrp x0, _strlen@GOTPAGE'));
+end;
+
+
+function TExternalTests.UnitSemanticError(const ASrc: string): string;
+var
+  U: TUnit;
+  A: TSemanticAnalyser;
+begin
+  Result := '';
+  U := ParseUnit(ASrc);
+  A := TSemanticAnalyser.Create();
+  try
+    try
+      A.AnalyseUnit(U);
+    except
+      on E: ESemanticError do
+        Result := E.Message;
+    end;
+  finally
+    A.Free();
+    U.Free();
+  end;
+end;
+
+procedure TExternalTests.TestSemantic_ExternalOverloadBesideImplementedOverload_OK;
+begin
+  AssertEquals('external + implemented overloads', '', UnitSemanticError(
+    '''
+    unit u;
+    interface
+    function Foo(X: Float64): Float64; overload; external name '_BlaiseSin';
+    function Foo(X: Float32): Float32; overload;
+    implementation
+    function Foo(X: Float32): Float32;
+    begin
+      Result := Foo(Float64(X));
+    end;
+    end.
+    '''));
+end;
+
+procedure TExternalTests.TestSemantic_MissingSecondOverloadBody_Reported;
+var
+  Err: string;
+begin
+  Err := UnitSemanticError(
+    '''
+    unit u;
+    interface
+    function Foo(X: Int): Int; overload;
+    function Foo(const S: string): Int; overload;
+    implementation
+    function Foo(X: Int): Int;
+    begin
+      Result := X;
+    end;
+    end.
+    ''');
+  AssertTrue('missing overload body: ' + Err,
+    Pos('Interface function ''Foo'' has no implementation', Err) >= 0);
+  AssertTrue('names the string overload''s line: ' + Err,
+    Pos('line 4', Err) >= 0);
 end;
 
 initialization
