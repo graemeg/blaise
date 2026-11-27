@@ -16,7 +16,7 @@ unit cp.test.genericconstraints;
 interface
 
 uses
-  Classes, SysUtils, blaise.testing,
+  Classes, SysUtils, uStrCompat, blaise.testing,
   uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
@@ -27,6 +27,7 @@ type
     procedure AnalyseExpectError(const ASrc: string);
     procedure AssertIntfConstraintAccepted(const ABody: string);
     procedure AssertIntfConstraintRejected(const ABody, AArg: string);
+    procedure AssertConstraintErrorAt(const ABody: string; ABodyLine: Int);
   published
     procedure TestParse_GenericType_ClassConstraint;
     procedure TestParse_GenericType_RecordConstraint;
@@ -52,6 +53,13 @@ type
     procedure TestSemantic_IntfConstraint_GenericClass_Satisfied;
     procedure TestSemantic_IntfConstraint_GenericClass_Violation;
     procedure TestSemantic_IntfConstraint_GenericMethod_Violation;
+    { A constraint violation names the line of the instantiating use
+      (BUG-20261120-constraint-error-no-location). }
+    procedure TestSemantic_ConstraintError_ExplicitCall_HasLocation;
+    procedure TestSemantic_ConstraintError_InferredCall_HasLocation;
+    procedure TestSemantic_ConstraintError_GenericMethod_HasLocation;
+    procedure TestSemantic_ConstraintError_VarDecl_HasLocation;
+    procedure TestSemantic_ConstraintError_TypeDecl_HasLocation;
   end;
 
 implementation
@@ -460,6 +468,85 @@ begin
       N := U.Measure<TPlain>(P)
     end.
     ''', 'TPlain');
+end;
+
+{ The constraint diagnostic for ABody must give the source line that holds
+  the instantiating use: ABodyLine counts from 1 at ABody's first line. }
+procedure TGenericConstraintTests.AssertConstraintErrorAt(const ABody: string;
+  ABodyLine: Int);
+var
+  Msg: string;
+  DeclLines: Int;
+  I: Int;
+begin
+  DeclLines := 0;
+  for I := 0 to Length(IntfConstraintDecls) - 1 do
+    if StrAt(IntfConstraintDecls, I) = 10 then
+      Inc(DeclLines);
+  Msg := SemanticError(IntfConstraintDecls + ABody);
+  AssertTrue('names the unsatisfied constraint: ' + Msg,
+    Pos('does not implement ''IShape''', Msg) >= 0);
+  AssertTrue('gives the instantiating line: ' + Msg,
+    Pos(Format(' at line %d col ', [DeclLines + ABodyLine]), Msg) >= 0);
+end;
+
+procedure TGenericConstraintTests.TestSemantic_ConstraintError_ExplicitCall_HasLocation;
+begin
+  AssertConstraintErrorAt('''
+    var P: TPlain; N: Int;
+    begin
+      P := TPlain.Create();
+      N := AreaOf<TPlain>(P)
+    end.
+    ''', 4);
+end;
+
+procedure TGenericConstraintTests.TestSemantic_ConstraintError_InferredCall_HasLocation;
+begin
+  AssertConstraintErrorAt('''
+    var P: TPlain; N: Int;
+    begin
+      P := TPlain.Create();
+
+      N := AreaOf(P)
+    end.
+    ''', 5);
+end;
+
+procedure TGenericConstraintTests.TestSemantic_ConstraintError_GenericMethod_HasLocation;
+begin
+  AssertConstraintErrorAt('''
+    var U: TUtil; P: TPlain; N: Int;
+    begin
+      U := TUtil.Create();
+      P := TPlain.Create();
+      N := U.Measure<TPlain>(P)
+    end.
+    ''', 5);
+end;
+
+procedure TGenericConstraintTests.TestSemantic_ConstraintError_VarDecl_HasLocation;
+begin
+  AssertConstraintErrorAt('''
+    var
+      N: Int;
+      H: THolder<TPlain>;
+    begin
+      N := 0
+    end.
+    ''', 3);
+end;
+
+procedure TGenericConstraintTests.TestSemantic_ConstraintError_TypeDecl_HasLocation;
+begin
+  AssertConstraintErrorAt('''
+    type
+      TAlias = class
+        FH: THolder<TPlain>;
+      end;
+    begin
+    end.
+    ''', 3);
 end;
 
 initialization
