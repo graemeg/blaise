@@ -31,6 +31,9 @@ rtl.platform.layout.windows_init:
         .globl _ThreadVarsRelease
 _ThreadVarsRelease:
         ret
+        .globl _StaticSlotsRelease
+_StaticSlotsRelease:
+        ret
         .globl TObject_Destroy
 TObject_Destroy:
         ret

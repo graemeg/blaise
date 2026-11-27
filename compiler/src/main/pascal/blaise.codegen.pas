@@ -309,6 +309,27 @@ function UnitBlockHasManagedGlobals(ABlock: TBlock): Boolean;
   NO fini and no call — binaries do not grow. }
 function UnitNeedsFini(AUnit: TUnit): Boolean;
 
+{ True when AField is the static var of a GENERIC instance whose value must
+  be released at program exit: one shared slot (ClassVarEmitName), of a
+  managed kind, not [Unretained]/[Weak].  Such a slot is registered with the
+  RTL (_StaticSlotRegister) by the initialization of every translation unit
+  that instantiates the type, and released once after the last unit's
+  finalization (_StaticSlotsRelease). }
+function GenericStaticNeedsRelease(AField: TFieldDecl): Boolean;
+
+{ True when an instance in AInstances (TGenericInstance) or ARecInstances
+  (TGenericRecordInstance) has a static var GenericStaticNeedsRelease
+  accepts.  Either list may be nil. }
+function InstancesHaveManagedStatics(AInstances, ARecInstances: TObjectList): Boolean;
+
+{ True when AUnit must export a <Unit>_init procedure: it has a user
+  `initialization` section, or it instantiates a generic type with a managed
+  static var it must register.  THE shared predicate for unit init -- the
+  unit's own object emits <Unit>_init exactly when it is True, the .bif
+  records it (HasInitialization), and the driver calls a dependency's init
+  under it, so they cannot drift (the fini twin is UnitNeedsFini). }
+function UnitNeedsInit(AUnit: TUnit): Boolean;
+
 { True if evaluating AExpr MIGHT defer a release to the statement end: a
   retained class/interface field read whose base is an owned transient
   (MakeObj().ClassField), or a call that holds its receiver for the call (a
@@ -628,6 +649,51 @@ begin
     if ArcScopeExitReleaseKind(VD.ResolvedType) <> arkNone then
       Exit(True);
   end;
+end;
+
+function GenericStaticNeedsRelease(AField: TFieldDecl): Boolean;
+begin
+  Result := AField.IsClassVar and (AField.ClassVarEmitName <> '') and
+    (AField.ResolvedType <> nil) and not AField.IsUnretained and
+    not AField.IsWeak and
+    (ArcScopeExitReleaseKind(AField.ResolvedType) <> arkNone);
+end;
+
+function FieldsHaveManagedStatics(AFields: TObjectList): Boolean;
+var
+  I: Int;
+begin
+  Result := False;
+  if AFields = nil then Exit;
+  for I := 0 to AFields.Count - 1 do
+    if GenericStaticNeedsRelease(TFieldDecl(AFields.Items[I])) then
+      Exit(True);
+end;
+
+function InstancesHaveManagedStatics(AInstances, ARecInstances: TObjectList): Boolean;
+var
+  I: Int;
+begin
+  Result := False;
+  if AInstances <> nil then
+    for I := 0 to AInstances.Count - 1 do
+      if (TGenericInstance(AInstances.Items[I]).ClassDef <> nil) and
+         FieldsHaveManagedStatics(
+           TGenericInstance(AInstances.Items[I]).ClassDef.Fields) then
+        Exit(True);
+  if ARecInstances <> nil then
+    for I := 0 to ARecInstances.Count - 1 do
+      if (TGenericRecordInstance(ARecInstances.Items[I]).RecordDef <> nil) and
+         FieldsHaveManagedStatics(
+           TGenericRecordInstance(ARecInstances.Items[I]).RecordDef.Fields) then
+        Exit(True);
+end;
+
+function UnitNeedsInit(AUnit: TUnit): Boolean;
+begin
+  Result := ((AUnit.InitStmts <> nil) and (AUnit.InitStmts.Count > 0))
+    or InstancesHaveManagedStatics(AUnit.GenericInstances,
+         AUnit.GenericRecordInstances);
 end;
 
 function UnitNeedsFini(AUnit: TUnit): Boolean;

@@ -110,6 +110,11 @@ type
     [Unretained] FDbgOuterDecl: TMethodDecl;
     FDbgSrcFile: string;              { .pas of the unit being emitted; '' = program }
     FGlobalNames: TStringList;                   { program-level int globals }
+    { managed static vars of generic instances this object defines (Objects =
+      TTypeDesc): released once at exit through the RTL registry, never by
+      the per-kind global lists (RegisterGenericStatics) }
+    FGenStatic: TStringList;
+    FGenStaticEmitted: TStringList;  { release routines already emitted }
     FStrLits:     TStringList;
     FLabelN:      Int;
     FProgramName: string;
@@ -910,6 +915,10 @@ type
       AValueExpr: TASTExpr);
     procedure RegisterUnitVars(ABlock: TBlock);
     procedure RegisterClassVars(ATypeDecls: TObjectList);
+    procedure RegisterGenericStaticFields(AFields: TObjectList);
+    procedure RegisterGenericStatics(AInstances, ARecInstances: TObjectList);
+    procedure EmitGenStaticRegistrations(AInstances, ARecInstances: TObjectList);
+    procedure EmitGenStaticReleaseRoutines;
     procedure FinalizeEmit; override;
 
     { ---- ARC walk primitives (TNativeBackend contract) ----
@@ -1107,6 +1116,8 @@ begin
   FUnwPend := TList<Int>.Create();
   FFrame       := TDictionary<string, Int>.Create();
   FGlobalNames := TStringList.Create();
+  FGenStatic := TStringList.Create();
+  FGenStaticEmitted := TStringList.Create();
   FStrLits     := TStringList.Create();
   FBreakLbls   := TStringList.Create();
   FContLbls    := TStringList.Create();
@@ -1217,6 +1228,8 @@ begin
   FBreakLbls.Free();
   FStrLits.Free();
   FGlobalNames.Free();
+  FGenStatic.Free();
+  FGenStaticEmitted.Free();
   FFrame.Free();
   inherited Destroy();
 end;
@@ -19884,6 +19897,7 @@ begin
   end;
 
   RegisterClassVars(AProg.Block.TypeDecls);
+  RegisterGenericStatics(AProg.GenericInstances, AProg.GenericRecordInstances);
   { Program-level variables become globals (int-family only for now). }
   for I := 0 to AProg.Block.Decls.Count - 1 do
   begin
@@ -20154,6 +20168,8 @@ begin
   { unit initialization sections, in dependency (append) order }
   for I := 0 to FUnitInits.Count - 1 do
     Self.Emit(Format(#9'bl %s', [FUnitInits.Strings[I]]));
+  EmitGenStaticRegistrations(AProg.GenericInstances,
+    AProg.GenericRecordInstances);
   { --debug: switch the ARC leak tracker on (it registers its own exit-time
     report); strings and dyn-arrays are then tracked by the RTL, class
     instances at each construction site (EmitLeakTrackerRegister).  Mirrors
@@ -20221,6 +20237,9 @@ begin
     finalization section, then releases the unit's managed globals }
   for I := FUnitFinals.Count - 1 downto 0 do
     Self.Emit(Format(#9'bl %s', [FUnitFinals.Strings[I]]));
+  { the static vars of generic instances, after EVERY unit's final: a unit
+    finalized late may still read one (runtime.arc _StaticSlotsRelease) }
+  EmitCallSym('_StaticSlotsRelease');
   Self.Emit(#9'movz w0, #0');
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
@@ -20241,6 +20260,7 @@ begin
   FAsm.Append(BodyBuf.ToString());
   BodyBuf.Free();
 
+  EmitGenStaticReleaseRoutines();
   EmitDynElemHooks();
   EmitUnwindBlock();
   EmitArrayConstData(AProg.Block);
@@ -20499,6 +20519,7 @@ begin
   RegisterUnitVars(AUnit.ImplBlock);
   RegisterClassVars(AUnit.IntfBlock.TypeDecls);
   RegisterClassVars(AUnit.ImplBlock.TypeDecls);
+  RegisterGenericStatics(AUnit.GenericInstances, AUnit.GenericRecordInstances);
   Self.Emit('.text');
   CheckTypeSubset(AUnit.IntfBlock.TypeDecls);
   CheckTypeSubset(AUnit.ImplBlock.TypeDecls);
@@ -20620,8 +20641,9 @@ begin
     defined symbols cannot drift.  The release walk lives in the unit's OWN
     object, where implementation-section privates are reachable (x86-64
     parity: <Unit>_fini). }
-  if (AUnit.InitStmts <> nil) and (AUnit.InitStmts.Count > 0) then
+  if UnitNeedsInit(AUnit) then
     EmitUnitInit(AUnit);
+  EmitGenStaticReleaseRoutines();
   if UnitNeedsFini(AUnit) then
     EmitUnitSection(AUnit, AUnit.FinalStmts,
       DarwinSym(CodegenMangle(AUnit.Name) + '_final'), FUnitFinals, AUnit);
@@ -20717,6 +20739,11 @@ begin
   FFinallyBodies.Clear();
   FLoopExcDepth.Clear();
   TvArmMark();
+  { a unit init registers the managed static vars of the generic instances
+    the unit instantiates, before its own initialization code runs }
+  if ARegistry = FUnitInits then
+    EmitGenStaticRegistrations(AUnit.GenericInstances,
+      AUnit.GenericRecordInstances);
   if AStmts <> nil then
     EmitStmtList(AStmts);
   Self.Emit(FExitLabel + ':');
@@ -20873,6 +20900,196 @@ begin
       else
         FGlobalSize.Items[N] := 8;
     end;
+  end;
+end;
+
+{ The static vars of generic instances: one WEAK global each under the
+  bare emit name the semantic pass gives it (DefineGenericStaticVar), so the
+  copies every instantiating object carries collapse into one slot at link
+  time, as the instance's methods do (BUG-004).  A managed one is NOT added
+  to the per-kind release lists: releasing it in this object's teardown
+  would free it while a unit finalized later may still read it, and every
+  instantiating object would release the one merged slot.  It is recorded
+  in FGenStatic for a release routine and an RTL registration instead. }
+procedure TArm64Backend.RegisterGenericStaticFields(AFields: TObjectList);
+var
+  J: Int;
+  F: TFieldDecl;
+  N: string;
+  T: TTypeDesc;
+begin
+  if AFields = nil then Exit;
+  for J := 0 to AFields.Count - 1 do
+  begin
+    F := TFieldDecl(AFields.Items[J]);
+    if not F.IsClassVar or (F.ClassVarEmitName = '') or
+       (F.ResolvedType = nil) then
+      Continue;
+    N := F.ClassVarEmitName;
+    T := F.ResolvedType;
+    if FGlobalNames.IndexOf(N) >= 0 then Continue;
+    FGlobalNames.Add(N);
+    FGlobalWeak.Add(N);
+    if T.Kind = tyInterface then
+    begin
+      FGlobalNames.Add(N + '_itab');
+      FGlobalWeak.Add(N + '_itab');
+      FGlobalSize.Items[N + '_itab'] := 8;
+    end;
+    if T.Kind in [tyRecord, tyStaticArray] then
+      FGlobalSize.Items[N] := T.RawSize()
+    else if IsMethodPtrType(T) then
+      FGlobalSize.Items[N] := 16
+    else
+      FGlobalSize.Items[N] := 8;
+    if GenericStaticNeedsRelease(F) then
+      FGenStatic.AddObject(N, T);
+  end;
+end;
+
+procedure TArm64Backend.RegisterGenericStatics(AInstances,
+  ARecInstances: TObjectList);
+var
+  I: Int;
+begin
+  if AInstances <> nil then
+    for I := 0 to AInstances.Count - 1 do
+      if TGenericInstance(AInstances.Items[I]).ClassDef <> nil then
+        RegisterGenericStaticFields(
+          TGenericInstance(AInstances.Items[I]).ClassDef.Fields);
+  if ARecInstances <> nil then
+    for I := 0 to ARecInstances.Count - 1 do
+      if TGenericRecordInstance(ARecInstances.Items[I]).RecordDef <> nil then
+        RegisterGenericStaticFields(
+          TGenericRecordInstance(ARecInstances.Items[I]).RecordDef.Fields);
+end;
+
+{ _StaticSlotRegister(@slot, @slot_release) for each managed static var of
+  the instances in the lists; the RTL keeps one entry per slot however many
+  objects register it. }
+procedure TArm64Backend.EmitGenStaticRegistrations(AInstances,
+  ARecInstances: TObjectList);
+
+  procedure RegisterFields(AFields: TObjectList);
+  var
+    J: Int;
+    F: TFieldDecl;
+    Rel: string;
+  begin
+    if AFields = nil then Exit;
+    for J := 0 to AFields.Count - 1 do
+    begin
+      F := TFieldDecl(AFields.Items[J]);
+      if not GenericStaticNeedsRelease(F) then Continue;
+      Rel := DarwinSym(F.ClassVarEmitName + '_release');
+      EmitSlotAddr('x0', F.ClassVarEmitName);
+      Self.Emit(Format(#9'adrp x1, %s@PAGE', [Rel]));
+      Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [Rel]));
+      EmitCallSym('_StaticSlotRegister');
+    end;
+  end;
+
+var
+  I: Int;
+begin
+  if AInstances <> nil then
+    for I := 0 to AInstances.Count - 1 do
+      if TGenericInstance(AInstances.Items[I]).ClassDef <> nil then
+        RegisterFields(TGenericInstance(AInstances.Items[I]).ClassDef.Fields);
+  if ARecInstances <> nil then
+    for I := 0 to ARecInstances.Count - 1 do
+      if TGenericRecordInstance(ARecInstances.Items[I]).RecordDef <> nil then
+        RegisterFields(
+          TGenericRecordInstance(ARecInstances.Items[I]).RecordDef.Fields);
+end;
+
+{ <slot>_release for each managed generic static var this object defines:
+  WEAK, like the slot, so the linker keeps one.  It releases the value with
+  the same per-kind code the program-exit walk uses, then clears the slot
+  (an interface's itab half too), so a second call is harmless. }
+procedure TArm64Backend.EmitGenStaticReleaseRoutines;
+var
+  I, K, Sz, Off: Int;
+  N, Rel: string;
+  T: TTypeDesc;
+begin
+  for I := 0 to FGenStatic.Count - 1 do
+  begin
+    N := FGenStatic.Strings[I];
+    if FGenStaticEmitted.IndexOf(N) >= 0 then Continue;
+    FGenStaticEmitted.Add(N);
+    T := TTypeDesc(FGenStatic.Objects[I]);
+    Rel := DarwinSym(N + '_release');
+    Self.Emit('.text');
+    Self.Emit('.balign 4');
+    EmitWeakDef(Rel);
+    Self.Emit(Rel + ':');
+    Self.Emit(#9'stp x29, x30, [sp, #-16]!');
+    Self.Emit(#9'mov x29, sp');
+    case ArcScopeExitReleaseKind(T) of
+      arkString:
+        begin
+          EmitLoadSlot('x0', N);
+          EmitCallSym('_StringRelease');
+        end;
+      arkClass, arkIntf:
+        begin
+          EmitLoadSlot('x0', N);
+          EmitCallSym('_ClassRelease');
+        end;
+      arkDynArray:
+        begin
+          EmitLoadSlot('x0', N);
+          EmitCallSym('_DynArrayRelease');
+        end;
+      arkRefEnv:
+        begin
+          EmitSlotAddr('x0', N);
+          Self.Emit(#9'ldr x0, [x0, #8]');
+          EmitCallSym('_ClassRelease');
+        end;
+      arkAggregate:
+        begin
+          Self.Emit(#9'str x19, [sp, #-16]!');
+          EmitSlotAddr('x19', N);
+          Self.EmitManagedReleaseAt(T, 'x19', False);
+          Self.Emit(#9'ldr x19, [sp], #16');
+        end;
+    end;
+    { clear the slot, a word at a time (any size is a multiple of 8: a
+      global's .zero block is) }
+    if not FGlobalSize.TryGetValue(N, Sz) then
+      Sz := 8;
+    EmitSlotAddr('x9', N);
+    Off := 0;
+    K := 0;
+    while K < Sz do
+    begin
+      if Off > 32760 then
+      begin
+        Self.Emit(#9'add x9, x9, #4096');
+        Off := Off - 4096;
+      end;
+      if Sz - K >= 8 then
+      begin
+        Self.Emit(Format(#9'str xzr, [x9, #%d]', [Off]));
+        K := K + 8;
+        Off := Off + 8;
+      end
+      else
+      begin
+        Self.Emit(Format(#9'strb wzr, [x9, #%d]', [Off]));
+        K := K + 1;
+        Off := Off + 1;
+      end;
+    end;
+    if T.Kind = tyInterface then
+    begin
+      EmitSlotAddr('x9', N + '_itab');
+      Self.Emit(#9'str xzr, [x9]');
+    end;
+    Self.Emit(#9'ldp x29, x30, [sp], #16');
+    Self.Emit(#9'ret');
   end;
 end;
 

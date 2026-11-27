@@ -780,8 +780,10 @@ begin
     for I := 0 to AUnit.LinkLibs.Count - 1 do
       if AIface.LinkLibs.IndexOf(TLinkLibDecl(AUnit.LinkLibs.Items[I]).LibName) < 0 then
         AIface.LinkLibs.Add(TLinkLibDecl(AUnit.LinkLibs.Items[I]).LibName);
-  AIface.HasInitialization :=
-    (AUnit.InitStmts <> nil) and (AUnit.InitStmts.Count > 0);
+  { the init flag mirrors the codegen-side predicate too (UnitNeedsInit):
+    a unit that instantiates a generic type with a managed static var has
+    an init that registers the slot, even with no initialization section }
+  AIface.HasInitialization := UnitNeedsInit(AUnit);
   { The fini flag mirrors the codegen-side emission predicate EXACTLY (shared
     UnitNeedsFini): the unit's own object exports <Unit>_fini iff this is
     True, and the driver emits the main_exit call iff this is True — one

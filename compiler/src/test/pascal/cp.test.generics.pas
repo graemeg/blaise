@@ -29,11 +29,13 @@ type
     { member constants of a generic class or record: TCfg<Int>.Limit and a
       bare Limit inside the instance's methods (they were "Unknown class
       method 'Limit'" and "Undeclared identifier 'Limit'"); a static var
-      in a generic is rejected, not compiled as a per-object field
+      of a generic instance is ONE shared slot under a bare, unit-independent
+      name per instance -- it was cloned as a per-object field
       (BUG-20261030-generic-class-members) }
     procedure TestSemantic_GenericClassConst_QualifiedAndBare;
     procedure TestSemantic_GenericRecordConst_QualifiedAndBare;
-    procedure TestSemantic_GenericClassStaticVar_Rejected;
+    procedure TestSemantic_GenericClassStaticVar_OneSlotPerInstance;
+    procedure TestSemantic_GenericStaticVar_BareAndQualifiedForms;
     { a block-scoped 'var' statement in a generic method body is cloned with
       the body ("CloneStmt: unhandled statement node TVarDeclStmt", a
       compiler error, at the first instantiation) }
@@ -1695,24 +1697,97 @@ begin
     '''));
 end;
 
-procedure TGenericsTests.TestSemantic_GenericClassStaticVar_Rejected;
+procedure TGenericsTests.TestSemantic_GenericClassStaticVar_OneSlotPerInstance;
 var
-  Msg: string;
+  Prog: TProgram;
+  I, J: Int;
+  GI: TGenericInstance;
+  F: TFieldDecl;
+  Names: TStringList;
 begin
-  Msg := SemanticError('''
+  Prog := Analyse('''
     program P;
     type
       TCnt<T> = class
       public
+        N: Int;
+        { static is a section qualifier: every member after it is static }
         static var Count: Int;
       end;
-    var C: TCnt<Int>;
+    var A: TCnt<Int>; B: TCnt<string>;
     begin
-      C := TCnt<Int>.Create()
+      TCnt<Int>.Count := 1;
+      TCnt<string>.Count := 2
     end.
     ''');
-  AssertTrue('static var in a generic rejected, got: ' + Msg,
-    Pos('static var ''Count'' in generic', Msg) >= 0);
+  Names := TStringList.Create();
+  try
+    for I := 0 to Prog.GenericInstances.Count - 1 do
+    begin
+      GI := TGenericInstance(Prog.GenericInstances.Items[I]);
+      for J := 0 to GI.ClassDef.Fields.Count - 1 do
+      begin
+        F := TFieldDecl(GI.ClassDef.Fields.Items[J]);
+        if F.IsClassVar then
+          Names.Add(F.ClassVarEmitName);
+      end;
+      { the static var is no instance field: only N is in the layout }
+      AssertNull(GI.TypeName + ': Count is not an instance field',
+        TRecordTypeDesc(GI.TypeDesc).FindField('Count'));
+      AssertNotNull(GI.TypeName + ': N is an instance field',
+        TRecordTypeDesc(GI.TypeDesc).FindField('N'));
+    end;
+    Names.Sort();
+    AssertEquals('one slot per instance', 2, Names.Count);
+    { bare and unit-independent, so every instantiating object agrees }
+    AssertEquals('Int64 instance', 'gsv_TCnt_Int64_Count', Names.Strings[0]);
+    AssertEquals('string instance', 'gsv_TCnt_string_Count', Names.Strings[1]);
+  finally
+    Names.Free();
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericsTests.TestSemantic_GenericStaticVar_BareAndQualifiedForms;
+begin
+  AssertEquals('accepted', '', SemanticError('''
+    program P;
+    type
+      TObj = class
+        N: Int;
+      end;
+      THold<T> = class
+      public
+        static var Count: Int;
+        static var O: TObj;
+        static var D: array of T;
+        procedure Fill;
+        static function Twice: Int;
+      end;
+      TTally<T> = record
+        static var Total: Int;
+      end;
+    procedure THold<T>.Fill;
+    begin
+      Count := Count + 1;
+      O := TObj.Create();
+      O.N := 5;
+      SetLength(D, 1);
+      D[0] := D[0]
+    end;
+    function THold<T>.Twice: Int;
+    begin
+      Result := Count * 2
+    end;
+    var H: THold<Int>; N: Int;
+    begin
+      H := THold<Int>.Create();
+      H.Fill();
+      THold<Int>.Count := 3;
+      N := THold<Int>.Count + THold<Int>.Twice() + THold<Int>.O.N;
+      TTally<Int>.Total := TTally<Int>.Total + 1
+    end.
+    '''));
 end;
 
 initialization

@@ -9361,6 +9361,60 @@ properties) than to write first and revisit when `static` arrives.
   the two are independent axes; sequencing them keeps each commit focused and
   lets the codegen-touching feature accumulate field exposure first.
 
+== Static Variables of Generic Types
+
+=== Decision
+
+A `static var` of a generic class or record is one variable per
+*instance type* for the whole program.  `TCnt<Int>.Count` is a single slot
+shared by every unit that writes `TCnt<Int>`, and `TCnt<string>.Count` is a
+different one.  Member constants of a generic type follow the same rule and
+are folded per instance, so `const Sz = SizeOf(T);` is 8 in `TCnt<Int>` and
+1 in `TCnt<Byte>`.
+
+A managed static var (a string, object, interface, dynamic array, closure,
+or a record or static array with managed content) is released once, after
+the *last* unit's finalization, rather than by any one unit's teardown.
+
+=== Rationale
+
+A generic instance has no single owning unit: every unit that names
+`TCnt<Int>` materialises it independently (separate compilation, cached
+units).  The instance's methods, vtable and typeinfo already carry bare,
+unit-independent names and are emitted weak, so the linker keeps one copy
+and `is` and `as` work across units (BUG-004).  The static var joins that
+model: each instantiating object defines the slot weak, under the bare name
+`gsv_<instance>_<field>`, and the linker merges the copies.
+
+Releasing the merged slot raises the question a per-unit slot never has: which
+unit releases it?  Every instantiating unit carries the slot, so releasing it in
+each unit's finalization would release one value several times.  Releasing it
+only in the first unit to finalise ("release and clear") is safe but early:
+units finalise in reverse initialization order, so a unit finalised later can
+still read the variable in its own `finalization` section, and would find it
+nil.  Instead each instantiating unit's initialization registers the slot and
+a release routine (both weak, both merged) with the RTL, which keeps one entry
+per slot.  The program calls `_StaticSlotsRelease` after the last unit's
+finalization; each routine releases its value and clears the slot, so nothing
+can observe a released value and a duplicate registration would be harmless.
+A unit that instantiates such a type therefore has an initialization routine
+even with no `initialization` section (`UnitNeedsInit`).
+
+=== Alternatives rejected
+
+* *A per-unit copy, as Free Pascal does.*  FPC specialises a generic
+  separately in every unit and names the copy after the unit, so each unit
+  has its own VMT and its own class var: an object built in one unit fails
+  `is` against the "same" specialisation in another, and a counter
+  incremented in two units holds two different values.  That contradicts the
+  source, where `TCnt<Integer>` names one type.
+* *Release and clear in each unit's finalization.*  No double release, but
+  the first unit to finalise frees the value while another unit's
+  finalization may still use it.
+* *Reject static vars in generics.*  The interim behaviour: a clear error
+  instead of the earlier silent miscompile, where the static var was cloned
+  as a per-object field.  Replaced by this design.
+
 == Generic Base Names are Unique Program-wide
 
 === Decision

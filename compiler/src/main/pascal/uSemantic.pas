@@ -174,6 +174,10 @@ type
     FGenericSourceUnits:   TStringList;
     FDeferredConsts:       TObjectList;  { not owned: scalar TConstDecls that wait for
                                            the block's types (FoldScalarConst) }
+    { frames of bare static-var names BindInstanceStaticVars bound, innermost
+      last (owned TBoundStaticFrame); hidden while a nested instantiation's
+      bodies are analysed }
+    FBoundStatics: TObjectList;
     FUseViewDepth: Int;                  { FGenericViews.Count when FUseLine was
                                            set: the position belongs to that
                                            view's unit, not to a template view
@@ -1220,6 +1224,14 @@ type
     { IFoo(X): a checked conversion, accepted where X converts to IFoo }
     procedure AnalyseInterfaceCast(AExpr: TFuncCallExpr; AIntf: TTypeDesc);
     procedure UseSiteError(const AMsg: string);
+    procedure BindInstanceStaticVars(const AInstName: string;
+      AFields: TObjectList);
+    procedure UnbindInstanceStaticVars;
+    function  HideBoundStatics: TObjectList;
+    procedure RestoreBoundStatics(AHidden: TObjectList);
+    procedure DefineGenericStaticVar(const AInstName: string;
+      AFDecl: TFieldDecl; const AFldName: string; AType: TTypeDesc;
+      const ADeclUnit: string);
     procedure RegisterGenericInstanceMembers(const AInstName, ADeclUnit: string;
       AConsts, AFields: TObjectList; AParamNames, AArgs: TStringList);
     procedure RejectBareIntfMethod(AAccess: TFieldAccessExpr;
@@ -1517,6 +1529,8 @@ type
       unqualified form work inside the declaring type's own methods (and a
       descendant's).  Does NOT check visibility — the caller asserts it, so
       the error names the right site. }
+    function LookupMemberStaticVar(AFromClass: TRecordTypeDesc;
+                                   const AName: string): TSymbol;
     function LookupMemberConst(AFromClass: TRecordTypeDesc;
                                const AName: string): TSymbol;
 
@@ -1630,6 +1644,17 @@ type
   { Raised inside an ArrowBodyFits trial when the body cannot be checked
     without side effects; never escapes ArrowBodyFits. }
   EArrowTrialAbort = class(Exception);
+
+  { The bare static-var names BindInstanceStaticVars defined in one scope
+    (Syms not owned: the scope owns them while they are defined in it). }
+  TBoundStaticFrame = class
+  public
+    [Unretained] Scope: TScope;
+    Syms: TObjectList;
+    Hidden: Boolean;
+    constructor Create;
+    destructor Destroy; override;
+  end;
 
   { One open generic view: the analyser state EnterGenericView replaced. }
   TGenericViewFrame = class
@@ -1834,12 +1859,25 @@ begin
   FGenericSourceUnits.Add(DeclUnit);
 end;
 
+constructor TBoundStaticFrame.Create;
+begin
+  inherited Create();
+  Syms := TObjectList.Create(False);
+end;
+
+destructor TBoundStaticFrame.Destroy;
+begin
+  Syms.Free();
+  inherited Destroy();
+end;
+
 constructor TSemanticAnalyser.Create;
 var
   Scope: TScope;
   I:     Int;
 begin
   inherited Create();
+  FBoundStatics := TObjectList.Create(True);
   FTable                := TSymbolTable.Create();
   FMethodIndex          := TStringList.Create();
   FMethodIndex.CaseSensitive := False;
@@ -1944,6 +1982,7 @@ begin
   FUnitSymbols.Free();
   FUnitIfaces.Free();
   FGenericViews.Free();
+  FBoundStatics.Free();
   FUnitChainLists.Free();
   FUnitChains.Free();
   FCurrentUsesChain.Free();
@@ -2630,27 +2669,133 @@ end;
   each instance needs one slot shared by every unit that instantiates it,
   which the generic path does not provide yet -- the template's field was
   cloned as a per-object instance field. }
+{ A static var of a generic instance: ONE slot for the whole program, not
+  an instance field.  Its emit name is bare -- the instance name and the
+  field, never unit-prefixed -- because every unit that instantiates the
+  type defines the slot (weak, so the linker keeps one), exactly as the
+  instance's methods are (BUG-004).  Reachable bare inside the instance's
+  methods and qualified as TCnt<Int>.Count, like a plain class's. }
+procedure TSemanticAnalyser.DefineGenericStaticVar(const AInstName: string;
+  AFDecl: TFieldDecl; const AFldName: string; AType: TTypeDesc;
+  const ADeclUnit: string);
+var
+  EmitName: string;
+  Sym: TSymbol;
+  Owner: string;
+begin
+  EmitName := 'gsv_' + CodegenMangle(AInstName) + '_' + AFldName;
+  FTable.NoteClassVarEmit(EmitName);
+  AFDecl.ClassVarEmitName := EmitName;
+  if (ADeclUnit <> '') and (ADeclUnit <> '<program>') then
+    Owner := ADeclUnit
+  else
+    Owner := FCurrentUnitName;
+  Sym := TSymbol.Create(AInstName + '.' + AFldName, skVariable, AType);
+  Sym.IsGlobal := True;
+  Sym.IsClassVar := True;
+  Sym.GlobalEmitName := EmitName;
+  Sym.Visibility := AFDecl.Visibility;
+  Sym.OwnerTypeName := AInstName;
+  Sym.OwningUnit := Owner;
+  if not FTable.DefineGlobal(Sym) then
+    Sym.Free();
+end;
+
+{ Bind the bare names of a generic instance's static vars in the current
+  (type-parameter) scope while its method bodies are analysed, so Count,
+  O.N := V, D[0] := V and every other bare-name path reach the instance's
+  one slot, as a plain class's bare static-var symbol does -- without a
+  global bare name that two instances (TCnt<Int>, TCnt<string>) would
+  share. }
+procedure TSemanticAnalyser.BindInstanceStaticVars(const AInstName: string;
+  AFields: TObjectList);
+var
+  I, K: Int;
+  F: TFieldDecl;
+  QSym, Sym: TSymbol;
+  Frame: TBoundStaticFrame;
+begin
+  { one frame per call, even when empty: UnbindInstanceStaticVars pops it }
+  Frame := TBoundStaticFrame.Create();
+  Frame.Scope := FTable.CurrentScope;
+  FBoundStatics.Add(Frame);
+  if AFields = nil then Exit;
+  for I := 0 to AFields.Count - 1 do
+  begin
+    F := TFieldDecl(AFields.Items[I]);
+    if not F.IsClassVar then Continue;
+    for K := 0 to F.Names.Count - 1 do
+    begin
+      QSym := FTable.Lookup(AInstName + '.' + F.Names.Strings[K]);
+      if (QSym = nil) or not QSym.IsClassVar then Continue;
+      Sym := TSymbol.Create(F.Names.Strings[K], skVariable, QSym.TypeDesc);
+      Sym.IsGlobal := True;
+      Sym.IsClassVar := True;
+      Sym.GlobalEmitName := QSym.GlobalEmitName;
+      Sym.Visibility := QSym.Visibility;
+      Sym.OwnerTypeName := QSym.OwnerTypeName;
+      Sym.OwningUnit := QSym.OwningUnit;
+      if FTable.Define(Sym) then
+        Frame.Syms.Add(Sym)
+      else
+        Sym.Free();
+    end;
+  end;
+end;
+
+{ The innermost frame's bare names go with its scope, popped right after. }
+procedure TSemanticAnalyser.UnbindInstanceStaticVars;
+begin
+  if FBoundStatics.Count > 0 then
+    FBoundStatics.Delete(FBoundStatics.Count - 1);
+end;
+
+{ Take every bound frame's names out of its scope -- a nested instantiation
+  about to analyse another generic's bodies must not see them (a program-
+  level template's bare Count would resolve to the outer instance's static
+  var).  Returns the frames hidden, for RestoreBoundStatics. }
+function TSemanticAnalyser.HideBoundStatics: TObjectList;
+var
+  I, J: Int;
+  Frame: TBoundStaticFrame;
+begin
+  Result := TObjectList.Create(False);
+  for I := 0 to FBoundStatics.Count - 1 do
+  begin
+    Frame := TBoundStaticFrame(FBoundStatics.Items[I]);
+    if Frame.Hidden then Continue;
+    for J := 0 to Frame.Syms.Count - 1 do
+      Frame.Scope.ExtractLocal(TSymbol(Frame.Syms.Items[J]).Name);
+    Frame.Hidden := True;
+    Result.Add(Frame);
+  end;
+end;
+
+procedure TSemanticAnalyser.RestoreBoundStatics(AHidden: TObjectList);
+var
+  I, J: Int;
+  Frame: TBoundStaticFrame;
+begin
+  for I := 0 to AHidden.Count - 1 do
+  begin
+    Frame := TBoundStaticFrame(AHidden.Items[I]);
+    for J := 0 to Frame.Syms.Count - 1 do
+      Frame.Scope.Define(TSymbol(Frame.Syms.Items[J]));
+    Frame.Hidden := False;
+  end;
+  AHidden.Free();
+end;
+
 procedure TSemanticAnalyser.RegisterGenericInstanceMembers(
   const AInstName, ADeclUnit: string; AConsts, AFields: TObjectList;
   AParamNames, AArgs: TStringList);
 var
   I: Int;
   CD, CDCopy: TConstDecl;
-  FDecl: TFieldDecl;
   CT: TTypeDesc;
   Sym: TSymbol;
   OldOwner: string;
 begin
-  if AFields <> nil then
-    for I := 0 to AFields.Count - 1 do
-    begin
-      FDecl := TFieldDecl(AFields.Items[I]);
-      if FDecl.IsClassVar then
-        SemanticError(
-          Format('static var ''%s'' in generic ''%s'' is not supported yet',
-            [FDecl.Names.Strings[0], AInstName]),
-          FDecl.Line, FDecl.Col);
-    end;
   if (AConsts = nil) or (AConsts.Count = 0) then Exit;
   { T bound while the constants fold: const Sz = SizeOf(T) }
   FTable.PushScope();
@@ -5260,6 +5405,36 @@ begin
   Result := (Sym <> nil) and (Sym.Kind = skConstant);
 end;
 
+{ A static var reached by its bare name inside a method of its type (or a
+  descendant's): registered only under its qualified key -- a generic
+  instance's under TCnt<Int64>.Count, so TCnt<Int64> and TCnt<string> never
+  share one bare global.  Nil when AName is no static var of the type. }
+function TSemanticAnalyser.LookupMemberStaticVar(AFromClass: TRecordTypeDesc;
+                                                 const AName: string): TSymbol;
+var
+  RT: TRecordTypeDesc;
+begin
+  Result := nil;
+  RT := AFromClass;
+  if RT = nil then
+    RT := FCurrentMethodOwner;
+  while RT <> nil do
+  begin
+    Result := FTable.Lookup(RT.Name + '.' + AName);
+    if (Result <> nil) and (Result.Kind = skVariable) and Result.IsClassVar then
+    begin
+      { a generic instance's slot reached from a descendant (TSub =
+        class(TCnt<Int>)): this unit must list the instance, so it defines
+        the slot weak and registers it }
+      if RT.GenericInst <> nil then
+        Self.NoteInstanceUse(RT.GenericInst);
+      Exit;
+    end;
+    Result := nil;
+    RT := RT.Parent;
+  end;
+end;
+
 function TSemanticAnalyser.LookupMemberConst(AFromClass: TRecordTypeDesc;
                                              const AName: string): TSymbol;
 var
@@ -5663,6 +5838,7 @@ end;
 
 procedure TSemanticAnalyser.RepairEarlyGenericInstances;
 var
+  HiddenStatics: TObjectList;
   Instances: TObjectList;
   I, J, K, MIdx: Int;
   GRI:       TGenericRecordInstance;
@@ -5730,11 +5906,15 @@ begin
             RT := TRecordTypeDesc(GRI.TypeDesc);
             Viewed := EnterGenericView(GRI.DefUnitName, GRI.TypeName, False,
               Hidden);
+            { another instance's bound static-var names must not leak into these
+              bodies (BindInstanceStaticVars) }
+            HiddenStatics := Self.HideBoundStatics();
             FTable.PushScope();
             for K := 0 to ParamNames.Count - 1 do
               FActiveTypeParams.Add(ParamNames.Strings[K]);
             try
               BindTypeParams(ParamNames, Args);
+              Self.BindInstanceStaticVars(GRI.TypeName, GRI.RecordDef.Fields);
               for J := 0 to RepairedIndices.Count - 1 do
               begin
                 MIdx := StrToInt(RepairedIndices.Strings[J]);
@@ -5745,7 +5925,9 @@ begin
             finally
               for K := 0 to ParamNames.Count - 1 do
                 FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
+              Self.UnbindInstanceStaticVars();
               FTable.PopScope();
+              Self.RestoreBoundStatics(HiddenStatics);
               if Viewed then
                 LeaveGenericView();
             end;
@@ -5807,11 +5989,15 @@ begin
             RT := TRecordTypeDesc(GI.TypeDesc);
             Viewed := EnterGenericView(GI.DefUnitName, GI.TypeName, False,
               Hidden);
+            { another instance's bound static-var names must not leak into these
+              bodies (BindInstanceStaticVars) }
+            HiddenStatics := Self.HideBoundStatics();
             FTable.PushScope();
             for K := 0 to ParamNames.Count - 1 do
               FActiveTypeParams.Add(ParamNames.Strings[K]);
             try
               BindTypeParams(ParamNames, Args);
+              Self.BindInstanceStaticVars(GI.TypeName, GI.ClassDef.Fields);
               for J := 0 to RepairedIndices.Count - 1 do
               begin
                 MIdx := StrToInt(RepairedIndices.Strings[J]);
@@ -5822,7 +6008,9 @@ begin
             finally
               for K := 0 to ParamNames.Count - 1 do
                 FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
+              Self.UnbindInstanceStaticVars();
               FTable.PopScope();
+              Self.RestoreBoundStatics(HiddenStatics);
               if Viewed then
                 LeaveGenericView();
             end;
@@ -7047,6 +7235,7 @@ end;
 
 function TSemanticAnalyser.InstantiateGenericCore(const ATypeName: string): TRecordTypeDesc;
 var
+  HiddenStatics: TObjectList;
   BracPos:  Int;
   BaseName: string;
   ArgsStr:  string;
@@ -7147,6 +7336,25 @@ begin
     for I := 0 to Templ.ClassDef.Fields.Count - 1 do
     begin
       FDecl    := TFieldDecl(Templ.ClassDef.Fields.Items[I]);
+      { static var A, B: T -- one decl per name, so each carries its own
+        slot's emit name (DefineGenericStaticVar) }
+      if FDecl.IsClassVar and (FDecl.Names.Count > 1) then
+      begin
+        for J := 0 to FDecl.Names.Count - 1 do
+        begin
+          NewFDecl := TFieldDecl.Create();
+          NewFDecl.Names.Add(FDecl.Names.Strings[J]);
+          NewFDecl.TypeName := SubstTypeParam(FDecl.TypeName, Templ.ParamNames, Args);
+          NewFDecl.Visibility := FDecl.Visibility;
+          NewFDecl.IsWeak := FDecl.IsWeak;
+          NewFDecl.IsUnretained := FDecl.IsUnretained;
+          NewFDecl.IsClassVar := True;
+          NewFDecl.Line := FDecl.Line;
+          NewFDecl.Col := FDecl.Col;
+          ClonedCD.Fields.Add(NewFDecl);
+        end;
+        Continue;
+      end;
       NewFDecl := TFieldDecl.Create();
       for J := 0 to FDecl.Names.Count - 1 do
         NewFDecl.Names.Add(FDecl.Names.Strings[J]);
@@ -7154,6 +7362,7 @@ begin
       NewFDecl.Visibility := FDecl.Visibility;
       NewFDecl.IsWeak       := FDecl.IsWeak;
       NewFDecl.IsUnretained := FDecl.IsUnretained;
+      NewFDecl.IsClassVar   := FDecl.IsClassVar;
       NewFDecl.Line := FDecl.Line;
       NewFDecl.Col  := FDecl.Col;
       ClonedCD.Fields.Add(NewFDecl);
@@ -7360,6 +7569,12 @@ begin
       for K := 0 to NewFDecl.Names.Count - 1 do
       begin
         FldName := NewFDecl.Names.Strings[K];
+        if NewFDecl.IsClassVar then
+        begin
+          Self.DefineGenericStaticVar(ATypeName, NewFDecl, FldName, FldType,
+            Templ.DefUnitName);
+          Continue;
+        end;
         RT.AddField(FldName, FldType);
         if NewFDecl.IsWeak then
           RT.FindField(FldName).IsWeak := True;
@@ -7502,11 +7717,15 @@ begin
     { Analyse method bodies with concrete types in scope.
       Push type-param bindings (T=Integer etc.) so that SizeOf(T) and
       local var declarations like 'var P: ^T' resolve to concrete types. }
+    { another instance's bound static-var names must not leak into these
+      bodies (BindInstanceStaticVars) }
+    HiddenStatics := Self.HideBoundStatics();
     FTable.PushScope();
     for K := 0 to Templ.ParamNames.Count - 1 do
       FActiveTypeParams.Add(Templ.ParamNames.Strings[K]);
     try
       BindTypeParams(Templ.ParamNames, Args);
+      Self.BindInstanceStaticVars(ATypeName, ClonedCD.Fields);
       for J := 0 to ClonedCD.Methods.Count - 1 do
       begin
         NewMDecl := TMethodDecl(ClonedCD.Methods.Items[J]);
@@ -7516,7 +7735,9 @@ begin
     finally
       for K := 0 to Templ.ParamNames.Count - 1 do
         FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
+      Self.UnbindInstanceStaticVars();
       FTable.PopScope();
+      Self.RestoreBoundStatics(HiddenStatics);
     end;
 
     { Wire up implements: for each interface name in the cloned definition,
@@ -7555,6 +7776,7 @@ end;
 
 function TSemanticAnalyser.InstantiateGenericRecordCore(const ATypeName: string): TRecordTypeDesc;
 var
+  HiddenStatics: TObjectList;
   RPDecl:   TPropertyDecl;
   RPInfo:   TPropertyInfo;
   RPType:   TTypeDesc;
@@ -7621,11 +7843,30 @@ begin
     for I := 0 to Templ.RecordDef.Fields.Count - 1 do
     begin
       FDecl    := TFieldDecl(Templ.RecordDef.Fields.Items[I]);
+      { static var A, B: T -- one decl per name (see the class path) }
+      if FDecl.IsClassVar and (FDecl.Names.Count > 1) then
+      begin
+        for J := 0 to FDecl.Names.Count - 1 do
+        begin
+          NewFDecl := TFieldDecl.Create();
+          NewFDecl.Names.Add(FDecl.Names.Strings[J]);
+          NewFDecl.TypeName := SubstTypeParam(FDecl.TypeName, Templ.ParamNames, Args);
+          NewFDecl.Visibility := FDecl.Visibility;
+          NewFDecl.IsClassVar := True;
+          NewFDecl.Line := FDecl.Line;
+          NewFDecl.Col := FDecl.Col;
+          ClonedRD.Fields.Add(NewFDecl);
+        end;
+        Continue;
+      end;
       NewFDecl := TFieldDecl.Create();
       for J := 0 to FDecl.Names.Count - 1 do
         NewFDecl.Names.Add(FDecl.Names.Strings[J]);
       NewFDecl.TypeName := SubstTypeParam(FDecl.TypeName, Templ.ParamNames, Args);
       NewFDecl.Visibility := FDecl.Visibility;
+      NewFDecl.IsClassVar := FDecl.IsClassVar;
+      NewFDecl.Line := FDecl.Line;
+      NewFDecl.Col := FDecl.Col;
       ClonedRD.Fields.Add(NewFDecl);
     end;
 
@@ -7685,6 +7926,12 @@ begin
       for K := 0 to NewFDecl.Names.Count - 1 do
       begin
         FldName := NewFDecl.Names.Strings[K];
+        if NewFDecl.IsClassVar then
+        begin
+          Self.DefineGenericStaticVar(ATypeName, NewFDecl, FldName, FldType,
+            Templ.DefUnitName);
+          Continue;
+        end;
         RT.AddField(FldName, FldType);
         RT.FindField(FldName).Visibility    := NewFDecl.Visibility;
         RT.FindField(FldName).DeclaringUnit := FCurrentUnitName;
@@ -7776,11 +8023,15 @@ begin
       RT.AddProperty(RPInfo);
     end;
 
+    { another instance's bound static-var names must not leak into these
+      bodies (BindInstanceStaticVars) }
+    HiddenStatics := Self.HideBoundStatics();
     FTable.PushScope();
     for K := 0 to Templ.ParamNames.Count - 1 do
       FActiveTypeParams.Add(Templ.ParamNames.Strings[K]);
     try
       BindTypeParams(Templ.ParamNames, Args);
+      Self.BindInstanceStaticVars(ATypeName, ClonedRD.Fields);
       for J := 0 to ClonedRD.Methods.Count - 1 do
       begin
         NewMDecl := TMethodDecl(ClonedRD.Methods.Items[J]);
@@ -7790,7 +8041,9 @@ begin
     finally
       for K := 0 to Templ.ParamNames.Count - 1 do
         FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
+      Self.UnbindInstanceStaticVars();
       FTable.PopScope();
+      Self.RestoreBoundStatics(HiddenStatics);
     end;
 
     GRI           := TGenericRecordInstance.Create();
@@ -8016,6 +8269,7 @@ end;
 
 function TSemanticAnalyser.InstantiateGenericFuncCore(const AInstName: string): TMethodDecl;
 var
+  HiddenStatics: TObjectList;
   BracPos:     Int;
   BaseName:    string;
   ArgsStr:     string;
@@ -8159,6 +8413,9 @@ begin
       InstantiateGenericMethod do, so body references such as
       TBox<T>.Create(), SizeOf(T) and T(X) resolve to the concrete type --
       without them TBox<T> was instantiated over a literal T. }
+    { another instance's bound static-var names must not leak into these
+      bodies (BindInstanceStaticVars) }
+    HiddenStatics := Self.HideBoundStatics();
     FTable.PushScope();
     for I := 0 to Templ.TypeParams.Count - 1 do
       FActiveTypeParams.Add(Templ.TypeParams.Strings[I]);
@@ -8169,6 +8426,7 @@ begin
       for I := 0 to Templ.TypeParams.Count - 1 do
         FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
       FTable.PopScope();
+      Self.RestoreBoundStatics(HiddenStatics);
     end;
 
     { Register in proc index and global symbol table }
@@ -8243,6 +8501,7 @@ function TSemanticAnalyser.InstantiateGenericMethodCore(
   InstantiateGenericFunc but preserves the implicit Self: the instance is
   analysed as a method of AOwnerType and emitted as <Owner>_<Inst>. }
 var
+  HiddenStatics: TObjectList;
   BaseName:    string;
   ArgsStr:     string;
   TemplIdx:    Int;
@@ -8389,6 +8648,9 @@ begin
       The method's OWN type params (R) are bound as scoped type aliases so
       body references like TList<R>.Create() canonicalise to the concrete
       instantiation — mirrors InstantiateGeneric's body-analysis block. }
+    { another instance's bound static-var names must not leak into these
+      bodies (BindInstanceStaticVars) }
+    HiddenStatics := Self.HideBoundStatics();
     FTable.PushScope();
     for I := 0 to Templ.TypeParams.Count - 1 do
       FActiveTypeParams.Add(Templ.TypeParams.Strings[I]);
@@ -8399,6 +8661,7 @@ begin
       for I := 0 to Templ.TypeParams.Count - 1 do
         FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
       FTable.PopScope();
+      Self.RestoreBoundStatics(HiddenStatics);
     end;
 
     GMI            := TGenericMethodInstance.Create();
@@ -16666,6 +16929,9 @@ begin
   end;
   { a bare STATIC property inside a STATIC method of its type: there is no
     FCurrentClass there (no Self), so resolve it on the method's owner }
+  { a bare static var of a generic instance (only its qualified key) }
+  if VarSym = nil then
+    VarSym := Self.LookupMemberStaticVar(FCurrentClass, AAssign.Name);
   if (VarSym = nil) and (FCurrentClass = nil) and
      (FCurrentMethodOwner <> nil) then
   begin
@@ -17646,6 +17912,11 @@ begin
     for a bare identifier: R.N := 5 wrote the global R }
   if FieldShadowsGlobal(AAssign.RecordName, RecSym) then
     RecSym := nil;
+  { TTally<Int>.Total := V: a generic instance named only here }
+  if (RecSym = nil) and (StrPos('<', AAssign.RecordName) >= 0) and
+     (FindTypeOrInstantiate(AAssign.RecordName) <> nil) then
+    RecSym := Self.InstanceSymbol(
+      FindTypeOrInstantiate(AAssign.RecordName).Name);
   { BUG-001: a field write through a for-in loop variable whose element type is
     a RECORD (a per-iteration value copy) is discarded — it never reaches the
     collection element.  A for-in over an array/list of CLASS references binds
@@ -17762,6 +18033,9 @@ begin
   if RecSym.Kind = skType then
   begin
     VarSym := FTable.Lookup(AAssign.RecordName + '.' + AAssign.FieldName);
+    { TCnt<Int>.Count := V: the instance's key is its canonical name }
+    if (VarSym = nil) and (RecSym.TypeDesc <> nil) then
+      VarSym := FTable.Lookup(RecSym.TypeDesc.Name + '.' + AAssign.FieldName);
     if (VarSym <> nil) and (VarSym.Kind = skVariable) and VarSym.IsClassVar then
     begin
       AssertStaticVarVisible(VarSym.Visibility, VarSym.OwningUnit,
@@ -22612,6 +22886,10 @@ begin
         end;
       end;
     end;
+    { a bare static var of a GENERIC instance inside its methods: only its
+      qualified key exists (DefineGenericStaticVar) }
+    if Sym = nil then
+      Sym := Self.LookupMemberStaticVar(FCurrentClass, TIdentExpr(AExpr).Name);
     { a bare STATIC property inside a STATIC method of its type (no
       FCurrentClass there) }
     if (Sym = nil) and (FCurrentClass = nil) and

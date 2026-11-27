@@ -90,7 +90,9 @@ type
     procedure EmitConstantsFromList(AList: TObjectList);
     procedure EmitTypesFromBlock(ABlock: TBlock);
     procedure EmitGlobalVarsFromList(AList: TObjectList);
+    procedure EmitStaticVarsFromFields(Flds: TObjectList);
     procedure EmitStaticVarsFromBlock(ABlock: TBlock);
+    procedure EmitStaticVarsFromInstances(AInstances, ARecInstances: TObjectList);
     procedure EmitAllTypes;
     procedure EmitGlobalVars;
     procedure EmitFunctionScopes;
@@ -1455,38 +1457,61 @@ end;
   instance fields, so they are not in any block's var-decl list and EmitFields
   (instance fields only) skips them.  Emit one recGlobalVar per IsClassVar field
   under its mangled ClassVarEmitName so a debugger can print TFoo.FInstance. }
+procedure TOPDFEmitter.EmitStaticVarsFromFields(Flds: TObjectList);
+var
+  K, N: Int;
+  FDecl: TFieldDecl;
+  Nm: string;
+begin
+  if Flds = nil then Exit;
+  for K := 0 to Flds.Count - 1 do
+  begin
+    FDecl := TFieldDecl(Flds.Items[K]);
+    if not FDecl.IsClassVar then Continue;
+    for N := 0 to FDecl.Names.Count - 1 do
+    begin
+      if (FDecl.ClassVarEmitName <> '') and (FDecl.Names.Count = 1) then
+        Nm := FDecl.ClassVarEmitName
+      else
+        Continue;  { multi-name static vars carry no per-name emit label yet }
+      EmitGlobalVar(Nm, FDecl.ResolvedType, True);
+    end;
+  end;
+end;
+
 procedure TOPDFEmitter.EmitStaticVarsFromBlock(ABlock: TBlock);
 var
-  I, K, N: Int;
-  TD:      TTypeDecl;
-  Flds:    TObjectList;
-  FDecl:   TFieldDecl;
-  Nm:      string;
+  I: Int;
+  TD: TTypeDecl;
 begin
   if ABlock = nil then Exit;
   for I := 0 to ABlock.TypeDecls.Count - 1 do
   begin
     TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
-    Flds := nil;
     if TD.Def is TClassTypeDef then
-      Flds := TClassTypeDef(TD.Def).Fields
+      EmitStaticVarsFromFields(TClassTypeDef(TD.Def).Fields)
     else if TD.Def is TRecordTypeDef then
-      Flds := TRecordTypeDef(TD.Def).Fields;
-    if Flds = nil then Continue;
-    for K := 0 to Flds.Count - 1 do
-    begin
-      FDecl := TFieldDecl(Flds.Items[K]);
-      if not FDecl.IsClassVar then Continue;
-      for N := 0 to FDecl.Names.Count - 1 do
-      begin
-        if (FDecl.ClassVarEmitName <> '') and (FDecl.Names.Count = 1) then
-          Nm := FDecl.ClassVarEmitName
-        else
-          Continue;  { multi-name static vars carry no per-name emit label yet }
-        EmitGlobalVar(Nm, FDecl.ResolvedType, True);
-      end;
-    end;
+      EmitStaticVarsFromFields(TRecordTypeDef(TD.Def).Fields);
   end;
+end;
+
+{ The static vars of generic instances: one shared slot each, under the
+  bare emit name every instantiating object agrees on. }
+procedure TOPDFEmitter.EmitStaticVarsFromInstances(AInstances,
+  ARecInstances: TObjectList);
+var
+  I: Int;
+begin
+  if AInstances <> nil then
+    for I := 0 to AInstances.Count - 1 do
+      if TGenericInstance(AInstances.Items[I]).ClassDef <> nil then
+        EmitStaticVarsFromFields(
+          TGenericInstance(AInstances.Items[I]).ClassDef.Fields);
+  if ARecInstances <> nil then
+    for I := 0 to ARecInstances.Count - 1 do
+      if TGenericRecordInstance(ARecInstances.Items[I]).RecordDef <> nil then
+        EmitStaticVarsFromFields(
+          TGenericRecordInstance(ARecInstances.Items[I]).RecordDef.Fields);
 end;
 
 procedure TOPDFEmitter.EmitGlobalVars;
@@ -1497,11 +1522,15 @@ begin
     EmitGlobalVarsFromList(FUnit.ImplBlock.Decls);
     EmitStaticVarsFromBlock(FUnit.IntfBlock);
     EmitStaticVarsFromBlock(FUnit.ImplBlock);
+    EmitStaticVarsFromInstances(FUnit.GenericInstances,
+      FUnit.GenericRecordInstances);
   end
   else if FProgram <> nil then
   begin
     EmitGlobalVarsFromList(FProgram.Block.Decls);
     EmitStaticVarsFromBlock(FProgram.Block);
+    EmitStaticVarsFromInstances(FProgram.GenericInstances,
+      FProgram.GenericRecordInstances);
   end;
 end;
 

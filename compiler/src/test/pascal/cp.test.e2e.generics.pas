@@ -31,6 +31,26 @@ type
       a unit, read back from the cached interface
       (BUG-20261030-generic-class-members) }
     procedure TestRun_GenericTypeMemberConstants;
+    { a static var of a generic class or record is ONE slot per instance for
+      the whole program, whichever units instantiate it: two units and the
+      program share TCnt<Int>.Count, TCnt<string> has its own, and a managed
+      one (string) is released once, after every unit's finalization -- so
+      a unit's finalization can still read it -- with no leak under --debug
+      (BUG-20261030-generic-class-members) }
+    procedure TestRun_GenericStaticVar_SharedAcrossUnits;
+    { every managed kind of generic static var, read and written from the
+      instance's methods and qualified, released at exit without a leak }
+    procedure TestRun_GenericStaticVar_ManagedKinds_NoLeak;
+    { a generic instance's static var reached through a DESCENDANT class
+      (TSub = class(TCnt<Int>) in a unit, TP = class(TSub) in the program):
+      every object that touches the slot lists the instance, so the slot is
+      one weak copy, registered once -- it was defined strong and released
+      twice on x86-64 }
+    procedure TestRun_GenericStaticVar_ThroughDescendant_NoLeak;
+    { the bare names bound for one instance's methods do not leak into
+      another generic's bodies analysed meanwhile: TOther<U>.Peek's bare
+      Count is the global constant, not TCnt<T>.Count }
+    procedure TestRun_GenericStaticVar_BareNamesDoNotLeak;
     { A constraint violation on a template declared in a unit is reported
       at the program's line, in the program -- not at that line "in" the
       template's unit (BUG-20261120-constraint-error-no-location) }
@@ -2211,6 +2231,264 @@ begin
   AssertEquals('output',
     '20 20 40' + LE + '18446744073709551615' + LE + '2 20' + LE +
     '8 buf 23' + LE + '1 8 16 18446744073709551615 buf!' + LE, Output);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericStaticVar_SharedAcrossUnits;
+const
+  UGen = '''
+    unit gsvgen;
+    interface
+    type
+      TCnt<T> = class
+      public
+        static var Count: Int;
+        static var Trail: string;
+        static var First, Last: string;
+        static procedure Bump(const ATag: string);
+      end;
+      TTally<T> = record
+        static var Total: Int;
+      end;
+    implementation
+    procedure TCnt<T>.Bump(const ATag: string);
+    begin
+      Count := Count + 1;
+      Trail := Trail + ATag;
+      if First = '' then
+        First := ATag;
+      Last := ATag
+    end;
+    end.
+    ''';
+  UA = '''
+    unit gsva;
+    interface
+    procedure BumpA;
+    function CountA: Int;
+    implementation
+    uses gsvgen;
+    procedure BumpA;
+    begin
+      TCnt<Int>.Bump('a');
+      TTally<Int>.Total := TTally<Int>.Total + 10
+    end;
+    function CountA: Int;
+    begin
+      Result := TCnt<Int>.Count
+    end;
+    finalization
+      { gsva initialises before gsvb, so it is finalised AFTER gsvb, which
+        also instantiates TCnt<Int>: the shared string must still be alive
+        here (a per-unit release would already have freed it) }
+      WriteLn('fini a: ', TCnt<Int>.Trail)
+    end.
+    ''';
+  UB = '''
+    unit gsvb;
+    interface
+    procedure BumpB;
+    function CountB: Int;
+    implementation
+    uses gsvgen;
+    procedure BumpB;
+    begin
+      TCnt<Int>.Bump('b');
+      TCnt<string>.Bump('s')
+    end;
+    function CountB: Int;
+    begin
+      Result := TCnt<Int>.Count
+    end;
+    end.
+    ''';
+  PSrc = '''
+    program P;
+    uses gsvgen, gsva, gsvb;
+    begin
+      BumpA();
+      BumpA();
+      BumpB();
+      TCnt<Int>.Bump('p');
+      WriteLn(CountA(), ' ', CountB(), ' ', TCnt<Int>.Count, ' ',
+        TCnt<string>.Count, ' ', TTally<Int>.Total);
+      WriteLn(TCnt<Int>.Trail, ' ', TCnt<string>.Trail, ' ',
+        TCnt<Int>.First, TCnt<Int>.Last)
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+  Ok: Boolean;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  WriteScratchUnit(UGen);
+  WriteScratchUnit(UA);
+  WriteScratchUnit(UB);
+  Ok := CompileAndRunInScratch(PSrc, Output, RCode);
+  AssertTrue('compile+run: ' + Output, Ok);
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('one slot per instance',
+    '4 4 4 1 20' + LE + 'aabp s ap' + LE + 'fini a: aabp' + LE, Output);
+  Ok := CompileAndRunInScratchDebug(PSrc, Output, RCode);
+  AssertTrue('--debug compile+run: ' + Output, Ok);
+  AssertEquals('--debug exit code (output: ' + Output + ')', 0, RCode);
+  AssertTrue('--debug no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericStaticVar_ManagedKinds_NoLeak;
+begin
+  AssertLeakFreeOnAll('''
+    program P;
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+      TSq = class(TObject, IShape)
+        function Area: Int;
+      end;
+      TObj = class
+        N: Int;
+      end;
+      TRec = record
+        S: string;
+        N: Int;
+      end;
+      THold<T> = class
+      public
+        static var S: string;
+        static var O: TObj;
+        static var I: IShape;
+        static var D: array of string;
+        static var R: TRec;
+        static var P: reference to function: Int;
+        static var V: T;
+        procedure Fill;
+      end;
+    function TSq.Area: Int; begin Result := 9 end;
+    procedure THold<T>.Fill;
+    var
+      K: Int;
+    begin
+      S := 'str' + IntToStr(7);
+      O := TObj.Create();
+      O.N := 5;
+      I := TSq.Create();
+      SetLength(D, 2);
+      D[0] := 'd' + IntToStr(0);
+      D[1] := 'd' + IntToStr(1);
+      R.S := 'rec' + IntToStr(3);
+      R.N := 3;
+      K := 11;
+      P := function: Int begin Result := K end;
+    end;
+    var
+      H: THold<string>;
+    begin
+      H := THold<string>.Create();
+      H.Fill();
+      THold<string>.V := 'v' + IntToStr(1);
+      WriteLn(THold<string>.S, ' ', THold<string>.O.N, ' ',
+        THold<string>.I.Area(), ' ', THold<string>.D[1], ' ',
+        THold<string>.R.S, ' ', THold<string>.P(), ' ', THold<string>.V);
+      H.Free()
+    end.
+    ''', 'str7 5 9 d1 rec3 11 v1');
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericStaticVar_ThroughDescendant_NoLeak;
+const
+  UGen = '''
+    unit gsdgen;
+    interface
+    type
+      TCnt<T> = class
+      public
+        static var Trail: string;
+      end;
+    implementation
+    end.
+    ''';
+  USub = '''
+    unit gsdsub;
+    interface
+    uses gsdgen;
+    type
+      TSub = class(TCnt<Int>)
+      public
+        procedure Mark(const ATag: string);
+      end;
+    implementation
+    procedure TSub.Mark(const ATag: string);
+    begin
+      Trail := Trail + ATag
+    end;
+    end.
+    ''';
+  PSrc = '''
+    program P;
+    uses gsdgen, gsdsub;
+    type
+      TP = class(TSub)
+      public
+        procedure Note;
+      end;
+    procedure TP.Note;
+    begin
+      Trail := Trail + 'x' + IntToStr(7)
+    end;
+    var
+      O: TP;
+    begin
+      O := TP.Create();
+      O.Mark('m');
+      O.Note();
+      WriteLn(TCnt<Int>.Trail);
+      O.Free()
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+  Ok: Boolean;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  WriteScratchUnit(UGen);
+  WriteScratchUnit(USub);
+  Ok := CompileAndRunInScratchDebug(PSrc, Output, RCode);
+  AssertTrue('--debug compile+run: ' + Output, Ok);
+  AssertEquals('--debug exit code (output: ' + Output + ')', 0, RCode);
+  AssertEquals('one shared slot', 'mx7' + LE, Output);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericStaticVar_BareNamesDoNotLeak;
+begin
+  AssertRunsOnAll('''
+    program P;
+    const
+      Count = 7;
+    type
+      TOther<U> = class
+      public
+        static function Peek: Int;
+      end;
+      TCnt<T> = class
+      public
+        static var Count: Int;
+        static function Bump: Int;
+      end;
+    function TOther<U>.Peek: Int;
+    begin
+      Result := Count
+    end;
+    function TCnt<T>.Bump: Int;
+    begin
+      Count := Count + 100;
+      Result := TOther<string>.Peek()
+    end;
+    begin
+      WriteLn(TCnt<Int>.Bump(), ' ', TCnt<Int>.Count)
+    end.
+    ''', '7 100' + LE, 0);
 end;
 
 initialization

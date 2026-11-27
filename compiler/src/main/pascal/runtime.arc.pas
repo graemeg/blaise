@@ -113,6 +113,19 @@ function  _LeakTrackerIsEnabled: Boolean;
 function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Int32;
   external name '__cxa_atexit';
 
+{ Static vars of GENERIC instances (TCnt<Int>.Count).  Every unit that
+  instantiates the type carries the slot and a release routine for it, both
+  weak, so the linker keeps one of each; the unit's initialization registers
+  the pair here.  A slot is registered once however many units register it,
+  and _StaticSlotsRelease -- called by the program after the LAST unit's
+  finalization -- runs each release routine once, last registered first.  A
+  release routine releases the value and clears the slot.  Releasing in any
+  one unit's finalization instead would free the value while a unit
+  finalized later may still read it (language-rationale.adoc, "Static
+  variables of generic types"). }
+procedure _StaticSlotRegister(ASlot, ARelease: Pointer);
+procedure _StaticSlotsRelease;
+
 implementation
 
 { String and dynamic-array header layout.  Every RTL unit that reads or
@@ -1190,6 +1203,62 @@ begin
     Slot    := Current;
     Current := Slot^;
   end;
+end;
+
+{ ---- static slots of generic instances ---- }
+
+type
+  TStaticSlotRelease = procedure;
+
+var
+  GStaticSlots: Pointer;      { pairs of (slot, release routine) }
+  GStaticSlotCount: Int64;
+  GStaticSlotCap: Int64;
+
+procedure _StaticSlotRegister(ASlot, ARelease: Pointer);
+var
+  I: Int64;
+  Grown: Pointer;
+begin
+  for I := 0 to GStaticSlotCount - 1 do
+    if PPointer(GStaticSlots + I * 16)^ = ASlot then
+      Exit;
+  if GStaticSlotCount = GStaticSlotCap then
+  begin
+    if GStaticSlotCap = 0 then
+      GStaticSlotCap := 16
+    else
+      GStaticSlotCap := GStaticSlotCap * 2;
+    Grown := _BlaiseGetMem(GStaticSlotCap * 16);
+    if GStaticSlotCount > 0 then
+    begin
+      _libc_memcpy(Grown, GStaticSlots, GStaticSlotCount * 16);
+      _BlaiseFreeMem(GStaticSlots);
+    end;
+    GStaticSlots := Grown;
+  end;
+  PPointer(GStaticSlots + GStaticSlotCount * 16)^ := ASlot;
+  PPointer(GStaticSlots + GStaticSlotCount * 16 + 8)^ := ARelease;
+  GStaticSlotCount := GStaticSlotCount + 1;
+end;
+
+procedure _StaticSlotsRelease;
+var
+  I: Int64;
+  Release: TStaticSlotRelease;
+begin
+  I := GStaticSlotCount - 1;
+  while I >= 0 do
+  begin
+    Release := TStaticSlotRelease(PPointer(GStaticSlots + I * 16 + 8)^);
+    Release();
+    I := I - 1;
+  end;
+  if GStaticSlots <> nil then
+    _BlaiseFreeMem(GStaticSlots);
+  GStaticSlots := nil;
+  GStaticSlotCount := 0;
+  GStaticSlotCap := 0;
 end;
 
 end.

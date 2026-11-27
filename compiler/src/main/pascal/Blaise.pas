@@ -781,8 +781,7 @@ begin
       for I := 0 to AUnits.Count - 1 do
       begin
         U := TUnit(AUnits.Items[I]);
-        AddEntry(U.Name,
-                 (U.InitStmts <> nil) and (U.InitStmts.Count > 0),
+        AddEntry(U.Name, UnitNeedsInit(U),
                  UnitNeedsFini(U), U.UsedUnits, U.ImplUsedUnits);
       end;
 
@@ -880,8 +879,7 @@ begin
       for WI := 0 to Self.AllUnits.Count - 1 do
         if TUnit(Self.AllUnits.Items[WI]) <> Self.WorkUnit then
           WCG.NoteDepInitUnit(TUnit(Self.AllUnits.Items[WI]).Name,
-            (TUnit(Self.AllUnits.Items[WI]).InitStmts <> nil) and
-            (TUnit(Self.AllUnits.Items[WI]).InitStmts.Count > 0));
+            UnitNeedsInit(TUnit(Self.AllUnits.Items[WI])));
     if Self.PrebuiltIfaces <> nil then
       for WI := 0 to Self.PrebuiltIfaces.Count - 1 do
         WCG.NoteDepInitUnit(

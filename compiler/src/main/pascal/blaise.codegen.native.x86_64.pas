@@ -395,6 +395,13 @@ type
       order at main_exit, AFTER the program's own EmitGlobalReleases —
       mirrors FUnitInitNames. }
     FUnitFiniNames: TStringList;
+    { static vars of generic instances this object defines: every one is
+      bound weak (GlobalLinkWeak); the managed ones (Objects = TTypeDesc) get
+      a weak release routine and an RTL registration, and are never in the
+      per-object exit release walk (RegisterGenericStatics) }
+    FGenStaticSlots: TStringList;
+    FGenStatic: TStringList;
+    FGenStaticEmitted: TStringList;
     { Owner-prefixed global names already released by some unit's fini walk.
       In the whole-program model unit globals also land in FDataGlobals, so
       EmitGlobalReleases must skip these or the slot would be released twice
@@ -424,6 +431,10 @@ type
       .data directive and every load/store of the slot. }
     procedure AddGlobal(const AName: string; AType: TTypeDesc);
     procedure RegisterClassVars(AFields: TObjectList);
+    procedure RegisterGenericStaticFields(AFields: TObjectList);
+    procedure RegisterGenericStatics(AInstances, ARecInstances: TObjectList);
+    procedure EmitGenStaticRegistrations(AInstances, ARecInstances: TObjectList);
+    procedure EmitGenStaticReleaseRoutines;
     procedure MarkThreadVar(const AName: string);
     procedure MarkWeakGlobal(const AName: string);
     procedure MarkUnretainedGlobal(const AName: string);
@@ -1934,6 +1945,9 @@ begin
   FSystemDefsEmitted  := False;
   FUnitInitNames      := TStringList.Create();
   FUnitFiniNames      := TStringList.Create();
+  FGenStaticSlots := TStringList.Create();
+  FGenStatic := TStringList.Create();
+  FGenStaticEmitted := TStringList.Create();
   FFiniReleased       := TStringList.Create();
   FFiniReleased.CaseSensitive := True;
   FFiniReleased.Sorted := True;
@@ -1997,6 +2011,9 @@ begin
   FImportedUnits.Free();
   FFiniReleased.Free();
   FUnitFiniNames.Free();
+  FGenStaticSlots.Free();
+  FGenStatic.Free();
+  FGenStaticEmitted.Free();
   FUnitInitNames.Free();
   FOALFrames.Free();
   FFinallyStack.Free();
@@ -2072,6 +2089,147 @@ end;
   class/record field list, under the mangled ClassVarEmitName stamped by the
   semantic pass.  EmitDataSection then emits a correctly-sized zero slot.  This
   covers read-only static vars that no assignment site auto-registers. }
+{ The static vars of generic instances: one WEAK global each under the
+  bare emit name the semantic pass gives it (DefineGenericStaticVar), so
+  the copies every instantiating object carries collapse into one slot at
+  link time, as the instance's methods do (BUG-004).  A managed one is kept
+  out of this object's exit release walk -- releasing it there would free it
+  while a unit finalized later may still read it, and every instantiating
+  object would release the one merged slot -- and gets a release routine
+  and an RTL registration instead (FGenStatic). }
+procedure TX86_64Backend.RegisterGenericStaticFields(AFields: TObjectList);
+var
+  J: Int;
+  F: TFieldDecl;
+  N: string;
+begin
+  if AFields = nil then Exit;
+  for J := 0 to AFields.Count - 1 do
+  begin
+    F := TFieldDecl(AFields.Items[J]);
+    if not F.IsClassVar or (F.ClassVarEmitName = '') or
+       (F.ResolvedType = nil) then
+      Continue;
+    N := F.ClassVarEmitName;
+    if FGenStaticSlots.IndexOf(N) >= 0 then Continue;
+    FGenStaticSlots.Add(N);
+    Self.AddGlobal(N, F.ResolvedType);
+    if GenericStaticNeedsRelease(F) then
+      FGenStatic.AddObject(N, F.ResolvedType);
+  end;
+end;
+
+procedure TX86_64Backend.RegisterGenericStatics(AInstances,
+  ARecInstances: TObjectList);
+var
+  I: Int;
+begin
+  if AInstances <> nil then
+    for I := 0 to AInstances.Count - 1 do
+      if TGenericInstance(AInstances.Items[I]).ClassDef <> nil then
+        Self.RegisterGenericStaticFields(
+          TGenericInstance(AInstances.Items[I]).ClassDef.Fields);
+  if ARecInstances <> nil then
+    for I := 0 to ARecInstances.Count - 1 do
+      if TGenericRecordInstance(ARecInstances.Items[I]).RecordDef <> nil then
+        Self.RegisterGenericStaticFields(
+          TGenericRecordInstance(ARecInstances.Items[I]).RecordDef.Fields);
+end;
+
+{ _StaticSlotRegister(@slot, @slot_release) for each managed static var of
+  the instances in the lists; the RTL keeps one entry per slot however many
+  objects register it.  An interface's slot is its object half. }
+procedure TX86_64Backend.EmitGenStaticRegistrations(AInstances,
+  ARecInstances: TObjectList);
+
+  procedure RegisterFields(AFields: TObjectList);
+  var
+    J: Int;
+    F: TFieldDecl;
+    Slot: string;
+  begin
+    if AFields = nil then Exit;
+    for J := 0 to AFields.Count - 1 do
+    begin
+      F := TFieldDecl(AFields.Items[J]);
+      if not GenericStaticNeedsRelease(F) then Continue;
+      Slot := F.ClassVarEmitName;
+      if F.ResolvedType.Kind = tyInterface then
+        Slot := Slot + '_obj';
+      Self.Emit(Format(#9'leaq %s(%%rip), %%rdi', [Slot]));
+      Self.Emit(Format(#9'leaq %s_release(%%rip), %%rsi',
+        [F.ClassVarEmitName]));
+      Self.Emit(#9'callq _StaticSlotRegister');
+    end;
+  end;
+
+var
+  I: Int;
+begin
+  if AInstances <> nil then
+    for I := 0 to AInstances.Count - 1 do
+      if TGenericInstance(AInstances.Items[I]).ClassDef <> nil then
+        RegisterFields(TGenericInstance(AInstances.Items[I]).ClassDef.Fields);
+  if ARecInstances <> nil then
+    for I := 0 to ARecInstances.Count - 1 do
+      if TGenericRecordInstance(ARecInstances.Items[I]).RecordDef <> nil then
+        RegisterFields(
+          TGenericRecordInstance(ARecInstances.Items[I]).RecordDef.Fields);
+end;
+
+{ <slot>_release for each managed generic static var this object defines:
+  WEAK, like the slot, so the linker keeps one.  It releases the value with
+  the program-exit walk's own per-kind code (EmitGlobalReleaseOne), then
+  clears the slot, so a second call is harmless. }
+procedure TX86_64Backend.EmitGenStaticReleaseRoutines;
+var
+  I, Off, Sz: Int;
+  N: string;
+  T: TTypeDesc;
+begin
+  for I := 0 to FGenStatic.Count - 1 do
+  begin
+    N := FGenStatic.Strings[I];
+    if FGenStaticEmitted.IndexOf(N) >= 0 then Continue;
+    FGenStaticEmitted.Add(N);
+    T := TTypeDesc(FGenStatic.Objects[I]);
+    Self.Emit('.text');
+    Self.Emit('.weak ' + N + '_release');
+    Self.Emit(N + '_release:');
+    Self.Emit(#9'pushq %rbp');
+    Self.Emit(#9'movq %rsp, %rbp');
+    Self.EmitGlobalReleaseOne(N, T);
+    if T.Kind = tyInterface then
+    begin
+      Self.Emit(Format(#9'movq $0, %s_obj(%%rip)', [N]));
+      Self.Emit(Format(#9'movq $0, %s_itab(%%rip)', [N]));
+    end
+    else
+    begin
+      if T.Kind in [tyRecord, tyStaticArray] then
+        Sz := T.RawSize()
+      else if IsMethodPtrType(T) then
+        Sz := 16
+      else
+        Sz := 8;
+      Off := 0;
+      while Off + 8 <= Sz do
+      begin
+        Self.Emit(Format(#9'movq $0, %s+%d(%%rip)', [N, Off]));
+        Off := Off + 8;
+      end;
+      while Off < Sz do
+      begin
+        Self.Emit(Format(#9'movb $0, %s+%d(%%rip)', [N, Off]));
+        Off := Off + 1;
+      end;
+    end;
+    Self.Emit(#9'popq %rbp');
+    Self.Emit(#9'ret');
+    Self.Emit('.type ' + N + '_release, @function');
+  end;
+end;
+
 procedure TX86_64Backend.RegisterClassVars(AFields: TObjectList);
 var
   I: Int;
@@ -2223,6 +2381,9 @@ begin
     owned by an unmangled unit carries a bare symbol every inlining object
     re-defines — weak binding lets the copies collapse (GH #174). }
   Result := False;
+  { a generic instance's static var: every instantiating object defines it }
+  if FGenStaticSlots.IndexOf(AName) >= 0 then
+    Exit(True);
   Owner := '';
   if not FGlobalOwners.TryGetValue(AName, Owner) then
     FGlobalOwners.TryGetValue(Self.GlobalSymName(AName), Owner);
@@ -3030,6 +3191,9 @@ begin
     { Unit-owned: released by the owning unit's <Unit>_fini, called above. }
     if Self.IsImportedGlobal(Name) then Continue;
     if FFiniReleased.IndexOf(Name) >= 0 then Continue;
+    { a generic instance's static var: released once, after every unit's
+      fini, through the RTL registry (_StaticSlotsRelease) }
+    if FGenStaticSlots.IndexOf(Name) >= 0 then Continue;
     Self.EmitGlobalReleaseOne(Name, Ty);
   end;
 end;
@@ -28304,6 +28468,8 @@ begin
     as assembly labels before being referenced in code.  Covers block-level
     consts and local consts inside procedure bodies. }
   Self.EmitArrayConstData(AProg.Block, '');
+  Self.RegisterGenericStatics(AProg.GenericInstances,
+    AProg.GenericRecordInstances);
 
   { Standalone procedures/functions, then $main. }
   for I := 0 to AProg.Block.ProcDecls.Count - 1 do
@@ -28383,6 +28549,8 @@ begin
   { Call initialization sections of imported units in order. }
   for I := 0 to FUnitInitNames.Count - 1 do
     Self.Emit(#9'callq ' + FUnitInitNames.Strings[I] + '_init');
+  Self.EmitGenStaticRegistrations(AProg.GenericInstances,
+    AProg.GenericRecordInstances);
   if FDebugMode then
     Self.Emit(#9'callq _LeakTrackerEnable');
   { Program body. }
@@ -28411,6 +28579,9 @@ begin
   Self.EmitGlobalReleases();
   for I := FUnitFiniNames.Count - 1 downto 0 do
     Self.Emit(#9'callq ' + FUnitFiniNames.Strings[I] + '_fini');
+  { the static vars of generic instances, after EVERY unit's fini: a unit
+    finalized late may still read one (runtime.arc _StaticSlotsRelease) }
+  Self.Emit(#9'callq _StaticSlotsRelease');
   Self.Emit(#9'movl $0, %eax');
   Self.Emit(#9'leave');
   Self.Emit(#9'ret');
@@ -28428,6 +28599,7 @@ begin
 
   { Data section: all registered global integer/float/record slots. }
   FUnwBlockLater := True;
+  Self.EmitGenStaticReleaseRoutines();
   Self.EmitDataSection();
   { Class data section: typeinfo, vtables, field-cleanup functions. }
   Self.EmitClassSection(AProg.Block.TypeDecls, OwnGI,
@@ -28560,6 +28732,8 @@ begin
   { Array-typed constants from both interface and implementation blocks. }
   Self.EmitArrayConstData(AUnit.IntfBlock, '');
   Self.EmitArrayConstData(AUnit.ImplBlock, '');
+  Self.RegisterGenericStatics(AUnit.GenericInstances,
+    AUnit.GenericRecordInstances);
 
   { Standalone procedures/functions from the implementation block.  Skip class
     method stubs (OwnerTypeName <> '': their bodies were transferred to the
@@ -28593,7 +28767,7 @@ begin
   { Initialization section: emit as a function <Unit>_init that the program's
     $main calls before the program body.  (Finalization is not yet wired into
     the native main footer; emitted but only init is invoked.) }
-  if (AUnit.InitStmts <> nil) and (AUnit.InitStmts.Count > 0) then
+  if UnitNeedsInit(AUnit) then
   begin
     { Re-assert THIS unit as the viewing context.  Earlier emit passes in this
       procedure (method-body type resolution that walks the uses chain) can
@@ -28628,7 +28802,12 @@ begin
     Self.Emit(#9'movq %rsp, %rbp');
     Self.TvArmBegin(SavedArmNodes, SavedArmPos);
     Self.TvArmMark();
-    Self.EmitStmtList(AUnit.InitStmts);
+    { the managed static vars of the generic instances this unit
+      instantiates, registered before its own initialization code }
+    Self.EmitGenStaticRegistrations(AUnit.GenericInstances,
+      AUnit.GenericRecordInstances);
+    if AUnit.InitStmts <> nil then
+      Self.EmitStmtList(AUnit.InitStmts);
     Self.Emit(#9'movl $0, %eax');
     Self.Emit(#9'leave');
     Self.Emit(#9'ret');
@@ -28803,6 +28982,7 @@ procedure TX86_64Backend.FinalizeEmit;
 begin
   if FFinalized then Exit;
   FFinalized := True;
+  Self.EmitGenStaticReleaseRoutines();
   Self.EmitDataSection();
 end;
 

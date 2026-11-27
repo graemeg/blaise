@@ -211,6 +211,10 @@ type
       from them beside the output, are reused as they stand. }
     function  CompileAndRunInScratch(const ASrc: string; out AStdout: string;
                                      out AExitCode: Int): Boolean;
+    { As CompileAndRunInScratch, built with --debug (leak tracker on). }
+    function  CompileAndRunInScratchDebug(const ASrc: string;
+                                          out AStdout: string;
+                                          out AExitCode: Int): Boolean;
     { Delete AName from the scratch directory, if it is there. }
     procedure DeleteScratchFile(const AName: string);
   end;
@@ -969,6 +973,14 @@ function TE2ETestCase.CompileAndRunInScratch(const ASrc: string;
 begin
   Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
     AExitCode)
+end;
+
+function TE2ETestCase.CompileAndRunInScratchDebug(const ASrc: string;
+                                                  out AStdout: string;
+                                                  out AExitCode: Int): Boolean;
+begin
+  Result := Self.CompileAndRunNativeCLI(ASrc, True, FScratch, AStdout,
+                                        AExitCode)
 end;
 
 procedure TE2ETestCase.DeleteScratchFile(const AName: string);
