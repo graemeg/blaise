@@ -10158,6 +10158,11 @@ The check does not apply to static arrays, strings, `PChar` or open-array
 parameters, and `for ... in` over a dynamic array performs none: the loop
 itself keeps its index within `0..High`.
 
+Taking an element's address is an access too, so `@A[0]` on an empty array
+and the one-past-the-end `@A[Length(A)]` raise.  Code that hands the data of
+a possibly empty array to a routine taking a pointer and a count guards the
+address: `if Length(A) > 0 then P := @A[0] else P := nil`.
+
 === Rationale
 
 A dynamic array's length is a run-time value, so the compile-time check on

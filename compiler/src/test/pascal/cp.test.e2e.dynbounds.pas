@@ -37,6 +37,11 @@ type
     procedure TestRun_IndexKinds_Boundaries;
     { an array captured by a closure that outlives its routine }
     procedure TestRun_ClosureCapture_RaisesERangeError;
+    { the shapes the first pass left untested: an owned call-result base,
+      interface / float / record elements of a field array, a record-call
+      right-hand side, a field chain, closure and jumbo-set elements, and
+      the address of element 0 of an empty array }
+    procedure TestRun_MoreShapes_RaiseERangeError;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -480,6 +485,72 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRTLRunsOnAll(Src, 'closure: Range check error' + LE + '3' + LE, 0);
+end;
+
+procedure TE2EDynBoundsTests.TestRun_MoreShapes_RaiseERangeError;
+const
+  Src = '''
+    program DynBoundsMore;
+    uses SysUtils;
+    type
+      TProc = reference to procedure;
+      TBig = set of 0..127;
+      IFoo = interface function Get: Int32; end;
+      TFoo = class(TObject, IFoo) function Get: Int32; end;
+      TRec = record N: Int32; S: String; end;
+      THolder = record
+        IA: array of IFoo;
+        FA: array of Float64;
+        RA: array of TRec;
+      end;
+      TInner = class Arr: array of Int32; end;
+      TOuter = class Inner: TInner; end;
+    var
+      G: array of Int32; RA: array of TRec; CA: array of TProc; JA: array of TBig;
+      E: array of Int32; H: THolder; O: TOuter; F: IFoo; X: Int32; P: ^Int32;
+    function TFoo.Get: Int32; begin Result := 1 end;
+    function GetArr: array of Int32; begin Result := G end;
+    function MkRec: TRec; begin Result.N := 1; Result.S := IntToStr(5) + 'x' end;
+    procedure Hit(const AName: string; AP: TProc);
+    begin
+      try
+        AP();
+        WriteLn('miss ', AName)
+      except
+        on Ex: ERangeError do WriteLn(AName)
+      end
+    end;
+    begin
+      SetLength(G, 2); SetLength(RA, 1); SetLength(CA, 1); SetLength(JA, 1);
+      SetLength(H.IA, 1); SetLength(H.FA, 1); SetLength(H.RA, 1);
+      O := TOuter.Create(); O.Inner := TInner.Create(); SetLength(O.Inner.Arr, 1);
+      F := TFoo.Create();
+      Hit('call-read', procedure begin X := GetArr()[2] end);
+      Hit('call-write', procedure begin GetArr()[2] := 1 end);
+      Hit('call-inc', procedure begin Inc(GetArr()[-1]) end);
+      Hit('intf-field-write', procedure begin H.IA[1] := F end);
+      Hit('intf-field-read', procedure begin F := H.IA[1] end);
+      Hit('float-field-write', procedure begin H.FA[1] := 1.5 end);
+      Hit('rec-field-write', procedure begin H.RA[1] := MkRec() end);
+      Hit('rec-elem-call-rhs', procedure begin RA[1] := MkRec() end);
+      Hit('chain-write', procedure begin O.Inner.Arr[1] := 1 end);
+      Hit('chain-read', procedure begin X := O.Inner.Arr[1] end);
+      Hit('closure-write', procedure begin CA[1] := procedure begin end end);
+      Hit('closure-call', procedure begin CA[1]() end);
+      Hit('jumbo-write', procedure begin JA[1] := [100] end);
+      Hit('addr-empty', procedure begin P := @E[0] end);
+      GetArr()[1] := 4; H.FA[0] := 2.5; RA[0] := MkRec(); O.Inner.Arr[0] := 3;
+      WriteLn(G[1], ' ', Trunc(H.FA[0] * 2), ' ', RA[0].S, ' ', O.Inner.Arr[0]);
+      O.Inner.Free(); O.Free()
+    end.
+    ''';
+begin
+  AssertRTLRunsOnAll(Src,
+    'call-read' + LE + 'call-write' + LE + 'call-inc' + LE +
+    'intf-field-write' + LE + 'intf-field-read' + LE + 'float-field-write' + LE +
+    'rec-field-write' + LE + 'rec-elem-call-rhs' + LE + 'chain-write' + LE +
+    'chain-read' + LE + 'closure-write' + LE + 'closure-call' + LE +
+    'jumbo-write' + LE + 'addr-empty' + LE + '4 5 5x 3' + LE, 0);
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;
