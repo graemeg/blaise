@@ -11763,8 +11763,14 @@ begin
       read-only memory.  Mirrors x86-64 (:16340) and QBE (:17676). }
     if (AStmt.BaseExpr <> nil) and ExprMayCall(AStmt.BaseExpr) and
        (AStmt.BaseExpr is TStringSubscriptExpr) and
-       (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType <> nil) and
-       (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
+          (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType <> nil) and
+          ((TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) or
+           { a named static array (a global or local, not a var parameter or
+             a field): storage nothing in the statement can free }
+           ((TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType.Kind = tyStaticArray) and
+            (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr is TIdentExpr) and
+            not TIdentExpr(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr).IsImplicitSelf and
+            (TIdentExpr(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr).ParamMode <> pmVar))) then
     begin
       { a string held in an element whose access runs code
         (Strs[K()][J()] := B): left to right, its slot first -- the array
@@ -11772,6 +11778,10 @@ begin
         cannot free the slot -- then the index, the byte, the store }
       { (any other base is located last, below: its container cannot be
         pinned, and the index or the byte could free it) }
+      if TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType.Kind =
+         tyStaticArray then
+        EmitLValueAddrToX0(AStmt.BaseExpr)
+      else
       begin
         Self.EmitExprToX0(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr);
         if not ArcExprOwnsRef(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr) then

@@ -10232,8 +10232,17 @@ not change what the program computes, only risk a pointer into a block the
 call freed.  Where no call is involved the backends are free to locate it
 in any order.
 
-One shape keeps an older order: an array field of a *record* returned by
-a call, `MkRec().Arr[I] := V`.  The record lives in a result buffer that
+Two shapes keep an older order, where the storage written to lives on
+the heap and cannot be held for the statement.
+
+* A byte of a string reached through a call inside a structure that is
+  neither a dynamic array nor a named static array -- `Items[M()].SA[K()][J()]
+  := Chr(V())` with `SA` a static-array field -- is located after the index
+  and the byte (`J`, `V`, then `M`, `K`), so a value that frees that
+  structure makes the locating check raise instead of writing to freed
+  memory.  (Through a dynamic array, `Strs[K()][J()]`, the array is held
+  and the order is left to right.)
+* An array field of a *record* returned by a call, `MkRec().Arr[I] := V`.  The record lives in a result buffer that
 evaluating `V` may reuse, so it cannot be held from step 1; it is
 evaluated once, after `V`, and `I` is checked only in step 4.  (A class
 receiver, `MakeObj().Arr[I]`, is an object reference and is held.)

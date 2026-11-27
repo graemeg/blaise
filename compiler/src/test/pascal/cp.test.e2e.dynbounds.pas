@@ -1087,7 +1087,7 @@ begin
       TItemS = record SA: TSS; end;
     var
       Strs: array of String; T: String; DA: array of TSS; Items: array of TItem;
-      Caught: Int32; DB: array of TSS; ItemsS: array of TItemS;
+      Caught: Int32; DB: array of TSS; ItemsS: array of TItemS; GS: TSS;
     function Tr(const AWhat: string; AN: Int32): Int32;
     begin T := T + AWhat; Result := AN end;
     function VS: String; begin SetLength(DA, 1); Result := IntToStr(7) + 's' end;
@@ -1099,6 +1099,10 @@ begin
       SetLength(Strs, 2); Strs[1] := IntToStr(10) + 'abc';
       Strs[Tr('K', 1)][Tr('J', 0)] := Chr(Tr('V', 120));
       WriteLn(T, ' ', Strs[1]);
+      { a named static array of strings cannot be freed: left to right }
+      T := ''; GS[1] := IntToStr(20) + 'def';
+      GS[Tr('K', 1)][Tr('J', 1)] := Chr(Tr('V', 121));
+      WriteLn(T, ' ', GS[1]);
       SetLength(DA, 2);
       try
         DA[1][0] := VS()
@@ -1130,9 +1134,10 @@ begin
         on E: ERangeError do Caught := Caught + 1
       end;
       WriteLn('caught ', Caught);
-      Strs := nil; DA := nil; Items := nil; DB := nil; ItemsS := nil
+      Strs := nil; DA := nil; Items := nil; DB := nil; ItemsS := nil;
+      GS[1] := ''
     end.
-    ''', 'KJV x0abc' + #10 + 'caught 4');
+    ''', 'KJV x0abc' + #10 + 'KJV 2ydef' + #10 + 'caught 4');
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;

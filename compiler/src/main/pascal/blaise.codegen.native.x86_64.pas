@@ -21265,8 +21265,14 @@ begin
         the COW, writing a literal-backed string would hit read-only memory. }
       if (SSA.BaseExpr <> nil) and ExprMayCall(SSA.BaseExpr) and
          (SSA.BaseExpr is TStringSubscriptExpr) and
-         (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType <> nil) and
-         (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
+            (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType <> nil) and
+            ((TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) or
+             { a named static array (a global or local, not a var parameter or
+               a field): storage nothing in the statement can free }
+             ((TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType.Kind = tyStaticArray) and
+              (TStringSubscriptExpr(SSA.BaseExpr).StrExpr is TIdentExpr) and
+              not TIdentExpr(TStringSubscriptExpr(SSA.BaseExpr).StrExpr).IsImplicitSelf and
+              (TIdentExpr(TStringSubscriptExpr(SSA.BaseExpr).StrExpr).ParamMode <> pmVar))) then
       begin
         { a string held in an element whose access runs code
           (Strs[K()][J()] := B): left to right, its slot first -- the array
@@ -21274,6 +21280,10 @@ begin
           cannot free the slot -- then the index, the byte, the store }
         { (any other base is located last, below: its container cannot be
           pinned, and the index or the byte could free it) }
+        if TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType.Kind =
+           tyStaticArray then
+          Self.EmitVarArgAddrToRax(SSA.BaseExpr)
+        else
         begin
           Self.EmitExprToEax(TStringSubscriptExpr(SSA.BaseExpr).StrExpr);
           if NativeExprOwnsRef(TStringSubscriptExpr(SSA.BaseExpr).StrExpr) then
