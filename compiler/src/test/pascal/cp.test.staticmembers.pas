@@ -691,6 +691,10 @@ type
     procedure AssertStaticCallExpr(ABody: TBlock; const AWhat: string);
     procedure AssertStaticCallStmt(ABody: TBlock; const AWhat: string);
   published
+    { TFoo.P(args), P a procedural static var: a call through the value it
+      holds, like F := TFoo.P; F(args) -- it was "Type 'TFoo' has no
+      method 'P'" (BUG-20261127-static-proc-var-call) }
+    procedure TestSemantic_ProcStaticVar_QualifiedCall_LowersToIndirectCall;
     { TFoo.StaticArr[I] reads and writes one element (the index was dropped,
       so the whole array was read and written) }
     procedure TestSem_StaticVar_ElementReadWrite;
@@ -1478,6 +1482,38 @@ begin
   Prog := AnalyseSrc(Src);
   Prog.Free();
   AnalyseExpectErrorMsg(SrcBad, 'element');
+end;
+
+procedure TStaticMembersSemTests.TestSemantic_ProcStaticVar_QualifiedCall_LowersToIndirectCall;
+var
+  Prog: TProgram;
+  Call: TProcCall;
+  IC: TIndirectFuncCallExpr;
+begin
+  Prog := Analyse('''
+    program P;
+    type
+      TH = class
+      public
+        static var P: reference to function(N: Int): Int;
+      end;
+    begin
+      WriteLn(TH.P(3))
+    end.
+    ''');
+  try
+    Call := TProcCall(Prog.Block.Stmts.Items[0]);
+    { the argument slot holds the lowered call in place of the method call }
+    AssertTrue('lowered to an indirect call',
+      TObject(Call.Args.Items[0]) is TIndirectFuncCallExpr);
+    IC := TIndirectFuncCallExpr(Call.Args.Items[0]);
+    AssertEquals('one argument moved', 1, IC.Args.Count);
+    AssertTrue('through the static var',
+      (IC.CalleeExpr is TFieldAccessExpr) and
+      TFieldAccessExpr(IC.CalleeExpr).IsClassVarRead);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

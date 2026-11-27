@@ -3614,6 +3614,10 @@ begin
             ((AExpr is TFieldAccessExpr) and
              (TFieldAccessExpr(AExpr).FieldInfo <> nil) and
              (TFieldAccessExpr(AExpr).PropRead = nil)) or
+            { TFoo.P, a static var: its one shared slot (the arm64
+              IsFatLValue twin) }
+            ((AExpr is TFieldAccessExpr) and
+             TFieldAccessExpr(AExpr).IsClassVarRead) or
             (AExpr is TStringSubscriptExpr) or (AExpr is TDerefExpr);
 end;
 

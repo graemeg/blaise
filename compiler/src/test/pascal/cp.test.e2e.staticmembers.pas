@@ -26,6 +26,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { a procedural static var called through the type (TH.P(X)) and copied
+      out of it (F := TH.P, which arm64 did not lower), in expression and
+      statement position, a reference-to closure and an of-object method
+      pointer, with no leak (BUG-20261127-static-proc-var-call) }
+    procedure TestRun_ProcStaticVar_QualifiedCallAndCopy_NoLeak;
     { TFoo.StaticArr[I] reads / writes one element of a static or dynamic
       array, and a default property through a static object }
     procedure TestRun_StaticVar_ElementReadWrite;
@@ -1256,6 +1261,42 @@ begin
     CompileAndRunWithUnit('CProps', USrc, Src, RunOut, Code));
   AssertEquals('exit code', 0, Code);
   AssertEquals('stdout', '5 nx' + LE, RunOut);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_ProcStaticVar_QualifiedCallAndCopy_NoLeak;
+begin
+  AssertLeakFreeOnAll('''
+    program P;
+    type
+      TObj = class
+        Base: Int;
+        function Add(N: Int): Int;
+      end;
+      TH = class
+      public
+        static var P: reference to function(N: Int): Int;
+        static var M: function(N: Int): Int of object;
+        static var Log: reference to procedure(const S: string);
+      end;
+    function TObj.Add(N: Int): Int; begin Result := Base + N end;
+    var
+      F: reference to function(N: Int): Int;
+      O: TObj;
+      K: Int;
+    begin
+      K := 10;
+      TH.P := function(N: Int): Int begin Result := N + K end;
+      TH.Log := procedure(const S: string) begin WriteLn('log ', S) end;
+      O := TObj.Create();
+      O.Base := 100;
+      TH.M := @O.Add;
+      F := TH.P;
+      WriteLn(TH.P(1), ' ', F(2), ' ', TH.M(3));
+      TH.Log('x' + IntToStr(K));
+      O.Free();
+      TH.M := nil
+    end.
+    ''', '11 12 103');
 end;
 
 initialization

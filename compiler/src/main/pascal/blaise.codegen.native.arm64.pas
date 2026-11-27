@@ -3129,6 +3129,9 @@ begin
       (TFieldAccessExpr(AExpr).FieldInfo <> nil) and
       not TFieldAccessExpr(AExpr).IsMethodCall and
       (TFieldAccessExpr(AExpr).PropRead = nil)) or
+     { TFoo.P, a static var: its one shared slot (F := TFoo.P was 'not yet
+       lowered'; the read of a plain var already took the TIdentExpr arm) }
+     ((AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsClassVarRead) or
      (AExpr is TStringSubscriptExpr) or (AExpr is TDerefExpr));
 end;
 

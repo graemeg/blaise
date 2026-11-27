@@ -15984,6 +15984,10 @@ var
   FldInfo: TFieldInfo;
   RecvIdent: TIdentExpr;
   RecvExpr: TASTExpr;
+  VarSym: TSymbol;
+  StaticCall: TIndirectFuncCallExpr;
+  StaticCallee: TFieldAccessExpr;
+  StaticStmt: TExprCallStmt;
 begin
   { Call on a receiver expression: AProg.UsedUnits.Add(UName) }
   if ACall.ObjExpr <> nil then
@@ -16199,6 +16203,35 @@ begin
       ACall.ObjectName := '';
       Self.AnalyseMethodCall(ACall);
       Exit;
+    end;
+    { TFoo.P(args); -- P a procedural STATIC VAR: a call through its value,
+      as the expression form lowers it (AnalyseMethodCallExpr) }
+    if FindMethodDecl(ObjSym.Name, ACall.Name) = nil then
+    begin
+      VarSym := FTable.Lookup(RT.Name + '.' + ACall.Name);
+      if (VarSym <> nil) and (VarSym.Kind = skVariable) and
+         VarSym.IsClassVar and (VarSym.TypeDesc <> nil) and
+         (VarSym.TypeDesc.Kind = tyProcedural) then
+      begin
+        StaticCall := TIndirectFuncCallExpr.Create();
+        StaticCall.Line := ACall.Line;
+        StaticCall.Col := ACall.Col;
+        StaticCallee := TFieldAccessExpr.Create();
+        StaticCallee.Line := ACall.Line;
+        StaticCallee.Col := ACall.Col;
+        StaticCallee.RecordName := ACall.ObjectName;
+        StaticCallee.FieldName := ACall.Name;
+        StaticCall.CalleeExpr := StaticCallee;
+        while ACall.Args.Count > 0 do
+          StaticCall.Args.Add(ACall.Args.Extract(ACall.Args.Items[0]));
+        StaticStmt := TExprCallStmt.Create();
+        StaticStmt.Line := ACall.Line;
+        StaticStmt.Col := ACall.Col;
+        StaticStmt.Call := StaticCall;
+        ACall.LoweredCall := StaticStmt;
+        Self.AnalyseStmt(ACall.LoweredCall);
+        Exit;
+      end;
     end;
     for I := 0 to ACall.Args.Count - 1 do
       Self.AnalyseArgSlot(ACall.Args, I);
@@ -21646,6 +21679,9 @@ var
   ResolvedObjName: string;
   FldInfo: TFieldInfo;
   FmtCall: TFuncCallExpr;
+  VarSym: TSymbol;
+  StaticCall: TIndirectFuncCallExpr;
+  StaticCallee: TFieldAccessExpr;
 begin
   { Call on an arbitrary expression (e.g. TCast(x).Method(y)) }
   if AExpr.ObjExpr <> nil then
@@ -21981,6 +22017,34 @@ begin
      (ObjSym.TypeDesc.Kind in [tyClass, tyRecord]) and
      not Self.CallsConstructor(ObjSym.TypeDesc, AExpr.Name) then
   begin
+    { TFoo.P(args), P a STATIC VAR of procedural type rather than a method:
+      a call through the value it holds -- the indirect call on the
+      qualified read, as F := TFoo.P; F(args) does.  Checked before the
+      args are analysed, so they are typed once, against P's signature. }
+    if FindMethodDecl(ObjSym.Name, AExpr.Name) = nil then
+    begin
+      VarSym := FTable.Lookup(ObjSym.TypeDesc.Name + '.' + AExpr.Name);
+      if (VarSym <> nil) and (VarSym.Kind = skVariable) and
+         VarSym.IsClassVar and (VarSym.TypeDesc <> nil) and
+         (VarSym.TypeDesc.Kind = tyProcedural) then
+      begin
+        StaticCall := TIndirectFuncCallExpr.Create();
+        StaticCall.Line := AExpr.Line;
+        StaticCall.Col := AExpr.Col;
+        StaticCallee := TFieldAccessExpr.Create();
+        StaticCallee.Line := AExpr.Line;
+        StaticCallee.Col := AExpr.Col;
+        StaticCallee.RecordName := AExpr.ObjectName;
+        StaticCallee.FieldName := AExpr.Name;
+        StaticCall.CalleeExpr := StaticCallee;
+        while AExpr.Args.Count > 0 do
+          StaticCall.Args.Add(AExpr.Args.Extract(AExpr.Args.Items[0]));
+        AExpr.LoweredCall := StaticCall;
+        Result := Self.AnalyseExpr(AExpr.LoweredCall);
+        AExpr.ResolvedType := Result;
+        Exit;
+      end;
+    end;
     for I := 0 to AExpr.Args.Count - 1 do
       Self.AnalyseArgSlot(AExpr.Args, I);
     MDecl := ResolveMethodOverload(ObjSym.Name, AExpr.Name, AExpr.Args,
