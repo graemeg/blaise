@@ -10,6 +10,7 @@ for src in *.pas; do
     name=${src%.pas}
     echo "building $name"
     "$BLAISE" --source "$src" --output "target/$name" \
+        --target linux-x86_64 \
         --unit-path "$ROOT/bindings/src/main/pascal" \
         --unit-path "$ROOT/stdlib/src/main/pascal"
 done
