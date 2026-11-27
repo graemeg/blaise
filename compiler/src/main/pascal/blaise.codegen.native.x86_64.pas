@@ -1208,7 +1208,6 @@ type
       builtin added here reaches both (a per-context arm is how float Abs
       once fell through in one of them). }
     function EmitUnaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
-    function EmitBinaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
     { Load a float (Double or Single) from AOperand into %xmm0. }
     procedure EmitLoadFloat(const AOperand: string; AType: TTypeDesc);
     { Store %xmm0 into AOperand at the float type's width. }
@@ -8529,7 +8528,7 @@ begin
     Exit;
   end;
 
-  { Integer-typed expression in a float context (e.g. Tanh(i), Power(2, n)):
+  { Integer-typed expression in a float context (e.g. Sqrt(i), Abs(n) beside a float):
     evaluate to %rax (sign-extended) and convert to double. }
   if (AExpr.ResolvedType <> nil) and IsIntFamily(AExpr.ResolvedType) then
   begin
@@ -8987,10 +8986,12 @@ begin
 end;
 
 { One-argument float math builtin: result left in %xmm0.  Sqrt is a
-  hardware instruction and Abs a runtime.math helper; every other function
-  is a runtime.math call.  A Single argument is widened to double, the
-  function runs in double, and the result is narrowed back to Single, so
-  the value an enclosing Single expression sees is correctly rounded. }
+  hardware instruction and a float Abs the runtime.math helper.  A Single
+  argument is widened to double, the function runs in double, and the
+  result is narrowed back to Single, so the value an enclosing Single
+  expression sees is correctly rounded.  Sin, Ln, Exp, Power and the other
+  transcendental functions are ordinary routines of the Math unit, bound
+  to runtime.math by external name, so they reach codegen as calls. }
 function TX86_64Backend.EmitUnaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
 var
   Arg: TASTExpr;
@@ -9015,36 +9016,8 @@ begin
   end;
 
   Sym := '';
-  if IsBuiltinCall(FC, 'Sin') then
-    Sym := '_BlaiseSin'
-  else if IsBuiltinCall(FC, 'Cos') then
-    Sym := '_BlaiseCos'
-  else if IsBuiltinCall(FC, 'Tan') then
-    Sym := '_BlaiseTan'
-  else if IsBuiltinCall(FC, 'ArcTan') then
-    Sym := '_BlaiseArcTan'
-  else if IsBuiltinCall(FC, 'ArcSin') then
-    Sym := '_BlaiseArcSin'
-  else if IsBuiltinCall(FC, 'ArcCos') then
-    Sym := '_BlaiseArcCos'
-  else if IsBuiltinCall(FC, 'Ln') then
-    Sym := '_BlaiseLn'
-  else if IsBuiltinCall(FC, 'Exp') then
-    Sym := '_BlaiseExp'
-  else if IsBuiltinCall(FC, 'Expm1') then
-    Sym := '_BlaiseExpm1'
-  else if IsBuiltinCall(FC, 'Log2') then
-    Sym := '_BlaiseLog2'
-  else if IsBuiltinCall(FC, 'Log10') then
-    Sym := '_BlaiseLog10'
-  else if IsBuiltinCall(FC, 'Sinh') then
-    Sym := '_BlaiseSinh'
-  else if IsBuiltinCall(FC, 'Cosh') then
-    Sym := '_BlaiseCosh'
-  else if IsBuiltinCall(FC, 'Tanh') then
-    Sym := '_BlaiseTanh'
-  else if IsBuiltinCall(FC, 'Abs') and (Arg.ResolvedType <> nil) and
-          Arg.ResolvedType.IsFloat() then
+  if IsBuiltinCall(FC, 'Abs') and (Arg.ResolvedType <> nil) and
+     Arg.ResolvedType.IsFloat() then
     Sym := '_BlaiseFabs';
   if Sym = '' then
     Exit;
@@ -9061,48 +9034,6 @@ begin
   Result := True;
 end;
 
-{ Two-argument float math builtin: result left in %xmm0.  Each argument is
-  widened to double by ITS OWN type (keying both on the first argument
-  mishandles mixed Single/Double pairs).  ArcTan2's result follows its
-  first argument; Power's is always double. }
-function TX86_64Backend.EmitBinaryFloatMathToXmm0(FC: TFuncCallExpr): Boolean;
-var
-  A0, A1: TASTExpr;
-  IsS: Boolean;
-  Sym: string;
-begin
-  Result := False;
-  if FC.Args.Count <> 2 then
-    Exit;
-  Sym := '';
-  if IsBuiltinCall(FC, 'ArcTan2') then
-    Sym := '_BlaiseArcTan2'
-  else if IsBuiltinCall(FC, 'Power') then
-    Sym := '_BlaisePow';
-  if Sym = '' then
-    Exit;
-
-  A0 := TASTExpr(FC.Args.Items[0]);
-  A1 := TASTExpr(FC.Args.Items[1]);
-  IsS := (A0.ResolvedType <> nil) and (A0.ResolvedType.Kind = tySingle);
-  Self.EmitExprToXmm0(A0);
-  if IsS then
-    Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-  Self.Emit(#9'subq $8, %rsp');
-  Self.Emit(#9'movsd %xmm0, (%rsp)');
-  Self.EmitExprToXmm0(A1);
-  if (A1.ResolvedType <> nil) and (A1.ResolvedType.Kind = tySingle) then
-    Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-  Self.Emit(#9'movaps %xmm0, %xmm1');
-  Self.Emit(#9'movsd (%rsp), %xmm0');
-  Self.Emit(#9'addq $8, %rsp');
-  Self.Emit(#9'callq ' + Sym);
-  if IsBuiltinCall(FC, 'ArcTan2') and IsS then
-    { result type follows the first argument }
-    Self.Emit(#9'cvtsd2ss %xmm0, %xmm0');
-  Result := True;
-end;
-
 function TX86_64Backend.EmitFloatBuiltin(FC: TFuncCallExpr): Boolean;
 begin
   Result := True;
@@ -9116,8 +9047,6 @@ begin
     Exit;
   end;
   if Self.EmitUnaryFloatMathToXmm0(FC) then
-    Exit;
-  if Self.EmitBinaryFloatMathToXmm0(FC) then
     Exit;
   Result := False;
 end;
@@ -9917,11 +9846,6 @@ begin
       Self.Emit(#9'movq %xmm0, %rax');
       Exit;
     end;
-    if Self.EmitBinaryFloatMathToXmm0(FC) then
-    begin
-      Self.Emit(#9'movq %xmm0, %rax');
-      Exit;
-    end;
     if IsBuiltinCall(FC, 'DoubleToStr') and (FC.Args.Count = 1) then
     begin
       { The argument expression may resolve to Single (e.g. a bare Single
@@ -10326,38 +10250,6 @@ begin
         Self.Emit(#9'callq _BlaiseCeilD');
         Self.Emit(#9'cvttsd2si %xmm0, %rax');
       end;
-      Exit;
-    end;
-    { Float classification, inline as on arm64: the C library's __isnan and
-      __isinf are absent from a freestanding link and from Windows.  A
-      Single operand is widened first; the widening keeps NaN and infinity,
-      so one double test serves both widths.
-        IsNaN:      NaN is the only value unordered with itself (PF set).
-        IsInfinite: shift the sign bit out; +/-inf is then exactly the
-                    all-ones exponent over a zero mantissa, $FFE0... }
-    if IsBuiltinCall(FC, 'IsNaN') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'ucomisd %xmm0, %xmm0');
-      Self.Emit(#9'setp %al');
-      Self.Emit(#9'movzbl %al, %eax');
-      Exit;
-    end;
-    if IsBuiltinCall(FC, 'IsInfinite') and (FC.Args.Count = 1) then
-    begin
-      Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-      Self.Emit(#9'movq %xmm0, %rax');
-      Self.Emit(#9'shlq $1, %rax');
-      Self.Emit(#9'movabsq $-9007199254740992, %rcx');
-      Self.Emit(#9'cmpq %rcx, %rax');
-      Self.Emit(#9'sete %al');
-      Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
     { Unqualified call to a procedural-typed field of the current class

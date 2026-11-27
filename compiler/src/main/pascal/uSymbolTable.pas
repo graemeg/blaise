@@ -2677,34 +2677,17 @@ begin
   Sym := TSymbol.Create('ProcessWaitOnExit', skProcedure, nil);          Define(Sym);
   Sym := TSymbol.Create('ProcessExitCode',   skFunction,  FTypeInteger); Define(Sym);
   Sym := TSymbol.Create('ProcessFree',       skProcedure, nil);          Define(Sym);
-  { Math builtins — Sqrt/Ceil/Floor/Round/Trunc/Ln/Exp/Expm1/Log2/Log10/Power,
-    Sin/Cos/Tan/ArcTan/ArcTan2, IsNaN/IsInfinite.
-    Return types marked here are overridden in uSemantic.AnalyseFuncCallExpr
-    (e.g. Ceil/Floor/Round/Trunc return Int64; Sin/Cos/Tan return the arg
-    type; IsNaN/IsInfinite return Boolean). }
+  { Math builtins: Sqrt/Ceil/Floor/Round/Trunc.  Return types marked here
+    are overridden in uSemantic.AnalyseFuncCallExpr (Ceil/Floor/Round/Trunc
+    return Int64, Sqrt the argument's float type).  Ln, Exp, Power, Sin and
+    the other transcendental functions live in the Math unit, so they are
+    not reserved here: see docs/language-rationale.adoc, "Builtins and the
+    Math Unit". }
   Sym := TSymbol.Create('Sqrt',       skFunction, FTypeDouble);  Define(Sym);
   Sym := TSymbol.Create('Ceil',       skFunction, FTypeInt64);   Define(Sym);
   Sym := TSymbol.Create('Floor',      skFunction, FTypeInt64);   Define(Sym);
   Sym := TSymbol.Create('Round',      skFunction, FTypeInt64);   Define(Sym);
   Sym := TSymbol.Create('Trunc',      skFunction, FTypeInt64);   Define(Sym);
-  Sym := TSymbol.Create('Ln',         skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Exp',        skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Expm1',      skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Log2',       skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Log10',      skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Power',      skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Sin',        skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Cos',        skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Tan',        skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('ArcTan',     skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('ArcTan2',    skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('ArcSin',     skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('ArcCos',     skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Sinh',       skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Cosh',       skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Tanh',       skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('IsNaN',      skFunction, FTypeBoolean); Define(Sym);
-  Sym := TSymbol.Create('IsInfinite', skFunction, FTypeBoolean); Define(Sym);
 end;
 
 { Whether a symbol defined now is private to the unit being analysed: a name

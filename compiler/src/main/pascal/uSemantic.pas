@@ -1691,6 +1691,25 @@ begin
   Result := _DoubleToStr(V);
 end;
 
+{ The suffix for an "Undeclared function/procedure" error when the name
+  is a routine of the Math unit, so a program that calls Sin without
+  'uses Math' is told where it lives. }
+function MathUnitHint(const AName: string): string;
+const
+  Names: array[0..27] of string = (
+    'Ln', 'Log2', 'Log10', 'Power', 'Exp', 'Expm1', 'Sin', 'Cos', 'Tan',
+    'ArcSin', 'ArcCos', 'ArcTan', 'ArcTan2', 'Sinh', 'Cosh', 'Tanh',
+    'IsNaN', 'IsInfinite', 'Frac', 'DegToRad', 'RadToDeg', 'Random',
+    'Min', 'Max', 'Sign', 'DivMod', 'InRange', 'EnsureRange');
+var
+  I: Int;
+begin
+  Result := '';
+  for I := 0 to High(Names) do
+    if SameText(AName, Names[I]) then
+      Exit(' (it is in unit Math: add ''uses Math'')');
+end;
+
 { X mod Y for a float constant expression, exactly as the RTL's
   _BlaiseFMod computes it at run time.  Written without a float `mod`, which
   the compiler that builds this unit may not accept yet.  Subtracting the
@@ -1702,9 +1721,12 @@ function ConstFloatMod(X, Y: Float64): Float64;
 var
   R, T: Float64;
 begin
-  if IsNaN(X) or IsNaN(Y) or IsInfinite(X) then
+  { X - X is NaN exactly when X is a NaN or an infinity, and a NaN is the
+    one value unequal to itself; Math's IsNaN/IsInfinite are not visible
+    here, as the compiler does not use the Math unit }
+  if (X <> X) or (Y <> Y) or ((X - X) <> (X - X)) then
     Exit((X - X) / (X - X));
-  if IsInfinite(Y) then
+  if (Y - Y) <> (Y - Y) then
     Exit(X);
   R := Abs(X);
   Y := Abs(Y);
@@ -19456,7 +19478,8 @@ begin
   end;
   if Sym = nil then
     SemanticError(
-      Format('Undeclared procedure ''%s''', [ACall.Name]),
+      Format('Undeclared procedure ''%s''%s',
+        [ACall.Name, MathUnitHint(ACall.Name)]),
       ACall.Line, ACall.Col);
   ACall.Name := Sym.Name;  { normalise to declared casing }
   { Indirect call through a procedural-typed variable used as a statement:
@@ -20438,7 +20461,8 @@ begin
   end;
   if Sym = nil then
     SemanticError(
-      Format('Undeclared function ''%s''', [AExpr.Name]),
+      Format('Undeclared function ''%s''%s',
+        [AExpr.Name, MathUnitHint(AExpr.Name)]),
       AExpr.Line, AExpr.Col);
   AExpr.Name := Sym.Name;  { normalise to declared casing }
   { Type cast: TypeName(Expr) — single-argument call to a type name }
@@ -20701,18 +20725,15 @@ begin
     Exit;
   end;
 
-  { Math builtins — Sqrt, Ceil, Floor, Round, Trunc, Ln, Log2, Log10,
-    Power, Sin, Cos, Tan, ArcTan, ArcTan2, ArcSin, ArcCos, Sinh, Cosh,
-    Tanh, Exp, Expm1, IsNaN, IsInfinite.
-    These are implemented as compiler builtins rather than RTL functions
-    so that the codegen can emit dtosi/stosi for the float→integer
-    conversions (Ceil/Floor/Round/Trunc) and can dispatch to the *f
-    variants for Single arguments on the trig functions.
+  { Math builtins -- Sqrt, Ceil, Floor, Round, Trunc (and Abs above).
+    These stay compiler builtins because the compiler does something a
+    routine cannot: Trunc and Round are one conversion instruction, Sqrt is
+    one instruction on x86-64, and Sqrt keeps its argument's float type.
     Integer-family arguments are accepted and implicitly widened to
-    Double (FloatBuiltinArgType) — matching FPC/Delphi and Blaise's own
-    implicit int→float assignment rule.
-    Min and Max are implemented in pure Pascal in math.pas because they
-    are handled correctly by normal overload resolution. }
+    Double (FloatBuiltinArgType) -- matching FPC/Delphi and Blaise's own
+    implicit int->float assignment rule.  Every other math routine (Ln,
+    Exp, Power, Sin, ..., IsNaN, IsInfinite, Min, Max) lives in the Math
+    unit; see docs/language-rationale.adoc, "Builtins and the Math Unit". }
 
   if SameText(AExpr.Name, 'Sqrt') then
   begin
@@ -20734,72 +20755,6 @@ begin
     { All four return Int64, so no float-to-integer conversion can lose the
       upper half of its result (language-rationale.adoc). }
     Result := FTable.TypeInt64;
-    AExpr.ResolvedType := Result;
-    Exit;
-  end;
-
-  if SameText(AExpr.Name, 'Ln') or SameText(AExpr.Name, 'Log2') or
-     SameText(AExpr.Name, 'Log10') then
-  begin
-    if AExpr.Args.Count <> 1 then
-      SemanticError(AExpr.Name + ' requires exactly one argument', AExpr.Line, AExpr.Col);
-    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
-    FloatBuiltinArgType(AExpr.Name, ArgType, AExpr.Line, AExpr.Col);
-    Result := FTable.TypeDouble;
-    AExpr.ResolvedType := Result;
-    Exit;
-  end;
-
-  if SameText(AExpr.Name, 'Power') then
-  begin
-    if AExpr.Args.Count <> 2 then
-      SemanticError('Power requires exactly two arguments', AExpr.Line, AExpr.Col);
-    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
-    FloatBuiltinArgType(AExpr.Name, ArgType, AExpr.Line, AExpr.Col);
-    ArgType := Self.AnalyseListSlot(AExpr.Args, 1);
-    FloatBuiltinArgType(AExpr.Name, ArgType, AExpr.Line, AExpr.Col);
-    Result := FTable.TypeDouble;
-    AExpr.ResolvedType := Result;
-    Exit;
-  end;
-
-  if SameText(AExpr.Name, 'Sin') or SameText(AExpr.Name, 'Cos') or
-     SameText(AExpr.Name, 'Tan') or SameText(AExpr.Name, 'ArcTan') or
-     SameText(AExpr.Name, 'ArcSin') or SameText(AExpr.Name, 'ArcCos') or
-     SameText(AExpr.Name, 'Sinh') or SameText(AExpr.Name, 'Cosh') or
-     SameText(AExpr.Name, 'Tanh') or SameText(AExpr.Name, 'Exp') or
-     SameText(AExpr.Name, 'Expm1') then
-  begin
-    if AExpr.Args.Count <> 1 then
-      SemanticError(AExpr.Name + ' requires exactly one argument', AExpr.Line, AExpr.Col);
-    Result := Self.AnalyseListSlot(AExpr.Args, 0);
-    { Return type matches argument type — Single→Single, Double→Double,
-      integer→Double.  Exp follows the same rule as the trig family,
-      unlike Ln/Log2/Log10/Power which always return Float64. }
-    Result := FloatBuiltinArgType(AExpr.Name, Result, AExpr.Line, AExpr.Col);
-    AExpr.ResolvedType := Result;
-    Exit;
-  end;
-
-  if SameText(AExpr.Name, 'ArcTan2') then
-  begin
-    if AExpr.Args.Count <> 2 then
-      SemanticError('ArcTan2 requires exactly two arguments', AExpr.Line, AExpr.Col);
-    Result := Self.AnalyseListSlot(AExpr.Args, 0);
-    Result := FloatBuiltinArgType(AExpr.Name, Result, AExpr.Line, AExpr.Col);
-    ArgType := Self.AnalyseListSlot(AExpr.Args, 1);
-    FloatBuiltinArgType(AExpr.Name, ArgType, AExpr.Line, AExpr.Col);
-    AExpr.ResolvedType := Result;  { return type matches first argument type }
-    Exit;
-  end;
-
-  if SameText(AExpr.Name, 'IsNaN') or SameText(AExpr.Name, 'IsInfinite') then
-  begin
-    if AExpr.Args.Count <> 1 then
-      SemanticError(AExpr.Name + ' requires exactly one argument', AExpr.Line, AExpr.Col);
-    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
-    FloatBuiltinArgType(AExpr.Name, ArgType, AExpr.Line, AExpr.Col);
-    Result := FTable.TypeBoolean;
     AExpr.ResolvedType := Result;
     Exit;
   end;

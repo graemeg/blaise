@@ -3575,8 +3575,7 @@ the wide candidates in both cases.
 
 An integer prefers `Float64` because `Float64` holds every 32-bit integer
 exactly, where `Float32` holds them only up to 2^24, and because the math
-built-ins already widen an integer argument to `Float64` (`Sin(I)` is a
-`Float64`).  Before this rule an integer argument tied the two, so the
+builtins (`Sqrt`) already widen an integer argument to `Float64`.  Before this rule an integer argument tied the two, so the
 `Math` unit's `Float32`/`Float64` overload pairs (`Frac`, `DegToRad`)
 could not be called with an integer (GH #266).  FPC resolves the same call
 to `Single` for every integer kind, `Int64` included, silently dropping
@@ -5820,6 +5819,72 @@ state, and good statistical quality.  It is not cryptographically secure;
 * *The Mersenne Twister.*  A 2.5 KB state and a slower step, for no
   quality advantage over xoshiro256** in this use.
 
+== Builtins and the Math Unit
+
+=== Decision
+
+Six math routines are compiler builtins, available in every program:
+`Abs`, `Sqrt`, `Trunc`, `Round`, `Floor` and `Ceil`.  Every other math
+routine is declared in the `Math` unit and needs `uses Math`: `Exp`,
+`Expm1`, `Ln`, `Log2`, `Log10`, `Power`, `Sin`, `Cos`, `Tan`, `ArcSin`,
+`ArcCos`, `ArcTan`, `ArcTan2`, `Sinh`, `Cosh`, `Tanh`, `IsNaN`,
+`IsInfinite`, alongside `Min`, `Max`, `Frac`, `Random` and the rest.
+
+The rule for which is which: a routine is a builtin only when the
+compiler must do something an ordinary routine cannot.
+
+* `Trunc` and `Round` are a single conversion instruction, and with
+  `Floor` and `Ceil` they return `Int64` for every float argument.
+* `Sqrt` is a single instruction on x86-64 and keeps its argument's float
+  type.
+* `Abs` takes every integer kind and both float kinds and returns the
+  argument's own type: ten overloads otherwise.
+
+The transcendental functions met none of these: both backends lowered
+them to plain calls into `runtime.math`.  In the `Math` unit the `Float64`
+form of each is bound to that same kernel by `external name`
+(`function Sin(X: Float64): Float64; overload; external name
+'_BlaiseSin';`), so a call compiles to the same single call instruction
+as before, with no wrapper.  The `Float32` form widens, calls and rounds
+once, as the builtin did.  The result types are unchanged: `Float32` in,
+`Float32` out, an integer argument gives `Float64`, and `Ln`, `Log2`,
+`Log10` and `Power` always return `Float64`.  The one difference is
+`ArcTan2` with one `Float32` and one `Float64` argument, which now
+returns `Float64` (the `Float64` overload) where the builtin followed the
+first argument.
+
+Calling one of these without `uses Math` is an error that names the unit:
+
+----
+Undeclared function 'Sin' (it is in unit Math: add 'uses Math')
+----
+
+The names are no longer reserved, so a program may declare its own `Sin`.
+
+=== Rationale
+
+A user should not need to know how the compiler implements a routine to
+know where it lives.  Before this change Blaise followed neither FPC nor
+a rule of its own: `Sin` and `Ln` were builtins (FPC: `System`), so were
+`Power`, `Log2`, `ArcSin` and `IsNaN` (FPC: the `Math` unit), while
+`Min`, `Max` and `Sign` were in `Math`.  The split had grown from
+implementation history -- the float builtins predate reliable
+`Float32`/`Float64` overload resolution -- and it showed: whether a
+`uses Math` was needed had to be learnt routine by routine.  "The
+primitive conversions are built in; everything else is `uses Math`" can
+be stated in one sentence.
+
+=== Alternatives Rejected
+
+* *Keep the transcendental functions as builtins.*  No codegen benefit,
+  and it keeps the split unexplainable.
+* *Make every math routine a builtin.*  The compiler would carry a
+  special case for each, and programs could no longer define a routine
+  with any of those names.
+* *Follow FPC's split exactly.*  FPC's line is historical too
+  (`Sin` in `System` but `ArcSin` in `Math`); it would replace one list
+  to memorise with another.
+
 == `Round` — Banker's Rounding
 
 === Decision
@@ -7073,7 +7138,7 @@ expression sees.  An operand of a `Float32` operation that is not itself a
 `Float32` first.  An operation with a `Float64` operand is a `Float64`
 operation, as before.  This is C's `FLT_EVAL_METHOD == 0`.
 
-A math builtin applied to a `Float32` (`Sqrt`, `Sin`, `ArcTan2` and the
+A math routine applied to a `Float32` (`Sqrt`, `Sin`, `ArcTan2` and the
 rest) returns a `Float32`: the runtime computes it in double and the result
 is rounded to `Float32` before an enclosing expression uses it, so
 `Sqrt(D) * A + C` rounds after the square root, the multiply and the add.
@@ -7102,14 +7167,14 @@ Integer-family values (`Int32`, `Int64`, `UInt32`, `UInt64`, `Int16`,
 `UInt16`, `Byte`) widen implicitly to `Float64` wherever a float is expected:
 
 * Assignment to a `Float32` or `Float64` variable (`d := i`).
-* Arguments to the float compiler builtins: `Sqrt`, `Ceil`, `Floor`,
-  `Round`, `Trunc`, `Ln`, `Exp`, `Expm1`, `Log2`, `Log10`, `Power`,
-  `Sin`, `Cos`, `Tan`, `ArcTan`, `ArcTan2`, `ArcSin`, `ArcCos`, `Sinh`,
-  `Cosh`, `Tanh`, `IsNaN`, `IsInfinite`.  `Sin(12)` and `Tanh(I)` are
-  valid; the result type of the value-returning trig builtins and `Exp`/
-  `Expm1` is `Float64` for integer arguments (for float arguments it
-  continues to match the argument type — `Float32`→`Float32`,
-  `Float64`→`Float64`).
+* Arguments to the float compiler builtins `Sqrt`, `Ceil`, `Floor`,
+  `Round` and `Trunc`, and to the `Math` unit's float routines (`Ln`,
+  `Exp`, `Power`, `Sin`, `Tanh`, `IsNaN` ...).  `Sin(12)` and `Tanh(I)`
+  are valid; the result is `Float64` for an integer argument (for a float
+  argument it continues to match the argument type —
+  `Float32`→`Float32`, `Float64`→`Float64`).  For the `Math` routines this
+  is overload resolution: an integer reaches the `Float64` overload
+  before the `Float32` one.
 * Explicit float typecasts: `Float64(I)` and `Float32(I)` perform a real
   numeric conversion (never a bit reinterpretation).  Float-to-float
   casts likewise convert: `Float32(D)` narrows, `Float64(S)` widens.
@@ -7140,11 +7205,15 @@ matches the C math library signatures the builtins lower to.
 
 === Decision
 
-`Exp` and `Expm1` are compiler builtins like `Sqrt`, `Ln` and the trig
-functions:
+(Superseded in part by _Builtins and the Math Unit_: `Exp` and `Expm1`,
+like `Ln` and the trig functions, are now `Math`-unit routines bound to
+the same kernels.  The rest of this section still describes them.)
+
+`Exp` and `Expm1` were added as compiler builtins like `Sqrt`, `Ln` and
+the trig functions:
 
 * available without `uses Math`, in the system namespace (Delphi's
-  `System.Exp` and FPC's intrinsic);
+  `System.Exp` and FPC's intrinsic) -- no longer the case;
 * one argument of any float or integer type, widened by the same implicit
   rule as every other float builtin (see the next section);
 * the result type matches the argument's float type (`Float32`→`Float32`,

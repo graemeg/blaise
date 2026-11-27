@@ -12,14 +12,15 @@ unit Math;
 //
 // Provides numeric utilities for integer and floating-point types.
 //
-// The following are implemented as compiler builtins (in uSemantic.pas +
-// the native code generators) and therefore do NOT appear in this unit's
-// interface:
-//   Abs, Sqrt, Ceil, Floor, Round, Trunc, Ln, Exp, Expm1, Log2, Log10,
-//   Power, Sin, Cos, Tan, ArcTan, ArcTan2, IsNaN, IsInfinite.
+// Six math routines are compiler builtins, available without this unit,
+// because the compiler does what a routine cannot: Abs (one name for every
+// numeric type), Sqrt, Trunc, Round, Floor and Ceil (single instructions or
+// fixed Int64 results).  Everything else is declared here.
 //
-// This unit provides only the functions that are implemented in pure
-// Blaise Pascal with no special codegen requirements:
+// This unit provides:
+//   Exp, Expm1, Ln, Log2, Log10, Power
+//   Sin, Cos, Tan, ArcSin, ArcCos, ArcTan, ArcTan2, Sinh, Cosh, Tanh
+//   IsNaN, IsInfinite
 //   Min, Max (Integer / Int64 / Double overloads)
 //   Sign (Integer / Int64 / Double overloads)
 //   DivMod
@@ -38,6 +39,64 @@ uses
 
 const
   Pi: Float64 = 3.14159265358979323846;
+
+{ ------------------------------------------------------------------ }
+{ Exponentials and logarithms                                          }
+{ ------------------------------------------------------------------ }
+
+{ The Float64 forms bind straight to the pure-Pascal runtime.math kernels
+  (no libm is ever linked); the Float32 forms compute in Float64 and
+  round once, which is correctly rounded for every function here.  An
+  integer argument widens to Float64. }
+
+{ e^X.  Overflows to +Inf, underflows to +0; NaN gives NaN. }
+function Exp(X: Float64): Float64; overload; external name '_BlaiseExp';
+function Exp(X: Float32): Float32; overload;
+{ e^X - 1, accurate for X near zero where Exp(X) - 1 cancels }
+function Expm1(X: Float64): Float64; overload; external name '_BlaiseExpm1';
+function Expm1(X: Float32): Float32; overload;
+
+{ The logarithms and Power always return Float64. }
+{ natural logarithm; Ln(0) = -Inf, a negative X gives NaN }
+function Ln(X: Float64): Float64; external name '_BlaiseLn';
+function Log2(X: Float64): Float64; external name '_BlaiseLog2';
+function Log10(X: Float64): Float64; external name '_BlaiseLog10';
+{ Base raised to Exponent }
+function Power(Base, Exponent: Float64): Float64; external name '_BlaisePow';
+
+{ ------------------------------------------------------------------ }
+{ Trigonometric and hyperbolic functions (angles in radians)           }
+{ ------------------------------------------------------------------ }
+
+function Sin(X: Float64): Float64; overload; external name '_BlaiseSin';
+function Sin(X: Float32): Float32; overload;
+function Cos(X: Float64): Float64; overload; external name '_BlaiseCos';
+function Cos(X: Float32): Float32; overload;
+function Tan(X: Float64): Float64; overload; external name '_BlaiseTan';
+function Tan(X: Float32): Float32; overload;
+function ArcSin(X: Float64): Float64; overload; external name '_BlaiseArcSin';
+function ArcSin(X: Float32): Float32; overload;
+function ArcCos(X: Float64): Float64; overload; external name '_BlaiseArcCos';
+function ArcCos(X: Float32): Float32; overload;
+function ArcTan(X: Float64): Float64; overload; external name '_BlaiseArcTan';
+function ArcTan(X: Float32): Float32; overload;
+{ the angle of the point (X, Y), in -Pi..Pi }
+function ArcTan2(Y, X: Float64): Float64; overload; external name '_BlaiseArcTan2';
+function ArcTan2(Y, X: Float32): Float32; overload;
+function Sinh(X: Float64): Float64; overload; external name '_BlaiseSinh';
+function Sinh(X: Float32): Float32; overload;
+function Cosh(X: Float64): Float64; overload; external name '_BlaiseCosh';
+function Cosh(X: Float32): Float32; overload;
+function Tanh(X: Float64): Float64; overload; external name '_BlaiseTanh';
+function Tanh(X: Float32): Float32; overload;
+
+{ ------------------------------------------------------------------ }
+{ Classification                                                       }
+{ ------------------------------------------------------------------ }
+
+{ A Float32 argument widens exactly, keeping NaN and infinity. }
+function IsNaN(X: Float64): Boolean;
+function IsInfinite(X: Float64): Boolean;
 
 { ------------------------------------------------------------------ }
 { Min / Max                                                            }
@@ -170,6 +229,42 @@ function Random(N: Int): Int; overload;
 function Random(Lo, Hi: Int): Int; overload;
 
 implementation
+
+{ ------------------------------------------------------------------ }
+{ Float32 forms of the transcendental functions                        }
+{ ------------------------------------------------------------------ }
+
+function Exp(X: Float32): Float32; begin Result := Exp(Float64(X)); end;
+function Expm1(X: Float32): Float32; begin Result := Expm1(Float64(X)); end;
+function Sin(X: Float32): Float32; begin Result := Sin(Float64(X)); end;
+function Cos(X: Float32): Float32; begin Result := Cos(Float64(X)); end;
+function Tan(X: Float32): Float32; begin Result := Tan(Float64(X)); end;
+function ArcSin(X: Float32): Float32; begin Result := ArcSin(Float64(X)); end;
+function ArcCos(X: Float32): Float32; begin Result := ArcCos(Float64(X)); end;
+function ArcTan(X: Float32): Float32; begin Result := ArcTan(Float64(X)); end;
+function ArcTan2(Y, X: Float32): Float32;
+begin
+  Result := ArcTan2(Float64(Y), Float64(X));
+end;
+function Sinh(X: Float32): Float32; begin Result := Sinh(Float64(X)); end;
+function Cosh(X: Float32): Float32; begin Result := Cosh(Float64(X)); end;
+function Tanh(X: Float32): Float32; begin Result := Tanh(Float64(X)); end;
+
+{ ------------------------------------------------------------------ }
+{ Classification                                                       }
+{ ------------------------------------------------------------------ }
+
+{ a NaN is the one value unordered with itself }
+function IsNaN(X: Float64): Boolean;
+begin
+  Result := X <> X;
+end;
+
+{ X - X is 0 for a finite X and NaN for an infinity or a NaN }
+function IsInfinite(X: Float64): Boolean;
+begin
+  Result := (X = X) and ((X - X) <> (X - X));
+end;
 
 { ------------------------------------------------------------------ }
 { Min / Max                                                            }

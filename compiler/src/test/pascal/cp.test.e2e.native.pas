@@ -5406,8 +5406,8 @@ end;
 procedure TE2ENativeTests.TestRun_Native_Builtin_SinCos;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
-    program Prg;
+  AssertRTLRunsOnAll('''
+    program Prg; uses Math;
     var R: Int;
     begin
       R := Round(Sin(0.0));

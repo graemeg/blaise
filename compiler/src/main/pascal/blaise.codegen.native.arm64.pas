@@ -6524,32 +6524,6 @@ begin
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
-    { float classification, inline -- x86-64 calls libc's __isnan/__isinf, but
-      Blaise binaries link no libm and macOS has no such entry points.  A
-      Single operand is promoted first; the promotion preserves NaN and
-      infinity, so one double test serves both widths.
-        IsNaN:      NaN is the only value unordered with itself (V set).
-        IsInfinite: shift the sign bit out; +/-inf is then exactly the
-                    all-ones exponent over a zero mantissa, $FFE0... }
-    if IsBuiltinCall(TFuncCallExpr(AExpr), 'IsNaN') and
-       (TFuncCallExpr(AExpr).Args.Count = 1) then
-    begin
-      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'fcmp d0, d0');
-      Self.Emit(#9'cset x0, vs');
-      Exit;
-    end;
-    if IsBuiltinCall(TFuncCallExpr(AExpr), 'IsInfinite') and
-       (TFuncCallExpr(AExpr).Args.Count = 1) then
-    begin
-      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'fmov x0, d0');
-      Self.Emit(#9'lsl x0, x0, #1');
-      EmitIntLiteral('x9', Int64($FFE0000000000000));
-      Self.Emit(#9'cmp x0, x9');
-      Self.Emit(#9'cset x0, eq');
-      Exit;
-    end;
     { process-control family (expression context): each takes the process
       handle (a pointer) and returns an int/pointer — pointer arg, no
       transient to dispose }
@@ -8615,9 +8589,11 @@ begin
     end;
     Exit;
   end;
-  { Float-math builtins lower to the pure-Pascal runtime.math RTL, the
-    same functions the x86-64 and QBE backends call -- no libm/libSystem
-    math anywhere.  All are double-only; the D0 contract is "d0 holds a
+  { Sqrt and a float Abs lower to the pure-Pascal runtime.math RTL, the
+    same functions the x86-64 backend calls -- no libm/libSystem math
+    anywhere.  (Sin, Ln, Exp, Power and the other transcendental functions
+    are ordinary Math-unit routines bound to runtime.math by external
+    name, so they reach codegen as calls.)  Both are double-only; the D0 contract is "d0 holds a
     double", so no Single narrowing happens here (the caller narrows when
     the expression type is Single).  EmitExprToD0OrConvert widens any
     Single/integer argument, and AAPCS64 passes/returns doubles in d0. }
@@ -8629,34 +8605,6 @@ begin
     RtlMathSym := '';
     if IsBuiltinCall(TFuncCallExpr(AExpr), 'Sqrt') then
       RtlMathSym := '_BlaiseSqrtD'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Sin') then
-      RtlMathSym := '_BlaiseSin'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Cos') then
-      RtlMathSym := '_BlaiseCos'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Tan') then
-      RtlMathSym := '_BlaiseTan'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcSin') then
-      RtlMathSym := '_BlaiseArcSin'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcCos') then
-      RtlMathSym := '_BlaiseArcCos'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcTan') then
-      RtlMathSym := '_BlaiseArcTan'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Ln') then
-      RtlMathSym := '_BlaiseLn'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Exp') then
-      RtlMathSym := '_BlaiseExp'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Expm1') then
-      RtlMathSym := '_BlaiseExpm1'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Log2') then
-      RtlMathSym := '_BlaiseLog2'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Log10') then
-      RtlMathSym := '_BlaiseLog10'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Sinh') then
-      RtlMathSym := '_BlaiseSinh'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Cosh') then
-      RtlMathSym := '_BlaiseCosh'
-    else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Tanh') then
-      RtlMathSym := '_BlaiseTanh'
     else if IsBuiltinCall(TFuncCallExpr(AExpr), 'Abs') and
             (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
             TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsFloat() then
@@ -8668,27 +8616,6 @@ begin
       EmitSingleResultRounding(AExpr);
       Exit;
     end;
-  end;
-  if (AExpr is TFuncCallExpr) and
-     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
-     (not TFuncCallExpr(AExpr).IsIndirectCall) and
-     (TFuncCallExpr(AExpr).Args.Count = 2) and
-     (IsBuiltinCall(TFuncCallExpr(AExpr), 'Power') or
-      IsBuiltinCall(TFuncCallExpr(AExpr), 'ArcTan2')) then
-  begin
-    { two-argument RTL math call: first arg in d0, second in d1, each
-      widened to double by its own type via EmitExprToD0OrConvert }
-    Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-    Self.Emit(#9'str d0, [sp, #-16]!');
-    Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
-    Self.Emit(#9'fmov d1, d0');
-    Self.Emit(#9'ldr d0, [sp], #16');
-    if IsBuiltinCall(TFuncCallExpr(AExpr), 'Power') then
-      EmitCallSym('_BlaisePow')
-    else
-      EmitCallSym('_BlaiseArcTan2');
-    EmitSingleResultRounding(AExpr);
-    Exit;
   end;
   if (AExpr is TFuncCallExpr) and
      IsBuiltinCall(TFuncCallExpr(AExpr), 'StrToDouble') and

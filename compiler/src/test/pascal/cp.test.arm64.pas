@@ -96,7 +96,6 @@ type
     procedure TestRecordMethod_RecordFieldReceiverIsAddress;
     procedure TestRecordMethod_ManagedCallResultReceiverReleased;
     procedure TestFieldRead_InterfaceFieldLoadsPair;
-    procedure TestIsNaNIsInfinite_Inline;
     procedure TestRecordMethod_StmtOnSelfRecordFieldPassesAddress;
     procedure TestIntfCall_ScalarContextSuppliesSret;
     procedure TestCall_IntArgToFloatParamIsFloatClass;
@@ -1937,34 +1936,6 @@ begin
   AssertTrue('receiver is Self + field offset', Pos(#9'add x0, x0, #8', Body) >= 0);
   AssertTrue('receiver is NOT a load of the field',
     Pos(#9'ldr x0, [x0, #8]', Body) < 0);
-end;
-
-procedure TArm64BackendTests.TestIsNaNIsInfinite_Inline;
-var
-  AsmT: string;
-begin
-  { IsNaN / IsInfinite lower inline on arm64 -- there is no libm (and no RTL
-    routine) to call.  NaN is the one value unordered with itself; an infinity
-    is the exponent-all-ones, zero-mantissa pattern once the sign is shifted
-    out.  Previously "this call form ('IsNaN')". }
-  AsmT := GenAsm(
-    '''
-    program P;
-    var X: Float64; S: Float32;
-    begin
-      WriteLn(IsNaN(X));
-      WriteLn(IsInfinite(S))
-    end.
-    ''', TargetArm64);
-  AssertTrue('IsNaN compares the value with itself',
-    Pos(#9'fcmp d0, d0', AsmT) >= 0);
-  AssertTrue('... and tests the unordered (V) flag',
-    Pos(#9'cset x0, vs', AsmT) >= 0);
-  AssertTrue('IsInfinite works on the raw bits',
-    Pos(#9'fmov x0, d0', AsmT) >= 0);
-  AssertTrue('... with the sign shifted out',
-    Pos(#9'lsl x0, x0, #1', AsmT) >= 0);
-  AssertTrue('no libm call', Pos('isnan', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestFieldRead_InterfaceFieldLoadsPair;

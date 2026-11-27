@@ -515,9 +515,9 @@ procedure TE2EMathTests.TestRun_Ln_E;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Ln(2.71828182845904523536));
@@ -532,9 +532,9 @@ procedure TE2EMathTests.TestRun_Log2_PowerOfTwo;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Log2(8.0));
@@ -549,9 +549,9 @@ procedure TE2EMathTests.TestRun_Log10_Hundred;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Log10(100.0));
@@ -572,7 +572,7 @@ end;
 procedure TE2EMathTests.TestRun_Exp_One;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     begin
       WriteLn(DoubleToStr(Exp(0.0)));
       WriteLn(IntToStr(Round(Exp(1.0) * 1000000000000.0)))
@@ -580,7 +580,7 @@ const
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src,
+  AssertRTLRunsOnAll(Src,
     '1' + LE +
     '2718281828459' + LE, 0);
 end;
@@ -588,59 +588,59 @@ end;
 procedure TE2EMathTests.TestRun_Exp_NegOne;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     begin
       WriteLn(IntToStr(Round(Exp(-1.0) * 1000000.0)))
     end.
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '367879' + LE, 0);
+  AssertRTLRunsOnAll(Src, '367879' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Exp_LnIsInverse;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     begin
       WriteLn(IntToStr(Round(Exp(Ln(2.0)))))
     end.
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '2' + LE, 0);
+  AssertRTLRunsOnAll(Src, '2' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Exp_OverflowsToInf;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     begin
       if IsInfinite(Exp(710.0)) then WriteLn('inf') else WriteLn('not-inf')
     end.
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, 'inf' + LE, 0);
+  AssertRTLRunsOnAll(Src, 'inf' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Exp_UnderflowsToZero;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     begin
       WriteLn(DoubleToStr(Exp(-746.0)))
     end.
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '0' + LE, 0);
+  AssertRTLRunsOnAll(Src, '0' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Exp_NaN_NaN;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     var X: Float64;
     begin
       X := 0.0 / 0.0;
@@ -649,13 +649,13 @@ const
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, 'yes' + LE, 0);
+  AssertRTLRunsOnAll(Src, 'yes' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Exp_SingleArg;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     var S: Float32;
     begin
       S := 1.0;
@@ -666,7 +666,7 @@ begin
   { Exp(Float32) returns Float32 (rounded through the double kernel), so the
     value is the correctly rounded single 2.71828183... }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '2718282' + LE, 0);
+  AssertRTLRunsOnAll(Src, '2718282' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Exp_Issue252_Repro;
@@ -700,7 +700,7 @@ end;
 procedure TE2EMathTests.TestRun_Expm1_Zero;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     begin
       WriteLn(DoubleToStr(Expm1(0.0)));
       WriteLn(IntToStr(Round(Expm1(Ln(3.0)) * 1000000000.0)))
@@ -708,7 +708,7 @@ const
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src,
+  AssertRTLRunsOnAll(Src,
     '0' + LE +
     '2000000000' + LE, 0);
 end;
@@ -716,7 +716,7 @@ end;
 procedure TE2EMathTests.TestRun_Expm1_LnIsInverse;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     begin
       WriteLn(IntToStr(Round(Expm1(Ln(7.0)) * 1000000.0)))
     end.
@@ -724,13 +724,13 @@ const
 begin
   { expm1(ln 7) = 6 }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '6000000' + LE, 0);
+  AssertRTLRunsOnAll(Src, '6000000' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Expm1_SmallArgumentNoCancellation;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     var X, D, E: Float64;
     begin
       X := 0.000000000000000000000000000001;
@@ -746,13 +746,13 @@ begin
     the whole correction (x back out unchanged).  This is what
     _BlaiseExpm1's small-x path is for. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, 'accurate' + LE, 0);
+  AssertRTLRunsOnAll(Src, 'accurate' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Expm1_SingleArg;
 const
   Src = '''
-    program P;
+    program P; uses Math;
     var S, R: Float32;
     begin
       S := 0.5;
@@ -764,7 +764,7 @@ begin
   { Expm1(Float32) returns Float32: the single-precision rendering of
     exp(0.5) - 1 = 0.64872127... }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '64872128' + LE, 0);
+  AssertRTLRunsOnAll(Src, '64872128' + LE, 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -775,9 +775,9 @@ procedure TE2EMathTests.TestRun_Power_Square;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Power(3.0, 2.0));
@@ -792,9 +792,9 @@ procedure TE2EMathTests.TestRun_Power_Zero_Exp;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Power(5.0, 0.0));
@@ -813,9 +813,9 @@ procedure TE2EMathTests.TestRun_Sin_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Sin(0.0));
@@ -830,9 +830,9 @@ procedure TE2EMathTests.TestRun_Cos_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Cos(0.0));
@@ -847,9 +847,9 @@ procedure TE2EMathTests.TestRun_Tan_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Tan(0.0));
@@ -864,9 +864,9 @@ procedure TE2EMathTests.TestRun_ArcTan_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(ArcTan(0.0));
@@ -881,9 +881,9 @@ procedure TE2EMathTests.TestRun_ArcTan2_OneOne;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Float64;
     begin
       { ArcTan2(1, 1) = pi/4, roughly 0.785 -- verify positive and < 1 }
@@ -903,9 +903,9 @@ procedure TE2EMathTests.TestRun_ArcSin_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(ArcSin(0.0));
@@ -920,9 +920,9 @@ procedure TE2EMathTests.TestRun_ArcCos_One;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(ArcCos(1.0));
@@ -937,9 +937,9 @@ procedure TE2EMathTests.TestRun_Sinh_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Sinh(0.0));
@@ -954,9 +954,9 @@ procedure TE2EMathTests.TestRun_Cosh_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Cosh(0.0));
@@ -971,9 +971,9 @@ procedure TE2EMathTests.TestRun_Tanh_Zero;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var R: Int;
     begin
       R := Round(Tanh(0.0));
@@ -992,9 +992,9 @@ procedure TE2EMathTests.TestRun_IsNaN_NaN;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var X: Float64;
     begin
       X := 0.0 / 0.0;
@@ -1009,9 +1009,9 @@ procedure TE2EMathTests.TestRun_IsNaN_Normal;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var X: Float64;
     begin
       X := 42.0;
@@ -1026,9 +1026,9 @@ procedure TE2EMathTests.TestRun_IsInfinite_Inf;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var X: Float64;
     begin
       X := 1.0 / 0.0;
@@ -1043,9 +1043,9 @@ procedure TE2EMathTests.TestRun_IsInfinite_Normal;
 var Output: string; RCode: Int;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(
+  AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var X: Float64;
     begin
       X := 42.0;
@@ -1841,9 +1841,9 @@ procedure TE2EMathTests.TestRun_Trig_IntegerArgs;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { tanh(32) ~ 1.0; sin(12 rad) ~ -0.53657; sqrt(16) = 4; 2^10 = 1024 }
-  AssertRunsOnAll(
+  AssertRTLRunsOnAll(
     '''
-    program P;
+    program P; uses Math;
     var
       d: Float64;
       s: Float32;
@@ -1864,9 +1864,9 @@ end;
 procedure TE2EMathTests.TestRun_FloatCast_FromInteger;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(
+  AssertRTLRunsOnAll(
     '''
-    program P;
+    program P; uses Math;
     var
       d: Float64;
       s: Float32;
@@ -1999,9 +1999,9 @@ begin
     $_BlaisePow in runtime.math, so this program must compile, LINK and
     RUN on both backends with no libm anywhere.  The integer argument
     also pins the int->double widening of builtin args. }
-  AssertRunsOnAll(
+  AssertRTLRunsOnAll(
     '''
-    program P;
+    program P; uses Math;
     var
       X: Int;
       R: Float64;
@@ -2138,9 +2138,9 @@ begin
   { Single trig: the backends widen to double, call the runtime.math
     kernel, and narrow the result back to Single.  sin(0.5) = 0.479426;
     the value printed is the SINGLE-rounded result. }
-  AssertRunsOnAll(
+  AssertRTLRunsOnAll(
     '''
-    program P;
+    program P; uses Math;
     var X, R: Float32;
     begin
       X := 0.5;
@@ -2155,9 +2155,9 @@ begin
   { sin(1e300) requires full Payne-Hanek argument reduction (the 2/pi
     bit table): a naive fmod-style reduction returns garbage.  Value
     check to 6 digits keeps a 2-ulp implementation margin. }
-  AssertRunsOnAll(
+  AssertRTLRunsOnAll(
     '''
-    program P;
+    program P; uses Math;
     var X: Float64;
     begin
       X := 1.0e300;
@@ -2226,7 +2226,7 @@ const
     Integer arguments promoted to Double for Sin / Power / Double() /
     Single() / real division. }
   Src = '''
-    program MathGaps;
+    program MathGaps; uses Math;
     type
       TR = record A, B: Int; end;
       TH = procedure(const R: TR);
@@ -2262,7 +2262,7 @@ const
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src,
+  AssertRTLRunsOnAll(Src,
     '2.50' + LE +
     '7 -3' + LE +
     '0.5211 1.1276 0.4621 0.4636 0.5236 1.0472' + LE +
@@ -2583,7 +2583,7 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P;
+    program P; uses Math;
     var X, Z, PosInf, QNaN, D, R: Float64; K: Int;
     begin
       Z := 0.0;
