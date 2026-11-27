@@ -22,6 +22,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { a property that shares its name with an inherited parameterless method
+      hides it for a bare read, on an interface and on a class receiver --
+      the method stays reachable as X.Size().  The interface read called the
+      method; the class read was rejected as a bare method call }
+    procedure TestRun_PropertyHidesInheritedMethod_BareRead;
     { interface and metaclass fields read off a call result: the value
       outlives the transient object, which is freed once, after the statement }
     procedure TestRun_IntfAndMetaclassFieldOfCallResult;
@@ -2936,6 +2941,54 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'headless1 x' + LineEnding + 'headless2 y 7' +
     LineEnding + 'headless118' + LineEnding);
+end;
+
+procedure TE2EInterfaceTests.TestRun_PropertyHidesInheritedMethod_BareRead;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      IBase = interface
+        function Size: Int;
+      end;
+      IShape = interface(IBase)
+        function GetN: Int;
+        property Size: Int read GetN;
+      end;
+      TImpl = class(TObject, IShape)
+        function Size: Int;
+        function GetN: Int;
+      end;
+      TBase = class
+        function Size: Int;
+      end;
+      TShape = class(TBase)
+        function GetN: Int;
+        property Size: Int read GetN;
+        function Twice: Int;
+      end;
+      THolder = record
+        F: IShape;
+      end;
+    function TImpl.Size: Int; begin Result := 1 end;
+    function TImpl.GetN: Int; begin Result := 2 end;
+    function TBase.Size: Int; begin Result := 3 end;
+    function TShape.GetN: Int; begin Result := 4 end;
+    function TShape.Twice: Int; begin Result := Size * 2 end;
+    var
+      X: IShape;
+      H: THolder;
+      C: TShape;
+    begin
+      X := TImpl.Create();
+      H.F := X;
+      WriteLn(X.Size, ' ', X.Size(), ' ', H.F.Size);
+      C := TShape.Create();
+      WriteLn(C.Size, ' ', C.Size(), ' ', C.Twice());
+      C.Free()
+    end.
+    ''', '2 1 2' + LE + '4 3 8' + LE, 0);
 end;
 
 initialization

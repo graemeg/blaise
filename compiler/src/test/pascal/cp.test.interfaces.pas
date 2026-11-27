@@ -32,6 +32,9 @@ type
     procedure TestSemantic_BareIntfMethod_ChainedBase_Rejected;
     procedure TestSemantic_BareIntfMethod_GenericT_Rejected;
     procedure TestSemantic_IntfMethodCallAndPropertyRead_Accepted;
+    { a property hides a same-named inherited method: the bare read is the
+      property (the interface read was the method, the class read an error) }
+    procedure TestSemantic_PropertyHidesInheritedMethod_ReadsGetter;
     { a var/out interface parameter is ONE pointer register: the frame
       layout counted it as a two-register fat value, so the parameters after
       it were mapped one slot late and the last register parameter was
@@ -1675,6 +1678,46 @@ begin
       WriteLn(ViaIntf(Q), ViaRec(H), ViaT<TSquare>(Q))
     end.
     '''));
+end;
+
+procedure TInterfaceTests.TestSemantic_PropertyHidesInheritedMethod_ReadsGetter;
+var
+  Prog: TProgram;
+  Call: TProcCall;
+  FA: TFieldAccessExpr;
+begin
+  Prog := Analyse('''
+    program P;
+    type
+      IBase = interface
+        function Size: Int;
+      end;
+      IShape = interface(IBase)
+        function GetN: Int;
+        property Size: Int read GetN;
+      end;
+      TBase = class
+        function Size: Int;
+      end;
+      TShape = class(TBase)
+        function GetN: Int;
+        property Size: Int read GetN;
+      end;
+    function TBase.Size: Int; begin Result := 3 end;
+    function TShape.GetN: Int; begin Result := 4 end;
+    var X: IShape; C: TShape;
+    begin
+      WriteLn(X.Size);
+      WriteLn(C.Size)
+    end.
+    ''');
+  try
+    Call := TProcCall(Prog.Block.Stmts.Items[0]);
+    FA := TFieldAccessExpr(Call.Args.Items[0]);
+    AssertEquals('interface read goes to the getter', 'GetN', FA.FieldName);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

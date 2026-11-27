@@ -22344,8 +22344,10 @@ begin
         AExpr.ResolvedType := Result;
         Exit;
       end;
-      { Bare zero-arg method reference — error: mandatory () required }
-      if FindMethodDecl(FCurrentClass.Name, TIdentExpr(AExpr).Name) <> nil then
+      { Bare zero-arg method reference — error: mandatory () required.  A
+        property of the name hides an inherited method, so it reads. }
+      if (FindMethodDecl(FCurrentClass.Name, TIdentExpr(AExpr).Name) <> nil) and
+         (FCurrentClass.FindProperty(TIdentExpr(AExpr).Name) = nil) then
         SemanticError(
           Format('Bare reference to ''%s'' requires () for a call',
             [TIdentExpr(AExpr).Name]),
@@ -23000,7 +23002,9 @@ begin
     begin
       IntfDesc := TInterfaceTypeDesc(BaseType);
       Self.RejectBareIntfMethod(AAccess, IntfDesc);
-      if not IntfDesc.HasMethod(AAccess.FieldName) then
+      { a property first: it hides a same-named inherited method }
+      if (IntfDesc.FindProperty(AAccess.FieldName) <> nil) or
+         not IntfDesc.HasMethod(AAccess.FieldName) then
       begin
         PropInfo := IntfDesc.FindProperty(AAccess.FieldName);
         if PropInfo = nil then
@@ -23432,7 +23436,9 @@ begin
   begin
     IntfDesc := TInterfaceTypeDesc(RecSym.TypeDesc);
     Self.RejectBareIntfMethod(AAccess, IntfDesc);
-    if not IntfDesc.HasMethod(AAccess.FieldName) then
+    { a property first: it hides a same-named inherited method }
+    if (IntfDesc.FindProperty(AAccess.FieldName) <> nil) or
+       not IntfDesc.HasMethod(AAccess.FieldName) then
     begin
       { Property read: lower to the getter — pure sugar over the
         zero-argument interface method dispatch below. }
@@ -23514,8 +23520,10 @@ begin
   FldInfo := RT.FindField(AAccess.FieldName);
   if FldInfo = nil then
   begin
-    { Zero-arg method call via field access: Obj.Method (no parens) — error }
-    if FindMethodDecl(RT.Name, AAccess.FieldName) <> nil then
+    { Zero-arg method call via field access: Obj.Method (no parens) — error;
+      a property of the name hides an inherited method, so it reads }
+    if (FindMethodDecl(RT.Name, AAccess.FieldName) <> nil) and
+       (RT.FindProperty(AAccess.FieldName) = nil) then
       SemanticError(
         Format('Bare reference to ''%s'' requires () for a call',
           [AAccess.FieldName]),
