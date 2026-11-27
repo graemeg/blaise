@@ -26,6 +26,10 @@ type
     { array-of-T fields of a generic class and record hold managed and plain
       elements }
     procedure TestRun_ArrayOfTypeParamFields;
+    { A constraint violation on a template declared in a unit is reported
+      at the program's line, in the program -- not at that line "in" the
+      template's unit (BUG-20261120-constraint-error-no-location) }
+    procedure TestCompile_ConstraintError_UnitTemplate_NamesUseSite;
     { A unit's generic routine whose implementation does not repeat the
       interface's constraint still enforces it: the body decl is the
       template, and it lost the constraint, so a violating argument reached
@@ -2059,6 +2063,72 @@ begin
     CompileAndRunWithUnitNative('cshape3', USrcDiffers, PSrcDiffers, Output, RCode));
   AssertTrue('differing constraint: reported: ' + Output,
     Pos('differs from its interface declaration', Output) >= 0);
+end;
+
+procedure TE2EGenericsTests.TestCompile_ConstraintError_UnitTemplate_NamesUseSite;
+const
+  USrc = '''
+    unit cshapes;
+    interface
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+      THolder<T: IShape> = class
+        FItem: T;
+      end;
+    function AreaOf<T: IShape>(const S: T): Int;
+    implementation
+    function AreaOf<T>(const S: T): Int;
+    begin
+      Result := S.Area()
+    end;
+    end.
+    ''';
+  PSrcCall = '''
+    program cuse;
+    uses cshapes;
+    type
+      TPlain = class
+      end;
+    var
+      P: TPlain;
+    begin
+      P := TPlain.Create();
+      WriteLn(AreaOf<TPlain>(P))
+    end.
+    ''';
+  PSrcVar = '''
+    program cuse;
+    uses cshapes;
+    type
+      TPlain = class
+      end;
+    var
+      H: THolder<TPlain>;
+    begin
+      H := nil
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertFalse('call rejected',
+    CompileAndRunWithUnitNative('cshapes', USrc, PSrcCall, Output, RCode));
+  AssertTrue('call: constraint named: ' + Output,
+    Pos('does not implement ''IShape''', Output) >= 0);
+  AssertTrue('call: at the program line, in the program: ' + Output,
+    Pos('at line 10 col ', Output) >= 0);
+  AssertTrue('call: no template-unit location: ' + Output,
+    Pos('in cshapes', Output) < 0);
+  AssertFalse('var rejected',
+    CompileAndRunWithUnitNative('cshapes', USrc, PSrcVar, Output, RCode));
+  AssertTrue('var: at the declaration line: ' + Output,
+    Pos('at line 7 col ', Output) >= 0);
+  AssertTrue('var: no template-unit location: ' + Output,
+    Pos('in cshapes', Output) < 0);
 end;
 
 initialization

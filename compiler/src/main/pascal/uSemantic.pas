@@ -174,6 +174,10 @@ type
     FGenericSourceUnits:   TStringList;
     FDeferredConsts:       TObjectList;  { not owned: scalar TConstDecls that wait for
                                            the block's types (FoldScalarConst) }
+    FUseViewDepth: Int;                  { FGenericViews.Count when FUseLine was
+                                           set: the position belongs to that
+                                           view's unit, not to a template view
+                                           entered since (SetUsePos) }
     FUseLine, FUseCol: Int;              { position of the statement, expression
                                            or declaration being analysed, 0 when
                                            none: a diagnostic raised far from the
@@ -1162,6 +1166,9 @@ type
       const AContext: string; ALine, ACol: Int);
 
     procedure SemanticError(const AMsg: string; ALine, ACol: Int);
+    procedure SemanticErrorInView(const AMsg: string; ALine, ACol,
+      AViewDepth: Int);
+    procedure SetUsePos(ALine, ACol: Int);
     { Register a generic template on FTable, rejecting a same-named template
       already registered by a DIFFERENT unit (bare instance symbols would
       silently alias at link time — see TSymbolTable.RegisterGeneric). }
@@ -1206,10 +1213,10 @@ type
     function  ConvertsToInterface(AActual, AIntf: TTypeDesc): Boolean;
     { IFoo(X): a checked conversion, accepted where X converts to IFoo }
     procedure AnalyseInterfaceCast(AExpr: TFuncCallExpr; AIntf: TTypeDesc);
+    procedure UseSiteError(const AMsg: string);
     { Validates a generic type parameter's constraint against a concrete type
       argument name.  Raises ESemanticError on constraint violation.
       AConstraint: '' (no constraint), 'class', 'record', or a type name. }
-    procedure UseSiteError(const AMsg: string);
     procedure CheckTypeParamConstraint(const AParamName, AArgName, AConstraint,
       AContext: string);
   public
@@ -1974,6 +1981,28 @@ end;
 
 procedure TSemanticAnalyser.SemanticError(const AMsg: string; ALine, ACol: Int);
 var
+  Depth: Int;
+begin
+  Depth := 0;
+  if FGenericViews <> nil then
+    Depth := FGenericViews.Count;
+  Self.SemanticErrorInView(AMsg, ALine, ACol, Depth);
+end;
+
+procedure TSemanticAnalyser.SetUsePos(ALine, ACol: Int);
+begin
+  FUseLine := ALine;
+  FUseCol := ACol;
+  FUseViewDepth := 0;
+  if FGenericViews <> nil then
+    FUseViewDepth := FGenericViews.Count;
+end;
+
+{ SemanticError for a position recorded under the first AViewDepth generic
+  views: a template view entered since does not own it. }
+procedure TSemanticAnalyser.SemanticErrorInView(const AMsg: string;
+  ALine, ACol, AViewDepth: Int);
+var
   Msg: string;
   View: TGenericViewFrame;
 begin
@@ -1996,9 +2025,10 @@ begin
     DECLARES the template, not the one being analysed: name both, so the
     position can be found and the instantiation that triggered it is clear
     (GH #268 reported 'line 1252 in tc' for a generics.collections line). }
-  if (FGenericViews <> nil) and (FGenericViews.Count > 0) then
+  if (FGenericViews <> nil) and (AViewDepth > 0) and
+     (AViewDepth <= FGenericViews.Count) then
   begin
-    View := TGenericViewFrame(FGenericViews.Items[FGenericViews.Count - 1]);
+    View := TGenericViewFrame(FGenericViews.Items[AViewDepth - 1]);
     Msg := Format('%s at line %d col %d in %s (instantiated as %s',
       [Msg, ALine, ACol, View.DeclUnit, View.InstName]);
     if FCurrentUnitName <> '' then
@@ -2588,7 +2618,7 @@ end;
 procedure TSemanticAnalyser.UseSiteError(const AMsg: string);
 begin
   if FUseLine > 0 then
-    SemanticError(AMsg, FUseLine, FUseCol);
+    SemanticErrorInView(AMsg, FUseLine, FUseCol, FUseViewDepth);
   raise ESemanticError.Create(AMsg);
 end;
 
@@ -3476,6 +3506,7 @@ var
 begin
   FCurrentUnitName := AUnit.Name;
   FCurrentUnit := AUnit;
+  SetUsePos(0, 0);
   FlushPendingGenericInstances();
   FTable.PushScope();
   NoteUnitScope();
@@ -3504,6 +3535,8 @@ begin
     for I := 0 to AUnit.IntfBlock.Decls.Count - 1 do
     begin
       MDecl := nil;  { reuse var below }
+      SetUsePos(TVarDecl(AUnit.IntfBlock.Decls.Items[I]).Line,
+        TVarDecl(AUnit.IntfBlock.Decls.Items[I]).Col);
       ParType := FindTypeOrInstantiate(TVarDecl(AUnit.IntfBlock.Decls.Items[I]).TypeName);
       if ParType = nil then
         SemanticError(
@@ -3600,6 +3633,8 @@ begin
     { Register impl-section global variables. }
     for I := 0 to AUnit.ImplBlock.Decls.Count - 1 do
     begin
+      SetUsePos(TVarDecl(AUnit.ImplBlock.Decls.Items[I]).Line,
+        TVarDecl(AUnit.ImplBlock.Decls.Items[I]).Col);
       ParType := FindTypeOrInstantiate(TVarDecl(AUnit.ImplBlock.Decls.Items[I]).TypeName);
       if ParType = nil then
         SemanticError(
@@ -3814,6 +3849,7 @@ begin
   AUnit.SymbolTable := FTable;
   FTable := nil;
   FCurrentUnit := nil;
+  SetUsePos(0, 0);
 end;
 
 procedure TSemanticAnalyser.EnableXref;
@@ -4114,6 +4150,7 @@ procedure TSemanticAnalyser.AnalyseUnitInterface(AUnit: TUnit);
 begin
   Self.AnalyseUnitIntfPart(AUnit);
   FCurrentUnit := nil;
+  SetUsePos(0, 0);
   FTable.DefineOwningUnit := '';
 end;
 
@@ -4125,6 +4162,7 @@ begin
     FXrefSource := AUnit.SourceFile;
   FCurrentUnitName := AUnit.Name;
   FCurrentUnit := AUnit;
+  SetUsePos(0, 0);
   BuildUsesChain(AUnit.UsedUnits);
   RegisterUnitChain(AUnit.Name, AUnit.UsedUnits, AUnit.ImplUsedUnits);
   FTable.UsesChainProvider := Self;
@@ -4145,6 +4183,7 @@ begin
     FXrefSource := AUnit.SourceFile;
   FCurrentUnitName := AUnit.Name;
   FCurrentUnit := AUnit;
+  SetUsePos(0, 0);
   { Per-unit accumulator: the caller snapshots it immediately after this
     returns (ExportUnitInterface -> GenericDepHashes), so it must describe
     THIS unit alone, not everything analysed so far this run. }
@@ -4181,6 +4220,7 @@ begin
   for I := 0 to AUnit.IntfBlock.Decls.Count - 1 do
   begin
     VDecl := TVarDecl(AUnit.IntfBlock.Decls.Items[I]);
+    SetUsePos(VDecl.Line, VDecl.Col);
     ParType := FindTypeOrInstantiate(VDecl.TypeName);
     if ParType = nil then
       SemanticError(Format('Unknown type ''%s''', [VDecl.TypeName]),
@@ -4342,6 +4382,7 @@ begin
     for I := 0 to AUnit.ImplBlock.Decls.Count - 1 do
     begin
       VDecl := TVarDecl(AUnit.ImplBlock.Decls.Items[I]);
+      SetUsePos(VDecl.Line, VDecl.Col);
       ParType := FindTypeOrInstantiate(VDecl.TypeName);
       if ParType = nil then
         SemanticError(Format('Unknown type ''%s''', [VDecl.TypeName]), VDecl.Line, VDecl.Col);
@@ -4536,6 +4577,7 @@ begin
     FTable.PopScope();
   end;
   FCurrentUnit := nil;
+  SetUsePos(0, 0);
   FTable.DefineOwningUnit := '';
 end;
 
@@ -10671,8 +10713,7 @@ begin
     TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
     FBoundLine := TD.Line;
     FBoundCol := TD.Col;
-    FUseLine := TD.Line;
-    FUseCol := TD.Col;
+    SetUsePos(TD.Line, TD.Col);
     if TD.Def is TRecordTypeDef then
     begin
       RT := FTable.NewRecordType(TD.Name);
@@ -11007,8 +11048,7 @@ begin
     TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
     FBoundLine := TD.Line;
     FBoundCol := TD.Col;
-    FUseLine := TD.Line;
-    FUseCol := TD.Col;
+    SetUsePos(TD.Line, TD.Col);
 
     { Generic templates, enum, set, and type alias need no pass-2 processing }
     if TD.Def is TGenericTypeDef then Continue;
@@ -11414,8 +11454,7 @@ begin
     for J := 0 to FieldList.Count - 1 do
     begin
       FDecl   := TFieldDecl(FieldList.Items[J]);
-      FUseLine := FDecl.Line;
-      FUseCol := FDecl.Col;
+      SetUsePos(FDecl.Line, FDecl.Col);
       FldType := FindTypeOrInstantiate(FDecl.TypeName);
       if FldType = nil then
         SemanticError(
@@ -11881,8 +11920,7 @@ begin
   ForwardDecls.Free();
   FBoundLine := 0;
   FBoundCol := 0;
-  FUseLine := 0;
-  FUseCol := 0;
+  SetUsePos(0, 0);
 end;
 
 procedure TSemanticAnalyser.AnalyseMethodBodies(ABlock: TBlock);
@@ -14382,8 +14420,7 @@ begin
   for I := 0 to ABlock.Decls.Count - 1 do
   begin
     Decl := TVarDecl(ABlock.Decls.Items[I]);
-    FUseLine := Decl.Line;
-    FUseCol := Decl.Col;
+    SetUsePos(Decl.Line, Decl.Col);
 
     Typ := FindTypeOrInstantiate(Decl.TypeName);
     if Typ = nil then
@@ -14487,6 +14524,7 @@ begin
     if Decl.InitConst <> nil then
       Self.AnalyseVarInitializer(Decl);
   end;
+  SetUsePos(0, 0);
 end;
 
 { Analyse and fold a variable initialiser (var G: T = value).  The initialiser
@@ -14919,19 +14957,20 @@ end;
 
 procedure TSemanticAnalyser.AnalyseStmt(AStmt: TASTStmt);
 var
-  SavedLine, SavedCol: Int;
+  SavedLine, SavedCol, SavedDepth: Int;
 begin
   SavedLine := FUseLine;
   SavedCol := FUseCol;
+  SavedDepth := FUseViewDepth;
   if (AStmt <> nil) and (AStmt.Line > 0) then
   begin
-    FUseLine := AStmt.Line;
-    FUseCol := AStmt.Col;
+    SetUsePos(AStmt.Line, AStmt.Col);
   end;
   Self.AnalyseStmtCore(AStmt);
   Self.NoteRoutineUse(AStmt);
   FUseLine := SavedLine;
   FUseCol := SavedCol;
+  FUseViewDepth := SavedDepth;
 end;
 
 function TSemanticAnalyser.InGenericInstanceBody: Boolean;
@@ -21992,17 +22031,17 @@ var
   MC: TMethodCallExpr;
   RT: TTypeDesc;
   Inner: TASTExpr;
-  SavedLine, SavedCol: Int;
+  SavedLine, SavedCol, SavedDepth: Int;
 begin
   { Not restored when AnalyseExprCore raises: an error abandons the
     statement, and a probe that catches one is inside an enclosing
     expression whose own frame restores the position on return. }
   SavedLine := FUseLine;
   SavedCol := FUseCol;
+  SavedDepth := FUseViewDepth;
   if (AExpr <> nil) and (AExpr.Line > 0) then
   begin
-    FUseLine := AExpr.Line;
-    FUseCol := AExpr.Col;
+    SetUsePos(AExpr.Line, AExpr.Col);
   end;
   if FXref = nil then
   begin
@@ -22010,6 +22049,7 @@ begin
     Self.NoteRoutineUse(AExpr);
     FUseLine := SavedLine;
     FUseCol := SavedCol;
+    FUseViewDepth := SavedDepth;
     Exit;
   end;
   { --emit-xref: the names as written (analysis rewrites them). }
@@ -22078,6 +22118,7 @@ begin
   end;
   FUseLine := SavedLine;
   FUseCol := SavedCol;
+  FUseViewDepth := SavedDepth;
 end;
 
 function TSemanticAnalyser.AnalyseExprCore(AExpr: TASTExpr): TTypeDesc;
@@ -24447,6 +24488,7 @@ var
   Sym:       TSymbol;
   WarnCount: Int;
   I:         Int;
+  SavedLine, SavedCol, SavedDepth: Int;
 begin
   Result := 0;
   if not IsRefProcType(ATarget) then Exit;
@@ -24470,6 +24512,10 @@ begin
 
   Body := CloneExpr(AME.ArrowExpr);
   WarnCount := FWarnings.Count;
+  { a caught error leaves the position inside the trial body }
+  SavedLine := FUseLine;
+  SavedCol := FUseCol;
+  SavedDepth := FUseViewDepth;
   FTable.PushScope();
   Inc(FArrowTrialDepth);
   try
@@ -24501,6 +24547,9 @@ begin
   finally
     Dec(FArrowTrialDepth);
     FTable.PopScope();
+    FUseLine := SavedLine;
+    FUseCol := SavedCol;
+    FUseViewDepth := SavedDepth;
     Body.Free();
     while FWarnings.Count > WarnCount do
       FWarnings.Delete(FWarnings.Count - 1);
