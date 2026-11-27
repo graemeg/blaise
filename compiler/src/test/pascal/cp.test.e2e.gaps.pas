@@ -45,6 +45,13 @@ type
     procedure TestRun_UInt64_DivMod_HighBitSet_SignedLiteral;
     procedure TestRun_UInt32_DivMod_HighBitSet;
 
+    { Overload resolution never narrows when a candidate holds the value:
+      F(Int32, Int32) beside F(Int64, Int64) with an Int64 argument above
+      the 32-bit range, and G(Float32, Float32) beside G(Float64, Float64)
+      with a Float64 past Float32's range.  The narrowing candidates won,
+      truncating 5000000000 to 705032704 and 1e300 to +Inf. }
+    procedure TestRun_Overload_NeverNarrowsAWideArgument;
+
     { [Unretained] attribute }
     procedure TestRun_Unretained_BackRef_NoLeak;
     procedure TestRun_Unretained_AssignAndReadBack;
@@ -1423,6 +1430,28 @@ begin
     '[  18446744073709551615]' + #10 +
     '[    3.1][      42]' + #10 +
     '[  2.5]' + #10, 0);
+end;
+
+
+procedure TE2EGapTests.TestRun_Overload_NeverNarrowsAWideArgument;
+const Src = '''
+    program T;
+    function F(A, B: Int32): Int64; overload; begin Result := B; end;
+    function F(A, B: Int64): Int64; overload; begin Result := B; end;
+    function G(A, B: Float32): Float64; overload; begin Result := B; end;
+    function G(A, B: Float64): Float64; overload; begin Result := B; end;
+    var I: Int32; L: Int64; S: Float32; D: Float64;
+    begin
+      I := 1; L := 5000000000; S := 1.0; D := 1.0e300;
+      WriteLn(F(I, L));
+      WriteLn(F(L, I));
+      if G(S, D) = 1.0e300 then WriteLn('wide') else WriteLn('narrowed');
+      if G(D, S) = 1.0 then WriteLn('wide') else WriteLn('narrowed')
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '5000000000' + Chr(10) + '1' + Chr(10) +
+    'wide' + Chr(10) + 'wide' + Chr(10), 0);
 end;
 
 initialization

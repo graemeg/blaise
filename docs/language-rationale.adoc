@@ -3561,6 +3561,18 @@ reaches `Float64` before `Float32`.  Only an equal total is ambiguous —
 for example `F(Int64; Int32)` against `F(Int32; Int64)` called with two
 `Int32` arguments.
 
+A *narrowing* conversion -- an `Int64` argument to an `Int32` formal, a
+`Float64` to a `Float32` -- costs more than any sum of widenings, so it
+is chosen only when no candidate holds the argument, and then the
+smallest loss wins (an `Int32` reaches `Int16` before `Int8`).  With
+`F(Int32, Int32)` and `F(Int64, Int64)`, `F(I32, I64)` calls the `Int64`
+candidate; with `G(Float32, Float32)` and `G(Float64, Float64)`,
+`G(S, D)` calls the `Float64` one.  The integer distance used to go
+negative for a narrowing and a `Float64`-to-`Float32` conversion cost
+nothing, so the narrowing candidate was the *cheapest*: `F(1, 5000000000)`
+truncated its second argument to 705032704 without a word.  FPC chooses
+the wide candidates in both cases.
+
 An integer prefers `Float64` because `Float64` holds every 32-bit integer
 exactly, where `Float32` holds them only up to 2^24, and because the math
 built-ins already widen an integer argument to `Float64` (`Sin(I)` is a
@@ -3573,8 +3585,10 @@ precision; Blaise deliberately chooses the lossless candidate.
 FPC and Delphi both prefer the closest widening.  Before this rule Blaise
 rated every widening alike and reported such calls as ambiguous — a
 frequent nuisance with the narrow integer types (`AssertEquals(Msg, 1, B)`
-with `B: Int8`).  The rule only decides calls that were previously
-rejected, so no call that compiled before changes its target.
+with `B: Int8`).  The closest-widening rule only decides calls that were
+previously rejected.  The narrowing cost does change the target of calls
+that compiled before -- each of them was silently truncating an argument,
+and two tests in Blaise's own suite were found relying on it.
 
 An enumeration argument takes part in the same ranking.  Blaise lets an
 enum value reach an integer formal through the enum/integer ordinal

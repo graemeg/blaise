@@ -18553,6 +18553,10 @@ end;
 
 function TSemanticAnalyser.ArgWideningCost(AParam: TTypeDesc;
   AArg: TTypeDesc; AArgExpr: TASTExpr): Int;
+const
+  { more than any sum of widenings over a realistic parameter list (an
+    integer to a float, the dearest widening, costs 65) }
+  NarrowingCost = 4096;
 var
   ArgInt:   Boolean;
   ParamInt: Boolean;
@@ -18597,13 +18601,28 @@ begin
     tySmallInt, tyWord, tyByte];
   if ArgInt and ParamInt then
   begin
-    Result := 2 * (AParam.RawSize() - AArg.RawSize());
+    { A narrowing (an Int64 argument to an Int32 formal) loses the high
+      bits, so it costs more than any set of widenings and is chosen only
+      when no candidate holds the value: with F(Int32, Int32) and
+      F(Int64, Int64), F(I32, I64) is the Int64 one.  The size difference
+      went negative here, so the narrowing candidate was the CHEAPEST and
+      truncated the argument silently.  Between two narrowings the smaller
+      loss wins, so H(I32) picks H(Int16) over H(Int8). }
+    if AParam.RawSize() < AArg.RawSize() then
+      Result := NarrowingCost + 2 * (AArg.RawSize() - AParam.RawSize())
+    else
+      Result := 2 * (AParam.RawSize() - AArg.RawSize());
     if (AArg.Kind in [tyUInt32, tyUInt64, tyWord, tyByte]) <>
        (AParam.Kind in [tyUInt32, tyUInt64, tyWord, tyByte]) then
       Inc(Result);
   end
   else if (AArg.Kind = tySingle) and (AParam.Kind = tyDouble) then
     Result := 1
+  { a Float64 argument to a Float32 formal rounds: never preferred to a
+    Float64 candidate (it cost nothing, so G(S, D) picked G(Float32,
+    Float32) over G(Float64, Float64)) }
+  else if (AArg.Kind = tyDouble) and (AParam.Kind = tySingle) then
+    Result := NarrowingCost
   { An integer reaching a float formal prefers Float64, which holds every
     32-bit integer exactly and is what the math builtins widen to, so
     F(Float32) / F(Float64) overloads do not tie on an integer argument

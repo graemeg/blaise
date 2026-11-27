@@ -55,6 +55,11 @@ type
       holds it exactly, for every integer kind and for a constant; a
       Float32 argument still picks Float32 (GH #266) }
     procedure TestSem_IntArg_PicksFloat64OverFloat32;
+    { a narrowing conversion is chosen only when no candidate holds the
+      argument: a mixed Int32/Int64 call picks the Int64 candidate, a mixed
+      Float32/Float64 call the Float64 one, and a call that needs a
+      narrowing in every candidate resolves to the smallest loss }
+    procedure TestSem_Narrowing_NeverBeatsAWideningCandidate;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -815,6 +820,34 @@ begin
   AssertEquals('UInt64', '', SemanticError(Head + 'S := F(U64); end.'));
   AssertEquals('constant', '', SemanticError(Head + 'S := F(7); end.'));
   AssertEquals('Float32 keeps Float32', '', SemanticError(Head + 'N := F(X); end.'));
+end;
+
+procedure TOverloadTests.TestSem_Narrowing_NeverBeatsAWideningCandidate;
+const
+  { the wide candidates return a string, the narrow ones an Int32, so the
+    assignment to S compiles only when the wide candidate wins }
+  Head = '''
+    program p;
+    function F(A, B: Int32): Int32; overload; begin Result := 0; end;
+    function F(A, B: Int64): string; overload; begin Result := 'i64'; end;
+    function G(A, B: Float32): Int32; overload; begin Result := 0; end;
+    function G(A, B: Float64): string; overload; begin Result := 'f64'; end;
+    function H(A: Int16): string; overload; begin Result := 'i16'; end;
+    function H(A: Int8): Int32; overload; begin Result := 0; end;
+    var
+      I: Int32; L: Int64; X: Float32; D: Float64; S: string; N: Int32;
+    begin
+    ''';
+begin
+  AssertEquals('Int32, Int64', '', SemanticError(Head + 'S := F(I, L); end.'));
+  AssertEquals('Int64, Int32', '', SemanticError(Head + 'S := F(L, I); end.'));
+  AssertEquals('Float32, Float64', '', SemanticError(Head + 'S := G(X, D); end.'));
+  AssertEquals('Float64, Float32', '', SemanticError(Head + 'S := G(D, X); end.'));
+  AssertEquals('two Int32 still pick Int32', '', SemanticError(Head + 'N := F(I, I); end.'));
+  AssertEquals('two Float32 still pick Float32', '', SemanticError(Head + 'N := G(X, X); end.'));
+  { every candidate narrows an Int32: the smaller loss (Int16) wins }
+  AssertEquals('all candidates narrow: the closest', '',
+    SemanticError(Head + 'S := H(I); end.'));
 end;
 
 initialization

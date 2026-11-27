@@ -985,8 +985,10 @@ begin
          or ((Ord(TextSec.Data[PatchOff + 3]) and $FF) shl 24);
     { S=0, A=-4, P = StartAddr+1 → disp = -4 - (StartAddr+1). }
     Expected := Int64(0) - 4 - (StartAddr + 1);
+    { Disp holds the field's 32 bits unsigned: Int32() reads them as the
+      signed displacement they are }
     AssertEquals('weak-undef PC32 disp (S=0)',
-      Int32(Expected and $FFFFFFFF), Disp);
+      Int32(Expected and $FFFFFFFF), Int32(Disp));
   finally
     Lk.Free();
   end;
@@ -1089,7 +1091,10 @@ begin
          or ((Ord(TextSec.Data[PatchOff + 1]) and $FF) shl 8)
          or ((Ord(TextSec.Data[PatchOff + 2]) and $FF) shl 16)
          or ((Ord(TextSec.Data[PatchOff + 3]) and $FF) shl 24);
-    AssertEquals('PC32 call displacement', Int32(Expected and $FFFFFFFF), Disp);
+    { Disp holds the field's 32 bits unsigned: Int32() reads them as the
+      signed displacement they are }
+    AssertEquals('PC32 call displacement', Int32(Expected and $FFFFFFFF),
+      Int32(Disp));
   finally
     Lk.Free();
   end;
