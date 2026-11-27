@@ -26,6 +26,12 @@ type
     { array-of-T fields of a generic class and record hold managed and plain
       elements }
     procedure TestRun_ArrayOfTypeParamFields;
+    { A unit's generic routine whose implementation does not repeat the
+      interface's constraint still enforces it: the body decl is the
+      template, and it lost the constraint, so a violating argument reached
+      the body ("has no method 'Area'"); a constraint that disagrees with
+      the interface is rejected }
+    procedure TestCompile_UnitGenericRoutine_ImplInheritsConstraint;
     { A generic routine read back from a cached unit interface keeps its
       constraints: the .bif reader dropped them, so once the unit was
       cached any argument type was accepted and the body failed }
@@ -1967,6 +1973,92 @@ begin
     CompileAndRunInScratch(PSrcBad, Output, RCode));
   AssertTrue('violated: the constraint is reported: ' + Output,
     Pos('''TPlain'' does not implement ''IShape''', Output) >= 0);
+end;
+
+procedure TE2EGenericsTests.TestCompile_UnitGenericRoutine_ImplInheritsConstraint;
+const
+  USrc = '''
+    unit cshape2;
+    interface
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+      TSquare = class(TObject, IShape)
+        function Area: Int;
+      end;
+    function AreaOf<T: IShape>(const S: T): Int;
+    implementation
+    function TSquare.Area: Int;
+    begin
+      Result := 4
+    end;
+    function AreaOf<T>(const S: T): Int;
+    begin
+      Result := S.Area()
+    end;
+    end.
+    ''';
+  USrcDiffers = '''
+    unit cshape3;
+    interface
+    type
+      IShape = interface
+        function Area: Int;
+      end;
+    function AreaOf<T: IShape>(const S: T): Int;
+    implementation
+    function AreaOf<T: class>(const S: T): Int;
+    begin
+      Result := 0
+    end;
+    end.
+    ''';
+  PSrcOk = '''
+    program cuse2;
+    uses cshape2;
+    var
+      Q: TSquare;
+    begin
+      Q := TSquare.Create();
+      WriteLn(AreaOf<TSquare>(Q))
+    end.
+    ''';
+  PSrcBad = '''
+    program cuse2;
+    uses cshape2;
+    type
+      TPlain = class
+      end;
+    var
+      P: TPlain;
+    begin
+      P := TPlain.Create();
+      WriteLn(AreaOf(P))
+    end.
+    ''';
+  PSrcDiffers = '''
+    program cuse3;
+    uses cshape3;
+    begin
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('satisfied: compile+run: ' + Output,
+    CompileAndRunWithUnitNative('cshape2', USrc, PSrcOk, Output, RCode));
+  AssertEquals('satisfied: output', '4' + LE, Output);
+  AssertFalse('violated: rejected',
+    CompileAndRunWithUnitNative('cshape2', USrc, PSrcBad, Output, RCode));
+  AssertTrue('violated: the constraint is reported: ' + Output,
+    Pos('''TPlain'' does not implement ''IShape''', Output) >= 0);
+  AssertFalse('differing constraint: rejected',
+    CompileAndRunWithUnitNative('cshape3', USrcDiffers, PSrcDiffers, Output, RCode));
+  AssertTrue('differing constraint: reported: ' + Output,
+    Pos('differs from its interface declaration', Output) >= 0);
 end;
 
 initialization

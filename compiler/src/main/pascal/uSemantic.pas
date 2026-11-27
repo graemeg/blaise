@@ -13264,7 +13264,45 @@ procedure TSemanticAnalyser.RegisterGenericFuncTemplate(ADecl: TMethodDecl);
 var
   CurUnit:  string;
   PrevUnit: string;
+  I, J:     Int;
+  Intf:     TMethodDecl;
 begin
+  { The implementation of a unit's generic routine need not repeat the
+    interface's constraints (function F<T>(...) after F<T: IShape>), but
+    the body decl is the template, so it inherits them: without this an
+    unsatisfied constraint went unchecked and the body failed instead. }
+  if (FCurrentUnit <> nil) and (FCurrentUnit.IntfBlock <> nil) then
+    for I := 0 to FCurrentUnit.IntfBlock.ProcDecls.Count - 1 do
+    begin
+      Intf := TMethodDecl(FCurrentUnit.IntfBlock.ProcDecls.Items[I]);
+      if (Intf = ADecl) or (Intf.TypeParams = nil) or
+         (Intf.TypeParamConstraints = nil) or
+         not SameText(Intf.Name, ADecl.Name) or
+         (Intf.TypeParams.Count <> ADecl.TypeParams.Count) then
+        Continue;
+      if ADecl.TypeParamConstraints = nil then
+        ADecl.TypeParamConstraints := TStringList.Create();
+      while ADecl.TypeParamConstraints.Count < ADecl.TypeParams.Count do
+        ADecl.TypeParamConstraints.Add('');
+      { '' = not written here: take the interface's.  A constraint written
+        on both must agree. }
+      for J := 0 to Intf.TypeParamConstraints.Count - 1 do
+        if J < ADecl.TypeParamConstraints.Count then
+        begin
+          if ADecl.TypeParamConstraints.Strings[J] = '' then
+            ADecl.TypeParamConstraints.Strings[J] :=
+              Intf.TypeParamConstraints.Strings[J]
+          else if (Intf.TypeParamConstraints.Strings[J] <> '') and
+                  not SameText(ADecl.TypeParamConstraints.Strings[J],
+                    Intf.TypeParamConstraints.Strings[J]) then
+            SemanticError(
+              Format('Constraint of type parameter ''%s'' of ''%s'' ' +
+                'differs from its interface declaration',
+                [ADecl.TypeParams.Strings[J], ADecl.Name]),
+              ADecl.Line, ADecl.Col);
+        end;
+      Break;
+    end;
   FGenericFuncTemplates.AddObject(ADecl.Name, ADecl);
   if FCurrentUnitName <> '' then
     CurUnit := FCurrentUnitName
