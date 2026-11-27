@@ -23,6 +23,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { BUG-20261017: F()[I] := V on a dynamic-array call result writes the
+      shared array and releases the returned reference }
+    procedure TestRun_WriteThroughCallResult_NoLeak;
     { overloads distinguished only by an array or metaclass parameter type --
       distinct dynamic arrays, distinct static arrays, distinct metaclasses --
       each get their own label and each call reaches its own body }
@@ -1846,6 +1849,66 @@ begin
     '7 0 0' + LE +
     '7 0 0' + LE +
     'v1 [] []' + LE, 0);
+end;
+
+
+procedure TE2EDynArrayTests.TestRun_WriteThroughCallResult_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program WriteThroughCall;
+    uses SysUtils;
+    type TArr = array of Int32; TSArr = array of String; TArrs = array of TArr;
+      TRec = record N: Int32; S: String; end; TRecs = array of TRec;
+      TFArr = array of Float64;
+      TBox = class N: Int32; end; TBoxes = array of TBox;
+      TSA = array[0..3] of Byte; TSB = array[0..3] of Byte;
+      TObj = class A: TArr; function Items: TArr; end;
+    var G: TArr; GS: TSArr; GG: TArrs; R: TRecs; F: TFArr; BX: TBoxes;
+      O: TObj; B: TSB; K: Int32;
+    function TObj.Items: TArr; begin Result := A end;
+    function GetArr: TArr; begin Result := G end;
+    function GetS: TSArr; begin Result := GS end;
+    function GetGG: TArrs; begin Result := GG end;
+    function GetR: TRecs; begin Result := R end;
+    function GetF: TFArr; begin Result := F end;
+    function GetBX: TBoxes; begin Result := BX end;
+    function Idx(N: Int32): Int32; begin Result := N end;
+    procedure Bump(var V: Int32); begin V := V + 100 end;
+    begin
+      SetLength(G, 3); SetLength(GS, 2); SetLength(GG, 2); SetLength(GG[1], 2);
+      SetLength(R, 1); SetLength(F, 1); SetLength(BX, 1);
+      O := TObj.Create(); SetLength(O.A, 2);
+      GetArr()[1] := 9;
+      GetArr()[Idx(2)] := Idx(7);
+      O.Items()[0] := 5;
+      GetS()[0] := IntToStr(40) + 'q';
+      GetS()[0] := IntToStr(41) + 'r';
+      GetS()[1] := GetS()[0];
+      GetGG()[1][1] := 6;
+      GetR()[0].N := 3;
+      GetR()[0].S := IntToStr(8) + 's';
+      GetF()[0] := 2.5;
+      GetBX()[0] := TBox.Create();
+      GetBX()[0].N := 4;
+      Inc(GetArr()[0]);
+      Bump(GetArr()[0]);
+      SetLength(GetGG()[0], 3);
+      for K := 0 to 1 do GetArr()[K] := GetArr()[K] + 1;
+      try
+        GetArr()[2] := 70;
+        raise Exception.Create('x')
+      except
+        on E: Exception do ;
+      end;
+      TSA(B)[1] := 7;
+      WriteLn(G[0], ' ', G[1], ' ', G[2], ' ', O.A[0], ' ', GS[0], ' ', GS[1],
+        ' ', GG[1][1], ' ', Length(GG[0]), ' ', R[0].N, R[0].S, ' ',
+        Trunc(F[0] * 2), ' ', BX[0].N, ' ', B[1]);
+      O.Free(); BX[0].Free(); G := nil; GS := nil; GG := nil; R := nil; F := nil; BX := nil;
+      WriteLn('done')
+    end.
+    ''', '102 10 70 5 41r 41r 6 3 38s 5 4 7' + #10 + 'done');
 end;
 
 initialization

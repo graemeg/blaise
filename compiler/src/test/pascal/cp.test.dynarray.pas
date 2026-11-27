@@ -38,6 +38,11 @@ type
     { Parser                                                               }
     { ------------------------------------------------------------------ }
     procedure TestParse_DynArray_TypeAlias_AcceptsDecl;
+    { BUG-20261017: F()[I] := V writes an element of the dynamic array a
+      call returns (shared storage); on a static-array result it would
+      change a temporary copy and is rejected }
+    procedure TestSemantic_WriteThroughCallResult_DynArrayOnly;
+    procedure TestCodegen_WriteThroughCallResult_ReleasesTheResult;
     procedure TestParse_DynArray_InlineVarDecl_AcceptsDecl;
     procedure TestParse_DynArray_Combined_TypeAndVar;
     procedure TestParse_DynArray_TypeName_EncodesCorrectly;
@@ -663,6 +668,58 @@ begin
   { a managed element passes its hook, so copies are retained }
   AssertEquals('string element hook passed', '',
     AsmMissing(Src, '_DynElemsString', '_DynElemsString'));
+end;
+
+
+const
+  SrcWriteThroughCall = '''
+    program P;
+    type TArr = array of Int32;
+      TObj = class A: TArr; function Items: TArr; end;
+    var G: TArr; O: TObj;
+    function GetArr: TArr; begin Result := G end;
+    function TObj.Items: TArr; begin Result := A end;
+    begin
+      GetArr()[1] := 9;
+      O.Items()[0] := 5
+    end.
+    ''';
+
+procedure TDynArrayTests.TestSemantic_WriteThroughCallResult_DynArrayOnly;
+const
+  SrcStatic = '''
+    program P;
+    type TSA = array[0..2] of Int32;
+    function GetSA: TSA; begin Result[0] := 0 end;
+    begin
+      GetSA()[1] := 9
+    end.
+    ''';
+begin
+  AssertEquals('a dynamic-array call result is writable', '',
+    SemanticError(SrcWriteThroughCall));
+  AssertEquals('a value cast of a static-array variable is its storage', '',
+    SemanticError('''
+      program P;
+      type TSA = array[0..3] of Byte; TSB = array[0..3] of Byte;
+      var B: TSB;
+      begin
+        TSA(B)[1] := 7
+      end.
+      '''));
+  AssertTrue('a static-array call result is a temporary: ' +
+    SemanticError(SrcStatic),
+    Pos('temporary', SemanticError(SrcStatic)) >= 0);
+end;
+
+procedure TDynArrayTests.TestCodegen_WriteThroughCallResult_ReleasesTheResult;
+begin
+  { the call returns an owned +1 reference: x86-64 never released it (one
+    leaked reference per write), arm64 stopped with an internal error }
+  AssertEquals('the returned array is released after the store', '',
+    AsmMissing(SrcWriteThroughCall,
+      #9'movq _pendrel_0(%rip), %rdi' + #10 + #9'callq _DynArrayRelease',
+      #9'bl __DynArrayRelease' + #10 + #9'stur xzr, [x29, #-'));
 end;
 
 initialization

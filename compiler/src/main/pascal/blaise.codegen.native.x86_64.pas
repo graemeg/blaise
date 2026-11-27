@@ -11991,6 +11991,10 @@ begin
          (SAE.StrExpr.ResolvedType.Kind = tyDynArray) then
       begin
         Self.EmitExprToEax(SAE.StrExpr);
+        { an owned base (Inc(GetArr()[1]), SetLength(GetGG()[1], N)): its
+          reference is released at the statement boundary, after the
+          element address has been used (it leaked; BUG-20261017) }
+        Self.DeferOwnedDynArrayBase(SAE.StrExpr);
         Self.Emit(#9'pushq %rax');
         Self.EmitExprToEax(SAE.IndexExpr);
         Self.Emit(Format(#9'imulq $%d, %%rax',
@@ -20923,6 +20927,9 @@ begin
       if SSA.BaseExpr <> nil then
       begin
         Self.EmitExprToEax(SSA.BaseExpr);
+        { F()[I] := V: the call's owned reference is released at the
+          statement boundary, after the store (BUG-20261017; it leaked) }
+        Self.DeferOwnedDynArrayBase(SSA.BaseExpr);
         Self.Emit(#9'pushq %rax');             { stack: [baseptr] }
       end;
       { Record-returning call as the RHS: sret directly into the element —

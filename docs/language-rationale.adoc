@@ -5363,6 +5363,34 @@ write silently and dropped it.
 Until 2026-10-21 the form was a parse error, found while closing the arm64
 property gaps.
 
+=== Writing an element of an array a call returns
+
+`F()[I] := V` on a function that returns a *dynamic* array writes element
+`I` of that array in place.  A dynamic array is shared storage: the call
+returns a reference to the same array its variable or field holds, so the
+write is seen through every other reference to it, as Delphi accepts it.
+The reference the call returned is released at the end of the statement,
+after the store.
+
+[source,pascal]
+----
+function TGrid.Row(I: Int): TCells;  // returns FRows[I], a dynamic array
+...
+Grid.Row(2)[5] := Wall;              // writes the grid's own row
+----
+
+On a *static*-array result the same write is an error: a static array is a
+value, so the element belongs to a temporary copy discarded after the
+statement and the write could only be lost.  A string result is rejected
+for the same reason (a byte of a temporary string).  This mirrors the record
+rule above: a write that reaches shared storage is legal, a write into a
+temporary is not.
+
+The dynamic-array form compiled to a missing release on x86-64 (a leaked
+reference per write) and an internal error on arm64 until 2026-11-27
+(BUG-20261017); the static-array form compiled silently and dropped the
+write.
+
 == Date and Time RTL — Five-Type Model
 
 The `DateUtils` unit replaces FPC/Delphi's `TDateTime`-as-`Double` with five

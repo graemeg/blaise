@@ -868,6 +868,7 @@ type
     procedure WarnIfNarrowing(ADestType: TTypeDesc; AExpr: TASTExpr;
       ALine, ACol: Int);
     function  IsRecordTemporary(AExpr: TASTExpr): Boolean;
+    function  IsStorageValueCast(AExpr: TASTExpr): Boolean;
     { BUG-001: warn when a bare for-in loop variable is passed where the callee
       mutates it by reference (var/out parameter, Inc/Dec, SetLength, ...) —
       the mutation writes the per-iteration copy and never reaches the
@@ -17208,6 +17209,24 @@ end;
   write into it lands in a temporary that is discarded after the statement.
   A dynamic array or object reached through such a record is shared, not
   part of the temporary, and the walk never descends through one. }
+function TSemanticAnalyser.IsStorageValueCast(AExpr: TASTExpr): Boolean;
+var
+  Arg: TASTExpr;
+begin
+  { TSA(B): a type cast (no routine behind the call) of one operand that is
+    itself storage reinterprets that storage in place -- TSA(B)[1] := 7
+    writes B -- so it is not a temporary, although it is a TFuncCallExpr }
+  Result := False;
+  if not (AExpr is TFuncCallExpr) then
+    Exit;
+  if (TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
+     TFuncCallExpr(AExpr).IsIndirectCall or
+     (TFuncCallExpr(AExpr).Args.Count <> 1) then
+    Exit;
+  Arg := TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]);
+  Result := Self.IsVarArgLValue(Arg) or Self.IsStorageValueCast(Arg);
+end;
+
 function TSemanticAnalyser.IsRecordTemporary(AExpr: TASTExpr): Boolean;
 var
   Fld: TFieldAccessExpr;
@@ -27372,6 +27391,16 @@ begin
         Format('Cannot assign through a subscript of a ''%s'' value: the ' +
           'base must be an array, a string or a PChar',
           [AStmt.ResolvedArrayType.Name]),
+        AStmt.Line, AStmt.Col);
+    { F()[I] := V on a static-array result (or a field / element of a
+      record result): the element belongs to a temporary that is discarded
+      after the statement, so the write would be lost.  A dynamic-array
+      result is shared storage and is written in place (BUG-20261017). }
+    if (AStmt.ResolvedArrayType.Kind = tyStaticArray) and
+       Self.IsRecordTemporary(AStmt.BaseExpr) and
+       not Self.IsStorageValueCast(AStmt.BaseExpr) then
+      SemanticError('Cannot assign to an element of a static array that ' +
+        'is a temporary (a call result): the write would be lost',
         AStmt.Line, AStmt.Col);
     if AStmt.ResolvedArrayType.Kind = tyDynArray then
       ElemT := TDynArrayTypeDesc(AStmt.ResolvedArrayType).ElementType

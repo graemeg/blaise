@@ -11623,12 +11623,11 @@ begin
       EmitArrayStorageAddr(AStmt.BaseExpr)
     else
     begin
-      if ArcExprOwnsRef(AStmt.BaseExpr) then
-        { no statement form writes through a call result: F()[I] := V does
-          not parse }
-        InternalError('subscript write through an owned transient base',
-          AStmt);
       Self.EmitExprToX0(AStmt.BaseExpr);
+      { F()[I] := V: the call's owned reference is released at the
+        statement boundary, after the store (BUG-20261017) }
+      if ArcExprOwnsRef(AStmt.BaseExpr) then
+        DeferNativeRelease('_DynArrayRelease');
     end;
   end
   else if AStmt.IsImplicitSelf then

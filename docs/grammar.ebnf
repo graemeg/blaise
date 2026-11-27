@@ -1208,7 +1208,10 @@ StaticSubscriptAssign
  *   MkList()[0] := 5;        Factory.Get()[I] := V;
  * The setter runs on the call's result.  On a class result that is the
  * object itself; on a record result it is a temporary discarded after the
- * statement, which is accepted (as in FPC and Delphi) with a warning.  The
+ * statement, which is accepted (as in FPC and Delphi) with a warning.  On
+ * a dynamic-array result (GetArr()[1] := 9) the element of the returned,
+ * shared array is written in place; on a static-array or string result
+ * the write would change a temporary and is a semantic error.  The
  * element may continue as a postfix chain (MkList()[0].Run();). *)
 CallSubscriptAssign
     = IDENT [ DOT IDENT ] LPAREN [ ArgList ] RPAREN
