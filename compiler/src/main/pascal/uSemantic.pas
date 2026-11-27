@@ -708,6 +708,10 @@ type
       const ARoutine, APosition, AVerb, ARemedy: string; AWritten: Boolean);
     function  AnalyseIntegerArg(AArgs: TObjectList; AIndex: Int;
       const ARoutine, ARole: string; ALine, ACol: Int): TTypeDesc;
+    function  AnalyseStringArg(AArgs: TObjectList; AIndex: Int;
+      const ARoutine, ARole: string; ALine, ACol: Int): TTypeDesc;
+    function  AnalyseNumberArg(AArgs: TObjectList; AIndex: Int;
+      const ARoutine, ARole: string; ALine, ACol: Int): TTypeDesc;
     function  AnalyseRawMemInteger(ACall: TProcCall; AIndex: Int;
       const ARoutine, ARole, AHint: string): TTypeDesc;
     procedure AnalyseMoveCall(ACall: TProcCall);
@@ -19329,6 +19333,69 @@ begin
         'Trunc or Round to convert a float to an integer)',
         [ARole, ARoutine, Result.Name]),
       ALine, ACol);
+  { a string, class or other non-ordinal would be passed as its pointer;
+    a Boolean or enum is an ordinal but not a number (use Ord) }
+  if (Result <> nil) and
+     (not Result.IsArrayIndex() or (Result.Kind in [tyBoolean, tyEnum])) then
+    SemanticError(
+      Format('%s argument of ''%s'' must be an integer, not ''%s''',
+        [ARole, ARoutine, Result.Name]),
+      ALine, ACol);
+end;
+
+{ 'First', 'Second', ... for a 0-based argument position in a message. }
+function OrdinalWord(AIndex: Int): string;
+begin
+  case AIndex of
+    0: Result := 'First';
+    1: Result := 'Second';
+    2: Result := 'Third';
+  else
+    Result := 'An';
+  end;
+end;
+
+{ An argument a built-in needs as a string: analysed, and rejected when it
+  is anything else -- the RTL routine reads a string header the value does
+  not have (Pos('a', N) segfaulted, FileExists(5) printed False), where an
+  ordinary routine with a string parameter rejects the same call.  A PChar
+  is rejected too: it has no header, so convert it explicitly. }
+function TSemanticAnalyser.AnalyseStringArg(AArgs: TObjectList;
+  AIndex: Int; const ARoutine, ARole: string;
+  ALine, ACol: Int): TTypeDesc;
+var
+  Hint: string;
+begin
+  Result := Self.AnalyseListSlot(AArgs, AIndex);
+  if (Result <> nil) and Result.IsString() then
+    Exit;
+  Hint := '';
+  if (Result <> nil) and (Result.Kind = tyPChar) then
+    Hint := ' (convert a PChar with string(P))'
+  else if (Result <> nil) and Result.IsArrayIndex() and
+          (TASTExpr(AArgs.Items[AIndex]) is TStringSubscriptExpr) then
+    Hint := ' (a string subscript is a byte: use Chr(S[I]) or Copy(S, I, 1))';
+  if Result = nil then
+    SemanticError(
+      Format('%s argument of ''%s'' must be a string', [ARole, ARoutine]),
+      ALine, ACol);
+  SemanticError(
+    Format('%s argument of ''%s'' must be a string, not ''%s''%s',
+      [ARole, ARoutine, Result.Name, Hint]),
+    ALine, ACol);
+end;
+
+{ An argument a built-in needs as a number, integer or float. }
+function TSemanticAnalyser.AnalyseNumberArg(AArgs: TObjectList;
+  AIndex: Int; const ARoutine, ARole: string;
+  ALine, ACol: Int): TTypeDesc;
+begin
+  Result := Self.AnalyseListSlot(AArgs, AIndex);
+  if (Result = nil) or not Result.IsNumeric() or
+     (Result.Kind in [tyBoolean, tyEnum]) then
+    SemanticError(
+      Format('%s argument of ''%s'' must be a number', [ARole, ARoutine]),
+      ALine, ACol);
 end;
 
 { An integer-typed argument of a raw-memory intrinsic; returns its type. }
@@ -19868,7 +19935,18 @@ begin
         Write/WriteLn specifically reject types that have no text representation. }
       for I := 0 to ACall.Args.Count - 1 do
       begin
-        ArgType := Self.AnalyseListSlot(ACall.Args, I);
+        { the file and process procedures take their paths, contents and
+          arguments as strings (WriteFile(5, 'x') compiled) }
+        if ((I < 2) and (SameText(ACall.Name, 'WriteFile') or
+                         SameText(ACall.Name, 'AppendFile'))) or
+           ((I = 0) and (SameText(ACall.Name, 'DeleteFile') or
+                         SameText(ACall.Name, 'RemoveDir'))) or
+           ((I = 1) and (SameText(ACall.Name, 'ProcessSetExe') or
+                         SameText(ACall.Name, 'ProcessAddArg'))) then
+          ArgType := Self.AnalyseStringArg(ACall.Args, I, ACall.Name,
+            OrdinalWord(I), ACall.Line, ACall.Col)
+        else
+          ArgType := Self.AnalyseListSlot(ACall.Args, I);
         { Halt(Code): the exit code is an integer (Halt(D) exited with the
           float's bit pattern) }
         if SameText(ACall.Name, 'Halt') and (ArgType <> nil) and
@@ -20687,8 +20765,10 @@ begin
   begin
     if AExpr.Args.Count <> 2 then
       SemanticError('Pos requires exactly two arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'Pos', 'First',
+      AExpr.Line, AExpr.Col);
+    Self.AnalyseStringArg(AExpr.Args, 1, 'Pos', 'Second',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20698,8 +20778,10 @@ begin
   begin
     if AExpr.Args.Count <> 3 then
       SemanticError('PosEx requires exactly three arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'PosEx', 'First',
+      AExpr.Line, AExpr.Col);
+    Self.AnalyseStringArg(AExpr.Args, 1, 'PosEx', 'Second',
+      AExpr.Line, AExpr.Col);
     Self.AnalyseIntegerArg(AExpr.Args, 2, 'PosEx', 'Third', AExpr.Line,
       AExpr.Col);
     Result := FTable.TypeInt64;
@@ -20727,6 +20809,11 @@ begin
       AExpr.ResolvedType := Result;
       Exit;
     end;
+    if (ArgType = nil) or not ArgType.IsString() then
+      SemanticError(
+        Format('First argument of ''Copy'' must be a string or a dynamic ' +
+          'array, not ''%s''', [TypeNameOrNil(ArgType)]),
+        AExpr.Line, AExpr.Col);
     if AExpr.Args.Count <> 3 then
       SemanticError('Copy of a string requires exactly three arguments',
         AExpr.Line, AExpr.Col);
@@ -20744,7 +20831,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError(AExpr.Name + ' requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, AExpr.Name, 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20754,8 +20842,10 @@ begin
   begin
     if AExpr.Args.Count <> 2 then
       SemanticError('SameText requires exactly two arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'SameText', 'First',
+      AExpr.Line, AExpr.Col);
+    Self.AnalyseStringArg(AExpr.Args, 1, 'SameText', 'Second',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeBoolean;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20794,7 +20884,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('Int64ToStr requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseIntegerArg(AExpr.Args, 0, 'Int64ToStr', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20804,7 +20895,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('UInt64ToStr requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseIntegerArg(AExpr.Args, 0, 'UInt64ToStr', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20814,7 +20906,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError(AExpr.Name + ' requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseNumberArg(AExpr.Args, 0, AExpr.Name, 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20824,7 +20917,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('StrToDouble requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'StrToDouble', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeDouble;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20880,7 +20974,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('StrToInt requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'StrToInt', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20913,7 +21008,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('StrToInt64 requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'StrToInt64', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
@@ -20950,7 +21046,8 @@ begin
   begin
     if AExpr.Args.Count < 1 then
       SemanticError('Format requires at least one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'Format', 'First', AExpr.Line,
+      AExpr.Col);
     { When the second arg is an array literal (Pascal 'array of const' notation),
       analyse each element individually — types need not be homogeneous. }
     if (AExpr.Args.Count = 2) and (AExpr.Args.Items[1] is TArrayLiteralExpr) then
@@ -20988,8 +21085,10 @@ begin
   begin
     if AExpr.Args.Count <> 2 then
       SemanticError('OrdAt requires exactly 2 arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'OrdAt', 'First', AExpr.Line,
+      AExpr.Col);
+    Self.AnalyseIntegerArg(AExpr.Args, 1, 'OrdAt', 'Second', AExpr.Line,
+      AExpr.Col);
     Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21031,7 +21130,16 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('UpCase requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    { a character code, or a string whose first character is taken (the
+      backends reduce it with _OrdAt) }
+    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
+    if (ArgType = nil) or
+       not (ArgType.IsString() or (ArgType.IsArrayIndex() and
+         not (ArgType.Kind in [tyBoolean, tyEnum]))) then
+      SemanticError(
+        Format('The argument of ''UpCase'' must be a string or a character ' +
+          'code, not ''%s''', [TypeNameOrNil(ArgType)]),
+        AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21041,8 +21149,10 @@ begin
   begin
     if AExpr.Args.Count <> 2 then
       SemanticError(AExpr.Name + ' requires exactly 2 arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, AExpr.Name, 'First',
+      AExpr.Line, AExpr.Col);
+    Self.AnalyseStringArg(AExpr.Args, 1, AExpr.Name, 'Second',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21082,8 +21192,10 @@ begin
   begin
     if AExpr.Args.Count <> 2 then
       SemanticError('GetTempFileName requires exactly 2 arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'GetTempFileName', 'First',
+      AExpr.Line, AExpr.Col);
+    Self.AnalyseStringArg(AExpr.Args, 1, 'GetTempFileName', 'Second',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21105,7 +21217,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('ReadFile requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'ReadFile', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21117,7 +21230,8 @@ begin
     if AExpr.Args.Count <> 1 then
       SemanticError(Format('''%s'' requires exactly 1 argument', [AExpr.Name]),
                     AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, AExpr.Name, 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeBoolean;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21127,7 +21241,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('FileAge requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'FileAge', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21137,7 +21252,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('ForceDirectories requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'ForceDirectories', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeBoolean;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21150,7 +21266,8 @@ begin
     if AExpr.Args.Count <> 1 then
       SemanticError('''ListDir'' requires exactly 1 argument',
                     AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'ListDir', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21163,7 +21280,8 @@ begin
     if AExpr.Args.Count <> 1 then
       SemanticError(Format('''%s'' requires exactly 1 argument', [AExpr.Name]),
                     AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, AExpr.Name, 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21173,7 +21291,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('Exec requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'Exec', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21184,8 +21303,10 @@ begin
   begin
     if AExpr.Args.Count <> 2 then
       SemanticError('ChangeFileExt requires exactly 2 arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'ChangeFileExt', 'First',
+      AExpr.Line, AExpr.Col);
+    Self.AnalyseStringArg(AExpr.Args, 1, 'ChangeFileExt', 'Second',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21201,7 +21322,8 @@ begin
     if AExpr.Args.Count <> 1 then
       SemanticError(Format('''%s'' requires exactly 1 argument', [AExpr.Name]),
                     AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, AExpr.Name, 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21211,8 +21333,10 @@ begin
   begin
     if AExpr.Args.Count <> 2 then
       SemanticError('RenameFile requires exactly 2 arguments', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'RenameFile', 'First',
+      AExpr.Line, AExpr.Col);
+    Self.AnalyseStringArg(AExpr.Args, 1, 'RenameFile', 'Second',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeBoolean;
     AExpr.ResolvedType := Result;
     Exit;
@@ -21222,7 +21346,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('SetCurrentDir requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseStringArg(AExpr.Args, 0, 'SetCurrentDir', 'The',
+      AExpr.Line, AExpr.Col);
     Result := FTable.TypeBoolean;
     AExpr.ResolvedType := Result;
     Exit;
