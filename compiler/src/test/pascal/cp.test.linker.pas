@@ -59,6 +59,12 @@ type
     procedure TestSym_TwoGlobalsDuplicate_FirstWins;
     procedure TestSym_StrongUndefined_Raises;
     procedure TestSym_WeakUndefinedResolvesToZero;
+    { a WEAK data symbol defined in two objects: both objects' references
+      resolve to the one copy the symbol table chose.  Each object's own
+      references bound to its own copy, so a generic instance's static var
+      (and an RTL unit's weak global) was one variable per object
+      (BUG-20261127-elf-weak-def-local-resolve) }
+    procedure TestSym_WeakDefinedTwice_EveryReferenceReachesOneCopy;
     procedure TestSym_SynthesisedSymbolsDefined;
     { blaise_unwind blocks from every object merge into one run bracketed by
       __start_blaise_unwind / __stop_blaise_unwind, in the writable load, with
@@ -886,6 +892,54 @@ begin
     '_start', Bytes);
   Lk.Free();
   AssertTrue('first-wins duplicate linking must succeed', True);
+end;
+
+function LeaqTarget(ATextSec: TMergedSection; ATextBase, AInsn: Int64): Int64;
+var
+  Off: Int;
+  Disp: Int;
+begin
+  { leaq sym(%rip), %rax = 48 8D 05 disp32: the target is the end of the
+    7-byte instruction plus the signed displacement }
+  Off := Int32(AInsn - ATextBase) + 3;
+  Disp := (Ord(ATextSec.Data[Off]) and $FF)
+       or ((Ord(ATextSec.Data[Off + 1]) and $FF) shl 8)
+       or ((Ord(ATextSec.Data[Off + 2]) and $FF) shl 16)
+       or ((Ord(ATextSec.Data[Off + 3]) and $FF) shl 24);
+  Result := AInsn + 7 + Int32(Disp);
+end;
+
+procedure TLinkerTests.TestSym_WeakDefinedTwice_EveryReferenceReachesOneCopy;
+var
+  Lk: TLinker;
+  Bytes: string;
+  TextSec: TMergedSection;
+  Base, Slot: Int64;
+begin
+  Lk := LinkObjs(
+    ['.text' + LineEnding + '.globl _start' + LineEnding + '_start:' + LineEnding +
+     'leaq slot(%rip), %rax' + LineEnding + 'ret' + LineEnding +
+     '.data' + LineEnding + '.weak slot' + LineEnding + 'slot:' + LineEnding +
+     '.quad 1' + LineEnding,
+     '.text' + LineEnding + '.globl getslot' + LineEnding + 'getslot:' + LineEnding +
+     'leaq slot(%rip), %rax' + LineEnding + 'ret' + LineEnding +
+     '.data' + LineEnding + '.weak slot' + LineEnding + 'slot:' + LineEnding +
+     '.quad 2' + LineEnding],
+    '_start', Bytes);
+  try
+    TextSec := Lk.FindMergedText();
+    AssertTrue('.text present', TextSec <> nil);
+    { _start is the first thing in .text }
+    Base := Lk.AddrOfSymbol('_start');
+    Slot := Lk.AddrOfSymbol('slot');
+    AssertTrue('slot resolved', Slot > 0);
+    AssertEquals('object 0 reaches the chosen copy', Slot,
+      LeaqTarget(TextSec, Base, Lk.AddrOfSymbol('_start')));
+    AssertEquals('object 1 reaches the same copy', Slot,
+      LeaqTarget(TextSec, Base, Lk.AddrOfSymbol('getslot')));
+  finally
+    Lk.Free();
+  end;
 end;
 
 procedure TLinkerTests.TestSym_StrongUndefined_Raises;

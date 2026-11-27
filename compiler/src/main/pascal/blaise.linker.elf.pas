@@ -1972,11 +1972,15 @@ begin
     that are defined in multiple objects, use the canonical address from
     the global symbol table so every reference resolves to the same copy.
     BuildSymbols uses first-definition-wins for duplicate STB_GLOBAL
-    symbols, so the global table holds the single canonical address. }
+    symbols, so the global table holds the single canonical address.  A
+    WEAK definition too: several objects carry one (a generic instance's
+    static var, an RTL unit's global), and every object must reach the copy
+    the table chose -- resolving it through the object's own section gave
+    each object its own variable. }
   if (Sym.Shndx <> SHN_UNDEF) and (Sym.Shndx <> SHN_ABS)
      and (Sym.Shndx <> SHN_COMMON) then
   begin
-    if Sym.Bind = STB_GLOBAL then
+    if (Sym.Bind = STB_GLOBAL) or (Sym.Bind = STB_WEAK) then
     begin
       G := Self.FindSymbol(Sym.Name);
       if (G <> nil) and G.Defined then
