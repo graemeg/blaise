@@ -68,7 +68,8 @@ uses
   IOProcess.Tests,
   IOWatch.Tests,
   ClassicPascalTypes.Tests,
-  SysUtils.Tests;
+  SysUtils.Tests,
+  Math.Tests;
 
 implementation
 

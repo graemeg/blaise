@@ -5734,6 +5734,78 @@ The float-valued integral part, when it is wanted, is `X - Frac(X)`.
 `DegToRad` and `RadToDeg` join `Frac` in the `Math` unit, with the same
 `Float32`/`Float64` overloads.
 
+== Random Numbers
+
+=== Decision
+
+The `Math` unit provides random numbers through one overloaded function
+and one record type, replacing FPC and Delphi's `Random`, `Randomize`,
+`RandSeed`, `RandomRange`, `RandG` and `RandomFrom`:
+
+[source,pascal]
+----
+uses Math;
+
+F := Random();          { Float64 in [0, 1) }
+I := Random(10);        { 0..9 }
+D := Random(1, 6);      { 1..6, both inclusive: a die roll }
+
+R := TRandom.Create(LevelSeed);   { a reproducible stream }
+X := R.Next(0, MapWidth - 1);
+G := R.Gaussian(100.0, 15.0);
+----
+
+* *No `Randomize`.*  The global generator seeds itself from the operating
+  system (`SecureRandomBytes`) on first use.  Turbo Pascal's generator
+  started from a fixed seed, so a program that forgot `Randomize` drew the
+  same "random" numbers on every run; Java's `Math.random()`, Python and
+  Go 1.20+ all seed automatically.
+* *Seeding belongs to a `TRandom`, not to the global functions.*
+  `TRandom.Create(Seed)` repeats its sequence exactly, which is what
+  procedural generation, simulations and tests need.  The global
+  functions cannot be seeded: any library that also calls `Random()`
+  would shift the caller's sequence, which is the usual way a "seeded"
+  global run stops being reproducible.
+* *An unseeded `TRandom` reports its seed.*  `TRandom.Create()` seeds from
+  the operating system and records the seed in `R.Seed`, so a game can
+  generate a fresh level, save or show its seed, and recreate it later
+  with `TRandom.Create(Seed)`.
+* *The sequence is a contract.*  For a given seed, `TRandom` returns the
+  same numbers on every platform and in every future Blaise version.  The
+  generator uses only 64-bit integer arithmetic, and the float and
+  Gaussian draws go through Blaise's own pure-Pascal math kernels, so
+  nothing depends on the host's libm.  The stdlib tests pin golden values
+  computed with an independent implementation.
+* *`Random(Lo, Hi)` is inclusive*, like a Pascal subrange `Lo..Hi`.
+  Delphi's `RandomRange(AFrom, ATo)` excludes `ATo`, a common off-by-one.
+  `Random(N)` is `0..N-1`, matching Blaise's 0-based conventions.
+* *No modulo bias.*  `Next(N)` rejects the few draws that would favour
+  low values, so every outcome is equally likely for every `N`.
+* *One generator per thread.*  The global state is a `threadvar`, so
+  threads never contend or race on it.  Delphi's global `RandSeed` is
+  shared and unsynchronised.
+* *An empty range raises `ERandomError`* (`Random(0)`, `Random(5, 4)`),
+  rather than returning a value outside the range.
+* *`TRandom` is a record.*  Copying it snapshots the stream, and the copy
+  continues with the same numbers.
+
+The generator is xoshiro256** seeded through SplitMix64: fast, a 256-bit
+state, and good statistical quality.  It is not cryptographically secure;
+`SysUtils.SecureRandomBytes` is the API for keys, tokens and nonces.
+
+=== Alternatives Rejected
+
+* *A separate `Random` unit.*  Its name would clash with the `Random`
+  function, and random numbers are nearly always used alongside other
+  `Math` routines.  Java's `Math.random()` makes the same choice.
+* *Delphi's API surface.*  Six names for what is here one function and
+  one type, with a global seed that is shared between threads and must
+  be remembered.
+* *A seedable global generator.*  Rejected for the reason above;
+  reproducible work holds its own `TRandom`.
+* *The Mersenne Twister.*  A 2.5 KB state and a slower step, for no
+  quality advantage over xoshiro256** in this use.
+
 == `Round` — Banker's Rounding
 
 === Decision

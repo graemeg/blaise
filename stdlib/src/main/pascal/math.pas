@@ -25,12 +25,16 @@ unit Math;
 //   DivMod
 //   InRange, EnsureRange (Integer / Double overloads)
 //   Frac, DegToRad, RadToDeg (Float32 / Float64 overloads)
+//   Random, TRandom (pseudo-random numbers)
 //   Pi constant
 //
 // There is no FMod: the mod operator takes float operands (X mod Y is
 // C fmod), and no float-valued Int: use Trunc, or X - Frac(X).
 
 interface
+
+uses
+  SysUtils;   { Exception }
 
 const
   Pi: Float64 = 3.14159265358979323846;
@@ -101,6 +105,69 @@ function DegToRad(Degrees: Float64): Float64; overload;
 function DegToRad(Degrees: Float32): Float32; overload;
 function RadToDeg(Radians: Float64): Float64; overload;
 function RadToDeg(Radians: Float32): Float32; overload;
+
+{ ------------------------------------------------------------------ }
+{ Random numbers                                                       }
+{ ------------------------------------------------------------------ }
+
+type
+  { Raised for an empty range (Next(0), Next(5, 4)), or when the operating
+    system cannot supply a seed. }
+  ERandomError = class(Exception);
+
+  { A pseudo-random number generator with its own state.
+
+      R := TRandom.Create(LevelSeed);   // the same level every time
+      X := R.Next(1, 6);                 // a die roll: 1..6 inclusive
+
+    TRandom.Create(Seed) repeats its sequence exactly: the same seed gives
+    the same numbers on every platform and in every Blaise version (the
+    algorithm is part of the contract).  TRandom.Create() seeds itself
+    from the operating system and records the seed it chose in Seed, so
+    a run can be logged and replayed.
+
+    TRandom is a record: copying it snapshots the stream, and the copy
+    continues with the same numbers.  It is not thread-safe; give each
+    thread its own.  It is NOT cryptographically secure: use SysUtils's
+    SecureRandomBytes for keys, tokens and nonces.
+
+    The generator is xoshiro256** (Blackman and Vigna), seeded through
+    SplitMix64; Next draws without modulo bias; NextFloat uses the top 53
+    bits; Gaussian is Box-Muller, one pair of draws per value. }
+  TRandom = record
+  private
+    FS0, FS1, FS2, FS3: UInt64;
+    FSeed: UInt64;
+    function Bounded(ABound: UInt64): UInt64;
+  public
+    { a generator that repeats the same sequence for the same seed }
+    static function Create(ASeed: UInt64): TRandom; overload;
+    { a generator seeded from the operating system; Seed reports it }
+    static function Create(): TRandom; overload;
+    { the next 64 random bits }
+    function NextUInt64(): UInt64;
+    { an integer in 0..N-1; N must be positive }
+    function Next(N: Int): Int; overload;
+    { an integer in Lo..Hi, both inclusive; Lo must not exceed Hi }
+    function Next(Lo, Hi: Int): Int; overload;
+    { a Float64 in [0, 1) }
+    function NextFloat(): Float64;
+    { a normally distributed Float64 }
+    function Gaussian(Mean, StdDev: Float64): Float64;
+    { the seed this generator started from }
+    property Seed: UInt64 read FSeed;
+  end;
+
+{ The global generator: auto-seeded from the operating system on first
+  use, one per thread, so there is nothing to call first and no shared
+  state between threads.  For a repeatable sequence use a TRandom. }
+
+{ a Float64 in [0, 1) }
+function Random(): Float64; overload;
+{ an integer in 0..N-1; N must be positive }
+function Random(N: Int): Int; overload;
+{ an integer in Lo..Hi, both inclusive; Lo must not exceed Hi }
+function Random(Lo, Hi: Int): Int; overload;
 
 implementation
 
@@ -254,6 +321,153 @@ end;
 function RadToDeg(Radians: Float32): Float32;
 begin
   Result := RadToDeg(Float64(Radians));
+end;
+
+
+{ ------------------------------------------------------------------ }
+{ TRandom                                                              }
+{ ------------------------------------------------------------------ }
+
+function RotL(X: UInt64; K: Int): UInt64;
+begin
+  Result := (X shl K) or (X shr (64 - K));
+end;
+
+{ SplitMix64 (Steele, Lea and Flood): expands one 64-bit seed into the
+  four state words, so that close seeds give unrelated streams }
+function SplitMix64(var AState: UInt64): UInt64;
+var
+  Z: UInt64;
+begin
+  AState := AState + UInt64($9E3779B97F4A7C15);
+  Z := AState;
+  Z := (Z xor (Z shr 30)) * UInt64($BF58476D1CE4E5B9);
+  Z := (Z xor (Z shr 27)) * UInt64($94D049BB133111EB);
+  Result := Z xor (Z shr 31);
+end;
+
+static function TRandom.Create(ASeed: UInt64): TRandom;
+var
+  SM: UInt64;
+begin
+  SM := ASeed;
+  Result.FS0 := SplitMix64(SM);
+  Result.FS1 := SplitMix64(SM);
+  Result.FS2 := SplitMix64(SM);
+  Result.FS3 := SplitMix64(SM);
+  Result.FSeed := ASeed;
+end;
+
+static function TRandom.Create(): TRandom;
+var
+  S: UInt64;
+begin
+  if not SecureRandomBytes(@S, SizeOf(S)) then
+    raise ERandomError.Create(
+      'TRandom.Create: the operating system could not supply a seed');
+  Result := TRandom.Create(S);
+end;
+
+{ xoshiro256** 1.0 }
+function TRandom.NextUInt64(): UInt64;
+var
+  T: UInt64;
+begin
+  Result := RotL(FS1 * 5, 7) * 9;
+  T := FS1 shl 17;
+  FS2 := FS2 xor FS0;
+  FS3 := FS3 xor FS1;
+  FS1 := FS1 xor FS2;
+  FS0 := FS0 xor FS3;
+  FS2 := FS2 xor T;
+  FS3 := RotL(FS3, 45);
+end;
+
+{ A value in 0..ABound-1 with no modulo bias: draws below 2^64 mod ABound
+  are rejected, so every residue has the same number of draws behind it
+  (the OpenBSD arc4random_uniform method).  ABound > 0. }
+function TRandom.Bounded(ABound: UInt64): UInt64;
+var
+  Threshold, X: UInt64;
+begin
+  Threshold := (UInt64(0) - ABound) mod ABound;
+  repeat
+    X := NextUInt64();
+  until X >= Threshold;
+  Result := X mod ABound;
+end;
+
+function TRandom.Next(N: Int): Int;
+begin
+  if N <= 0 then
+    raise ERandomError.Create(
+      'TRandom.Next: N must be positive, got ' + IntToStr(N));
+  Result := Int(Bounded(UInt64(N)));
+end;
+
+function TRandom.Next(Lo, Hi: Int): Int;
+var
+  Span: UInt64;
+begin
+  if Lo > Hi then
+    raise ERandomError.Create(
+      'TRandom.Next: empty range ' + IntToStr(Lo) + '..' + IntToStr(Hi));
+  { the span wraps to 0 only for the full Int64 range }
+  Span := UInt64(Hi) - UInt64(Lo) + 1;
+  if Span = 0 then
+    Exit(Int(NextUInt64()));
+  Result := Int(UInt64(Lo) + Bounded(Span));
+end;
+
+function TRandom.NextFloat(): Float64;
+begin
+  { the top 53 bits, scaled by 2^-53: every value is a multiple of 2^-53 }
+  Result := Float64(Int64(NextUInt64() shr 11)) * (1.0 / 9007199254740992.0);
+end;
+
+function TRandom.Gaussian(Mean, StdDev: Float64): Float64;
+var
+  U1, U2: Float64;
+begin
+  { U1 in (0, 1], so Ln(U1) is finite }
+  U1 := 1.0 - NextFloat();
+  U2 := NextFloat();
+  Result := Mean + StdDev * Sqrt(-2.0 * Ln(U1)) * Cos(2.0 * Pi * U2);
+end;
+
+{ ------------------------------------------------------------------ }
+{ The global generator                                                 }
+{ ------------------------------------------------------------------ }
+
+threadvar
+  GRandom: TRandom;
+  GRandomSeeded: Boolean;
+
+procedure EnsureSeeded;
+begin
+  if not GRandomSeeded then
+  begin
+    GRandom := TRandom.Create();
+    GRandomSeeded := True;
+  end;
+end;
+
+function Random(): Float64;
+begin
+  EnsureSeeded();
+  Result := GRandom.NextFloat();
+end;
+
+function Random(N: Int): Int;
+begin
+  EnsureSeeded();
+  Result := GRandom.Next(N);
+end;
+
+function Random(Lo, Hi: Int): Int;
+begin
+  EnsureSeeded();
+  Result := GRandom.Next(Lo, Hi);
 end;
 
 end.
