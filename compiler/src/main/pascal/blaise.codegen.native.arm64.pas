@@ -11761,15 +11761,17 @@ begin
       store it back so the slot keeps exactly one owned reference, then storeb
       into it.  Without the COW, writing a literal-backed string would hit
       read-only memory.  Mirrors x86-64 (:16340) and QBE (:17676). }
-    if (AStmt.BaseExpr <> nil) and ExprMayCall(AStmt.BaseExpr) then
+    if (AStmt.BaseExpr <> nil) and ExprMayCall(AStmt.BaseExpr) and
+       (AStmt.BaseExpr is TStringSubscriptExpr) and
+       (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType <> nil) and
+       (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
     begin
       { a string held in an element whose access runs code
         (Strs[K()][J()] := B): left to right, its slot first -- the array
         holding it pinned to the statement end, so the index and the byte
         cannot free the slot -- then the index, the byte, the store }
-      if (AStmt.BaseExpr is TStringSubscriptExpr) and
-         (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType <> nil) and
-         (TStringSubscriptExpr(AStmt.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
+      { (any other base is located last, below: its container cannot be
+        pinned, and the index or the byte could free it) }
       begin
         Self.EmitExprToX0(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr);
         if not ArcExprOwnsRef(TStringSubscriptExpr(AStmt.BaseExpr).StrExpr) then
@@ -11787,9 +11789,7 @@ begin
         EmitIntLiteral('x2', 8);
         Self.Emit(#9'mul x1, x1, x2');
         Self.Emit(#9'add x0, x0, x1');
-      end
-      else
-        EmitLValueAddrToX0(AStmt.BaseExpr);
+      end;
       EmitPushX0();                                { [slot] }
       Self.EmitExprToX0(AStmt.IndexExpr);
       EmitPushX0();                                { [slot][index] }

@@ -20188,8 +20188,8 @@ begin
         Self.EmitInterfaceToFieldSlotsAt(FA.Expr, '%rbx', 0, DAElemType);
         { the owned pair is released by any check up to the store: the
           receiver's (located now) and the element's }
-        if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
-          Self.ArmRngFailReleaseSticky(DAElemType, '(%rsp)');
+        { (whatever the field's kind: the receiver's own checks count) }
+        Self.ArmRngFailReleaseSticky(DAElemType, '(%rsp)');
         { Element address → %rcx, fresh (post-RHS), per receiver shape. }
         if IdxTmp <> '' then
           Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
@@ -20241,7 +20241,7 @@ begin
       Self.Emit(#9'pushq %rax');           { value (or record src addr) }
       { an owned value is released by any check up to the store: the
         receiver's (located after the value) and the element's }
-      if (FA.FieldInfo.TypeDesc.Kind = tyDynArray) and NativeExprOwnsRef(FA.Expr) then
+      if NativeExprOwnsRef(FA.Expr) then
         Self.ArmRngFailReleaseSticky(DAElemType, '(%rsp)');
       if IdxTmp <> '' then
         Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
@@ -21263,15 +21263,17 @@ begin
         pointer (releasing the old one when it copies); store it back so the
         slot keeps exactly one owned reference, then storeb into it.  Without
         the COW, writing a literal-backed string would hit read-only memory. }
-      if (SSA.BaseExpr <> nil) and ExprMayCall(SSA.BaseExpr) then
+      if (SSA.BaseExpr <> nil) and ExprMayCall(SSA.BaseExpr) and
+         (SSA.BaseExpr is TStringSubscriptExpr) and
+         (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType <> nil) and
+         (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
       begin
         { a string held in an element whose access runs code
           (Strs[K()][J()] := B): left to right, its slot first -- the array
           holding it pinned to the statement end, so the index and the byte
           cannot free the slot -- then the index, the byte, the store }
-        if (SSA.BaseExpr is TStringSubscriptExpr) and
-           (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType <> nil) and
-           (TStringSubscriptExpr(SSA.BaseExpr).StrExpr.ResolvedType.Kind = tyDynArray) then
+        { (any other base is located last, below: its container cannot be
+          pinned, and the index or the byte could free it) }
         begin
           Self.EmitExprToEax(TStringSubscriptExpr(SSA.BaseExpr).StrExpr);
           if NativeExprOwnsRef(TStringSubscriptExpr(SSA.BaseExpr).StrExpr) then
@@ -21290,9 +21292,7 @@ begin
           Self.Emit(#9'imulq $8, %rax');
           Self.Emit(#9'popq %rcx');
           Self.Emit(#9'addq %rcx, %rax');
-        end
-        else
-          Self.EmitVarArgAddrToRax(SSA.BaseExpr);
+        end;
         Self.Emit(#9'pushq %rax');                { [slot] }
         Self.EmitExprToEax(SSA.IndexExpr);
         Self.Emit(#9'pushq %rax');                { [slot][index] }

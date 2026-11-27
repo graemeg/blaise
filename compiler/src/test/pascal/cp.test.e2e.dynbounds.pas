@@ -1084,13 +1084,17 @@ begin
     type
       TSS = array[0..1] of String;
       TItem = record SA: array of String; end;
+      TItemS = record SA: TSS; end;
     var
       Strs: array of String; T: String; DA: array of TSS; Items: array of TItem;
-      Caught: Int32;
+      Caught: Int32; DB: array of TSS; ItemsS: array of TItemS;
     function Tr(const AWhat: string; AN: Int32): Int32;
     begin T := T + AWhat; Result := AN end;
     function VS: String; begin SetLength(DA, 1); Result := IntToStr(7) + 's' end;
     function VI: String; begin SetLength(Items, 1); Result := IntToStr(8) + 'i' end;
+    function K1: Int32; begin Result := 1 end;
+    function VFree: Int32; begin DB := nil; Result := 120 end;
+    function VIS: String; begin SetLength(ItemsS, 1); Result := IntToStr(9) + 'j' end;
     begin
       SetLength(Strs, 2); Strs[1] := IntToStr(10) + 'abc';
       Strs[Tr('K', 1)][Tr('J', 0)] := Chr(Tr('V', 120));
@@ -1107,10 +1111,28 @@ begin
       except
         on E: ERangeError do Caught := Caught + 1
       end;
+      { a string inside a static array inside a dynamic one, reached through
+        a call: located last (it cannot be pinned), so a value that frees
+        DB makes the locating check raise -- never a store into freed
+        memory }
+      SetLength(DB, 2); DB[1][1] := IntToStr(10) + 'abc';
+      try
+        DB[K1()][1][0] := Chr(VFree())
+      except
+        on E: ERangeError do Caught := Caught + 1
+      end;
+      { a static-array field of an element of a shrinking dynamic array: the
+        receiver's check raises, the owned value is released }
+      SetLength(ItemsS, 2);
+      try
+        ItemsS[1].SA[0] := VIS()
+      except
+        on E: ERangeError do Caught := Caught + 1
+      end;
       WriteLn('caught ', Caught);
-      Strs := nil; DA := nil; Items := nil
+      Strs := nil; DA := nil; Items := nil; DB := nil; ItemsS := nil
     end.
-    ''', 'KJV x0abc' + #10 + 'caught 2');
+    ''', 'KJV x0abc' + #10 + 'caught 4');
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;
