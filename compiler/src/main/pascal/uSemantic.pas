@@ -1218,6 +1218,8 @@ type
     { IFoo(X): a checked conversion, accepted where X converts to IFoo }
     procedure AnalyseInterfaceCast(AExpr: TFuncCallExpr; AIntf: TTypeDesc);
     procedure UseSiteError(const AMsg: string);
+    procedure RegisterGenericInstanceMembers(const AInstName, ADeclUnit: string;
+      AConsts, AFields: TObjectList; AParamNames, AArgs: TStringList);
     procedure RejectBareIntfMethod(AAccess: TFieldAccessExpr;
       AIntf: TInterfaceTypeDesc);
     { Validates a generic type parameter's constraint against a concrete type
@@ -2616,6 +2618,83 @@ begin
   MD.Body.Stmts.Add(Asn);
   Sink.ProcDecls.Add(MD);
   AUse.ThunkDecl := MD;
+end;
+
+{ The member constants of a generic class or record instance, registered
+  under the instance's name (TCfg<Int64>.Limit) exactly as a plain type's
+  are under its own: folded from a copy of the template's declaration with
+  the type arguments substituted, so the qualified form and a bare name
+  inside the instance's methods both resolve.  A static var is rejected:
+  each instance needs one slot shared by every unit that instantiates it,
+  which the generic path does not provide yet -- the template's field was
+  cloned as a per-object instance field. }
+procedure TSemanticAnalyser.RegisterGenericInstanceMembers(
+  const AInstName, ADeclUnit: string; AConsts, AFields: TObjectList;
+  AParamNames, AArgs: TStringList);
+var
+  I: Int;
+  CD, CDCopy: TConstDecl;
+  FDecl: TFieldDecl;
+  CT: TTypeDesc;
+  Sym: TSymbol;
+  OldOwner: string;
+begin
+  if AFields <> nil then
+    for I := 0 to AFields.Count - 1 do
+    begin
+      FDecl := TFieldDecl(AFields.Items[I]);
+      if FDecl.IsClassVar then
+        SemanticError(
+          Format('static var ''%s'' in generic ''%s'' is not supported yet',
+            [FDecl.Names.Strings[0], AInstName]),
+          FDecl.Line, FDecl.Col);
+    end;
+  if (AConsts = nil) or (AConsts.Count = 0) then Exit;
+  { T bound while the constants fold: const Sz = SizeOf(T) }
+  FTable.PushScope();
+  try
+    BindTypeParams(AParamNames, AArgs);
+    for I := 0 to AConsts.Count - 1 do
+    begin
+      CD := TConstDecl(AConsts.Items[I]);
+      if CD.IsArrayConst then
+        SemanticError(
+          Format('array constant ''%s'' in generic ''%s'' is not supported yet',
+            [CD.Name, AInstName]),
+          CD.Line, CD.Col);
+      CDCopy := CloneConstDecl(CD);
+      try
+        CDCopy.TypeName := SubstTypeParam(CD.TypeName, AParamNames, AArgs);
+        OldOwner := FConstOwner;
+        FConstOwner := AInstName;
+        try
+          CT := Self.FoldScalarConst(CDCopy);
+        finally
+          FConstOwner := OldOwner;
+        end;
+        if CT = nil then
+          CT := FTable.TypeInteger;   { a set member const }
+        Sym := TSymbol.Create(AInstName + '.' + CD.Name, skConstant, CT);
+        Sym.ConstValue := CDCopy.IntVal;
+        Sym.ConstString := CDCopy.StrVal;
+        Sym.Visibility := CD.Visibility;
+        Sym.OwnerTypeName := AInstName;
+        { the template's unit: the instance's method bodies are analysed in
+          its view, which hides another unit's symbols }
+        if (ADeclUnit <> '') and (ADeclUnit <> '<program>') then
+          Sym.OwningUnit := ADeclUnit
+        else
+          Sym.OwningUnit := FCurrentUnitName;
+        { global, not in the scope that binds T }
+        if not FTable.DefineGlobal(Sym) then
+          Sym.Free();
+      finally
+        CDCopy.Free();
+      end;
+    end;
+  finally
+    FTable.PopScope();
+  end;
 end;
 
 { X.M through an interface, M a parameterless METHOD written without ():
@@ -7207,6 +7286,10 @@ begin
       end;
     end;
 
+    Self.RegisterGenericInstanceMembers(ATypeName, Templ.DefUnitName,
+      Templ.ClassDef.ConstDecls,
+      Templ.ClassDef.Fields, Templ.ParamNames, Args);
+
     { Pre-pass: vtable slots (before fields so vptr is counted in offsets).
       Generic-instance symbols are ALWAYS bare (no unit prefix): the same
       instance can be materialised by any compilation process, so its symbols
@@ -7529,6 +7612,9 @@ begin
 
     ClonedRD := TRecordTypeDef.Create();
     ClonedRD.IsPacked := Templ.RecordDef.IsPacked;
+    Self.RegisterGenericInstanceMembers(ATypeName, Templ.DefUnitName,
+      Templ.RecordDef.ConstDecls,
+      Templ.RecordDef.Fields, Templ.ParamNames, Args);
 
     for I := 0 to Templ.RecordDef.Fields.Count - 1 do
     begin

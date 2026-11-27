@@ -26,6 +26,11 @@ type
     { array-of-T fields of a generic class and record hold managed and plain
       elements }
     procedure TestRun_ArrayOfTypeParamFields;
+    { member constants of generic classes and records, qualified on the
+      instance and bare in its methods, for two instances; one template in
+      a unit, read back from the cached interface
+      (BUG-20261030-generic-class-members) }
+    procedure TestRun_GenericTypeMemberConstants;
     { A constraint violation on a template declared in a unit is reported
       at the program's line, in the program -- not at that line "in" the
       template's unit (BUG-20261120-constraint-error-no-location) }
@@ -2129,6 +2134,83 @@ begin
     Pos('at line 7 col ', Output) >= 0);
   AssertTrue('var: no template-unit location: ' + Output,
     Pos('in cshapes', Output) < 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericTypeMemberConstants;
+const
+  USrc = '''
+    unit gconsts;
+    interface
+    type
+      TBuf<T> = class
+      public
+        const Capacity = 8;
+        const Tag = 'buf';
+        const Doubled = Capacity * 2;
+        const Sz = SizeOf(T);
+        const Big = 18446744073709551615;
+        const Label = Tag + '!';
+        function Room: Int;
+      end;
+    implementation
+    function TBuf<T>.Room: Int;
+    begin
+      Result := Capacity - 1 + Doubled
+    end;
+    end.
+    ''';
+  PSrc = '''
+    program P;
+    uses gconsts;
+    type
+      TCfg<T> = class
+      public
+        const Limit = 20;
+        const Big = UInt64(-1);
+        function Twice: Int;
+      end;
+      TPair<T> = record
+        A, B: T;
+        const Width = 2;
+        function Size: Int;
+      end;
+    function TCfg<T>.Twice: Int; begin Result := Limit * 2 end;
+    function TPair<T>.Size: Int; begin Result := Width * 10 end;
+    var
+      C: TCfg<Int>;
+      R: TPair<string>;
+      B: TBuf<Int>;
+      U: UInt64;
+    begin
+      C := TCfg<Int>.Create();
+      WriteLn(TCfg<Int>.Limit, ' ', TCfg<string>.Limit, ' ', C.Twice());
+      U := TCfg<Int>.Big;
+      WriteLn(U);
+      WriteLn(TPair<Int>.Width, ' ', R.Size());
+      B := TBuf<Int>.Create();
+      WriteLn(TBuf<Int>.Capacity, ' ', TBuf<string>.Tag, ' ', B.Room());
+      U := TBuf<Int>.Big;
+      WriteLn(TBuf<Byte>.Sz, ' ', TBuf<Int>.Sz, ' ', TBuf<Int>.Doubled, ' ',
+        U, ' ', TBuf<Int>.Label);
+      C.Free();
+      B.Free()
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+  Ok: Boolean;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { the call fills Output, so it runs before the message is built }
+  Ok := CompileAndRunWithUnitNative('gconsts', USrc, PSrc, Output, RCode);
+  AssertTrue('compile+run: ' + Output, Ok);
+  Ok := CompileAndRunInScratch(PSrc, Output, RCode);
+  AssertTrue('cached compile+run: ' + Output, Ok);
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output',
+    '20 20 40' + LE + '18446744073709551615' + LE + '2 20' + LE +
+    '8 buf 23' + LE + '1 8 16 18446744073709551615 buf!' + LE, Output);
 end;
 
 initialization

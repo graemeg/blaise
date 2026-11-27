@@ -26,6 +26,14 @@ type
     function AnalyseUnit(const ASrc: string): TUnit;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { member constants of a generic class or record: TCfg<Int>.Limit and a
+      bare Limit inside the instance's methods (they were "Unknown class
+      method 'Limit'" and "Undeclared identifier 'Limit'"); a static var
+      in a generic is rejected, not compiled as a per-object field
+      (BUG-20261030-generic-class-members) }
+    procedure TestSemantic_GenericClassConst_QualifiedAndBare;
+    procedure TestSemantic_GenericRecordConst_QualifiedAndBare;
+    procedure TestSemantic_GenericClassStaticVar_Rejected;
     { a block-scoped 'var' statement in a generic method body is cloned with
       the body ("CloneStmt: unhandled statement node TVarDeclStmt", a
       compiler error, at the first instantiation) }
@@ -1645,6 +1653,66 @@ const
     ''';
 begin
   AssertEquals('instantiated at Int and at string', '', SemanticError(Src));
+end;
+
+procedure TGenericsTests.TestSemantic_GenericClassConst_QualifiedAndBare;
+begin
+  AssertEquals('accepted', '', SemanticError('''
+    program P;
+    type
+      TCfg<T> = class
+      public
+        const Limit = 20;
+        const Name = 'cfg';
+        function Twice: Int;
+      end;
+    function TCfg<T>.Twice: Int; begin Result := Limit * 2 end;
+    var C: TCfg<Int>; N: Int; S: string;
+    begin
+      N := TCfg<Int>.Limit + TCfg<string>.Limit;
+      S := TCfg<Int>.Name;
+      C := TCfg<Int>.Create();
+      N := C.Twice()
+    end.
+    '''));
+end;
+
+procedure TGenericsTests.TestSemantic_GenericRecordConst_QualifiedAndBare;
+begin
+  AssertEquals('accepted', '', SemanticError('''
+    program P;
+    type
+      TPair<T> = record
+        A, B: T;
+        const Width = 2;
+        function Size: Int;
+      end;
+    function TPair<T>.Size: Int; begin Result := Width end;
+    var R: TPair<Int>; N: Int;
+    begin
+      N := TPair<Int>.Width + R.Size()
+    end.
+    '''));
+end;
+
+procedure TGenericsTests.TestSemantic_GenericClassStaticVar_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    type
+      TCnt<T> = class
+      public
+        static var Count: Int;
+      end;
+    var C: TCnt<Int>;
+    begin
+      C := TCnt<Int>.Create()
+    end.
+    ''');
+  AssertTrue('static var in a generic rejected, got: ' + Msg,
+    Pos('static var ''Count'' in generic', Msg) >= 0);
 end;
 
 initialization

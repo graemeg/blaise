@@ -54,7 +54,11 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 38; { v38: every serialised expression and statement node
+  IFACE_VERSION = 39; { v39: a generic class or record template carries its
+                          member constants (ConstDecls), so an instance of a
+                          cached template has TBuf<T>.Capacity
+                          (BUG-20261030-generic-class-members).
+                        v38: every serialised expression and statement node
                           carries its source Line and Col after its payload,
                           so a diagnostic inside a generic body instantiated
                           from a cached unit names the real position (it
@@ -588,8 +592,9 @@ end;
   static const members are scalar in the current language surface. }
 function EncodeConstDeclList(AConsts: TObjectList): string;
 var
-  I: Int;
+  I, J: Int;
   C: TConstDecl;
+  Parts: string;
 begin
   Result := EncodeCount(AConsts.Count);
   for I := 0 to AConsts.Count - 1 do
@@ -606,7 +611,26 @@ begin
                 cache) rebuild silently ACCEPTED an access that a cold build
                 correctly rejected — the same class of defect as the field
                 Visibility carried since IFACE v5. }
-              EncodeLpstr(IntToStr(Ord(C.Visibility)));
+              EncodeLpstr(IntToStr(Ord(C.Visibility))) +
+              { The unfolded forms too: a GENERIC template's constants are
+                folded per instance (a type argument may feed them, as in
+                SizeOf(T)), so a cached template must carry the expression,
+                the string parts and the literal's UInt64-ness -- without
+                them const B = A * 3 read back as 0. }
+              EncodeBool(C.IsUInt64) +
+              EncodeBool(C.IsArrayConst) +
+              EncodeExpr(C.IntValueExpr);
+    Parts := '';
+    if C.ConstParts <> nil then
+    begin
+      Parts := EncodeCount(C.ConstParts.Count);
+      for J := 0 to C.ConstParts.Count - 1 do
+        Parts := Parts + EncodeLpstr(C.ConstParts.Strings[J]) +
+          EncodeBool(C.ConstParts.Objects[J] <> nil);
+    end
+    else
+      Parts := EncodeCount(0);
+    Result := Result + EncodeBool(C.ConstParts <> nil) + Parts;
   end;
 end;
 
@@ -891,6 +915,7 @@ begin
       M := TMethodDecl(RecordDef.Methods.Items[J]);
       Result := Result + EncodeBlock(M.Body);
     end;
+    Result := Result + EncodeConstDeclList(RecordDef.ConstDecls);
   end
   else
     { Defensive, mirroring the generic-class writer: a false has-body flag so
@@ -940,6 +965,8 @@ begin
       its properties (e.g. TList<T>.Count, TDictionary<K,V>.Count).  Without
       these the instance has no properties and 'D.Count' fails to resolve. }
     Result := Result + EncodePropertyList(ClassDef.Properties);
+    { Member constants (TBuf<T>.Capacity), resolved per instance. }
+    Result := Result + EncodeConstDeclList(ClassDef.ConstDecls);
   end
   else
     { Defensive: encode "has-body" flag = false so the reader can
@@ -949,7 +976,7 @@ begin
               EncodeLpstr('0') +
               EncodeCount(0) + EncodeCount(0) +
               EncodeCount(0) + EncodeCount(0) +
-              EncodeCount(0);
+              EncodeCount(0) + EncodeCount(0);
 end;
 
 function WriteGenericInterfacePayload(AEntry: TTypeEntry): string;
@@ -2565,7 +2592,10 @@ end;
 procedure ReadConstDeclList(const AText: string; var APos: Int;
                             ATarget: TObjectList);
 var
-  C, I:     Int;
+  C, I, J:  Int;
+  NParts:   Int;
+  HasParts: Boolean;
+  PartStr:  string;
   CD:       TConstDecl;
   IsString: Boolean;
   IsFloat:  Boolean;
@@ -2582,6 +2612,21 @@ begin
     CD.IsString := IsString;
     CD.IsFloat  := IsFloat;
     CD.Visibility := TMemberVisibility(StrToInt(ReadLpstrAt(AText, APos)));
+    CD.IsUInt64 := DecodeBool(AText, APos);
+    CD.IsArrayConst := DecodeBool(AText, APos);
+    CD.IntValueExpr := ReadExpr(AText, APos);
+    HasParts := DecodeBool(AText, APos);
+    NParts := DecodeCount(AText, APos);
+    if HasParts then
+      CD.ConstParts := TStringList.Create();
+    for J := 1 to NParts do
+    begin
+      PartStr := ReadLpstrAt(AText, APos);
+      if DecodeBool(AText, APos) then
+        CD.ConstParts.AddObject(PartStr, TObject(1))
+      else
+        CD.ConstParts.Add(PartStr);
+    end;
     ATarget.Add(CD);
   end;
 end;
@@ -2979,6 +3024,7 @@ begin
 
   { Property declarations (parallel to WriteGenericClassPayload). }
   ReadPropertyList(AText, APos, ClassDef.Properties);
+  ReadConstDeclList(AText, APos, ClassDef.ConstDecls);
 
   AEntry.IsGeneric := True;
   AEntry.Def       := Def;
@@ -3009,6 +3055,7 @@ begin
     ReadFieldList(AText, APos, RecordDef.Fields);
     ReadMethodList(AText, APos, AEntry.Methods);
     ReadTemplateMethodDecls(AText, APos, AEntry, RecordDef.Methods, AUnitName);
+    ReadConstDeclList(AText, APos, RecordDef.ConstDecls);
   end
   else
   begin

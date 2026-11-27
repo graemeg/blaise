@@ -3188,6 +3188,7 @@ begin
   Result.StrVal   := ASrc.StrVal;
   Result.IsString := ASrc.IsString;
   Result.IsFloat  := ASrc.IsFloat;
+  Result.IsUInt64 := ASrc.IsUInt64;
   { Member visibility must survive a clone — dropping it would silently
     turn a strict-private const public in the cloned type. }
   Result.Visibility := ASrc.Visibility;
