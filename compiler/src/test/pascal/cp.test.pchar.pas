@@ -28,6 +28,11 @@ type
     procedure TestSemantic_PChar_CastFromString;
     procedure TestSemantic_PChar_VarKind;
     procedure TestSemantic_String_CastFromPChar;
+    { PChar(P)[I] := V is an assignable subscript, as its read is
+      (BUG-20261113-cast-subscript-lvalue) }
+    procedure TestSemantic_PCharCastSubscript_Assignable;
+    procedure TestSemantic_PCharCastSubscript_FloatIndex_Rejected;
+    procedure TestSemantic_NonArraySubscriptBase_NamesTheType;
 
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
@@ -96,6 +101,54 @@ begin
     AssertEquals('PChar(s) resolves to tyPChar',
       Ord(tyPChar), Ord(Assign.Expr.ResolvedType.Kind));
   finally P.Free(); end;
+end;
+
+procedure TPCharTests.TestSemantic_PCharCastSubscript_Assignable;
+begin
+  AssertEquals('accepted', '', SemanticError(
+    '''
+        program P;
+        var B: array[0..7] of Byte; Q: Pointer; I: Int64;
+        begin
+          Q := @B[0]; I := 1;
+          PChar(Q)[I] := 'x';
+          PChar(Q)[0] := Chr(65)
+        end.
+        '''));
+end;
+
+procedure TPCharTests.TestSemantic_PCharCastSubscript_FloatIndex_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(
+    '''
+        program P;
+        var B: array[0..7] of Byte; Q: Pointer; D: Float64;
+        begin
+          Q := @B[0]; D := 1.0;
+          PChar(Q)[D] := 'x'
+        end.
+        ''');
+  AssertTrue('float index rejected, got: ' + Msg,
+    Pos('PChar subscript index must be an integer', Msg) >= 0);
+end;
+
+procedure TPCharTests.TestSemantic_NonArraySubscriptBase_NamesTheType;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(
+    '''
+        program P;
+        var Q: Pointer;
+        begin
+          Q := nil;
+          Int64(Q)[0] := 1
+        end.
+        ''');
+  AssertTrue('names the base type, not multi-dimensional, got: ' + Msg,
+    (Pos('Int64', Msg) >= 0) and (Pos('Multi-dimensional', Msg) < 0));
 end;
 
 procedure TPCharTests.TestSemantic_PChar_VarKind;

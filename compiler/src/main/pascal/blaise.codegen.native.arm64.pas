@@ -11463,7 +11463,7 @@ begin
   if ((AStmt.BaseExpr <> nil) and
       ((AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray,
-                                             tyString]))) or
+                                             tyString, tyPChar]))) or
      (AStmt.IsVarParam and
       ((AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar, tyDynArray,
@@ -11531,10 +11531,16 @@ begin
       value is a length-1 string literal in the AST — store its byte. }
     Self.EmitExprToX0(AStmt.IndexExpr);
     EmitPushX0();
-    EmitLoadSlot('x0', AStmt.ArrayName);
-    if AStmt.IsVarParam then
-      { var PChar parameter: the slot holds the caller variable's address }
-      Self.Emit(#9'ldr x0, [x0]');
+    if AStmt.BaseExpr <> nil then
+      { PChar(P)[I] := V: the base is a pointer VALUE }
+      Self.EmitExprToX0(AStmt.BaseExpr)
+    else
+    begin
+      EmitLoadSlot('x0', AStmt.ArrayName);
+      if AStmt.IsVarParam then
+        { var PChar parameter: the slot holds the caller variable's address }
+        Self.Emit(#9'ldr x0, [x0]');
+    end;
     EmitPopTo('x1');
     Self.Emit(#9'add x9, x0, x1');
     if (AStmt.ValueExpr is TStringLiteral) then

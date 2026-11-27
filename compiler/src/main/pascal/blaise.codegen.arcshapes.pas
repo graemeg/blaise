@@ -370,6 +370,7 @@ begin
   else if AStmt is TStaticSubscriptAssign then
   begin
     SSubA := TStaticSubscriptAssign(AStmt);
+    CollectAddressTakenExpr(SSubA.BaseExpr, ASet);
     CollectAddressTakenExpr(SSubA.IndexExpr, ASet);
     CollectAddressTakenExpr(SSubA.ValueExpr, ASet);
   end

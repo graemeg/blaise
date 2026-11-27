@@ -26603,10 +26603,27 @@ begin
         Exit;
       end;
     end;
-    if (AStmt.ResolvedArrayType = nil) or
-       not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]) then
+    { PChar(P)[I] := V, F()[I] := V on a PChar result: a byte written at
+      the pointer's value plus I.  The base is a value, not storage, so
+      unlike a string byte write it needs no l-value. }
+    if (AStmt.ResolvedArrayType <> nil) and
+       (AStmt.ResolvedArrayType.Kind = tyPChar) then
+    begin
+      AStmt.ResolvedArrayType := FTable.TypePChar;
+      IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
+      if not IdxType.IsNumeric() or IdxType.IsFloat() then
+        SemanticError('PChar subscript index must be an integer',
+          AStmt.Line, AStmt.Col);
+      Self.AnalyseExprSlot(AStmt.ValueExpr);
+      Exit;
+    end;
+    if AStmt.ResolvedArrayType = nil then
+      SemanticError('Subscript base has no type', AStmt.Line, AStmt.Col);
+    if not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]) then
       SemanticError(
-        'Multi-dimensional subscript base must be a static or dynamic array',
+        Format('Cannot assign through a subscript of a ''%s'' value: the ' +
+          'base must be an array, a string or a PChar',
+          [AStmt.ResolvedArrayType.Name]),
         AStmt.Line, AStmt.Col);
     if AStmt.ResolvedArrayType.Kind = tyDynArray then
       ElemT := TDynArrayTypeDesc(AStmt.ResolvedArrayType).ElementType

@@ -20708,10 +20708,22 @@ begin
       Self.EmitByteRhsToEax(SSA.ValueExpr);
       Self.Emit(#9'pushq %rax');
       Self.EmitExprToEax(SSA.IndexExpr);
-      Self.EmitVarBaseToReg(SSA.ArrayName, False, '%rcx');
-      if SSA.IsVarParam then
-        { var/out param: slot -> caller var -> char pointer. }
-        Self.Emit(#9'movq (%rcx), %rcx');
+      if SSA.BaseExpr <> nil then
+      begin
+        { PChar(P)[I] := V: the base is a pointer VALUE; park the index
+          while it is evaluated }
+        Self.Emit(#9'pushq %rax');
+        Self.EmitExprToEax(SSA.BaseExpr);
+        Self.Emit(#9'movq %rax, %rcx');
+        Self.Emit(#9'popq %rax');
+      end
+      else
+      begin
+        Self.EmitVarBaseToReg(SSA.ArrayName, False, '%rcx');
+        if SSA.IsVarParam then
+          { var/out param: slot -> caller var -> char pointer. }
+          Self.Emit(#9'movq (%rcx), %rcx');
+      end;
       Self.Emit(#9'addq %rax, %rcx');
       Self.Emit(#9'popq %rax');
       Self.Emit(#9'movb %al, (%rcx)');

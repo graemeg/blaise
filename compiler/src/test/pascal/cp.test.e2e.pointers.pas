@@ -41,6 +41,9 @@ type
     procedure TestRun_Pointer_NilCheck;
     procedure TestRun_PCharSubscript_ChrAssignment;
     procedure TestRun_PCharSubscript_HashCharLiteralAssignment;
+    { PChar(P)[I] := V writes through a cast base, as the read does
+      (BUG-20261113-cast-subscript-lvalue) }
+    procedure TestRun_PCharCastSubscript_Assignment;
     procedure TestRun_StaticArrayOfPChar_ElementPreservesAllBits;
     procedure TestRun_DoublePointerWrite_PreservesValue;
     procedure TestRun_SinglePointerWrite_NoAdjacentSlotClobber;
@@ -552,6 +555,46 @@ const
     end.
     ''';
 
+  SrcPCharCastSubscript = '''
+    program P;
+    type
+      TBox = class
+        FBuf: Pointer;
+      end;
+    var
+      B: array[0..7] of Byte;
+      Q: Pointer;
+      I: Int64;
+      Box: TBox;
+    function Buf(): Pointer;
+    begin
+      Result := Q
+    end;
+    procedure Fill(AP: Pointer; N: Int);
+    var
+      K: Int;
+    begin
+      for K := 0 to N - 1 do
+        PChar(AP)[K] := Chr(97 + K);
+      PChar(AP)[N] := #0
+    end;
+    begin
+      Q := @B[0];
+      I := 1;
+      PChar(Q)[I] := 'x';
+      PChar(Buf())[I + 1] := Chr(121);
+      PChar(@B[0])[3] := #90;
+      WriteLn(B[1], ' ', B[2], ' ', B[3]);
+      Box := TBox.Create();
+      Box.FBuf := Q;
+      PChar(Box.FBuf)[0] := 'Q';
+      WriteLn(Chr(B[0]));
+      Fill(Q, 5);
+      WriteLn(string(PChar(Q)));
+      Box.Free()
+    end.
+    ''';
+
   SrcDoublePtrWriteE2E = '''
     program P;
     var
@@ -777,6 +820,16 @@ begin
   AssertTrue('compile+run', CompileAndRun(SrcPCharSubscriptHashChar, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('ABCD', 'ABCD' + LE, Output);
+end;
+
+procedure TE2EPointersTests.TestRun_PCharCastSubscript_Assignment;
+var Output: string; RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRun(SrcPCharCastSubscript, Output, RCode));
+  AssertEquals('exit code 0', 0, RCode);
+  AssertEquals('bytes written through PChar casts',
+    '120 121 90' + LE + 'Q' + LE + 'abcde' + LE, Output);
 end;
 
 procedure TE2EPointersTests.TestRun_StaticArrayOfPChar_ElementPreservesAllBits;
