@@ -44,6 +44,12 @@ type
     { PChar(P)[I] := V writes through a cast base, as the read does
       (BUG-20261113-cast-subscript-lvalue) }
     procedure TestRun_PCharCastSubscript_Assignment;
+    { another unit's IMPLEMENTATION-private PByte = ^Byte must not hide the
+      built-in PByte from a unit that casts with it: PByte(ABuf) was an
+      arm64 "call 'PByte' with no lowering" internal error
+      (BUG-20261103-undeclared-pointer-cast-internal-error); both uses
+      orders }
+    procedure TestRun_ImplPrivatePointerAlias_DoesNotHideBuiltin;
     procedure TestRun_StaticArrayOfPChar_ElementPreservesAllBits;
     procedure TestRun_DoublePointerWrite_PreservesValue;
     procedure TestRun_SinglePointerWrite_NoAdjacentSlotClobber;
@@ -1406,6 +1412,67 @@ begin
     '123' + LE + 'axb' + LE + 'm0m1' + LE + 'm0' + LE + 'dropped' + LE +
     'gone k0' + LE + 'gone k1' + LE + 'replaced' + LE + 'gone n' + LE +
     'end' + LE, 0);
+end;
+
+procedure TE2EPointersTests.TestRun_ImplPrivatePointerAlias_DoesNotHideBuiltin;
+const
+  U1 = '''
+    unit rother;
+    interface
+    function Peek(P: Pointer): Int;
+    implementation
+    type
+      PByte = ^Byte;
+    function Peek(P: Pointer): Int;
+    begin
+      Result := PByte(P)^
+    end;
+    end.
+    ''';
+  U2 = '''
+    unit ru;
+    interface
+    function FirstByte(ABuf: Pointer): Int;
+    implementation
+    function FirstByte(ABuf: Pointer): Int;
+    var
+      P: PByte;
+    begin
+      P := PByte(ABuf);
+      Result := P^
+    end;
+    end.
+    ''';
+  PSrc1 = '''
+    program rp;
+    uses rother, ru;
+    var B: array[0..1] of Byte;
+    begin
+      B[0] := 42; B[1] := 7;
+      WriteLn(Peek(@B[1]), ' ', FirstByte(@B[0]))
+    end.
+    ''';
+  PSrc2 = '''
+    program rp;
+    uses ru, rother;
+    var B: array[0..1] of Byte;
+    begin
+      B[0] := 42; B[1] := 7;
+      WriteLn(Peek(@B[1]), ' ', FirstByte(@B[0]))
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+  Ok: Boolean;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Ok := CompileAndRunWithUnits(U1, U2, PSrc1, Output, RCode);
+  AssertTrue('rother first: ' + Output, Ok);
+  AssertEquals('rother first', '7 42' + LE, Output);
+  Ok := CompileAndRunWithUnits(U1, U2, PSrc2, Output, RCode);
+  AssertTrue('ru first: ' + Output, Ok);
+  AssertEquals('ru first', '7 42' + LE, Output);
 end;
 
 initialization
