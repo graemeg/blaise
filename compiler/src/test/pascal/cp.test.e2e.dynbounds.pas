@@ -64,6 +64,11 @@ type
     { an owned value whose evaluation shrinks the array so the check after
       it raises is released, not leaked }
     procedure TestDebug_ShrinkingValue_NoLeak;
+    { an index or value that drops what the statement is reading or writing
+      through: a string reassigned by the index, a receiver object freed by
+      the value -- read or written safely, nothing leaked; left to right
+      for interface, float and Inc element forms }
+    procedure TestDebug_IndexOrValueDropsTheBase_NoLeak;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -916,6 +921,51 @@ begin
       SA := nil; BA := nil; DA := nil; XA := nil; CA := nil; RA := nil; H.SA := nil
     end.
     ''', 'caught 7');
+end;
+
+procedure TE2EDynBoundsTests.TestDebug_IndexOrValueDropsTheBase_NoLeak;
+begin
+  AssertLeakFreeOnAll('''
+    program DropsBase;
+    uses SysUtils;
+    type
+      TIntArr = array of Int32;
+      THold = class Arr: TIntArr; end;
+      IFoo = interface function Get: Int32; end;
+      TFoo = class(TObject, IFoo) N: Int32; function Get: Int32; end;
+    var
+      S: String; Items: array of THold; T: String; XA: array of IFoo;
+      FA: array of Float64; G: TIntArr; Q: IFoo; D: Float64; F0: TFoo;
+    function TFoo.Get: Int32; begin Result := N end;
+    function Tr(const AWhat: string; AN: Int32): Int32;
+    begin T := T + AWhat; Result := AN end;
+    function Reassign: Int32; begin S := IntToStr(42) + 'xyz'; Result := 1 end;
+    function GetS: String; begin Result := S end;
+    function K: Int32; begin Result := 0 end;
+    function Drop: Int32; begin Items[0] := nil; Result := 7 end;
+    function FX: array of IFoo; begin T := T + 'X'; Result := XA end;
+    function FD: array of Float64; begin T := T + 'D'; Result := FA end;
+    function F: TIntArr; begin T := T + 'F'; Result := G end;
+    begin
+      { a named string is read where it is used, after the index ('2' of
+        '42xyz'); a string from a call is evaluated first ('0' of '10abc') }
+      S := IntToStr(10) + 'abc';
+      WriteLn(Ord(S[Reassign()]));
+      S := IntToStr(10) + 'abc';
+      WriteLn(Ord(GetS()[Reassign()]));
+      SetLength(Items, 1); Items[0] := THold.Create(); SetLength(Items[0].Arr, 1);
+      Items[K()].Arr[0] := Drop();
+      WriteLn(Items[0] = nil);
+      SetLength(XA, 1); F0 := TFoo.Create(); F0.N := 3; XA[0] := F0;
+      SetLength(FA, 1); FA[0] := 2.5; SetLength(G, 1);
+      Q := FX()[Tr('i', 0)];
+      D := FD()[Tr('i', 0)];
+      Inc(F()[Tr('i', 0)]);
+      WriteLn(T, ' ', Q.Get(), ' ', Trunc(D * 2), ' ', G[0]);
+      Q := nil; XA := nil; Items := nil;
+      WriteLn('done')
+    end.
+    ''', '50' + #10 + '48' + #10 + 'True' + #10 + 'XiDiFi 3 5 1' + #10 + 'done');
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;

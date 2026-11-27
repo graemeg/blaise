@@ -5189,8 +5189,16 @@ begin
      not AStmt.FieldInfo.TypeDesc.IsString() then
   begin
     Self.EmitExprToX0(AStmt.ObjExpr);
-    if ArcExprOwnsRef(AStmt.ObjExpr) then
-      DeferNativeClassRelease();
+    { held to the end of the statement: an owned receiver's release is
+      deferred, a borrowed one is retained (the value or the index could
+      drop the last other reference to it) }
+    if not ArcExprOwnsRef(AStmt.ObjExpr) then
+    begin
+      EmitPushX0();
+      EmitCallSym('_ClassAddRef');
+      EmitPopTo('x0');
+    end;
+    DeferNativeClassRelease();
     FFieldRecvSlot := '__frecv_' + IntToStr(FJArgN);
     FJArgN := FJArgN + 1;
     if not FFrame.ContainsKey(FFieldRecvSlot) then
@@ -5489,7 +5497,16 @@ end;
 
 procedure TArm64Backend.EmitFieldElemAddrToX0(AStmt: TFieldAssignment;
   AElem: TTypeDesc; AIsDyn: Boolean; ALow: Int);
+var
+  ArmSet, ArmRec: Boolean;
+  ArmElem: TTypeDesc;
 begin
+  { the caller's release arming, taken and cleared before anything below
+    can emit a check of its own }
+  ArmSet := FFieldArmSet;
+  ArmRec := FFieldArmRec;
+  ArmElem := FFieldArmElem;
+  FFieldArmSet := False;
   { x0 := address of Rec.Field[Index].  Evaluated AFTER the value expression
     (its caller parks the value), so a value that reallocates the dyn-array
     field cannot leave a stale data pointer.  Index → scaled offset, parked;
@@ -5513,12 +5530,11 @@ begin
   begin
     { the caller's owned value, parked at [sp], is released if this check
       raises (the value may have shrunk the array) }
-    if FFieldArmSet then
-      ArmRngFailRelease(FFieldArmElem, 0, FFieldArmRec);
+    if ArmSet then
+      ArmRngFailRelease(ArmElem, 0, ArmRec);
     EmitDynIndexCheck('x0', 'x1');
     DisarmRngFailRelease();
   end;
-  FFieldArmSet := False;
   EmitIntLiteral('x2', AElem.RawSize());
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');               { x0 = element address }
@@ -7713,12 +7729,40 @@ begin
   begin
     { S[I] / P[I]: byte at data-pointer+index (Blaise strings are
       0-based and the value IS the data pointer) }
-    { left to right: the string, then the index }
-    Self.EmitExprToX0(TStringSubscriptExpr(AExpr).StrExpr);
-    EmitPushX0();
-    Self.EmitExprToX0(TStringSubscriptExpr(AExpr).IndexExpr);
-    Self.Emit(#9'mov x1, x0');
-    EmitPopTo('x0');
+    { left to right: the string, then the index.  An index that may run
+      code could reassign the string: a named string is then loaded after
+      it (loading a variable has no side effect), a borrowed string from
+      an expression is pinned while it runs }
+    if (TStringSubscriptExpr(AExpr).StrExpr is TIdentExpr) and
+       ExprMayCall(TStringSubscriptExpr(AExpr).IndexExpr) and
+       not ExprMayCall(TStringSubscriptExpr(AExpr).StrExpr) then
+    begin
+      Self.EmitExprToX0(TStringSubscriptExpr(AExpr).IndexExpr);
+      EmitPushX0();
+      Self.EmitExprToX0(TStringSubscriptExpr(AExpr).StrExpr);
+      EmitPopTo('x1');
+    end
+    else
+    begin
+      Self.EmitExprToX0(TStringSubscriptExpr(AExpr).StrExpr);
+      { a string returned by a call (GetS()[I]) is released at the statement
+        end, after the byte is read (it leaked) }
+      if (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyString) and
+         ArcExprOwnsRef(TStringSubscriptExpr(AExpr).StrExpr) then
+        DeferNativeRelease('_StringRelease')
+      else if (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyString) and
+         ExprMayCall(TStringSubscriptExpr(AExpr).IndexExpr) then
+      begin
+        EmitPushX0();
+        EmitCallSym('_StringAddRef');
+        EmitPopTo('x0');
+        DeferNativeRelease('_StringRelease');
+      end;
+      EmitPushX0();
+      Self.EmitExprToX0(TStringSubscriptExpr(AExpr).IndexExpr);
+      Self.Emit(#9'mov x1, x0');
+      EmitPopTo('x0');
+    end;
     Self.Emit(#9'add x0, x0, x1');
     Self.Emit(#9'ldrb w0, [x0]');
     Exit;

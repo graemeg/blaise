@@ -8431,7 +8431,8 @@ end;
 
 procedure TX86_64Backend.EmitDynBaseThenIndex(ABase, AIndex: TASTExpr);
 begin
-  if (ABase is TIdentExpr) and ExprMayCall(AIndex) then
+  if (ABase is TIdentExpr) and ExprMayCall(AIndex) and
+     not ExprMayCall(ABase) then
   begin
     Self.EmitExprToEax(AIndex);
     Self.Emit(#9'pushq %rax');
@@ -11487,11 +11488,38 @@ begin
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyString) then
   begin
     SAE := TStringSubscriptExpr(AExpr);
-    Self.EmitExprToEax(SAE.StrExpr);
-    Self.Emit(#9'pushq %rax');
-    Self.EmitInt64ArgToRax(SAE.IndexExpr);
-    Self.Emit(#9'movq %rax, %rsi');
-    Self.Emit(#9'popq %rdi');
+    { left to right, as for arrays: an index that may run code could
+      reassign the string -- a named string is loaded after it, a borrowed
+      string from an expression is pinned while it runs }
+    if (SAE.StrExpr is TIdentExpr) and ExprMayCall(SAE.IndexExpr) and
+       not ExprMayCall(SAE.StrExpr) then
+    begin
+      Self.EmitInt64ArgToRax(SAE.IndexExpr);
+      Self.Emit(#9'pushq %rax');
+      Self.EmitExprToEax(SAE.StrExpr);
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'popq %rsi');
+    end
+    else
+    begin
+      Self.EmitExprToEax(SAE.StrExpr);
+      { a string returned by a call (GetS()[I]) is released at the
+        statement end, after the byte is read }
+      if NativeExprOwnsRef(SAE.StrExpr) then
+        Self.DeferNativeRelease('_StringRelease')
+      else if ExprMayCall(SAE.IndexExpr) then
+      begin
+        Self.Emit(#9'pushq %rax');
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _StringAddRef');
+        Self.Emit(#9'popq %rax');
+        Self.DeferNativeRelease('_StringRelease');
+      end;
+      Self.Emit(#9'pushq %rax');
+      Self.EmitInt64ArgToRax(SAE.IndexExpr);
+      Self.Emit(#9'movq %rax, %rsi');
+      Self.Emit(#9'popq %rdi');
+    end;
     Self.Emit(#9'callq _OrdAt');
     Self.Emit(#9'movslq %eax, %rax');
     Exit;
@@ -19977,6 +20005,17 @@ begin
          (FA.ObjExpr.ResolvedType.Kind = tyClass) then
       begin
         Self.EmitFieldRecvToEax(FA);
+        { held to the end of the statement: EmitFieldRecvToEax defers an
+          owned receiver's release; a borrowed one is retained (the value
+          or the index could drop the last other reference to it) }
+        if not NativeExprOwnsRef(FA.ObjExpr) then
+        begin
+          Self.Emit(#9'pushq %rax');
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _ClassAddRef');
+          Self.Emit(#9'popq %rax');
+          Self.DeferNativeClassRelease();
+        end;
         FFieldRecvSlot := Self.NewScratchOperand(8);
         Self.Emit(Format(#9'movq %%rax, %s', [FFieldRecvSlot]));
         FFieldRecvFA := FA;
