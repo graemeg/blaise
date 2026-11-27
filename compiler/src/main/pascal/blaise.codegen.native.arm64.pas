@@ -845,6 +845,12 @@ type
     { A failed `as`: the RTL's _Raise_InvalidCast, which raises EInvalidCast
       through the hook SysUtils installs, else aborts. }
     procedure EmitRaiseInvalidCast;
+    { The dynamic-array index check: ABase holds the data pointer (nil for
+      an empty array) and AIdx the unscaled index.  Falls through when
+      0 <= index < Length; otherwise calls the RTL's _Raise_RangeError,
+      which never returns.  Both registers are preserved; x16 is
+      clobbered. }
+    procedure EmitDynIndexCheck(const ABase, AIdx: string);
     procedure EmitNonOwningFieldStore(AFld: TFieldInfo; const ABase: string);
     { ABaseInfo describes the CONTAINING field for a nested Self path
       (Self.FIntermediate.SubField) — AFld then describes only SubField, whose
@@ -5392,6 +5398,8 @@ begin
   if AIsDyn then
     Self.Emit(#9'ldr x0, [x0]');               { dyn-array: slot holds data ptr }
   EmitPopTo('x1');                             { index }
+  if AIsDyn then
+    EmitDynIndexCheck('x0', 'x1');
   EmitIntLiteral('x2', AElem.RawSize());
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');               { x0 = element address }
@@ -11681,6 +11689,8 @@ begin
   else
     EmitSlotAddr('x0', AStmt.ArrayName);
   EmitPopTo('x1');
+  if AStmt.ResolvedArrayType.Kind = tyDynArray then
+    EmitDynIndexCheck('x0', 'x1');
   EmitIntLiteral('x2', Elem.RawSize());
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');
@@ -14139,6 +14149,8 @@ begin
     if ArcExprOwnsRef(ASub.StrExpr) then
       DeferNativeRelease('_DynArrayRelease');
     EmitPopTo('x1');
+    if ASub.StrExpr.ResolvedType.Kind = tyDynArray then
+      EmitDynIndexCheck('x0', 'x1');
     EmitIntLiteral('x2', ESz);
     Self.Emit(#9'mul x1, x1, x2');
     Self.Emit(#9'add x0, x0, x1');
@@ -14176,6 +14188,8 @@ begin
       Self.Emit(#9'ldr x0, [x0]');
   end;
   EmitPopTo('x1');
+  if ASub.StrExpr.ResolvedType.Kind = tyDynArray then
+    EmitDynIndexCheck('x0', 'x1');
   EmitIntLiteral('x2', ESz);
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');
@@ -14264,9 +14278,11 @@ begin
     EmitIntLiteral('x1', LowB);
     Self.Emit(#9'sub x0, x0, x1');
   end;
+  EmitPopTo('x1');                                 { base }
+  if AFAE.FieldInfo.TypeDesc.Kind = tyDynArray then
+    EmitDynIndexCheck('x1', 'x0');
   EmitIntLiteral('x2', ESz);
   Self.Emit(#9'mul x0, x0, x2');
-  EmitPopTo('x1');                                 { base }
   Self.Emit(#9'add x0, x0, x1');
 end;
 
@@ -19601,6 +19617,27 @@ end;
 procedure TArm64Backend.EmitRaiseInvalidCast;
 begin
   EmitCallSym('_Raise_InvalidCast');
+end;
+
+procedure TArm64Backend.EmitDynIndexCheck(const ABase, AIdx: string);
+var
+  FailL, OkL: string;
+begin
+  { One unsigned compare against the Length header (data - 8) rejects a
+    negative index too: it reads as a huge unsigned value.  A nil array has
+    no header and length 0, so every index fails.  The failure call sits
+    inline and is branched over: the RTL routine never returns, so nothing
+    follows it but the trap. }
+  FailL := NewLabel('rngfail');
+  OkL := NewLabel('rngok');
+  Self.Emit(Format(#9'cbz %s, %s', [ABase, FailL]));
+  Self.Emit(Format(#9'ldur x16, [%s, #-8]', [ABase]));
+  Self.Emit(Format(#9'cmp %s, x16', [AIdx]));
+  Self.Emit(Format(#9'b.lo %s', [OkL]));
+  Self.Emit(FailL + ':');
+  EmitCallSym('_Raise_RangeError');
+  Self.Emit(#9'brk #1');
+  Self.Emit(OkL + ':');
 end;
 
 { ClassCreate(Cls, args...): construction from a metaclass VALUE.  The

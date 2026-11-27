@@ -221,6 +221,7 @@ uses
   cp.test.e2e.properties,
   cp.test.e2e.varparams,
   cp.test.e2e.dynarray,
+  cp.test.e2e.dynbounds,
   cp.test.e2e.external,
   cp.test.e2e.atomics,
   cp.test.e2e.genericintfs,

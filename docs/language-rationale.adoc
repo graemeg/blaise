@@ -10047,8 +10047,10 @@ against. Both inclusive bounds are accepted; only indices strictly outside
 
 === Rationale
 
-Blaise has no runtime range checking and no `{$R+}` equivalent, so an
-out-of-range index is not caught anywhere. The consequences were silent and
+Static-array indices have no runtime range check and Blaise has no `{$R+}`
+equivalent, so a constant out-of-range index was caught nowhere. (Dynamic-array
+indices are checked at run time; see <<dynarray-bounds-checked>>.) The
+consequences were silent and
 severe: a positive out-of-range index read or wrote past the array — in the
 reported case `a[99]` on a 5-element array wrote 376 bytes beyond it, leaving
 neighbouring variables intact and the corruption undiscovered — and a negative
@@ -10068,9 +10070,9 @@ their indices dynamically.
 
 === Deliberate boundaries
 
-* *Dynamic arrays are not checked.* `SetLength(d, 3); d[50] := 9` still
-  compiles. The length is a runtime property; catching this needs runtime range
-  checking, which is a separate decision.
+* *Dynamic arrays are not checked at compile time.* `SetLength(d, 3); d[50] := 9`
+  still compiles. The length is a runtime property, so the access is checked at
+  run time instead and raises `ERangeError` (see <<dynarray-bounds-checked>>).
 * *Variable indices are not checked.* No dataflow or value-range analysis is
   attempted.
 * *`Low`/`High` are not folded into the index.* `a[High(a) + 1]` is not
@@ -10096,12 +10098,11 @@ constant", and this is where it is recorded.
 
 === Alternatives rejected
 
-*Runtime range checking for every index.* This is the complete fix and remains
-desirable, but it is a much larger change — it needs codegen work on every
-backend, a decision on the error-reporting mechanism, and a switch to disable
-it in hot code. Blocking the constant case on that work would leave a
-segfaulting program compiling cleanly in the meantime. The two are
-complementary, not competing.
+*Runtime range checking for every index.* This is the complete fix. It has
+since been adopted for dynamic arrays (<<dynarray-bounds-checked>>); a
+static-array index that is not constant remains unchecked. Blocking the
+constant case on that work would have left a segfaulting program compiling
+cleanly in the meantime. The two are complementary, not competing.
 
 *Warning rather than error.* A constant out-of-range index has no correct
 interpretation: the program cannot be doing what its author intended. Pascal
@@ -10118,6 +10119,98 @@ An enum given explicit ordinals used as an array index type exposed a
 separate, pre-existing defect, since resolved — see
 <<explicit-ordinal-enum-index>>. This range check did not cause it; it
 surfaced it.
+
+[#dynarray-bounds-checked]
+== Dynamic Array Indices Are Always Bounds-Checked
+
+=== Decision
+
+Every element access of a dynamic array (`tyDynArray`) checks its index against
+the array's current length at run time, in every build. An index outside
+`0..High(A)` raises `ERangeError` with the message `Range check error` when
+SysUtils is linked into the program, and is otherwise a fatal runtime error:
+`Runtime error: range check error` on standard error and exit code 201, FPC's
+range-check runtime error number.
+
+[source,pascal]
+----
+var
+  A: array of Int;
+begin
+  SetLength(A, 4);
+  A[3] := 1;     // fine
+  A[4] := 1;     // ERangeError: Range check error
+  A[-1] := 1;    // ERangeError
+end.
+----
+
+The check covers every form an element is reached through: a read, a write,
+the address of an element (`@A[I]`, a `var` argument `F(A[I])`, `Inc(A[I])`),
+a field of a record element (`A[I].F := V`), a dynamic-array field
+(`R.Arr[I]`, a field of `Self`), a `var` dynamic-array parameter, an array
+captured by a nested routine or closure, and each level of a multi-dimensional
+access (`M[I, J]`, `M[I][J]`). A `nil` array has length 0, so every index into
+it fails the check. Indices of every integer kind and of an enumeration are
+checked by value: a negative `Int8`, a `UInt64` above `High(Int64)` and an
+`Int64` that would truncate to an in-range 32-bit value all fail.
+
+The check does not apply to static arrays, strings, `PChar` or open-array
+parameters, and `for ... in` over a dynamic array performs none: the loop
+itself keeps its index within `0..High`.
+
+=== Rationale
+
+A dynamic array's length is a run-time value, so the compile-time check on
+constant static-array indices cannot reach it. Before this rule an
+out-of-range index compiled cleanly and read or wrote whatever memory lay
+beyond the allocation (`BUG-20261027-dynarray-no-bounds-check`): a read
+returned garbage with exit status 0, and a write corrupted the heap with the
+failure surfacing, if at all, far from its cause. A dynamic array is the
+container whose size most often depends on input, so it is where such an
+error is most likely and least visible.
+
+The check is cheap. The data pointer of a dynamic array is preceded by its
+length, so the check is an inline nil test, one load and one unsigned compare;
+an unsigned compare rejects a negative index too, as it reads as a very large
+value. The failure path is a call to the RTL that never returns and is
+branched over on success. Measured on the compiler itself, which indexes
+dynamic arrays throughout and carries several hundred checked sites, a cold
+self-compile took the same time with and without the checks (8.1 s on
+macOS arm64) and the binary grew by 0.25 per cent.
+
+Reporting follows the existing runtime-error hooks (see "Integer division by
+zero"): the generated code calls `_Raise_RangeError` in the RTL whatever the
+unit has in scope, and SysUtils installs the routine that raises
+`ERangeError` from its initialization through `_SetRangeErrorHook`. A unit's
+object therefore never depends on whether the program it is linked into uses
+SysUtils. The hook has a setter of its own, as the convert-error hook does,
+so `_SetRuntimeErrorHooks` keeps its signature.
+
+=== Alternatives rejected
+
+*Off by default behind `{$R+}`, as in Delphi and FPC.* Both compilers support
+range checking, and both leave it off unless the programmer asks. In practice
+release builds run without it, so the class of bug it exists to catch ships.
+Rust and Swift check every index unconditionally and provide unchecked
+access as a separate, explicit operation; given the low cost measured above,
+Blaise follows them.
+
+*Checked only under `--debug`.* A check that disappears in the build that
+meets real input protects the cases least in need of it, and makes a program
+behave differently in debug and release builds: one raises, the other
+silently corrupts memory.
+
+*An opt-in or opt-out compiler flag.* A flag splits the language into two
+dialects with different behaviour for the same source, and a library cannot
+know which one it is compiled under. An unchecked access, if it is ever
+needed for a measured hot loop, belongs in the source where the reader can
+see it, not in a build setting.
+
+*Checking static arrays and strings in the same change.* Both are worthwhile
+and remain open. They are separate decisions: a static array's variable index
+is checked against its declared bounds rather than a header, a string needs
+its own lowering and measurement, and keeping this change to dynamic arrays
+keeps it reviewable.
 
 == Constant Values Stored into a Subrange or Enum Are Range-Checked
 

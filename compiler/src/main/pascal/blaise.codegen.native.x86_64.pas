@@ -426,6 +426,15 @@ type
       through the hook SysUtils installs, else aborts.  Never returns, so the
       stack is realigned for the Pascal raise path. }
     procedure EmitRaiseInvalidCast;
+    { The dynamic-array index check: ABaseReg holds the data pointer (nil for
+      an empty array) and %rax the unscaled index.  Falls through when
+      0 <= index < Length; otherwise calls the RTL's _Raise_RangeError,
+      which never returns.  Every register is preserved. }
+    procedure EmitDynIndexCheck(const ABaseReg: string);
+    { As EmitDynIndexCheck with the data pointer on top of the stack (the
+      shape every element read parks it in); clobbers %rcx, which those
+      readers pop the base into next. }
+    procedure EmitDynIndexCheckTOS;
     { Register a global integer slot of the given type (idempotent; the first
       registration's type wins).  The width and signedness drive both the
       .data directive and every load/store of the slot. }
@@ -2048,6 +2057,34 @@ procedure TX86_64Backend.EmitRaiseInvalidCast;
 begin
   Self.Emit(#9'andq $-16, %rsp');
   Self.Emit(#9'callq _Raise_InvalidCast');
+end;
+
+procedure TX86_64Backend.EmitDynIndexCheck(const ABaseReg: string);
+var
+  FailL, OkL: string;
+begin
+  { One unsigned compare against the Length header (data - 8) rejects a
+    negative index too: it reads as a huge unsigned value.  A nil array has
+    no header and length 0, so every index fails.  The failure call sits
+    inline and is jumped over.  It is aligned as every other call is, by
+    Emit's tracked-depth pad (as the _DivByZero guard's is): an
+    `andq $-16, %rsp` first would be undone by that pad whenever the
+    tracked depth is odd, leaving the call misaligned. }
+  FailL := Self.NewLabel('rngfail');
+  OkL := Self.NewLabel('rngok');
+  Self.Emit(Format(#9'testq %s, %s', [ABaseReg, ABaseReg]));
+  Self.Emit(#9'je ' + FailL);
+  Self.Emit(Format(#9'cmpq -8(%s), %%rax', [ABaseReg]));
+  Self.Emit(#9'jb ' + OkL);
+  Self.Emit(FailL + ':');
+  Self.Emit(#9'callq _Raise_RangeError');
+  Self.Emit(OkL + ':');
+end;
+
+procedure TX86_64Backend.EmitDynIndexCheckTOS;
+begin
+  Self.Emit(#9'movq (%rsp), %rcx');
+  Self.EmitDynIndexCheck('%rcx');
 end;
 
 procedure TX86_64Backend.AddGlobal(const AName: string; AType: TTypeDesc);
@@ -5938,7 +5975,11 @@ begin
     if AFA.FieldInfo.TypeDesc.Kind = tyStaticArray then
       Self.EmitStaticElemScale(TStaticArrayTypeDesc(AFA.FieldInfo.TypeDesc))
     else
+    begin
+      if AFA.FieldInfo.TypeDesc.Kind = tyDynArray then
+        Self.EmitDynIndexCheckTOS();
       Self.Emit(#9'imulq $16, %rax');
+    end;
     { Pop the base through %rcx, not ADstReg: several callers pass %rax as
       ADstReg, and popping the base into %rax would destroy the scaled index
       just computed there ("addq %rax, %rax" then doubled the base). }
@@ -6067,6 +6108,8 @@ begin
   Self.EmitExprToEax(ASub.StrExpr);            { data pointer -> %rax }
   Self.Emit(#9'pushq %rax');
   Self.EmitExprToEax(ASub.IndexExpr);          { index -> %rax }
+  if ASub.StrExpr.ResolvedType.Kind = tyDynArray then
+    Self.EmitDynIndexCheckTOS();
   Self.Emit(#9'imulq $16, %rax');
   Self.Emit(#9'popq %rcx');                    { data pointer }
   Self.Emit(#9'addq %rcx, %rax');
@@ -9114,6 +9157,8 @@ begin
     Self.DeferOwnedDynArrayBase(TStringSubscriptExpr(AExpr).StrExpr);
     Self.Emit(#9'pushq %rax');
     Self.EmitExprToEax(TStringSubscriptExpr(AExpr).IndexExpr);
+    if TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyDynArray then
+      Self.EmitDynIndexCheckTOS();
     Self.Emit(Format(#9'imulq $%d, %%rax', [FloatElem.RawSize()]));
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
@@ -11228,6 +11273,7 @@ begin
     Self.DeferOwnedDynArrayBase(SAE.StrExpr);
     Self.Emit(#9'pushq %rax');
     Self.EmitExprToEax(SAE.IndexExpr);
+    Self.EmitDynIndexCheckTOS();
     Self.Emit(Format(#9'imulq $%d, %%rax',
       [TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.RawSize()]));
     Self.Emit(#9'popq %rcx');
@@ -11652,6 +11698,7 @@ begin
         protection the static-array branch below has always had. }
       Self.Emit(#9'pushq %rcx');
       Self.EmitExprToEax(FAE.PropIndexExpr);
+      Self.EmitDynIndexCheckTOS();
       Self.Emit(Format(#9'imulq $%d, %%rax',
         [TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
       Self.Emit(#9'popq %rcx');
@@ -11997,6 +12044,7 @@ begin
         Self.DeferOwnedDynArrayBase(SAE.StrExpr);
         Self.Emit(#9'pushq %rax');
         Self.EmitExprToEax(SAE.IndexExpr);
+        Self.EmitDynIndexCheckTOS();
         Self.Emit(Format(#9'imulq $%d, %%rax',
           [TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.RawSize()]));
         Self.Emit(#9'popq %rcx');
@@ -12150,6 +12198,7 @@ begin
         Self.Emit(#9'movq (%rcx), %rcx');
         Self.Emit(#9'pushq %rcx');
         Self.EmitExprToEax(FAE.PropIndexExpr);
+        Self.EmitDynIndexCheckTOS();
         Self.Emit(Format(#9'imulq $%d, %%rax',
           [TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
         Self.Emit(#9'popq %rcx');
@@ -13121,6 +13170,8 @@ begin
      (TStaticArrayTypeDesc(AFAE.FieldInfo.TypeDesc).LowBound <> 0) then
     Self.Emit(Format(#9'subq $%d, %%rax',
       [TStaticArrayTypeDesc(AFAE.FieldInfo.TypeDesc).LowBound]));
+  if AFAE.FieldInfo.TypeDesc.Kind = tyDynArray then
+    Self.EmitDynIndexCheckTOS();
   Self.Emit(Format(#9'imulq $%d, %%rax', [ElemT.RawSize()]));
   Self.Emit(#9'popq %rcx');                  { base }
   Self.Emit(#9'addq %rcx, %rax');            { element address }
@@ -19791,12 +19842,14 @@ begin
            (TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound <> 0) then
           Self.Emit(Format(#9'subq $%d, %%rax',
             [TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound]));
-        Self.Emit(#9'imulq $16, %rax');
-        Self.Emit(#9'pushq %rax');         { scaled element offset }
+        Self.Emit(#9'pushq %rax');         { element index }
         Self.EmitFieldAssignSlotAddrToReg(FA, '%rcx');
         if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
           Self.Emit(#9'movq (%rcx), %rcx'); { heap data pointer (fresh) }
         Self.Emit(#9'popq %rax');
+        if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
+          Self.EmitDynIndexCheck('%rcx');
+        Self.Emit(#9'imulq $16, %rax');
         Self.Emit(#9'addq %rax, %rcx');     { element address }
         { Release the element's old obj, then move the owned pair in. }
         Self.Emit(#9'pushq %rcx');
@@ -19833,12 +19886,14 @@ begin
          (TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound <> 0) then
         Self.Emit(Format(#9'subq $%d, %%rax',
           [TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound]));
-      Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
-      Self.Emit(#9'pushq %rax');           { scaled element offset }
+      Self.Emit(#9'pushq %rax');           { element index }
       Self.EmitFieldAssignSlotAddrToReg(FA, '%rdx');
       if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
         Self.Emit(#9'movq (%rdx), %rdx');  { data pointer }
-      Self.Emit(#9'popq %rax');            { scaled offset }
+      Self.Emit(#9'popq %rax');            { element index }
+      if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
+        Self.EmitDynIndexCheck('%rdx');
+      Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
       Self.Emit(#9'addq %rax, %rdx');
       Self.Emit(#9'movq %rdx, %rcx');      { element address }
       if IsFloatFamily(DAElemType) then
@@ -20939,7 +20994,6 @@ begin
       begin
         Self.Emit(#9'pushq %rbx');
         Self.EmitExprToEax(SSA.IndexExpr);
-        Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
         if SSA.BaseExpr <> nil then
           { Base ptr pushed before %rbx: now at 8(%rsp). }
           Self.Emit(#9'movq 8(%rsp), %rcx')
@@ -20967,6 +21021,9 @@ begin
         end
         else
           Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
+        if SSA.ResolvedArrayType.Kind = tyDynArray then
+          Self.EmitDynIndexCheck('%rcx');
+        Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
         Self.Emit(#9'addq %rcx, %rax');
         Self.Emit(#9'movq %rax, %rbx');
         Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%rbx');
@@ -20986,7 +21043,6 @@ begin
       begin
         Self.Emit(#9'pushq %r14');
         Self.EmitExprToEax(SSA.IndexExpr);
-        Self.Emit(#9'imulq $16, %rax');
         if SSA.BaseExpr <> nil then
           Self.Emit(#9'movq 8(%rsp), %r14')     { base ptr pushed before %r14 }
         else if SSA.IsImplicitSelf then
@@ -21012,6 +21068,9 @@ begin
         end
         else
           Self.Emit(Format(#9'movq %s, %%r14', [Self.VarOperand(SSA.ArrayName)]));
+        if SSA.ResolvedArrayType.Kind = tyDynArray then
+          Self.EmitDynIndexCheck('%r14');
+        Self.Emit(#9'imulq $16, %rax');
         Self.Emit(#9'addq %rax, %r14');          { %r14 = element address }
         Self.EmitInterfaceToFieldSlotsAt(SSA.ValueExpr, '%r14', 0, DAElemType);
         Self.Emit(#9'popq %r14');
@@ -21038,7 +21097,6 @@ begin
         Self.EmitExprToEax(SSA.ValueExpr);
       Self.Emit(#9'pushq %rax');
       Self.EmitExprToEax(SSA.IndexExpr);
-      Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
       if SSA.BaseExpr <> nil then
         { Base ptr pushed before the value: value is on top, so the base
           sits at 8(%rsp). }
@@ -21072,6 +21130,9 @@ begin
       end
       else
         Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
+      if SSA.ResolvedArrayType.Kind = tyDynArray then
+        Self.EmitDynIndexCheck('%rcx');
+      Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
       Self.Emit(#9'addq %rcx, %rax');
       Self.Emit(#9'movq %rax, %rcx');
       if IsFloatFamily(DAElemType) then

@@ -555,7 +555,7 @@ begin
   AssertEquals('element store through _cap_', '',
     AsmMissing(Src,
       #9'movq -8(%rbp), %rcx' + #10 + #9'movq (%rcx), %rcx' + #10 +
-        #9'addq %rcx, %rax',
+        #9'testq %rcx, %rcx',
       #9'ldur x0, [x29, #-8]' + #10 + #9'ldr x0, [x0]' + #10 +
         #9'ldr x1, [sp], #16'));
   AssertEquals('SetLength through _cap_', '',

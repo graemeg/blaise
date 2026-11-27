@@ -67,6 +67,14 @@ type
   EInvalidCast = class(Exception)
   end;
 
+  { Raised when a dynamic-array index lies outside 0..High.  Every element
+    access checks its index, in every build; the RTL routes a failed check
+    to RaiseRangeError (below) when SysUtils is in scope, and without
+    SysUtils it is a fatal runtime error (exit code 201).  Matches Delphi,
+    where ERangeError lives in System.SysUtils. }
+  ERangeError = class(Exception)
+  end;
+
 { _RaiseDivByZero — raises EDivByZero('Division by zero').  The RTL's
   division-by-zero hook, installed by this unit's initialization; not
   intended for direct use.  It stays in the interface because code compiled
@@ -152,6 +160,8 @@ procedure _SetRuntimeErrorHooks(ADivByZero, AInvalidCast: Pointer);
   external name '_SetRuntimeErrorHooks';
 procedure _SetConvertErrorHook(AHook: Pointer);
   external name '_SetConvertErrorHook';
+procedure _SetRangeErrorHook(AHook: Pointer);
+  external name '_SetRangeErrorHook';
 { the platform port's CSPRNG: 1 on success, 0 on failure }
 function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
   external name '_RandomBytes';
@@ -218,6 +228,12 @@ end;
 procedure _RaiseInvalidCast;
 begin
   raise EInvalidCast.Create('Invalid class typecast')
+end;
+
+{ The RTL's range-error hook, installed by this unit's initialization. }
+procedure RaiseRangeError;
+begin
+  raise ERangeError.Create('Range check error')
 end;
 
 function IsValidIntStr(const S: string): Boolean;
@@ -435,11 +451,12 @@ begin
 end;
 
 initialization
-  { From here on the RTL raises EDivByZero, EInvalidCast and EConvertError
-    for the runtime errors every unit's code reports to it, whether or not
-    that unit uses SysUtils (docs/language-rationale.adoc, "Integer division
-    by zero"). }
+  { From here on the RTL raises EDivByZero, EInvalidCast, EConvertError and
+    ERangeError for the runtime errors every unit's code reports to it,
+    whether or not that unit uses SysUtils (docs/language-rationale.adoc,
+    "Integer division by zero"). }
   _SetRuntimeErrorHooks(Pointer(@_RaiseDivByZero), Pointer(@_RaiseInvalidCast));
   _SetConvertErrorHook(Pointer(@RaiseConvertError));
+  _SetRangeErrorHook(Pointer(@RaiseRangeError));
 
 end.

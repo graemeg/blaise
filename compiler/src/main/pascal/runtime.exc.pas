@@ -70,6 +70,14 @@ procedure _DivByZero;
 { A failed `as`: EInvalidCast through the installed hook, else a fatal
   runtime error.  Never returns. }
 procedure _Raise_InvalidCast;
+{ The range-error hook has a setter of its own (as the convert-error hook
+  does), so _SetRuntimeErrorHooks keeps its signature. }
+procedure _SetRangeErrorHook(AHook: Pointer);
+{ A dynamic-array index outside 0..High (docs/language-rationale.adoc,
+  "Dynamic Array Indices Are Always Bounds-Checked"): ERangeError through
+  the installed hook, else a fatal runtime error with exit code 201, FPC's
+  range-check error.  Never returns. }
+procedure _Raise_RangeError;
 procedure _CheckNil(Obj: Pointer);
 { Exception unwind cleanup (docs/exception-unwind-cleanup-design.adoc).
   Generated _main passes the bounds of the linked unwind section. }
@@ -130,6 +138,7 @@ procedure _blaise_longjmp(Buf: Pointer; Val: Int32); external name '_blaise_long
 function  _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 function  _libc_write(Fd: Int32; Buf: Pointer; Count: Int64): Int64; external name 'write';
 procedure _libc_abort; external name 'abort';
+procedure _libc_exit(Code: Int32); external name 'exit';
 
 threadvar
   g_exc_top: Pointer;
@@ -254,6 +263,7 @@ var
   { set once, by SysUtils' initialization; nil without SysUtils }
   g_div_by_zero_hook: Pointer;
   g_invalid_cast_hook: Pointer;
+  g_range_error_hook: Pointer;
 
 var
   g_unw_start: Pointer;
@@ -665,6 +675,27 @@ begin
     Hook();
   end;
   DiagAbort('Runtime error: invalid typecast', 31);
+end;
+
+procedure _SetRangeErrorHook(AHook: Pointer);
+begin
+  g_range_error_hook := AHook;
+end;
+
+procedure _Raise_RangeError;
+var
+  Hook: TRuntimeErrorHook;
+  NL: Byte;
+begin
+  if g_range_error_hook <> nil then
+  begin
+    Hook := TRuntimeErrorHook(g_range_error_hook);
+    Hook();
+  end;
+  _libc_write(2, 'Runtime error: range check error', 32);
+  NL := 10;
+  _libc_write(2, @NL, 1);
+  _libc_exit(201);
 end;
 
 procedure _CheckNil(Obj: Pointer);

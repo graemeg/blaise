@@ -9314,10 +9314,11 @@ begin
     slot VALUE), then the field offset #8 is added to that instance pointer }
   AssertTrue('the field offset is added to the loaded instance pointer',
     Pos(#9'add x0, x0, #8', AsmT) >= 0);
-  { the element index is scaled (mul) and added to the base }
+  { the base is popped, then the element index is scaled (mul) and added
+    to it (a static array has no run-time index check) }
   AssertTrue('the index is scaled and added',
-    Pos(#9'mul x0, x0, x2' + LF + #9'ldr x1, [sp], #16' + LF +
-        #9'add x0, x0, x1', AsmT) >= 0);
+    Pos(#9'ldr x1, [sp], #16' + LF + #9'movz x2, #1' + LF +
+        #9'mul x0, x0, x2' + LF + #9'add x0, x0, x1', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64afe.o');
   try
