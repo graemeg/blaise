@@ -30,6 +30,9 @@ type
     procedure TestDivGuard_CallsRtlThenTraps;
     procedure TestDivGuard_SameWithoutSysUtils;
     procedure TestFailedAs_CallsRtl;
+    { the failed-as call is aligned by the tracked-depth pad alone: an
+      `andq $-16, %rsp` before it was undone by that pad at an odd depth }
+    procedure TestFailedAs_OddDepth_CallIsAligned;
     procedure TestStrToInt_CallsValidatingRtl;
     { Every dynamic-array element access compares the index with the length
       header and calls the RTL on failure: a read, a write, the address of
@@ -251,6 +254,30 @@ begin
     Pos('_Raise_RangeError', GenAsm(SrcOtherArrays, TargetX86_64)) < 0);
   AssertTrue('arm64: static array, string and open array are unchecked',
     Pos('_Raise_RangeError', GenAsm(SrcOtherArrays, TargetArm64)) < 0);
+end;
+
+
+procedure TRtErrorHooksTests.TestFailedAs_OddDepth_CallIsAligned;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type TA = class N: Int32; end; TB = class(TA) end;
+    var O: TA; X, Y: Int32;
+    begin
+      X := Y + (Y + (O as TB).N)
+    end.
+    ''';
+var
+  A: string;
+begin
+  A := GenAsm(Src, TargetX86_64);
+  AssertTrue('the failed-as call is reached', Pos('callq _Raise_InvalidCast', A) >= 0);
+  AssertTrue('no andq before the pad: ' + A,
+    Pos(#9'andq $-16, %rsp' + #10 + #9'subq $8, %rsp' + #10 +
+      #9'callq _Raise_InvalidCast', A) < 0);
+  AssertTrue('the odd depth is padded', Pos(#9'subq $8, %rsp' + #10 +
+    #9'callq _Raise_InvalidCast', A) >= 0);
 end;
 
 initialization

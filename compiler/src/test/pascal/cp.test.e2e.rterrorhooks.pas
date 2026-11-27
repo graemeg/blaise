@@ -36,6 +36,9 @@ type
       uses SysUtils then links their cached objects and still catches every
       error they raise as its exception. }
     procedure TestRun_CachedWithout_CatchableWithSysUtils;
+    { a failed `as` deep in an expression (an odd number of values pushed)
+      raises a catchable EInvalidCast: the RTL call was misaligned on x86-64 }
+    procedure TestRun_FailedAs_DeepInExpression_Caught;
   end;
 
 implementation
@@ -182,6 +185,38 @@ begin
   Self.WriteUnits();
   Self.RunWithoutSysUtils('first');
   Self.RunWithSysUtils('second, cached units');
+end;
+
+
+procedure TE2ERtErrorHooksTests.TestRun_FailedAs_DeepInExpression_Caught;
+begin
+  Self.SetUpScratch('compiler/target/test-e2e-rterrorhooks-c');
+  AssertRTLRunsOnAll('''
+    program P;
+    uses SysUtils;
+    type TA = class N: Int32; end; TB = class(TA) end;
+    var O: TA; X, Y: Int32; D: Float64;
+    begin
+      O := TA.Create(); Y := 1; D := 1.5;
+      try
+        X := Y + (Y + (O as TB).N)
+      except
+        on E: EInvalidCast do WriteLn('caught1 ', E.Message)
+      end;
+      try
+        X := Y + (Y + (Y + (O as TB).N))
+      except
+        on E: EInvalidCast do WriteLn('caught2 ', E.Message)
+      end;
+      try
+        WriteLn(DoubleToStr(D * (Y + (O as TB).N)))
+      except
+        on E: EInvalidCast do WriteLn('caught3 ', E.Message)
+      end;
+      O.Free()
+    end.
+    ''', 'caught1 Invalid class typecast' + #10 + 'caught2 Invalid class typecast' +
+    #10 + 'caught3 Invalid class typecast' + #10, 0);
 end;
 
 initialization

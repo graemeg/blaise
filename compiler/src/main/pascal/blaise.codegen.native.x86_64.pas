@@ -2055,7 +2055,10 @@ end;
   (BUG-20261113-unit-object-depends-on-program). }
 procedure TX86_64Backend.EmitRaiseInvalidCast;
 begin
-  Self.Emit(#9'andq $-16, %rsp');
+  { aligned by Emit's tracked-depth pad, as every other call is.  An
+    `andq $-16, %rsp` first was undone by that pad whenever the tracked
+    depth was odd (a failed `as` deep in an expression), leaving the call
+    8 bytes off; the call never returns, so nothing restores %rsp }
   Self.Emit(#9'callq _Raise_InvalidCast');
 end;
 
