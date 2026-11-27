@@ -149,6 +149,7 @@ type
     procedure TestSemantic_InterfaceEnumerator_Lowered;
     procedure TestSemantic_RecordWithoutGetEnumerator_RaisesError;
     procedure TestSemantic_LoweredLoopVarWrite_Warns;
+    procedure TestCodegen_StaticArrayElem_CopyRetains;
   end;
 
 implementation
@@ -1161,6 +1162,41 @@ begin
   AssertTrue('arm64 calls F once', PosEx(#9'bl _F'#10, A, P + 1) < 0);
   AssertEquals('a borrowed array is held for the loop', '',
     AsmMissing(Src, #9'callq _DynArrayAddRef', #9'bl __DynArrayAddRef'));
+end;
+
+
+procedure TForInTests.TestCodegen_StaticArrayElem_CopyRetains;
+const
+  Src = '''
+    program P;
+    type TPair = array[0..1] of String;
+    var DA: array of TPair;
+    procedure Run;
+    var E: TPair; Acc: String;
+    begin
+      for E in DA do Acc := Acc + E[0]
+    end;
+    begin Run() end.
+    ''';
+begin
+  { BUG-023: the loop variable is a value copy of a static array of
+    strings.  Both strings of the element are retained and the variable's
+    old ones released BEFORE the 16-byte copy; x86-64 copied without ARC
+    and arm64 rejected the element as a 16-byte scalar load. }
+  AssertEquals('the element strings are retained', '',
+    AsmMissing(Src,
+      #9'callq _StringAddRef' + #10 + #9'popq %r14' + #10 + #9'popq %r15' +
+        #10 + #9'pushq %r15',
+      #9'bl __StringAddRef' + #10 + #9'ldp x21, x20, [sp], #16' + #10 +
+        #9'stp x21, x20, [sp, #-16]!'));
+  AssertEquals('copy follows the release of the old value', '',
+    AsmMissing(Src,
+      #9'callq _StringRelease' + #10 + #9'popq %r14' + #10 + #9'popq %r15' +
+        #10 + #9'movq %r15, %rdi' + #10 + #9'movq %rbx, %rsi' + #10 +
+        #9'movq $16, %rdx' + #10 + #9'callq memcpy',
+      #9'bl __StringRelease' + #10 + #9'ldp x21, x20, [sp], #16' + #10 +
+        #9'mov x0, x22' + #10 + #9'mov x1, x19' + #10 + #9'movz x2, #16' +
+        #10 + #9'bl _memcpy'));
 end;
 
 initialization

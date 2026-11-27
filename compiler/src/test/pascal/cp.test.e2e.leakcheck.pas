@@ -97,6 +97,8 @@ type
       empty string, read a float Current as 0.0, and leaked or re-evaluated
       call collections) }
     procedure TestDebug_ForInForms_NoLeak;
+    procedure TestDebug_ForInStaticArrayElem_NoLeak;
+    procedure TestDebug_ForInStaticArrayElem_MoreForms_NoLeak;
     { for X in Call() do over a class collection, left by Exit, Exit(X),
       Break, or an exception caught inside the routine with the loop run
       again: the collection the call returned is released on every path (it
@@ -4532,6 +4534,113 @@ begin
     '  after run alive=0' + #10 +
     'func 100 alive=1' + #10 +
     '  after run alive=0');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ForInStaticArrayElem_NoLeak;
+begin
+  { BUG-023: a for..in loop variable that is a static array of managed
+    values (TPair, TOne) is a value copy of each element.  The copy retained
+    nothing while the variable's scope-exit release released its last
+    value, so the array's own strings were over-released; on arm64 the
+    16-byte element was also loaded as one 8-byte word.  Every collection
+    form: dynamic array, static array, a one-element (8-byte) static array,
+    and class elements. }
+  AssertLeakFreeOnAll(
+    '''
+    program ForInSAElem;
+    uses SysUtils;
+    type
+      TPair = array[0..1] of String;
+      TOne = array[0..0] of String;
+      TBox = class N: Int32; constructor Create(AN: Int32); end;
+      TBoxes = array[0..1] of TBox;
+    var DA: array of TPair; SA: array[0..1] of TPair; D1: array of TOne;
+      DB: array of TBoxes;
+    constructor TBox.Create(AN: Int32); begin N := AN end;
+    procedure Run;
+    var E: TPair; O: TOne; B: TBoxes; Acc: String;
+    begin
+      SetLength(DA, 2);
+      DA[0][0] := IntToStr(10) + 'a'; DA[0][1] := IntToStr(11) + 'b';
+      DA[1][0] := IntToStr(20) + 'c'; DA[1][1] := IntToStr(21) + 'd';
+      SA[0] := DA[0]; SA[1] := DA[1];
+      SetLength(D1, 2); D1[0][0] := IntToStr(1) + 'x'; D1[1][0] := IntToStr(2) + 'y';
+      SetLength(DB, 2);
+      DB[0][0] := TBox.Create(5); DB[0][1] := TBox.Create(6);
+      DB[1][0] := TBox.Create(7); DB[1][1] := TBox.Create(8);
+      Acc := '';
+      for E in DA do Acc := Acc + E[0] + E[1] + ' ';
+      for E in SA do Acc := Acc + E[0] + E[1] + ' ';
+      for O in D1 do Acc := Acc + O[0] + ' ';
+      for B in DB do Acc := Acc + IntToStr(B[0].N + B[1].N) + ' ';
+      WriteLn(Acc);
+      WriteLn(DA[0][0], ' ', DA[1][1], ' ', SA[1][0], ' ', D1[1][0], ' ', DB[1][1].N)
+    end;
+    begin
+      Run();
+      DA := nil; D1 := nil; DB := nil;
+      SA[0][0] := ''; SA[0][1] := ''; SA[1][0] := ''; SA[1][1] := '';
+      WriteLn('done')
+    end.
+    ''', '10a11b 20c21d 10a11b 20c21d 1x 2y 11 15 ' + #10 +
+      '10a 21d 20c 2y 8' + #10 + 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ForInStaticArrayElem_MoreForms_NoLeak;
+begin
+  { BUG-023, the remaining shapes: an enumerator whose Current returns a
+    static array (both ISAs took the scalar path: one word stored, no
+    ARC), an open-array parameter, a global and a captured loop variable,
+    a record element holding a static array, and an unmanaged element. }
+  AssertLeakFreeOnAll(
+    '''
+    program ForInSAMore;
+    uses SysUtils;
+    type
+      TPair = array[0..1] of String;
+      TQuad = array[0..3] of Byte;
+      TRec = record P: TPair; K: Int32; end;
+      TPairEnum = class I: Int32; function MoveNext: Boolean;
+        function GetCurrent: TPair; property Current: TPair read GetCurrent; end;
+      TPairs = class function GetEnumerator: TPairEnum; end;
+    var GE: TPair; DA: array of TPair; RA: array of TRec; QA: array of TQuad;
+      Acc: String;
+    function TPairEnum.MoveNext: Boolean; begin I := I + 1; Result := I <= 2 end;
+    function TPairEnum.GetCurrent: TPair;
+    begin Result[0] := 'e' + IntToStr(I); Result[1] := 'f' + IntToStr(I) end;
+    function TPairs.GetEnumerator: TPairEnum; begin Result := TPairEnum.Create() end;
+    procedure Open(const A: array of TPair);
+    var E: TPair;
+    begin for E in A do Acc := Acc + E[1] + ' ' end;
+    procedure Captured;
+    var E: TPair;
+      procedure Inner; begin for E in DA do Acc := Acc + E[0] + ' ' end;
+    begin Inner(); Acc := Acc + E[1] + ' ' end;
+    procedure Run;
+    var E: TPair; R: TRec; Q: TQuad; Ps: TPairs; N: Int32;
+    begin
+      SetLength(DA, 2);
+      DA[0][0] := IntToStr(1) + 'a'; DA[0][1] := IntToStr(1) + 'b';
+      DA[1][0] := IntToStr(2) + 'a'; DA[1][1] := IntToStr(2) + 'b';
+      SetLength(RA, 1); RA[0].P := DA[1]; RA[0].K := 7;
+      SetLength(QA, 2); QA[0][3] := 9; QA[1][0] := 4;
+      Ps := TPairs.Create();
+      for E in Ps do Acc := Acc + E[0] + E[1] + ' ';
+      Ps.Free();
+      Open(DA);
+      for GE in DA do Acc := Acc + GE[0] + ' ';
+      Captured();
+      for R in RA do Acc := Acc + R.P[0] + IntToStr(R.K) + ' ';
+      N := 0;
+      for Q in QA do N := N + Q[0] + Q[3];
+      WriteLn(Acc, N)
+    end;
+    begin
+      Run();
+      DA := nil; RA := nil; QA := nil; GE[0] := ''; GE[1] := ''; Acc := '';
+      WriteLn('done')
+    end.
+    ''', 'e1f1 e2f2 1b 2b 1a 2a 1a 2a 2b 2a7 13' + #10 + 'done');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_ForInForms_NoLeak;

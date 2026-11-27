@@ -12175,20 +12175,19 @@ begin
     Self.Emit(#9'stp x0, x1, [x9]');
     Exit;
   end;
-  { a record (or a jumbo set's bitmap): the record-assignment discipline --
-    retain a borrowed source's managed fields, release the loop variable's
-    old ones, copy.  Callee-saved x19/x22 hold the two addresses across the
-    walk calls. }
+  { a record, a static array (BUG-023) or a jumbo set's bitmap: the
+    record-assignment discipline -- retain a borrowed source's managed
+    values, release the loop variable's old ones, copy.  Callee-saved
+    x19/x22 hold the two addresses across the walk calls. }
   Self.Emit(#9'stp x19, x22, [sp, #-16]!');
   Self.Emit(#9'mov x19, x0');
   EmitForInVarAddr('x22', AStmt);
-  if (AStmt.ResolvedVarType.Kind = tyRecord) and
+  if (AStmt.ResolvedVarType.Kind in [tyRecord, tyStaticArray]) and
      AggHasManaged(AStmt.ResolvedVarType) then
   begin
     if not AOwned then
-      Self.EmitRecordFieldRetains(TRecordTypeDesc(AStmt.ResolvedVarType), 'x19');
-    Self.EmitRecordFieldReleases(TRecordTypeDesc(AStmt.ResolvedVarType),
-      'x22', False);
+      Self.EmitManagedAddRefAt(AStmt.ResolvedVarType, 'x19');
+    Self.EmitManagedReleaseAt(AStmt.ResolvedVarType, 'x22', False);
   end;
   Self.Emit(#9'mov x0, x22');
   Self.Emit(#9'mov x1, x19');
@@ -12336,8 +12335,10 @@ begin
     EmitIntLiteral('x2', ESz);
     Self.Emit(#9'mul x1, x1, x2');
     Self.Emit(#9'add x0, x0, x1');
-    if IsAgg or IsMethodPtrType(Elem) or IsJumboSetType(Elem) then
-      { an aggregate element is copied from its address; the element stays
+    if IsAgg or IsMethodPtrType(Elem) or IsJumboSetType(Elem) or
+       (Elem.Kind = tyStaticArray) then
+      { an aggregate element -- a static-array element too, whatever its
+        width (BUG-023) -- is copied from its address; the element stays
         the array's, so the copy retains }
       EmitForInAssignAddr(AStmt, False)
     else
@@ -12601,9 +12602,12 @@ begin
     EmitLoadSlot('x0', AStmt.EnumVarName);
     EmitMethodCallCommon(MN, 'MoveNext', EmptyArgs);
     Self.Emit(Format(#9'cbz x0, %s', [EndL]));
-    if IsAgg or IsMethodPtrType(AStmt.ResolvedVarType) then
+    if IsAgg or IsMethodPtrType(AStmt.ResolvedVarType) or
+       ((AStmt.ResolvedVarType <> nil) and
+        (AStmt.ResolvedVarType.Kind = tyStaticArray)) then
     begin
-      { a record / interface / closure Current comes back through x8 (or
+      { a record / interface / closure / static-array (BUG-023) Current
+        comes back through x8 (or
         x0:x1 for a small record) into a per-site scratch, OWNED, and moves
         into the loop variable without a retain.  A closure is returned
         through x8 like a function result of its type: the scalar call

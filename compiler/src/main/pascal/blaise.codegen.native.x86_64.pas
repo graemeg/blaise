@@ -16152,10 +16152,13 @@ begin
   end
   else
     Self.EmitVarAddr(AStmt.VarName, '%r15');
-  if AElemType.Kind = tyRecord then
+  if (AElemType.Kind in [tyRecord, tyStaticArray]) and
+     ArcTypeHasManagedContent(AElemType) then
   begin
-    Self.EmitRecordFieldRetains(TRecordTypeDesc(AElemType), '%rbx');
-    Self.EmitRecordFieldReleases(TRecordTypeDesc(AElemType), '%r15', False);
+    { a static array of managed values is walked element by element, like
+      a record's fields (BUG-023: it was copied without ARC) }
+    Self.EmitManagedAddRefAt(AElemType, '%rbx');
+    Self.EmitManagedReleaseAt(AElemType, '%r15', False);
   end
   else if AElemType.Kind = tyInterface then
   begin
@@ -16245,7 +16248,8 @@ begin
       Self.Emit(Format(#9'subq $%d, %%rax', [AStmt.ArrayLow]));
     Self.Emit(Format(#9'imulq $%d, %%rax, %%rax', [ElemSize]));
     Self.Emit(#9'addq %rcx, %rax');
-    if (SAT.ElementType.Kind = tyRecord) or (SAT.ElementType.RawSize() > 8) then
+    if (SAT.ElementType.Kind in [tyRecord, tyStaticArray]) or
+       (SAT.ElementType.RawSize() > 8) then
       { %rax = element address; copy the aggregate by value. }
       Self.EmitForInAggAssignElem(AStmt, SAT.ElementType, ElemSize)
     else
@@ -16377,7 +16381,7 @@ begin
     Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
     Self.Emit(Format(#9'imulq $%d, %%rax, %%rax', [ElemSize]));
     Self.Emit(#9'addq %rcx, %rax');
-    if (ElemT.Kind = tyRecord) or (ElemT.RawSize() > 8) then
+    if (ElemT.Kind in [tyRecord, tyStaticArray]) or (ElemT.RawSize() > 8) then
       { %rax = element address; copy the aggregate by value. }
       Self.EmitForInAggAssignElem(AStmt, ElemT, ElemSize)
     else
@@ -16732,9 +16736,11 @@ begin
       SynthCur.Free();
     end;
   end
-  else if (CurDecl.ResolvedReturnType.Kind = tyInterface) or
+  else if (CurDecl.ResolvedReturnType.Kind in [tyInterface, tyStaticArray]) or
           IsMethodPtrType(CurDecl.ResolvedReturnType) then
-    { (a closure / method-pointer Current comes back as a (code, data) pair
+    { (a static-array Current comes back through a result buffer; the
+      scalar store below kept its first word and no ARC, BUG-023.)
+      (a closure / method-pointer Current comes back as a (code, data) pair
       in rax:rdx; the scalar store below kept only the code half, so a
       capturing closure ran with a garbage env -- for P in TList<TProc>
       crashed.  The assignment path knows the pair and the owned +1.) }
