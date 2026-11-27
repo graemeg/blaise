@@ -69,6 +69,11 @@ type
       the value -- read or written safely, nothing leaked; left to right
       for interface, float and Inc element forms }
     procedure TestDebug_IndexOrValueDropsTheBase_NoLeak;
+    { the remaining shapes: a field-array read and a static array inside a
+      dynamic one whose index resizes the array, a string-field byte write,
+      a PChar write and a static-array field write -- left to right, and
+      never through a freed block }
+    procedure TestDebug_RemainingShapes_LeftToRight_NoLeak;
     { the report's program without SysUtils: the diagnostic and exit code
       201 after the last good access }
     procedure TestRun_NoSysUtils_ExitCode201;
@@ -966,6 +971,72 @@ begin
       WriteLn('done')
     end.
     ''', '50' + #10 + '48' + #10 + 'True' + #10 + 'XiDiFi 3 5 1' + #10 + 'done');
+end;
+
+procedure TE2EDynBoundsTests.TestDebug_RemainingShapes_LeftToRight_NoLeak;
+begin
+  AssertLeakFreeOnAll('''
+    program Remaining;
+    uses SysUtils;
+    type
+      TIntArr = array of Int32;
+      TSA = array[0..2] of Int32;
+      THold = class S: String; Arr: TIntArr; end;
+      TRec = record Arr: TIntArr; SA: TSA; end;
+    var
+      H: TRec; DA: array of TSA; O: THold; T: String; X: Int32; Buf: TSA;
+      R2: TRec; P: Pointer; KeepArr: TIntArr; KeepDA: array of TSA;
+      T2: String; PNamed: PChar;
+    function Tr(const AWhat: string; AN: Int32): Int32;
+    begin T := T + AWhat; Result := AN end;
+    function ReplaceArr: Int32;
+    begin H.Arr := nil; SetLength(H.Arr, 4); H.Arr[1] := 9; Result := 1 end;
+    function GrowDA: Int32; begin SetLength(DA, 50000); DA[0][1] := 8; Result := 1 end;
+    function GrowDA2: Int32; begin SetLength(DA, 60000); Result := 6 end;
+    function MakeObj: THold; begin T := T + 'O'; Result := O end;
+    function FP: Pointer; begin T := T + 'P'; Result := P end;
+    procedure Show(const AName: string); begin WriteLn(AName, ' ', T); T := '' end;
+    begin
+      { the old blocks stay alive under KeepArr / KeepDA, so a read through
+        a stale pointer shows their old values (3, 4) }
+      SetLength(H.Arr, 2); H.Arr[1] := 3; KeepArr := H.Arr;
+      X := H.Arr[ReplaceArr()];
+      WriteLn('field-read ', X);
+      SetLength(DA, 1); DA[0][1] := 4; KeepDA := DA;
+      X := DA[0][GrowDA()];
+      WriteLn('static-in-dyn ', X, ' ', Length(DA));
+      KeepDA := DA;
+      DA[0][2] := GrowDA2();
+      WriteLn('w-static-in-dyn ', DA[0][2], ' ', KeepDA[0][2]);
+      O := THold.Create(); O.S := IntToStr(10) + 'abc';
+      MakeObj().S[Tr('i', 1)] := Chr(Tr('v', 122));
+      Show('w-strfield'); WriteLn(O.S);
+      P := @Buf;
+      PChar(FP())[Tr('i', 0)] := Chr(Tr('v', 7));
+      Show('w-pchar'); WriteLn(Buf[0]);
+      R2.SA[Tr('i', 1)] := Tr('v', 5);
+      Show('w-sfield'); WriteLn(R2.SA[1]);
+      Buf[Tr('i', 2)] := Tr('v', 3);
+      Show('w-static-named');
+      O.S[Tr('i', 2)] := Chr(Tr('v', 121));
+      Show('w-strfield-named');
+      T2 := IntToStr(10) + 'abc';
+      T2[Tr('i', 0)] := Chr(Tr('v', 120));
+      Show('w-str-named'); WriteLn(T2, ' ', O.S);
+      P := @Buf;
+      PNamed := P;
+      { byte 1 of Buf[0] (7) becomes 9: Buf[0] = 7 + 9 * 256 = 2311 }
+      PNamed[Tr('i', 1)] := Chr(Tr('v', 9));
+      Show('w-pchar-named'); WriteLn(Buf[0], Buf[2]);
+      MakeObj().Arr := nil;
+      O.Free(); H.Arr := nil; DA := nil; KeepArr := nil; KeepDA := nil;
+      WriteLn('done')
+    end.
+    ''', 'field-read 9' + #10 + 'static-in-dyn 8 50000' + #10 + 'w-static-in-dyn 6 0' + #10 +
+      'w-strfield Oiv' + #10 + '1zabc' + #10 + 'w-pchar Piv' + #10 + '7' + #10 +
+      'w-sfield iv' + #10 + '5' + #10 + 'w-static-named iv' + #10 +
+      'w-strfield-named iv' + #10 + 'w-str-named iv' + #10 + 'x0abc 1zybc' + #10 +
+      'w-pchar-named iv' + #10 + '23113' + #10 + 'done');
 end;
 
 procedure TE2EDynBoundsTests.TestRun_NoSysUtils_ExitCode201;

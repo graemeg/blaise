@@ -10219,8 +10219,18 @@ both before `V`.
 
 Reads follow the same order: `X := F()[G()]` calls `F`, then `G`, and the
 array an expression produced is kept alive while the index is evaluated.
-A named array is read where it is used -- after the index -- so
-`X := A[Shrink()]` reads the array as `Shrink` left it.
+Strings, `PChar` pointers and static arrays follow the same order, in reads
+and writes (`S[I()] := Chr(V())` evaluates `I`, then `V`).
+
+An array that is named by storage free of calls -- a variable, a field, an
+element with plain indices (`A`, `R.Arr`, `DA[I]`) -- has no side effects of
+its own, so it is located where it is used: after an index, or a value,
+that may run code.  `X := A[Shrink()]` and `X := H.Arr[Replace()]` read the
+array as the call left it, and `DA[0][2] := Grow()` stores into the static
+array where it lies after `Grow` resized `DA`.  Locating it earlier would
+not change what the program computes, only risk a pointer into a block the
+call freed.  Where no call is involved the backends are free to locate it
+in any order.
 
 One shape keeps an older order: an array field of a *record* returned by
 a call, `MkRec().Arr[I] := V`.  The record lives in a result buffer that

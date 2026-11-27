@@ -319,6 +319,10 @@ type
     FRngFailReg: string;
     FRngFailSym: string;
     [Unretained] FRngFailRec: TRecordTypeDesc;
+    { Rec.Arr[I] read whose index (which may run code) was evaluated before
+      its call-free receiver, and the slot holding it }
+    [Unretained] FFieldIdxReadFA: TFieldAccessExpr;
+    FFieldIdxReadSlot: string;
     { ABI classification for the current record-returning function.  Set in
       BuildFrame; rcSret when FSretFunc is True; rcInt1/rcSSE1/etc. when the
       record qualifies for register return (FSretFunc is False in that case). }
@@ -1303,6 +1307,20 @@ type
       base's release is deferred; a borrowed one is pinned while an index
       that may run code is evaluated. }
     procedure EmitDynBaseThenIndex(ABase, AIndex: TASTExpr);
+    { Rec.Arr[I]: when I may run code and the receiver is free of calls,
+      evaluate I now (before the receiver), into a scratch slot }
+    procedure EmitFieldIdxPre(AFAE: TFieldAccessExpr);
+    { %rax := the index of AFAE -- the pre-evaluated one, or evaluated here }
+    procedure EmitFieldIdxToEax(AFAE: TFieldAccessExpr);
+    { the address of a dynamic / open array field's slot is in AReg: [TOS]
+      := its data pointer, read AFTER the index (which may replace the
+      array), %rax := the index, checked for a dynamic array }
+    procedure EmitFieldDynIdxAfterSlot(AFAE: TFieldAccessExpr;
+      const AReg: string; ACheck: Boolean);
+    { [TOS] := the storage address of the static array AStr, %rax := the
+      index: left to right, except that storage free of calls is located
+      after an index that may run code (which could move it) }
+    procedure EmitStaticBaseThenIndex(AStr, AIndex: TASTExpr);
     { %rax := Length(AArg) for a dyn-array expression; an owned transient
       (Length(MakeArr())) is released once its length is read. }
     procedure EmitDynArrayLengthOf(AArg: TASTExpr);
@@ -6041,6 +6059,8 @@ procedure TX86_64Backend.EmitInterfaceFieldAddr(AFA: TFieldAccessExpr;
   pointer) in ADstReg.  Mirrors the receiver-base resolution used by the
   field-read path, but stops at the address rather than loading a value. }
 begin
+  if AFA.IsArrayAccess then
+    Self.EmitFieldIdxPre(AFA);
   if AFA.Base <> nil then
   begin
     { Nested receiver expression (e.g. Outer.Inner.G): evaluate it to the base
@@ -6086,10 +6106,13 @@ begin
   if AFA.IsArrayAccess then
   begin
     if AFA.FieldInfo.TypeDesc.Kind in [tyDynArray, tyOpenArray] then
-      { heap data pointer lives in the field slot }
-      Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
-    Self.Emit(Format(#9'pushq %s', [ADstReg]));
-    Self.EmitExprToEax(AFA.PropIndexExpr);
+      { heap data pointer lives in the field slot: read after the index }
+      Self.EmitFieldDynIdxAfterSlot(AFA, ADstReg, False)
+    else
+    begin
+      Self.Emit(Format(#9'pushq %s', [ADstReg]));
+      Self.EmitFieldIdxToEax(AFA);
+    end;
     if AFA.FieldInfo.TypeDesc.Kind = tyStaticArray then
       Self.EmitStaticElemScale(TStaticArrayTypeDesc(AFA.FieldInfo.TypeDesc))
     else
@@ -7468,6 +7491,8 @@ begin
   if AExpr is TFieldAccessExpr then
   begin
     FAE := TFieldAccessExpr(AExpr);
+    if FAE.IsArrayAccess then
+      Self.EmitFieldIdxPre(FAE);
     { Static (class-level) var used as an l-value (e.g. the receiver of
       TFoo.StaticVar.Free()): its storage IS the mangled global slot — load its
       address, not a field of an instance.  Has no FieldInfo, so this must
@@ -8429,10 +8454,74 @@ begin
   end;
 end;
 
+procedure TX86_64Backend.EmitFieldIdxPre(AFAE: TFieldAccessExpr);
+begin
+  if (AFAE = nil) or (AFAE.PropIndexExpr = nil) then
+    Exit;
+  if ExprMayCall(AFAE.PropIndexExpr) and
+     ((AFAE.Base = nil) or not ExprMayCall(AFAE.Base)) then
+  begin
+    Self.EmitExprToEax(AFAE.PropIndexExpr);
+    FFieldIdxReadSlot := Self.NewScratchOperand(8);
+    Self.Emit(Format(#9'movq %%rax, %s', [FFieldIdxReadSlot]));
+    FFieldIdxReadFA := AFAE;
+  end;
+end;
+
+procedure TX86_64Backend.EmitFieldIdxToEax(AFAE: TFieldAccessExpr);
+begin
+  if (AFAE = FFieldIdxReadFA) and (FFieldIdxReadSlot <> '') then
+  begin
+    Self.Emit(Format(#9'movq %s, %%rax', [FFieldIdxReadSlot]));
+    FFieldIdxReadFA := nil;
+    FFieldIdxReadSlot := '';
+  end
+  else
+    Self.EmitExprToEax(AFAE.PropIndexExpr);
+end;
+
+procedure TX86_64Backend.EmitFieldDynIdxAfterSlot(AFAE: TFieldAccessExpr;
+  const AReg: string; ACheck: Boolean);
+begin
+  if not ExprMayCall(AFAE.PropIndexExpr) then
+  begin
+    { nothing in the index can replace the array: the data pointer first }
+    Self.Emit(Format(#9'movq (%s), %s', [AReg, AReg]));
+    Self.Emit(Format(#9'pushq %s', [AReg]));
+    Self.EmitFieldIdxToEax(AFAE);
+    if ACheck then
+      Self.EmitDynIndexCheckTOS();
+    Exit;
+  end;
+  Self.Emit(Format(#9'pushq %s', [AReg]));          { the field slot }
+  Self.EmitFieldIdxToEax(AFAE);
+  Self.Emit(#9'movq (%rsp), %rcx');
+  Self.Emit(#9'movq (%rcx), %rcx');                 { data pointer, now }
+  Self.Emit(#9'movq %rcx, (%rsp)');
+  if ACheck then
+    Self.EmitDynIndexCheckTOS();
+end;
+
+procedure TX86_64Backend.EmitStaticBaseThenIndex(AStr, AIndex: TASTExpr);
+begin
+  if ExprMayCall(AIndex) and not ExprMayCall(AStr) then
+  begin
+    Self.EmitExprToEax(AIndex);
+    Self.Emit(#9'pushq %rax');
+    Self.EmitExprToEax(AStr);
+    Self.Emit(#9'movq %rax, %rcx');
+    Self.Emit(#9'popq %rax');
+    Self.Emit(#9'pushq %rcx');
+    Exit;
+  end;
+  Self.EmitExprToEax(AStr);
+  Self.Emit(#9'pushq %rax');
+  Self.EmitExprToEax(AIndex);
+end;
+
 procedure TX86_64Backend.EmitDynBaseThenIndex(ABase, AIndex: TASTExpr);
 begin
-  if (ABase is TIdentExpr) and ExprMayCall(AIndex) and
-     not ExprMayCall(ABase) then
+  if ExprMayCall(AIndex) and not ExprMayCall(ABase) then
   begin
     Self.EmitExprToEax(AIndex);
     Self.Emit(#9'pushq %rax');
@@ -9314,9 +9403,8 @@ begin
      IsFloatFamily(TStaticArrayTypeDesc(
        TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType) then
   begin
-    Self.EmitExprToEax(TStringSubscriptExpr(AExpr).StrExpr);
-    Self.Emit(#9'pushq %rax');
-    Self.EmitExprToEax(TStringSubscriptExpr(AExpr).IndexExpr);
+    Self.EmitStaticBaseThenIndex(TStringSubscriptExpr(AExpr).StrExpr,
+      TStringSubscriptExpr(AExpr).IndexExpr);
     Self.EmitStaticElemScale(
       TStaticArrayTypeDesc(TStringSubscriptExpr(AExpr).StrExpr.ResolvedType));
     Self.Emit(#9'popq %rcx');
@@ -11442,9 +11530,7 @@ begin
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyStaticArray) then
   begin
     SAE := TStringSubscriptExpr(AExpr);
-    Self.EmitExprToEax(SAE.StrExpr);
-    Self.Emit(#9'pushq %rax');
-    Self.EmitExprToEax(SAE.IndexExpr);
+    Self.EmitStaticBaseThenIndex(SAE.StrExpr, SAE.IndexExpr);
     Self.EmitStaticElemScale(TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType));
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
@@ -11491,8 +11577,7 @@ begin
     { left to right, as for arrays: an index that may run code could
       reassign the string -- a named string is loaded after it, a borrowed
       string from an expression is pinned while it runs }
-    if (SAE.StrExpr is TIdentExpr) and ExprMayCall(SAE.IndexExpr) and
-       not ExprMayCall(SAE.StrExpr) then
+    if ExprMayCall(SAE.IndexExpr) and not ExprMayCall(SAE.StrExpr) then
     begin
       Self.EmitInt64ArgToRax(SAE.IndexExpr);
       Self.Emit(#9'pushq %rax');
@@ -11826,6 +11911,7 @@ begin
      (TFieldAccessExpr(AExpr).FieldInfo <> nil) then
   begin
     FAE := TFieldAccessExpr(AExpr);
+    Self.EmitFieldIdxPre(FAE);
     if FAE.Base <> nil then
     begin
       { Chained receiver (c.N.Arr[I]): the base expression evaluates to the
@@ -11859,13 +11945,10 @@ begin
       Self.Emit(Format(#9'addq $%d, %%rcx', [FAE.FieldInfo.Offset]));
     if FAE.FieldInfo.TypeDesc.Kind = tyDynArray then
     begin
-      Self.Emit(#9'movq (%rcx), %rcx');
       { The index expression may itself use %rcx (a record-field or chained
-        read), so the data pointer must survive on the stack — same
-        protection the static-array branch below has always had. }
-      Self.Emit(#9'pushq %rcx');
-      Self.EmitExprToEax(FAE.PropIndexExpr);
-      Self.EmitDynIndexCheckTOS();
+        read), so the data pointer survives on the stack; it is read after
+        the index, which may replace the array. }
+      Self.EmitFieldDynIdxAfterSlot(FAE, '%rcx', True);
       Self.Emit(Format(#9'imulq $%d, %%rax',
         [TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
       Self.Emit(#9'popq %rcx');
@@ -11887,7 +11970,7 @@ begin
     else if FAE.FieldInfo.TypeDesc.Kind = tyStaticArray then
     begin
       Self.Emit(#9'pushq %rcx');
-      Self.EmitExprToEax(FAE.PropIndexExpr);
+      Self.EmitFieldIdxToEax(FAE);
       Self.EmitStaticElemScale(TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc));
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
@@ -11900,10 +11983,8 @@ begin
     end
     else if FAE.FieldInfo.TypeDesc.Kind = tyOpenArray then
     begin
-      Self.Emit(#9'movq (%rcx), %rcx');
       { Same %rcx-survival rule as the dynamic-array branch above. }
-      Self.Emit(#9'pushq %rcx');
-      Self.EmitExprToEax(FAE.PropIndexExpr);
+      Self.EmitFieldDynIdxAfterSlot(FAE, '%rcx', False);
       Self.Emit(Format(#9'imulq $%d, %%rax',
         [TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
       Self.Emit(#9'popq %rcx');
@@ -12177,9 +12258,7 @@ begin
       if (SAE.StrExpr.ResolvedType <> nil) and
          (SAE.StrExpr.ResolvedType.Kind = tyStaticArray) then
       begin
-        Self.EmitExprToEax(SAE.StrExpr);
-        Self.Emit(#9'pushq %rax');
-        Self.EmitExprToEax(SAE.IndexExpr);
+        Self.EmitStaticBaseThenIndex(SAE.StrExpr, SAE.IndexExpr);
         Self.EmitStaticElemScale(TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType));
         Self.Emit(#9'popq %rcx');
         Self.Emit(#9'addq %rcx, %rax');
@@ -12322,6 +12401,7 @@ begin
        TFieldAccessExpr(AOE.Expr).IsArrayAccess then
     begin
       FAE := TFieldAccessExpr(AOE.Expr);
+      Self.EmitFieldIdxPre(FAE);
       if FAE.Base <> nil then
       begin
         Self.EmitExprToEax(FAE.Base);
@@ -12359,10 +12439,7 @@ begin
         Self.Emit(Format(#9'addq $%d, %%rcx', [FAE.FieldInfo.Offset]));
       if FAE.FieldInfo.TypeDesc.Kind = tyDynArray then
       begin
-        Self.Emit(#9'movq (%rcx), %rcx');
-        Self.Emit(#9'pushq %rcx');
-        Self.EmitExprToEax(FAE.PropIndexExpr);
-        Self.EmitDynIndexCheckTOS();
+        Self.EmitFieldDynIdxAfterSlot(FAE, '%rcx', True);
         Self.Emit(Format(#9'imulq $%d, %%rax',
           [TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
         Self.Emit(#9'popq %rcx');
@@ -12371,7 +12448,7 @@ begin
       else if FAE.FieldInfo.TypeDesc.Kind = tyStaticArray then
       begin
         Self.Emit(#9'pushq %rcx');
-        Self.EmitExprToEax(FAE.PropIndexExpr);
+        Self.EmitFieldIdxToEax(FAE);
         Self.EmitStaticElemScale(TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc));
         Self.Emit(#9'popq %rcx');
         Self.Emit(#9'addq %rcx, %rax');
@@ -12379,7 +12456,7 @@ begin
       else
       begin
         Self.Emit(#9'pushq %rcx');
-        Self.EmitExprToEax(FAE.PropIndexExpr);
+        Self.EmitFieldIdxToEax(FAE);
         Self.Emit(Format(#9'imulq $%d, %%rax',
           [TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
         Self.Emit(#9'popq %rcx');
@@ -12401,6 +12478,8 @@ begin
     if AOE.Expr is TFieldAccessExpr then
     begin
       FAE := TFieldAccessExpr(AOE.Expr);
+      if FAE.IsArrayAccess then
+        Self.EmitFieldIdxPre(FAE);
       if FAE.Base <> nil then
       begin
         Self.EmitExprToEax(FAE.Base);
@@ -13327,9 +13406,13 @@ begin
   else
     ElemT := TStaticArrayTypeDesc(AFAE.FieldInfo.TypeDesc).ElementType;
   if AFAE.FieldInfo.TypeDesc.Kind in [tyDynArray, tyOpenArray] then
-    Self.Emit(#9'movq (%rax), %rax');        { data pointer }
-  Self.Emit(#9'pushq %rax');                 { park base across index eval }
-  Self.EmitExprToEax(AFAE.PropIndexExpr);
+    { the data pointer, read after the index (which may replace it) }
+    Self.EmitFieldDynIdxAfterSlot(AFAE, '%rax', False)
+  else
+  begin
+    Self.Emit(#9'pushq %rax');               { park base across index eval }
+    Self.EmitFieldIdxToEax(AFAE);
+  end;
   if (AFAE.FieldInfo.TypeDesc.Kind = tyStaticArray) and
      (TStaticArrayTypeDesc(AFAE.FieldInfo.TypeDesc).LowBound <> 0) then
     Self.Emit(Format(#9'subq $%d, %%rax',
@@ -13663,6 +13746,8 @@ begin
     { Record/class field as var argument (including fields of the sret
       Result record).  Compute the field's address. }
     FAE := TFieldAccessExpr(AArg);
+    if FAE.IsArrayAccess then
+      Self.EmitFieldIdxPre(FAE);
     { A static (class-level) var passed by reference: its storage IS the
       mangled global slot — take its address, not a field of an instance.
       Has no FieldInfo, so this must precede the guard below. }
@@ -17712,6 +17797,7 @@ var
   PropRelStr: Boolean;
   PtrSlot: string;
   IdxTmp: string;
+  BasePushed: Boolean;
   RecBuf: string;
   RetT: TTypeDesc;
 begin
@@ -19962,11 +20048,30 @@ begin
     begin
       { R.S[I] := B on a string field: copy-on-write in the field's own slot,
         as the string-variable subscript write does.  %rbx holds the slot's
-        address across _StringUnique, which may replace the string. }
-      Self.EmitByteRhsToEax(FA.Expr);
-      Self.Emit(#9'pushq %rax');                  { byte value }
+        address across _StringUnique, which may replace the string.  Left to
+        right: a class receiver that may run code is evaluated first and
+        held, then the index, then the byte; the slot is located last. }
+      if (FA.ObjExpr <> nil) and ExprMayCall(FA.ObjExpr) and
+         (FA.ObjExpr.ResolvedType <> nil) and
+         (FA.ObjExpr.ResolvedType.Kind = tyClass) then
+      begin
+        Self.EmitFieldRecvToEax(FA);
+        if not NativeExprOwnsRef(FA.ObjExpr) then
+        begin
+          Self.Emit(#9'pushq %rax');
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _ClassAddRef');
+          Self.Emit(#9'popq %rax');
+          Self.DeferNativeClassRelease();
+        end;
+        FFieldRecvSlot := Self.NewScratchOperand(8);
+        Self.Emit(Format(#9'movq %%rax, %s', [FFieldRecvSlot]));
+        FFieldRecvFA := FA;
+      end;
       Self.EmitExprToEax(FA.PropIndexExpr);
       Self.Emit(#9'pushq %rax');                  { index }
+      Self.EmitByteRhsToEax(FA.Expr);
+      Self.Emit(#9'pushq %rax');                  { byte value }
       Self.Emit(#9'pushq %rbx');
       Self.Emit(#9'subq $8, %rsp');               { align to 16 }
       Self.EmitFieldAssignSlotAddrToReg(FA, '%rbx');
@@ -19976,10 +20081,10 @@ begin
       Self.Emit(#9'movq %rax, %rcx');
       Self.Emit(#9'addq $8, %rsp');
       Self.Emit(#9'popq %rbx');
+      Self.Emit(#9'popq %rdx');                   { byte value }
       Self.Emit(#9'popq %rax');                   { index }
       Self.Emit(#9'addq %rax, %rcx');
-      Self.Emit(#9'popq %rax');                   { byte value }
-      Self.Emit(#9'movb %al, (%rcx)');
+      Self.Emit(#9'movb %dl, (%rcx)');
       Exit;
     end;
     if FA.IsElemWrite then
@@ -20031,6 +20136,17 @@ begin
         Self.Emit(#9'movq (%rdx), %rdx');
         Self.Emit(#9'popq %rax');
         Self.EmitDynIndexCheck('%rdx');
+        Self.Emit(Format(#9'movq %%rax, %s', [IdxTmp]));
+      end;
+      { a static-array field: its index is evaluated before the value too
+        (left to right), parked for the arms below }
+      if (IdxTmp = '') and (FA.FieldInfo.TypeDesc.Kind = tyStaticArray) and
+         ExprMayCall(FA.PropIndexExpr) and ExprMayCall(FA.Expr) and
+         not ((FA.ObjExpr <> nil) and ExprMayCall(FA.ObjExpr) and
+              (FA <> FFieldRecvFA)) then
+      begin
+        IdxTmp := Self.NewScratchOperand(8);
+        Self.EmitExprToEax(FA.PropIndexExpr);
         Self.Emit(Format(#9'movq %%rax, %s', [IdxTmp]));
       end;
       { Interface element: a two-slot fat pointer — the generic path below
@@ -21125,10 +21241,11 @@ begin
         pointer (releasing the old one when it copies); store it back so the
         slot keeps exactly one owned reference, then storeb into it.  Without
         the COW, writing a literal-backed string would hit read-only memory. }
-      Self.EmitByteRhsToEax(SSA.ValueExpr);
-      Self.Emit(#9'pushq %rax');                  { [rsp] = byte value }
+      { left to right: the index, then the byte; the slot is located last }
       Self.EmitExprToEax(SSA.IndexExpr);
       Self.Emit(#9'pushq %rax');                  { [rsp] = index }
+      Self.EmitByteRhsToEax(SSA.ValueExpr);
+      Self.Emit(#9'pushq %rax');                  { [rsp] = byte value }
       { Preserve %rbx and keep %rsp 16-aligned across the call: pushing %rbx
         alone (3rd push) would misalign, so reserve a paired 8-byte pad. }
       Self.Emit(#9'pushq %rbx');                  { preserve %rbx }
@@ -21155,10 +21272,10 @@ begin
       Self.Emit(#9'movq %rax, %rcx');             { %rcx = unique base }
       Self.Emit(#9'addq $8, %rsp');               { drop alignment pad }
       Self.Emit(#9'popq %rbx');                   { restore %rbx }
+      Self.Emit(#9'popq %rdx');                   { byte value }
       Self.Emit(#9'popq %rax');                   { index }
       Self.Emit(#9'addq %rax, %rcx');
-      Self.Emit(#9'popq %rax');                   { byte value }
-      Self.Emit(#9'movb %al, (%rcx)');
+      Self.Emit(#9'movb %dl, (%rcx)');
       Exit;
     end;
     if (SSA.ResolvedArrayType <> nil) and
@@ -21166,27 +21283,32 @@ begin
     begin
       { PChar subscript write: P[I] := byte — storeb at base + I.  PChar is a
         raw pointer with no ARC header (the slot holds it directly). }
-      Self.EmitByteRhsToEax(SSA.ValueExpr);
-      Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(SSA.IndexExpr);
       if SSA.BaseExpr <> nil then
       begin
-        { PChar(P)[I] := V: the base is a pointer VALUE; park the index
-          while it is evaluated }
-        Self.Emit(#9'pushq %rax');
+        { PChar(P)[I] := V: the base is a pointer VALUE -- left to right,
+          the base, the index, then the byte }
         Self.EmitExprToEax(SSA.BaseExpr);
-        Self.Emit(#9'movq %rax, %rcx');
-        Self.Emit(#9'popq %rax');
-      end
-      else
-      begin
-        Self.EmitVarBaseToReg(SSA.ArrayName, False, '%rcx');
-        if SSA.IsVarParam then
-          { var/out param: slot -> caller var -> char pointer. }
-          Self.Emit(#9'movq (%rcx), %rcx');
+        Self.Emit(#9'pushq %rax');
+        Self.EmitExprToEax(SSA.IndexExpr);
+        Self.Emit(#9'addq %rax, (%rsp)');           { element address }
+        Self.EmitByteRhsToEax(SSA.ValueExpr);
+        Self.Emit(#9'popq %rcx');
+        Self.Emit(#9'movb %al, (%rcx)');
+        Exit;
       end;
-      Self.Emit(#9'addq %rax, %rcx');
-      Self.Emit(#9'popq %rax');
+      { a named PChar: the index, then the byte, then the pointer (loading
+        a variable has no side effect) }
+      Self.EmitExprToEax(SSA.IndexExpr);
+      Self.Emit(#9'pushq %rax');
+      Self.EmitByteRhsToEax(SSA.ValueExpr);
+      Self.Emit(#9'pushq %rax');
+      Self.EmitVarBaseToReg(SSA.ArrayName, False, '%rcx');
+      if SSA.IsVarParam then
+        { var/out param: slot -> caller var -> char pointer. }
+        Self.Emit(#9'movq (%rcx), %rcx');
+      Self.Emit(#9'popq %rax');                   { byte }
+      Self.Emit(#9'popq %rdx');                   { index }
+      Self.Emit(#9'addq %rdx, %rcx');
       Self.Emit(#9'movb %al, (%rcx)');
       Exit;
     end;
@@ -21636,10 +21758,26 @@ begin
       inner-array address) first and stash it on the stack so the index
       evaluation below can clobber registers freely; the base-resolve step
       then pops it instead of loading from a named slot. }
-    if SSA.BaseExpr <> nil then
+    { Left to right: a chained base that may run code is evaluated first
+      and stashed; a chained base free of calls is located after the value
+      instead (no side effect to reorder; the value may move it -- resize
+      the dynamic array the static one lives in).  The index is evaluated
+      before the value and parked. }
+    { (only when code could observe the difference: with no call in the
+      value the old order -- base, value, index -- is kept) }
+    BasePushed := (SSA.BaseExpr <> nil) and
+      (ExprMayCall(SSA.BaseExpr) or not ExprMayCall(SSA.ValueExpr));
+    if BasePushed then
     begin
       Self.EmitExprToEax(SSA.BaseExpr);
       Self.Emit(#9'pushq %rax');             { stack: [baseaddr] }
+    end;
+    IdxTmp := '';
+    if ExprMayCall(SSA.ValueExpr) and ExprMayCall(SSA.IndexExpr) then
+    begin
+      IdxTmp := Self.NewScratchOperand(8);
+      Self.EmitExprToEax(SSA.IndexExpr);
+      Self.Emit(Format(#9'movq %%rax, %s', [IdxTmp]));
     end;
     { Float element: evaluate into %xmm0, coerce to the element width, then
       spill through %rax (see the dyn-array float branch above). }
@@ -21657,16 +21795,27 @@ begin
     else
       Self.EmitExprToEax(SSA.ValueExpr);
     Self.Emit(#9'pushq %rax');
-    Self.EmitExprToEax(SSA.IndexExpr);
+    if IdxTmp <> '' then
+      Self.Emit(Format(#9'movq %s, %%rax', [IdxTmp]))
+    else
+      Self.EmitExprToEax(SSA.IndexExpr);
     if TStaticArrayTypeDesc(SSA.ResolvedArrayType).LowBound <> 0 then
       Self.Emit(Format(#9'subq $%d, %%rax',
         [TStaticArrayTypeDesc(SSA.ResolvedArrayType).LowBound]));
     Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
-    if SSA.BaseExpr <> nil then
+    if BasePushed then
     begin
       { Base address was pushed before the value: it now sits at 8(%rsp)
         (the value is on top).  Load it without disturbing the value. }
       Self.Emit(#9'movq 8(%rsp), %rcx');
+    end
+    else if SSA.BaseExpr <> nil then
+    begin
+      { a chained base free of calls, located now (after the value) }
+      Self.Emit(#9'pushq %rax');
+      Self.EmitExprToEax(SSA.BaseExpr);
+      Self.Emit(#9'movq %rax, %rcx');
+      Self.Emit(#9'popq %rax');
     end
     else if SSA.IsImplicitSelf then
     begin
@@ -21694,7 +21843,7 @@ begin
       Self.Emit(#9'popq %rax');
       Self.Emit(#9'movq %rax, %xmm0');
       Self.EmitStoreFloat('(%rcx)', DAElemType);
-      if SSA.BaseExpr <> nil then
+      if BasePushed then
         Self.Emit(#9'addq $8, %rsp');           { drop stashed base address }
       Exit;
     end;
@@ -21746,7 +21895,7 @@ begin
       Self.Emit(#9'popq %r15');
       Self.Emit(#9'popq %rbx');
       Self.Emit(#9'addq $8, %rsp');          { drop saved src addr }
-      if SSA.BaseExpr <> nil then
+      if BasePushed then
         Self.Emit(#9'addq $8, %rsp');         { drop stashed base address }
       Exit;
     end;
@@ -21797,7 +21946,7 @@ begin
     end;
     Self.Emit(#9'popq %rax');
     Self.EmitStoreVar('(%rcx)', DAElemType);
-    if SSA.BaseExpr <> nil then
+    if BasePushed then
       Self.Emit(#9'addq $8, %rsp');           { drop stashed base address }
     Exit;
   end;
