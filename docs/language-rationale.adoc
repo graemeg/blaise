@@ -6737,6 +6737,34 @@ return `'True'` / `'False'` as a string value.
   integer rendering was a bug, not a feature.
 
 
+== `WriteLn` of a `Float32` prints 7 significant digits
+
+=== Decision
+
+`Write` / `WriteLn` of a `Float32` argument prints the value with 7
+significant digits, exactly as `SingleToStr` renders it: `0.3333333`,
+`2.897385e+14`.  A `Float64` argument keeps the 15-digit `DoubleToStr`
+rendering.  Both backends call the runtime's Single writer with a genuine
+32-bit value.
+
+=== Rationale
+
+* *The same program prints the same text on every target.*  The arm64
+  backend widened a `Float32` to double and wrote it through the double
+  writer, printing `0.333333343267441` where x86-64 printed `0.3333333`.
+  Output that depends on the CPU is a defect, whichever form is chosen.
+* *Seven digits is what a `Float32` holds.*  A single carries about 7
+  significant decimal digits; the extra digits of the widened double are
+  the binary rounding error of the conversion, not information.
+* *It matches the explicit conversion.*  `WriteLn(S)` and
+  `WriteLn(SingleToStr(S))` print the same text, so adding or removing the
+  conversion never changes a program's output.
+
+=== Alternatives considered
+
+* *The widened double (the old arm64 output).*  Rejected: it prints digits
+  the value does not have, and differs from `SingleToStr`.
+
 == Write / WriteLn field widths — `X:W` and `X:W:D`
 
 === Decision

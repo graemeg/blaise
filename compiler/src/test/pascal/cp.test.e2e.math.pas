@@ -221,6 +221,7 @@ type
     { WriteLn(Double) / WriteLn(Single) — direct float output without DoubleToStr }
     procedure TestRun_WriteLn_Double_Direct;
     procedure TestRun_WriteLn_Single_Direct;
+    procedure TestRun_WriteLn_Single_SevenDigits;
     { Integer arguments to float builtins + float typecasts }
     procedure TestRun_Trig_IntegerArgs;
     procedure TestRun_FloatCast_FromInteger;
@@ -675,12 +676,9 @@ const
     Undeclared function 'Exp'" for `i := exp(33.3)` while Sqrt worked
     without uses Math.  The value is printed through SingleToStr, whose
     rendering is identical on every target (the shared _SingleToStr).
-    A bare WriteLn(i) is deliberately NOT asserted: WriteLn of a Single
-    renders differently between the backends (arm64 widens to double and
-    calls _SysWriteDouble -> 289738527342592; x86-64 calls _SysWriteSingle
-    with 7 significant digits -> 2.897385e+14).  That pre-existing writer
-    inconsistency is BUG-20261109-writeln-single-backend-rendering in
-    BUGS.md; the Exp wiring itself is what this test pins. }
+    Since BUG-20261110 a bare WriteLn(i) prints the same text on every
+    target too (TestRun_WriteLn_Single_SevenDigits pins that); the Exp
+    wiring is what this test pins. }
   Src = '''
     program P;
     uses math, classicpascaltypes;
@@ -1835,6 +1833,43 @@ begin
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('WriteLn(Float32)', '1.5', Trim(Output));
+end;
+
+procedure TE2EMathTests.TestRun_WriteLn_Single_SevenDigits;
+const
+  { BUG-20261110: WriteLn of a Single renders with 7 significant digits on
+    every target, exactly as SingleToStr does.  arm64 used to widen it to
+    double and print the widened value's 15 digits (0.333333343267441,
+    289738527342592), while x86-64 printed 0.3333333 and 2.897385e+14. }
+  Src = '''
+    program P;
+    var S, T: Float32; I: Int;
+    function Half(X: Float32): Float32;
+    begin
+      Result := X / 2.0
+    end;
+    begin
+      I := 7;
+      S := 1.0 / 3.0;
+      T := 289738527342592.0;
+      WriteLn(S);
+      WriteLn(T);
+      WriteLn(SingleToStr(S));
+      Write(S, ' ', T);
+      WriteLn();
+      WriteLn(-S);
+      WriteLn(S + S);
+      WriteLn(Half(S));
+      WriteLn(Float32(I));
+      WriteLn('[', S:12, ']')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0.3333333' + LE + '2.897385e+14' + LE + '0.3333333' + LE +
+    '0.3333333 2.897385e+14' + LE + '-0.3333333' + LE + '0.6666667' + LE +
+    '0.1666667' + LE + '7' + LE + '[   0.3333333]' + LE, 0);
 end;
 
 procedure TE2EMathTests.TestRun_Trig_IntegerArgs;

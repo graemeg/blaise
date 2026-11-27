@@ -10963,11 +10963,20 @@ begin
           EmitCallSym('_SysWriteStr');
       end;
     end
-    else if K in [tyDouble, tySingle] then
+    else if K = tyDouble then
     begin
       Self.EmitExprToD0OrConvert(Arg);
       Self.Emit(FdMov);
       EmitCallSym('_SysWriteDouble');
+    end
+    else if K = tySingle then
+    begin
+      { a Single is written with 7 significant digits, as on x86-64 and by
+        SingleToStr: narrow the (exact) widened value back to s0 }
+      Self.EmitExprToD0OrConvert(Arg);
+      Self.Emit(#9'fcvt s0, d0');
+      Self.Emit(FdMov);
+      EmitCallSym('_SysWriteSingle');
     end
     else if K = tyBoolean then
     begin

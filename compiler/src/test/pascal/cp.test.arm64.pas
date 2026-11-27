@@ -103,6 +103,7 @@ type
     procedure TestRecordReturn_SmallImageStoredWidthExact;
     procedure TestJumboSetTypedConst_IsBitmapAddress;
     procedure TestWriteLn_StdErrSelectsFd2;
+    procedure TestWriteLn_Single_UsesSingleWriter;
     { A Single-returning METHOD call in float context comes back in s0 and
       must be widened to d0 (the D0 contract); arm64 read the stale d0. }
     procedure TestSingleMethodResult_WidenedAfterCall;
@@ -1719,6 +1720,25 @@ begin
   AssertEquals('the Float32 result is widened right after the call', '',
     AsmMissing(Src, #9'callq TBase_T' + #10 + #9'cvtss2sd %xmm0, %xmm0',
       #9'bl _TBase_T' + #10 + #9'fcvt d0, s0'));
+end;
+
+procedure TArm64BackendTests.TestWriteLn_Single_UsesSingleWriter;
+const
+  Src = '''
+    program P;
+    var S: Float32;
+    begin
+      S := 1.5;
+      WriteLn(S)
+    end.
+    ''';
+begin
+  { BUG-20261110: arm64 widened a Single to double and wrote it through
+    _SysWriteDouble (15 digits); x86-64 wrote it through _SysWriteSingle
+    (7 significant digits).  Both now pass a genuine Single in s0/xmm0. }
+  AssertEquals('Single goes through the Single writer', '',
+    AsmMissing(Src, 'callq _SysWriteSingle',
+      #9'fcvt s0, d0' + #10 + #9'movz w0, #1' + #10 + #9'bl __SysWriteSingle'));
 end;
 
 procedure TArm64BackendTests.TestWriteLn_StdErrSelectsFd2;
