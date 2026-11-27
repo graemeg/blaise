@@ -35,6 +35,9 @@ type
     { a property hides a same-named inherited method: the bare read is the
       property (the interface read was the method, the class read an error) }
     procedure TestSemantic_PropertyHidesInheritedMethod_ReadsGetter;
+    { an interface field of Self: the property reads bare, the method
+      needs () }
+    procedure TestSemantic_ImplicitSelfIntfField_PropertyAndBareMethod;
     { a var/out interface parameter is ONE pointer register: the frame
       layout counted it as a two-register fat value, so the parameters after
       it were mapped one slot late and the last register parameter was
@@ -1718,6 +1721,39 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TInterfaceTests.TestSemantic_ImplicitSelfIntfField_PropertyAndBareMethod;
+const
+  Decls = '''
+    program P;
+    type
+      IShape = interface
+        function Area: Int;
+        function GetSides: Int;
+        property Sides: Int read GetSides;
+      end;
+      THost = class
+        FI: IShape;
+        function Total: Int;
+      end;
+
+    ''';
+var
+  Msg: string;
+begin
+  AssertEquals('property read accepted', '', SemanticError(Decls + '''
+    function THost.Total: Int; begin Result := FI.Sides end;
+    begin
+    end.
+    '''));
+  Msg := SemanticError(Decls + '''
+    function THost.Total: Int; begin Result := FI.Area end;
+    begin
+    end.
+    ''');
+  AssertTrue('bare method rejected, got: ' + Msg,
+    Pos('Bare reference to ''Area'' requires () for a call', Msg) >= 0);
 end;
 
 initialization

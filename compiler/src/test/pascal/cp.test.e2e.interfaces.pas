@@ -27,6 +27,11 @@ type
       the method stays reachable as X.Size().  The interface read called the
       method; the class read was rejected as a bare method call }
     procedure TestRun_PropertyHidesInheritedMethod_BareRead;
+    { FI.Sides inside a method, FI an interface field of Self: a property
+      read through the implicit-Self field (it was "Undeclared identifier
+      'FI'" while FI.Area() compiled), as a value, in a condition and as a
+      for bound, with the interface held only by the field }
+    procedure TestRun_ImplicitSelfIntfField_PropertyRead;
     { interface and metaclass fields read off a call result: the value
       outlives the transient object, which is freed once, after the statement }
     procedure TestRun_IntfAndMetaclassFieldOfCallResult;
@@ -2989,6 +2994,49 @@ begin
       C.Free()
     end.
     ''', '2 1 2' + LE + '4 3 8' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ImplicitSelfIntfField_PropertyRead;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      IShape = interface
+        function Area: Int;
+        function GetSides: Int;
+        property Sides: Int read GetSides;
+      end;
+      TSq = class(TObject, IShape)
+        function Area: Int;
+        function GetSides: Int;
+      end;
+      THost = class
+        FI: IShape;
+        function Total: Int;
+      end;
+    function TSq.Area: Int; begin Result := 4 end;
+    function TSq.GetSides: Int; begin Result := 5 end;
+    function THost.Total: Int;
+    var
+      K, N: Int;
+    begin
+      N := 0;
+      for K := 1 to FI.Sides do
+        N := N + 1;
+      if FI.Sides = 5 then
+        N := N + 100;
+      Result := FI.Area() + FI.Sides + N
+    end;
+    var
+      H: THost;
+    begin
+      H := THost.Create();
+      H.FI := TSq.Create();
+      WriteLn(H.Total());
+      H.Free()
+    end.
+    ''', '114' + LE, 0);
 end;
 
 initialization

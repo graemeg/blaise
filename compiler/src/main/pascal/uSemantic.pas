@@ -23179,6 +23179,19 @@ begin
     if FCurrentClass <> nil then
     begin
       FldInfo := FCurrentClass.FindField(AAccess.RecordName);
+      { FI.Sides, FI an interface field: the chained form with FI as its
+        base, whose interface arm reads the property (and rejects a bare
+        method) -- this arm knows only record and class fields }
+      if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
+         (FldInfo.TypeDesc.Kind = tyInterface) then
+      begin
+        AAccess.Base := TIdentExpr.Create();
+        AAccess.Base.Line := AAccess.Line;
+        AAccess.Base.Col := AAccess.Col;
+        TIdentExpr(AAccess.Base).Name := AAccess.RecordName;
+        AAccess.RecordName := '';
+        Exit(Self.AnalyseFieldAccess(AAccess));
+      end;
       if (FldInfo <> nil) and
          (FldInfo.TypeDesc.Kind in [tyRecord, tyClass]) then
       begin
