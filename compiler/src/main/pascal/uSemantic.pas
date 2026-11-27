@@ -8704,6 +8704,13 @@ begin
     end;
   end;
 
+  { T(X) naming no type or constant function: say so, so a classic name
+    (Word, Cardinal) gets its ClassicPascalTypes hint }
+  if (AExpr is TFuncCallExpr) and (FTable.Lookup(TFuncCallExpr(AExpr).Name) = nil) then
+    SemanticError(
+      Format('Unknown type ''%s'' in a constant cast',
+        [TFuncCallExpr(AExpr).Name]),
+      ALine, ACol);
   SemanticError(
     'Constant expression is not a compile-time integer', ALine, ACol);
 end;

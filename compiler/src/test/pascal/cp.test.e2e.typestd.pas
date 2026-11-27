@@ -23,6 +23,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { an integer cast in a constant -- UInt64(-1), Int8(200), ... -- is a
+      constant of the cast's type at its boundary values, in the program and
+      read back from a cached unit interface
+      (BUG-20261113-uint64-cast-const-type) }
+    procedure TestRun_ConstCast_BoundaryValuesAndType;
     { SizeOf, wrap-around and signedness of every new integer name }
     procedure TestRun_IntegerNames_WidthAndArithmetic;
     { Float is Float64 (full double precision), Float32 rounds to single }
@@ -892,6 +897,58 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_ConstCast_BoundaryValuesAndType;
+const
+  USrc = '''
+    unit ccast;
+    interface
+    const
+      UAll = UInt64(-1);
+      UTop = UInt64(-1) shr 1;
+    implementation
+    end.
+    ''';
+  PSrc = '''
+    program P;
+    uses ccast;
+    const
+      A = UInt64(-1);
+      B = UInt32(-10);
+      C = Int8(200);
+      D = Byte(300);
+      E = Int16(-32769);
+      F = UInt16(-1);
+      G = Int32(4294967295);
+    var
+      X: UInt64; Y: UInt32; Z: Int8; W: Byte; V: Int16; U: UInt16; T: Int32;
+    begin
+      X := A; Y := B; Z := C; W := D; V := E; U := F; T := G;
+      WriteLn(X, ' ', Y, ' ', Z, ' ', W, ' ', V, ' ', U, ' ', T);
+      WriteLn(X = High(UInt64), ' ', A > UInt64(High(Int64)));
+      X := UAll;
+      WriteLn(X, ' ', UTop = UInt64(High(Int64)));
+      X := A - 1;
+      WriteLn(X)
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Int;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { twice: the second build reads ccast's constants from its cached .bif }
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRunWithUnitNative('ccast', USrc, PSrc, Output, RCode));
+  AssertTrue('cached compile+run: ' + Output,
+    CompileAndRunInScratch(PSrc, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('values',
+    '18446744073709551615 4294967286 -56 44 32767 65535 -1' + #10 +
+    'True True' + #10 +
+    '18446744073709551615 True' + #10 +
+    '18446744073709551614' + #10, Output);
 end;
 
 initialization

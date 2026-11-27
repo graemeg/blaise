@@ -148,6 +148,7 @@ type
     function  TryParseConstIntTypecast(out AValue: Int64): Boolean;
     function  IsConstExprOp(AKind: TTokenKind): Boolean;
     function  ConstRhsStartsIntExpr: Boolean;
+    function  IsConstIntTypecastName(const AName: string): Boolean;
     function  CurrentIsConstBitOp: Boolean;
     function  ConsumeConstBitOpName: string;
     function  CollectConstBitOpExpr(const AFirstStr: string;
@@ -1616,6 +1617,7 @@ begin
   Result := False;
   if not Check(tkIdent) then Exit;
   if PeekKind() <> tkLParen then Exit;
+  if not Self.IsConstIntTypecastName(FCurrent.Value) then Exit;
   TypeName := FCurrent.Value;
   Width := 0; IsSigned := False;
   if SameText(TypeName, 'Byte') or SameText(TypeName, 'UInt8') then
@@ -1685,6 +1687,23 @@ begin
          or (AKind = tkShl)  or (AKind = tkShr);
 end;
 
+{ True when AName is an integer type a constant may be cast to (the names
+  TryParseConstIntTypecast knows). }
+function TParser.IsConstIntTypecastName(const AName: string): Boolean;
+const
+  Names: array[0..19] of string = ('Byte', 'UInt8', 'ShortInt', 'Int8',
+    'SmallInt', 'Int16', 'Word', 'UInt16', 'Integer', 'LongInt', 'Int32',
+    'Cardinal', 'LongWord', 'UInt32', 'Int64', 'Int', 'UInt64', 'QWord',
+    'PtrUInt', 'UInt');
+var
+  I: Int;
+begin
+  for I := 0 to High(Names) do
+    if SameText(AName, Names[I]) then
+      Exit(True);
+  Result := False;
+end;
+
 function TParser.ConstRhsStartsIntExpr: Boolean;
 begin
   Result := False;
@@ -1699,6 +1718,13 @@ begin
     Result := True
   else if Check(tkMinus) and (PeekKind() = tkFloatLit)
        and Self.IsConstExprOp(PeekKind2()) then
+    Result := True
+  { An integer-type cast, UInt64(-1) or Int8(M) or UInt32(M) shr 4: the
+    expression path folds any operand and types the constant from the cast
+    (ConstExprOrdinalType).  The literal-only fast path kept the value but
+    not the type, so UInt64(-1) was an Int64. }
+  else if Check(tkIdent) and (PeekKind() = tkLParen) and
+          Self.IsConstIntTypecastName(FCurrent.Value) then
     Result := True
   { Ident-led integer expression (e.g. BASE * 2).  Only the unambiguously
     numeric operators trigger this — '+' is left to the string path so that
@@ -2095,7 +2121,6 @@ end;
 
 procedure TParser.ParseConstValue(CD: TConstDecl);
 var
-  CastVal:      Int64;
   FirstOperand: string;
   ElemStr:      string;
 begin
@@ -2189,19 +2214,6 @@ begin
         CD.IntVal := 0;
         CD.IsUInt64 := False;
       end;
-    end
-    else if Check(tkIdent) and (PeekKind() = tkLParen)
-         and TryParseConstIntTypecast(CastVal) then
-    begin
-      { TypeName(IntLit) typecast in scalar const init }
-      CD.IsString := False;
-      if CurrentIsConstBitOp() then
-      begin
-        CD.IntExprTokens := CollectConstBitOpExpr(IntToStr(CastVal), False);
-        CD.IntVal := 0;
-      end
-      else
-        CD.IntVal := CastVal;
     end
     else if Check(tkIdent)
          and (PeekKind() in [tkOr, tkAnd, tkXor, tkShl, tkShr]) then

@@ -20,6 +20,16 @@ type
     function ParseUnit(const ASrc: string): TUnit;
     function IRContains(const AIR, AFragment: string): Boolean;
   published
+    { const A = UInt64(-1) is a UInt64, Int8(200) an Int8, ...: the
+      literal-only cast fast path folded the value and dropped the type, so
+      X := A with X: UInt64 was a type mismatch, and a cast of a named
+      constant or an expression did not parse
+      (BUG-20261113-uint64-cast-const-type) }
+    procedure TestConstCast_TakesTheCastType;
+    procedure TestConstCast_OfNamedConstAndExpression_Folds;
+    { a classic name (Word) is a type only with ClassicPascalTypes, in a
+      constant cast as anywhere else: the hint names the unit }
+    procedure TestConstCast_ClassicNameWithoutUnit_Hints;
     { a const array's data directive follows the element type's real width
       for EVERY spelling of it -- builtin aliases (Int16, UInt16, QWord,
       PtrUInt) and user aliases alike; arm64 matched only the classic names
@@ -993,6 +1003,82 @@ begin
     end.
     ''');
   AssertTrue('asks for a type: ' + Err, Pos('takes a type, but ''G'' is a variable', Err) >= 0);
+end;
+
+function ConstSymType(AProg: TProgram; const AName: string): string;
+var
+  I: Int;
+  CD: TConstDecl;
+begin
+  Result := '';
+  for I := 0 to AProg.Block.ConstDecls.Count - 1 do
+  begin
+    CD := TConstDecl(AProg.Block.ConstDecls.Items[I]);
+    if SameText(CD.Name, AName) then
+      Exit(CD.TypeName);
+  end;
+end;
+
+procedure TConstTests.TestConstCast_TakesTheCastType;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse('''
+    program P;
+    const
+      A = UInt64(-1);
+      B = UInt32(-10);
+      C = Int8(200);
+      D = Byte(300);
+      E = Int16(-1);
+    var
+      X: UInt64; Y: UInt32; Z: Int8; W: Byte; V: Int16;
+    begin
+      X := A; Y := B; Z := C; W := D; V := E
+    end.
+    ''');
+  try
+    AssertEquals('UInt64(-1)', 'UInt64', ConstSymType(Prog, 'A'));
+    AssertEquals('UInt32(-10)', 'UInt32', ConstSymType(Prog, 'B'));
+    AssertEquals('Int8(200)', 'Int8', ConstSymType(Prog, 'C'));
+    AssertEquals('Byte(300)', 'Byte', ConstSymType(Prog, 'D'));
+    AssertEquals('Int16(-1)', 'Int16', ConstSymType(Prog, 'E'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TConstTests.TestConstCast_OfNamedConstAndExpression_Folds;
+begin
+  AssertEquals('accepted', '', SemanticError('''
+    program P;
+    const
+      M = -1;
+      A = UInt64(M);
+      B = UInt64(-1 + 0);
+      C = UInt32(M) shr 4;
+    var
+      X: UInt64;
+    begin
+      X := A; X := B; X := C
+    end.
+    '''));
+end;
+
+procedure TConstTests.TestConstCast_ClassicNameWithoutUnit_Hints;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    const A = Word(70000);
+    begin
+      WriteLn(A)
+    end.
+    ''');
+  AssertTrue('unknown type with the ClassicPascalTypes hint, got: ' + Msg,
+    (Pos('Unknown type ''Word''', Msg) >= 0) and
+    (Pos('ClassicPascalTypes', Msg) >= 0));
 end;
 
 initialization
