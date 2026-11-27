@@ -331,9 +331,9 @@ const
     begin
       for I := 0 to 999 do
       begin
-        Self.Shared.CS.Enter;
+        Self.Shared.CS.Enter();
         Self.Shared.Counter := Self.Shared.Counter + 1;
-        Self.Shared.CS.Leave
+        Self.Shared.CS.Leave()
       end
     end;
     var

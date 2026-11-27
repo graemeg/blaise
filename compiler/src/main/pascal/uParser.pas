@@ -4298,8 +4298,10 @@ var
   SubNode:     TStringSubscriptExpr;
   ChainBase:   TASTExpr;
   ExitS:       TExitStmt;
+  CallParens:  Boolean;
 begin
   Result := nil;
+  CallParens := False;
   Self.RejectForeignConstruct();
 
   if Check(tkEnd) or Check(tkEOF) or Check(tkSemicolon) or Check(tkElse) then
@@ -4696,7 +4698,16 @@ begin
           ChainBase := FldNode;
           Continue;
         end;
-        { Statement boundary: parenless method call Name[I]....M }
+        { Statement boundary: Name[I]....M with no () -- a call needs its
+          parentheses, as on any other receiver }
+        if not Check(tkLParen) then
+        begin
+          ChainBase.Free();
+          ChainBase := nil;
+          raise EParseError.Create(Format(
+            'Bare reference to ''%s'' requires () for a call at line %d col %d in %s',
+            [SecondIdent, SecondLine, SecondCol, FLexer.Filename]));
+        end;
         MCall := TMethodCallStmt.Create();
         MCall.Line := Line;
         MCall.Col := Col;
@@ -4800,13 +4811,19 @@ begin
         MCall.ObjExpr := FldNode.Base;
         FldNode.Base := nil;
         FldNode.Free();
-        if Check(tkLParen) then
+        { Ident^.M; with no () -- a call needs its parentheses }
+        if not Check(tkLParen) then
         begin
-          Advance();  { consume '(' }
-          if not Check(tkRParen) then
-            ParseMethodCallArgList(MCall);
-          Expect(tkRParen);
+          SecondIdent := MCall.Name;
+          MCall.Free();
+          raise EParseError.Create(Format(
+            'Bare reference to ''%s'' requires () for a call at line %d col %d in %s',
+            [SecondIdent, Line, Col, FLexer.Filename]));
         end;
+        Advance();  { consume '(' }
+        if not Check(tkRParen) then
+          ParseMethodCallArgList(MCall);
+        Expect(tkRParen);
         Exit(MCall);
       end;
       FldAssign         := TFieldAssignment.Create();
@@ -5161,6 +5178,7 @@ begin
             MCall.MemberCol := SecondCol;
             if Check(tkLParen) then
             begin
+              CallParens := True;
               Advance();
               if not Check(tkRParen) then
                 ParseMethodCallArgList(MCall);
@@ -5204,6 +5222,16 @@ begin
           MCall := nil;
           FldAssign.Expr := ParseExpr();
           Exit(FldAssign);
+        end;
+        { A.B.M; with no () -- a call needs its parentheses here too }
+        if not CallParens then
+        begin
+          SecondIdent := MCall.Name;
+          MCall.Free();
+          MCall := nil;
+          raise EParseError.Create(Format(
+            'Bare reference to ''%s'' requires () for a call at line %d col %d in %s',
+            [SecondIdent, SecondLine, SecondCol, FLexer.Filename]));
         end;
         Result := MCall;
       end

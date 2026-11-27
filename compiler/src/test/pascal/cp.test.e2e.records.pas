@@ -1028,7 +1028,7 @@ const
     begin
       SetLength(a, 1);
       a[0] := TC.Create();
-      a[0].Bump;
+      a[0].Bump();
       a[0].Bump();
       writeln(a[0].V);
     end.

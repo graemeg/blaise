@@ -23,6 +23,11 @@ type
     { ParseErrorMsg for a unit source. }
     function ParseUnitErrorMsg(const ASrc: string): string;
   published
+    { a chained call statement needs () like any other: C.S.Hit; A[0].Hit;
+      A[0].S.Hit; P^.Hit; and P^.S.Hit; were parsed as calls
+      (BUG-20261127-chained-stmt-bare-call); the () forms still parse }
+    procedure TestParse_ChainedBareCallStatement_Rejected;
+    procedure TestParse_ChainedCallStatementWithParens_Parses;
     { a chained base's field element may be followed by more chain: a field
       write, a further subscript, or a call through the element }
     procedure TestParse_ChainPastFieldElement;
@@ -1083,6 +1088,46 @@ begin
     on E: EParseError do
       Result := E.Message;
   end;
+end;
+
+const
+  ChainedCallDecls =
+    'program P;' + #10 +
+    'type' + #10 +
+    '  PC = ^TC;' + #10 +
+    '  TC = class' + #10 +
+    '    S: TC;' + #10 +
+    '    procedure Hit;' + #10 +
+    '  end;' + #10 +
+    'procedure TC.Hit; begin end;' + #10 +
+    'var C: TC; A: array[0..0] of TC; P: PC;' + #10 +
+    'begin' + #10;
+
+procedure TParserTests.TestParse_ChainedBareCallStatement_Rejected;
+var
+  Stmts: array[0..4] of string;
+  Msg: string;
+  I: Int;
+begin
+  Stmts[0] := 'C.S.Hit;';
+  Stmts[1] := 'A[0].Hit;';
+  Stmts[2] := 'A[0].S.Hit;';
+  Stmts[3] := 'P^.Hit;';
+  Stmts[4] := 'P^.S.Hit;';
+  for I := 0 to 4 do
+  begin
+    Msg := ParseErrorMsg(ChainedCallDecls + '  ' + Stmts[I] + #10 + 'end.');
+    AssertTrue(Stmts[I] + ' rejected, got: ' + Msg,
+      Pos('requires () for a call', Msg) >= 0);
+  end;
+end;
+
+procedure TParserTests.TestParse_ChainedCallStatementWithParens_Parses;
+begin
+  AssertEquals('() forms parse', '', ParseErrorMsg(ChainedCallDecls +
+    '  C.S.Hit(); A[0].Hit(); A[0].S.Hit(); P^.Hit(); P^.S.Hit();' + #10 +
+    '  C.S.S := C; A[0].S := C; P^.S := C' + #10 +
+    'end.'));
 end;
 
 procedure TParserTests.TestGoto_NamesTheRule;

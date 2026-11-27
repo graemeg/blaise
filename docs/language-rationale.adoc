@@ -7048,6 +7048,9 @@ accepted and dispatched as a call, while the same text on a class receiver
 or on a value of a constrained type parameter `T: IShape` was rejected.  An
 interface receiver now follows the rule too: a parameterless interface
 method is called `S.Area()`, and only an interface *property* reads bare.
+The same holds for a chained statement: `A[0].Proc;`, `C.Inner.Proc;` and
+`P^.Proc;` were once parsed as calls and are now rejected like the bare
+`Obj.Proc;`.
 
 === Statement keywords take no parentheses
 
