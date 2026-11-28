@@ -29,6 +29,7 @@ type
     procedure TestText_LoneCarriageReturn;
     procedure TestText_EmptyLinesKept;
     procedure TestText_RoundTrip;
+    procedure TestSplitIntoList_OnAnySeparator;
   end;
 
 implementation
@@ -94,6 +95,20 @@ begin
   AssertEquals('first', 'one', M[0]);
   AssertEquals('empty', '', M[1]);
   AssertEquals('last', 'three', M[2]);
+end;
+
+{ SplitIntoList is public and used directly (BlaiseUI's tutorial): it
+  splits on the one separator it is given, nothing else. }
+procedure TClassesTests.TestSplitIntoList_OnAnySeparator;
+var
+  L: TStringList;
+begin
+  L := TStringList.Create();
+  SplitIntoList('a,b' + #13 + ',,c', Ord(','), L);
+  AssertEquals('count', 4, L.Count);
+  AssertEquals('CR kept: only the separator splits', 'b' + #13, L[1]);
+  AssertEquals('empty part kept', '', L[2]);
+  AssertEquals('last', 'c', L[3]);
 end;
 
 initialization

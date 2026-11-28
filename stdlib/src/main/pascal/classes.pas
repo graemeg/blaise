@@ -265,6 +265,9 @@ type
     property Objects[Index: Int]: Pointer read GetObject write SetObject;
   end;
 
+{ AList given the ASep-separated parts of S (ASep is a byte value). }
+procedure SplitIntoList(const S: string; ASep: Int; AList: TStringList);
+{ AList given the lines of S; a line ends at LF, CR LF or a lone CR. }
 procedure SplitLinesIntoList(const S: string; AList: TStringList);
 
 implementation
@@ -388,6 +391,29 @@ begin
     so RemoveComponent must only unlink the slot — it must not release again. }
   if Self.FOwner <> nil then
     Self.FOwner.RemoveComponent(Self)
+end;
+
+procedure SplitIntoList(const S: string; ASep: Int; AList: TStringList);
+var
+  I:     Int;
+  Start: Int;
+begin
+  { Each segment between separators is added verbatim — leading and trailing
+    whitespace is preserved. }
+  AList.Clear();
+  Start := 0;
+  I     := 0;
+  while I < Length(S) do
+  begin
+    if OrdAt(S, I) = ASep then
+    begin
+      AList.Add(Copy(S, Start, I - Start));
+      Start := I + 1;
+    end;
+    I := I + 1;
+  end;
+  if Start < Length(S) then
+    AList.Add(Copy(S, Start, Length(S) - Start));
 end;
 
 procedure SplitLinesIntoList(const S: string; AList: TStringList);
