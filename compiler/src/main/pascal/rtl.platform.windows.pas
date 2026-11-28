@@ -34,8 +34,8 @@ type
     procedure DeleteFile(const APath: string); override;
     function RenameFile(const AOldPath, ANewPath: string): Boolean; override;
     function ReadFile(const APath: string): string; override;
-    procedure WriteFile(const APath, AContent: string); override;
-    procedure AppendFile(const APath, AContent: string); override;
+    function WriteFile(const APath, AContent: string): Int32; override;
+    function AppendFile(const APath, AContent: string): Int32; override;
     function FileAge(const APath: string): Int64; override;
     function DirectoryExists(const APath: string): Boolean; override;
     function PathKind(const APath: string; AFollowLinks: Boolean): Int32; override;
@@ -603,13 +603,24 @@ begin
   Result := (H <> nil) and (H <> Pointer(-1));
 end;
 
-{ Write all of AContent to handle H. }
-procedure WriteAllToHandle(H: Pointer; const AContent: string);
+{ The calling thread's last Win32 error, or ADefault when none is set: a
+  failure must never read as success. }
+function LastErrorOr(ADefault: Int32): Int32;
+begin
+  Result := Int32(W32GetLastError());
+  if Result = 0 then
+    Result := ADefault;
+end;
+
+{ Write all of AContent to handle H: 0, or the Win32 error of the write
+  that failed. }
+function WriteAllToHandle(H: Pointer; const AContent: string): Int32;
 var
   P: PChar;
   Left: Int64;
   Chunk, Done: UInt32;
 begin
+  Result := 0;
   P := PChar(AContent);
   Left := Length(AContent);
   while Left > 0 do
@@ -620,7 +631,10 @@ begin
       Chunk := UInt32(Left);
     Done := 0;
     if (W32WriteFile(H, P, Chunk, @Done, nil) = 0) or (Done = 0) then
+    begin
+      Result := LastErrorOr(29);  { ERROR_WRITE_FAULT }
       Exit;
+    end;
     P := P + Done;
     Left := Left - Done;
   end;
@@ -916,18 +930,18 @@ begin
   Result := StrAdopt(R);
 end;
 
-procedure TRtlPlatformWindows.WriteFile(const APath, AContent: string);
+function TRtlPlatformWindows.WriteFile(const APath, AContent: string): Int32;
 var
   H: Pointer;
 begin
   H := OpenPath(APath, GENERIC_WRITE, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL);
   if not IsValidHandle(H) then
-    Exit;
-  WriteAllToHandle(H, AContent);
+    Exit(LastErrorOr(5));  { ERROR_ACCESS_DENIED when none is set }
+  Result := WriteAllToHandle(H, AContent);
   W32CloseHandle(H);
 end;
 
-procedure TRtlPlatformWindows.AppendFile(const APath, AContent: string);
+function TRtlPlatformWindows.AppendFile(const APath, AContent: string): Int32;
 var
   H: Pointer;
 begin
@@ -935,8 +949,8 @@ begin
   H := OpenPath(APath, FILE_APPEND_DATA or SYNCHRONIZE, OPEN_ALWAYS,
     FILE_ATTRIBUTE_NORMAL);
   if not IsValidHandle(H) then
-    Exit;
-  WriteAllToHandle(H, AContent);
+    Exit(LastErrorOr(5));  { ERROR_ACCESS_DENIED when none is set }
+  Result := WriteAllToHandle(H, AContent);
   W32CloseHandle(H);
 end;
 

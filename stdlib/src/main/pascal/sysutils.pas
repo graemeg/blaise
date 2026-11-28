@@ -32,7 +32,13 @@ type
     property Message: string read FMessage;
   end;
 
+  { A file operation failed.  ErrorCode is the OS error code (errno, or the
+    Win32 error on Windows), as FPC's EInOutError carries one; WriteFile
+    and AppendFile raise it for a file they cannot write. }
   EInOutError = class(Exception)
+  public
+    ErrorCode: Int32;
+    constructor CreateCode(const AMessage: string; ACode: Int32);
   end;
 
   EConvertError = class(Exception)
@@ -173,6 +179,8 @@ procedure _SetConvertErrorHook(AHook: Pointer);
   external name '_SetConvertErrorHook';
 procedure _SetRangeErrorHook(AHook: Pointer);
   external name '_SetRangeErrorHook';
+procedure _SetFileErrorHook(AHook: Pointer);
+  external name '_SetFileErrorHook';
 { the platform port's CSPRNG: 1 on success, 0 on failure }
 function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
   external name '_RandomBytes';
@@ -260,6 +268,50 @@ begin
 end;
 
 { The RTL's range-error hook, installed by this unit's initialization. }
+constructor EInOutError.CreateCode(const AMessage: string; ACode: Int32);
+begin
+  inherited Create(AMessage);
+  ErrorCode := ACode;
+end;
+
+{ A few words for the OS errors a file write commonly meets; the number
+  alone for the rest (strerror needs libc, which not every profile has). }
+function FileErrorText(ACode: Int32): string;
+begin
+  {$IFDEF WINDOWS}
+  case ACode of
+    2: Result := 'file not found';
+    3: Result := 'path not found';
+    5: Result := 'access denied';
+    32: Result := 'the file is in use';
+    112: Result := 'not enough space on the disk';
+  else
+    Result := '';
+  end;
+  {$ELSE}
+  case ACode of
+    2: Result := 'no such file or directory';
+    13: Result := 'permission denied';
+    21: Result := 'is a directory';
+    28: Result := 'no space left on device';
+    30: Result := 'read-only file system';
+  else
+    Result := '';
+  end;
+  {$ENDIF}
+  if Result = '' then
+    Result := 'OS error ' + IntToStr(ACode)
+  else
+    Result := Result + ' (OS error ' + IntToStr(ACode) + ')';
+end;
+
+{ The RTL's file-error hook: WriteFile or AppendFile could not write APath. }
+procedure RaiseFileError(const APath: string; ACode: Int32);
+begin
+  raise EInOutError.CreateCode('Cannot write "' + APath + '": ' +
+    FileErrorText(ACode), ACode);
+end;
+
 procedure RaiseRangeError;
 begin
   raise ERangeError.Create('Range check error')
@@ -487,5 +539,6 @@ initialization
   _SetRuntimeErrorHooks(Pointer(@_RaiseDivByZero), Pointer(@_RaiseInvalidCast));
   _SetConvertErrorHook(Pointer(@RaiseConvertError));
   _SetRangeErrorHook(Pointer(@RaiseRangeError));
+  _SetFileErrorHook(Pointer(@RaiseFileError));
 
 end.

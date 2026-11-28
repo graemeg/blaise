@@ -36,8 +36,11 @@ type
     procedure DeleteFile(const APath: string); virtual; abstract;
     function RenameFile(const AOldPath, ANewPath: string): Boolean; virtual; abstract;
     function ReadFile(const APath: string): string; virtual; abstract;
-    procedure WriteFile(const APath, AContent: string); virtual; abstract;
-    procedure AppendFile(const APath, AContent: string); virtual; abstract;
+    { Write (replace) or append APath's content.  0 on success, else the OS
+      error code (errno, or the Win32 error): _WriteFile and _AppendFile turn
+      a failure into EInOutError (rtl.platform.abi). }
+    function WriteFile(const APath, AContent: string): Int32; virtual; abstract;
+    function AppendFile(const APath, AContent: string): Int32; virtual; abstract;
     function FileAge(const APath: string): Int64; virtual; abstract;
 
     { Directory operations }

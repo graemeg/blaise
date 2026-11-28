@@ -44,8 +44,8 @@ type
     procedure DeleteFile(const APath: string); override;
     function RenameFile(const AOldPath, ANewPath: string): Boolean; override;
     function ReadFile(const APath: string): string; override;
-    procedure WriteFile(const APath, AContent: string); override;
-    procedure AppendFile(const APath, AContent: string); override;
+    function WriteFile(const APath, AContent: string): Int32; override;
+    function AppendFile(const APath, AContent: string): Int32; override;
     function FileAge(const APath: string): Int64; override;
 
     { Directory operations }
@@ -419,18 +419,37 @@ begin
   Result := Buf;
 end;
 
-procedure WriteAllToFd(Fd: Int; Data: PChar; Len: Int64);
+{ The errno of a call that failed with result R, in either profile (the
+  freestanding one returns -errno); EIO when neither says. }
+function FailureErrno(R: Int64): Int32;
+begin
+  Result := Int32(errno_GetOsErrno());
+  if (Result = 0) and (R < 0) then
+    Result := Int32(-R);
+  if Result = 0 then
+    Result := 5;  { EIO }
+end;
+
+{ Write all Len bytes at Data to Fd, retrying a write a signal interrupted.
+  0 when all were written, else the errno of the write that failed. }
+function WriteAllToFd(Fd: Int; Data: PChar; Len: Int64): Int32;
 var
   P: PChar;
   Rem: Int64;
   Written: Int64;
 begin
+  Result := 0;
   P := Data;
   Rem := Len;
   while Rem > 0 do
   begin
     Written := libc_write(Fd, P, Rem);
-    if Written <= 0 then Break;
+    if Written <= 0 then
+    begin
+      if (Written < 0) and errno_Interrupted(Written) then
+        Continue;
+      Exit(FailureErrno(Written));
+    end;
     P := P + Written;
     Rem := Rem - Written;
   end;
@@ -532,30 +551,33 @@ begin
   Result := StrAdopt(R);
 end;
 
-procedure TRtlPlatformPosix.WriteFile(const APath, AContent: string);
+{ Open APath with AFlags and write AContent to it: 0, or the errno of the
+  open or the write that failed. }
+function WriteWithFlags(const APath, AContent: string; AFlags: Int32): Int32;
 var
   Fd:  Int;
   Len: Int64;
 begin
-  Fd := libc_open(StrData(Pointer(APath)), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_TRUNC(), 420);
-  if Fd < 0 then Exit;
+  Fd := libc_open(StrData(Pointer(APath)), AFlags, 420);
+  if Fd < 0 then
+    Exit(FailureErrno(Fd));
+  Result := 0;
   Len := StrLen(Pointer(AContent));
   if Len > 0 then
-    WriteAllToFd(Fd, StrData(Pointer(AContent)), Len);
+    Result := WriteAllToFd(Fd, StrData(Pointer(AContent)), Len);
   libc_close(Fd);
 end;
 
-procedure TRtlPlatformPosix.AppendFile(const APath, AContent: string);
-var
-  Fd:  Int;
-  Len: Int64;
+function TRtlPlatformPosix.WriteFile(const APath, AContent: string): Int32;
 begin
-  Fd := libc_open(StrData(Pointer(APath)), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_APPEND(), 420);
-  if Fd < 0 then Exit;
-  Len := StrLen(Pointer(AContent));
-  if Len > 0 then
-    WriteAllToFd(Fd, StrData(Pointer(AContent)), Len);
-  libc_close(Fd);
+  Result := WriteWithFlags(APath, AContent, GPlatformLayout.O_WRONLY() or
+    GPlatformLayout.O_CREAT() or GPlatformLayout.O_TRUNC());
+end;
+
+function TRtlPlatformPosix.AppendFile(const APath, AContent: string): Int32;
+begin
+  Result := WriteWithFlags(APath, AContent, GPlatformLayout.O_WRONLY() or
+    GPlatformLayout.O_CREAT() or GPlatformLayout.O_APPEND());
 end;
 
 function TRtlPlatformPosix.FileAge(const APath: string): Int64;

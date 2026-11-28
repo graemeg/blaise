@@ -20,6 +20,11 @@ type
     procedure TestIsTerminal_InvalidHandles;
     { GetUserDir: the home directory, with a trailing separator }
     procedure TestGetUserDir_IsHomeWithSeparator;
+    { WriteFile and AppendFile fail loudly: a file that cannot be written
+      raises EInOutError naming it, rather than being skipped in silence }
+    procedure TestWriteFile_MissingDirectoryRaises;
+    procedure TestAppendFile_MissingDirectoryRaises;
+    procedure TestWriteFile_WritesAndReplaces;
     { SecureRandomBytes: the operating system's CSPRNG }
     procedure TestSecureRandomBytes_FillsBuffer;
     procedure TestSecureRandomBytes_DiffersPerCall;
@@ -111,6 +116,59 @@ begin
     AssertEquals('', GetUserDir())
   else
     AssertEquals(IncludeTrailingPathDelimiter(Home), GetUserDir());
+end;
+
+function MissingDirPath(): string;
+begin
+  Result := IncludeTrailingPathDelimiter(GetTempDir()) +
+    'blaise-no-such-dir-' + IntToStr(GetProcessID()) + DirectorySeparator + 'f.txt';
+end;
+
+procedure TSysUtilsTests.TestWriteFile_MissingDirectoryRaises;
+var
+  Path, Msg: string;
+  Raised: Boolean;
+begin
+  Path := MissingDirPath();
+  Raised := False;
+  try
+    WriteFile(Path, 'x');
+  except
+    on E: EInOutError do
+    begin
+      Raised := True;
+      Msg := E.Message;
+    end;
+  end;
+  AssertTrue('EInOutError raised', Raised);
+  AssertTrue('the message names the file: ' + Msg, Pos(Path, Msg) >= 0);
+end;
+
+procedure TSysUtilsTests.TestAppendFile_MissingDirectoryRaises;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    AppendFile(MissingDirPath(), 'x');
+  except
+    on E: EInOutError do
+      Raised := True;
+  end;
+  AssertTrue('EInOutError raised', Raised);
+end;
+
+procedure TSysUtilsTests.TestWriteFile_WritesAndReplaces;
+var
+  Path: string;
+begin
+  Path := IncludeTrailingPathDelimiter(GetTempDir()) +
+    'blaise-writefile-' + IntToStr(GetProcessID()) + '.txt';
+  WriteFile(Path, 'first');
+  WriteFile(Path, 'second');
+  AppendFile(Path, '+more');
+  AssertEquals('second+more', ReadFile(Path));
+  DeleteFile(Path);
 end;
 
 initialization

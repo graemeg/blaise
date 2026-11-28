@@ -3188,6 +3188,40 @@ converts it.
 
 ---
 
+=== File writes fail loudly
+
+==== Decision
+
+`WriteFile` and `AppendFile` never return having written nothing in
+silence.  When the file cannot be opened or a write fails (a missing
+directory, no permission, a full disk), they raise `EInOutError`, whose
+message names the file and the reason and whose `ErrorCode` is the OS error
+(errno, or the Win32 error).  SysUtils installs the raising routine from its
+initialization (`_SetFileErrorHook`), as for the runtime errors above.  A
+program without SysUtils stops with runtime error 101, FPC's "disk write
+error", printing the file and the OS error on standard error.
+
+An interrupted write (`EINTR`) is retried rather than reported.
+
+==== Rationale
+
+The RTL formerly returned when the open failed and stopped writing when a
+write failed, so a program believed it had saved what it had not.  The
+failure surfaced later, if at all, far from its cause: the PasBuild port
+found a test fixture that passed on one machine only because an earlier run
+had left the directory it wrote into.  FPC, with I/O checking on (its
+default), raises `EInOutError` in the same situation, or stops with a
+runtime error without SysUtils, so ported code expects to be told.
+
+==== Alternatives Rejected
+
+* *A Boolean result.*  Every existing call is a statement; a result that is
+  easy to ignore is how the silent failure arose.
+* *Creating missing parent directories.*  It hides a wrong path instead of
+  reporting it; `ForceDirectories` is there for a caller that means it.
+* *Raising from `ReadFile` too.*  `ReadFile` of a missing file returns `''`,
+  which callers rely on as "no content yet"; that is a separate decision.
+
 == Project Governance
 
 === Licensing

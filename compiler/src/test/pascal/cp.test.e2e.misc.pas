@@ -23,6 +23,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { WriteFile fails loudly without SysUtils too: runtime error 101 naming
+      the file, never a silent skip }
+    procedure TestRun_WriteFile_UnwritableNoSysUtils_RuntimeError101;
     { GH #269: a unit routine whose implementation is spelt in a different
       case from its interface declaration was emitted local on x86-64, so
       the program's call to it failed to link }
@@ -5574,6 +5577,23 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile + run: ' + Output, CompileAndRunNativeCLI(Src, False, '', Output, ExitCode));
   AssertEquals('emit 1' + LE + '5' + LE, Output);
+end;
+
+procedure TE2EMiscTests.TestRun_WriteFile_UnwritableNoSysUtils_RuntimeError101;
+const
+  Src = '''
+    program WriteFileFails;
+    begin
+      WriteLn('before');
+      WriteFile('/blaise-no-such-dir-xyz/f.txt', 'x');
+      WriteLn('not reached')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { the harness captures stderr with stdout; ENOENT is 2 on every Unix }
+  AssertRunsOnAll(Src, 'before' + LE +
+    'Runtime error 101: cannot write /blaise-no-such-dir-xyz/f.txt (OS error 2)' + LE, 101);
 end;
 
 initialization

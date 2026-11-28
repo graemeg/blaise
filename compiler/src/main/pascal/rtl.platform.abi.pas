@@ -33,8 +33,16 @@ function  _FileExists(const Path: string): Int32;
 procedure _DeleteFile(const Path: string);
 function  _RenameFile(const OldPath, NewPath: string): Int32;
 function  _ReadFile(const Path: string): Pointer;
+{ WriteFile and AppendFile fail loudly: a file that cannot be opened or
+  written raises EInOutError through the hook SysUtils installs
+  (_SetFileErrorHook), or, in a program without SysUtils, stops it with
+  runtime error 101 (FPC's "disk write error").  They never return having
+  written nothing in silence. }
 procedure _WriteFile(const Path, Content: string);
 procedure _AppendFile(const Path, Content: string);
+{ AHook: procedure(const APath: string; ACode: Int32), never returning;
+  called with the file and the OS error code (errno, or the Win32 error). }
+procedure _SetFileErrorHook(AHook: Pointer);
 function  _FileAge(const Path: string): Int64;
 
 { Directory operations }
@@ -160,14 +168,54 @@ begin
   Result := Pointer(GRtlPlatform.ReadFile(Path));
 end;
 
-procedure _WriteFile(const Path, Content: string);
+type
+  TFileErrorHook = procedure(APath: Pointer; ACode: Int32);
+
+var
+  { set once, by SysUtils' initialization; nil without SysUtils }
+  GFileErrorHook: Pointer;
+
+procedure _SetFileErrorHook(AHook: Pointer);
 begin
-  GRtlPlatform.WriteFile(Path, Content);
+  GFileErrorHook := AHook;
+end;
+
+{ APath could not be written (ACode the OS error): EInOutError through the
+  hook, else runtime error 101.  Never returns. }
+procedure FileWriteFailed(const APath: string; ACode: Int32);
+var
+  Hook: TFileErrorHook;
+begin
+  if GFileErrorHook <> nil then
+  begin
+    Hook := TFileErrorHook(GFileErrorHook);
+    Hook(Pointer(APath), ACode);
+  end;
+  GRtlPlatform.SysWriteStr(2, Pointer('Runtime error 101: cannot write '));
+  GRtlPlatform.SysWriteStr(2, Pointer(APath));
+  GRtlPlatform.SysWriteStr(2, Pointer(' (OS error '));
+  GRtlPlatform.SysWriteInt(2, ACode);
+  GRtlPlatform.SysWriteStr(2, Pointer(')'));
+  GRtlPlatform.SysWriteNewline(2);
+  GRtlPlatform.Halt(101);
+end;
+
+procedure _WriteFile(const Path, Content: string);
+var
+  Code: Int32;
+begin
+  Code := GRtlPlatform.WriteFile(Path, Content);
+  if Code <> 0 then
+    FileWriteFailed(Path, Code);
 end;
 
 procedure _AppendFile(const Path, Content: string);
+var
+  Code: Int32;
 begin
-  GRtlPlatform.AppendFile(Path, Content);
+  Code := GRtlPlatform.AppendFile(Path, Content);
+  if Code <> 0 then
+    FileWriteFailed(Path, Code);
 end;
 
 function _FileAge(const Path: string): Int64;
