@@ -1609,7 +1609,7 @@ begin
     getrlimit — stays freestanding and produces no note.) }
   SrcPath := WriteScratchSource(
     'program p; ' +
-    'function tty(fd: Int): Int; cdecl; external name ''isatty''; ' +
+    'function tty(fd: Int): Int; cdecl; external name ''ttyname''; ' +
     'begin tty(0); WriteLn(1); end.');
   BinPath := FScratch + 'cli_lmauto_bare_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
@@ -1617,7 +1617,7 @@ begin
     '--output', BinPath], Out_);
   AssertEquals('bare-libc program links (out: ' + Out_ + ')', 0, EC);
   AssertTrue('note names the unresolved symbols',
-    Pos('unresolved C symbols (isatty)', Out_) >= 0);
+    Pos('unresolved C symbols (ttyname)', Out_) >= 0);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
@@ -1660,7 +1660,7 @@ begin
     symbols instead of dying mid-link with a bare undefined reference. }
   SrcPath := WriteScratchSource(
     'program p; ' +
-    'function tty(fd: Int): Int; cdecl; external name ''isatty''; ' +
+    'function tty(fd: Int): Int; cdecl; external name ''ttyname''; ' +
     'begin tty(0); WriteLn(1); end.');
   BinPath := FScratch + 'cli_lmstatic_sym_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--static',
@@ -1668,7 +1668,7 @@ begin
     '--output', BinPath], Out_);
   AssertTrue('link must fail', EC <> 0);
   AssertTrue('error names the symbols',
-    Pos('unresolved C symbols (isatty)', Out_) >= 0);
+    Pos('unresolved C symbols (ttyname)', Out_) >= 0);
 end;
 
 procedure TCLIContractTests.TestLinkDynamic_Flag_ForcesDynamic;
