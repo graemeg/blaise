@@ -11,7 +11,7 @@ unit SysUtils.Tests;
 interface
 
 uses
-  blaise.testing, SysUtils;
+  blaise.testing, SysUtils, StrUtils;
 
 type
   TSysUtilsTests = class(TTestCase)
@@ -25,6 +25,12 @@ type
     procedure TestWriteFile_MissingDirectoryRaises;
     procedure TestAppendFile_MissingDirectoryRaises;
     procedure TestWriteFile_WritesAndReplaces;
+    { TFdLineReader (behind ReadLn): one line per call, the LF and a CR
+      before it dropped, the last line without a break still read, False
+      only at the end; bytes pass through untouched (UTF-8) }
+    procedure TestLineReader_LinesAndBreaks;
+    procedure TestLineReader_EmptyInput;
+    procedure TestLineReader_LongLineAcrossReads;
     { SecureRandomBytes: the operating system's CSPRNG }
     procedure TestSecureRandomBytes_FillsBuffer;
     procedure TestSecureRandomBytes_DiffersPerCall;
@@ -169,6 +175,51 @@ begin
   AppendFile(Path, '+more');
   AssertEquals('second+more', ReadFile(Path));
   DeleteFile(Path);
+end;
+
+function _FdOpenRead(Path: Pointer): Int32; external name '_FdOpenRead';
+procedure _FdClose(Fd: Int32); external name '_FdClose';
+
+{ The lines a TFdLineReader gives for a file holding AContent, joined
+  with '|'. }
+function ReadAllLines(const AContent: string): string;
+var
+  Path, Line: string;
+  Fd: Int32;
+  R: TFdLineReader;
+begin
+  Path := IncludeTrailingPathDelimiter(GetTempDir()) +
+    'blaise-linereader-' + IntToStr(GetProcessID()) + '.txt';
+  WriteFile(Path, AContent);
+  Fd := _FdOpenRead(Pointer(Path));
+  R := TFdLineReader.Create(Fd);
+  Result := '';
+  while R.ReadLine(Line) do
+    Result := Result + Line + '|';
+  _FdClose(Fd);
+  DeleteFile(Path);
+end;
+
+procedure TSysUtilsTests.TestLineReader_LinesAndBreaks;
+begin
+  AssertEquals('a|b|' + #$C3#$A9 + 't' + #$C3#$A9 + '||last|',
+    ReadAllLines('a' + #10 + 'b' + #13#10 + #$C3#$A9 + 't' + #$C3#$A9 + #10 +
+      #10 + 'last'));
+end;
+
+procedure TSysUtilsTests.TestLineReader_EmptyInput;
+begin
+  AssertEquals('', ReadAllLines(''));
+  AssertEquals('one empty line', '|', ReadAllLines(#10));
+end;
+
+procedure TSysUtilsTests.TestLineReader_LongLineAcrossReads;
+var
+  Long: string;
+begin
+  { longer than the reader's buffer, so the line spans several reads }
+  Long := DupeString('x', 10000);
+  AssertEquals(Long + '|y|', ReadAllLines(Long + #10 + 'y' + #10));
 end;
 
 initialization

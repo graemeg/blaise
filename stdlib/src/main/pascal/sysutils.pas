@@ -170,6 +170,34 @@ function IsTerminal(AHandle: Int): Boolean;
   %USERPROFILE% on Windows; '' when it is not set. }
 function GetUserDir(): string;
 
+type
+  { Lines read from a file descriptor through a buffer: what ReadLn reads
+    standard input with.  A line ends at LF, and a CR just before it is
+    dropped too (a Windows console or file); a last line with no break is
+    still a line.  Bytes pass through as they are, so UTF-8 stays intact. }
+  TFdLineReader = class
+  private
+    FFd: Int32;
+    FBuf: string;
+    FPos: Int;
+    FEnded: Boolean;
+    function Fill(): Boolean;
+  public
+    constructor Create(AFd: Int32);
+    { The next line in ALine, True; False (ALine '') at the end of input. }
+    function ReadLine(out ALine: string): Boolean;
+  end;
+
+{ Reads a line from standard input into ALine, without its line break.
+  False, with ALine '', at the end of input (a closed pipe, Ctrl+D, or
+  Ctrl+Z then Enter on a Windows console), so a filter can loop:
+  `while ReadLn(Line) do ...`.  Input is buffered: it is read from
+  standard input in blocks, as FPC's ReadLn reads its text buffer. }
+function ReadLn(out ALine: string): Boolean; overload;
+{ Reads and discards a line (waiting for Enter, say); False at the end of
+  input. }
+function ReadLn(): Boolean; overload;
+
 implementation
 
 function _EnvVector: Pointer; external name '_EnvVector';
@@ -201,6 +229,93 @@ begin
   {$ENDIF}
   if Result <> '' then
     Result := IncludeTrailingPathDelimiter(Result);
+end;
+
+function _FdRead(AFd: Int32; ABuf: Pointer; ACount: Int): Int;
+  external name '_FdRead';
+
+const
+  LineReadChunk = 4096;
+
+function EndsWithCR(const S: string): Boolean;
+begin
+  Result := (Length(S) > 0) and (S[Length(S) - 1] = 13);
+end;
+
+constructor TFdLineReader.Create(AFd: Int32);
+begin
+  inherited Create();
+  FFd := AFd;
+  FBuf := '';
+  FPos := 0;
+  FEnded := False;
+end;
+
+{ More input after what is unread; False at the end of input. }
+function TFdLineReader.Fill(): Boolean;
+var
+  Chunk: string;
+  N: Int;
+begin
+  if FEnded then
+    Exit(False);
+  SetLength(Chunk, LineReadChunk);
+  N := _FdRead(FFd, Pointer(Chunk), LineReadChunk);
+  if N <= 0 then
+  begin
+    FEnded := True;
+    Exit(False);
+  end;
+  FBuf := Copy(FBuf, FPos, Length(FBuf) - FPos) + Copy(Chunk, 0, N);
+  FPos := 0;
+  Result := True;
+end;
+
+function TFdLineReader.ReadLine(out ALine: string): Boolean;
+var
+  I, Scanned: Int;
+begin
+  Scanned := FPos;
+  while True do
+  begin
+    for I := Scanned to Length(FBuf) - 1 do
+      if FBuf[I] = 10 then
+      begin
+        ALine := Copy(FBuf, FPos, I - FPos);
+        FPos := I + 1;
+        if EndsWithCR(ALine) then
+          ALine := Copy(ALine, 0, Length(ALine) - 1);
+        Exit(True);
+      end;
+    { no break yet: read more; the unread part moves to the front, and
+      all of it has been scanned }
+    Scanned := Length(FBuf) - FPos;
+    if not Fill() then
+      Break;
+  end;
+  { the end of input: a last line without a break, or nothing }
+  ALine := Copy(FBuf, FPos, Length(FBuf) - FPos);
+  FPos := Length(FBuf);
+  if EndsWithCR(ALine) then
+    ALine := Copy(ALine, 0, Length(ALine) - 1);
+  Result := ALine <> '';
+end;
+
+var
+  GStdinReader: TFdLineReader;
+
+function ReadLn(out ALine: string): Boolean;
+begin
+  if GStdinReader = nil then
+    GStdinReader := TFdLineReader.Create(0);
+  Result := GStdinReader.ReadLine(ALine);
+end;
+
+function ReadLn(): Boolean;
+var
+  Discarded: string;
+begin
+  Result := ReadLn(Discarded);
 end;
 
 function IsTerminal(AHandle: Int): Boolean;
