@@ -166,8 +166,8 @@ function IsWritable(const APath: string): Boolean;
 function IsExecutable(const APath: string): Boolean;
 
 { True when the last name in APath starts with '.' (and is not '.' or
-  '..'), the Unix convention.  Looks at the name only; APath need not
-  exist. }
+  '..'), the Unix convention, or, on Windows, when APath exists and has the
+  hidden attribute.  The name test needs no file; APath need not exist. }
 function IsHidden(const APath: string): Boolean;
 
 { ---- symbolic links --------------------------------------------------------- }
@@ -246,9 +246,12 @@ function ListDirectory(const APath: string): TList<TDirEntry>;
   macOS it is ~/.Trash, by rename: Finder shows the item but cannot "Put
   Back", which needs NSFileManager's trashItemAtURL, out of reach of a
   plain-C stdlib (and on recent macOS a process without Full Disk Access
-  may be refused).  Returns False, leaving APath alone, when there is no
-  usable trash -- APath on another device than the trash, no home
-  directory, permission refused -- so the caller can delete instead. }
+  may be refused).  On Windows it is the Recycle Bin, through the shell,
+  for a file on a fixed local drive; a removable or network drive has
+  none.  Returns False, leaving APath alone, when there is no usable trash
+  -- APath on another device than the trash, no home directory, no
+  Recycle Bin on its drive, permission refused -- so the caller can delete
+  instead. }
 function MoveToTrash(const APath: string): Boolean;
 
 { Move APath into the freedesktop.org trash directory ATrashDir (the
@@ -301,6 +304,8 @@ function _FsReadlink(const Path: string; Buf: Pointer; Size: Int64): Int64;
 function _FsAccess(const Path: string; Mode: Int32): Int32; external name '_FsAccess';
 function _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
   external name '_FsSetModified';
+function _FsIsHidden(const Path: string): Int32; external name '_FsIsHidden';
+function _FsMoveToTrash(const Path: string): Int32; external name '_FsMoveToTrash';
 
 { Imported from the RTL (rtl.platform.posix): 0 missing, 1 regular file,
   2 directory, 3 symbolic link, 4 other.  FollowLinks <> 0 stats the link's
@@ -376,6 +381,32 @@ begin
   Result := P = PLen;
 end;
 
+{ '/' or the target's own separator ('\' on Windows). }
+function IsDelim(B: Int): Boolean;
+begin
+  Result := (B = Ord('/')) or (B = OrdAt(DirectorySeparator, 0));
+end;
+
+{ AName inside ADir, joined with the target's separator (none is added when
+  ADir ends in one already). }
+function JoinPath(const ADir, AName: string): string;
+begin
+  if (Length(ADir) > 0) and IsDelim(OrdAt(ADir, Length(ADir) - 1)) then
+    Result := ADir + AName
+  else
+    Result := ADir + DirectorySeparator + AName;
+end;
+
+{ APath without trailing separators, keeping a root: '/', and on Windows
+  a drive's 'C:\'. }
+function StripDelims(const APath: string): string;
+begin
+  Result := APath;
+  while (Length(Result) > 1) and IsDelim(OrdAt(Result, Length(Result) - 1)) and
+        not ((Length(Result) = 3) and (OrdAt(Result, 1) = Ord(':'))) do
+    Result := Copy(Result, 0, Length(Result) - 1);
+end;
+
 { The entry names in ADir, sorted.  Empty for an empty or unreadable
   directory. }
 function SortedEntries(const ADir: string): TList<string>;
@@ -410,7 +441,7 @@ begin
     Names := SortedEntries(ADir);
   for I := 0 to Names.Count - 1 do
   begin
-    Path := ADir + '/' + Names[I];
+    Path := JoinPath(ADir, Names[I]);
     Kind := _PathKind(Path, 0);
     { A link is classified by its target, but only a file target counts:
       a linked directory is not descended into. }
@@ -433,9 +464,8 @@ var
   Root: string;
 begin
   Root := ARoot;
-  { Strip trailing separators, but keep '/' itself. }
-  while (Length(Root) > 1) and (OrdAt(Root, Length(Root) - 1) = Ord('/')) do
-    Root := Copy(Root, 0, Length(Root) - 1);
+  { Strip trailing separators, but keep a root ('/', 'C:\') itself. }
+  Root := StripDelims(Root);
   if (Root = '') or (_PathKind(Root, 1) <> KIND_DIR) then
     raise EDirectoryNotFound.Create('Directory not found: "' + ARoot + '"');
   Result := TList<string>.Create();
@@ -637,8 +667,7 @@ var
   S: string;
 begin
   S := APath;
-  while (Length(S) > 1) and (OrdAt(S, Length(S) - 1) = Ord('/')) do
-    S := Copy(S, 0, Length(S) - 1);
+  S := StripDelims(S);
   Result := ExtractFileName(S);
 end;
 
@@ -647,8 +676,8 @@ var
   Name: string;
 begin
   Name := LastName(APath);
-  Result := (Length(Name) > 0) and (OrdAt(Name, 0) = Ord('.')) and
-    (Name <> '.') and (Name <> '..');
+  Result := ((Length(Name) > 0) and (OrdAt(Name, 0) = Ord('.')) and
+    (Name <> '.') and (Name <> '..')) or (_FsIsHidden(APath) = 1);
 end;
 
 { ---- symbolic links --------------------------------------------------------- }
@@ -710,7 +739,7 @@ begin
   end;
   Names := SortedEntries(APath);
   for I := 0 to Names.Count - 1 do
-    DeleteTree(APath + '/' + Names[I]);
+    DeleteTree(JoinPath(APath, Names[I]));
   DeleteDirectory(APath);
 end;
 
@@ -841,7 +870,7 @@ begin
     MakeDir(ATarget, MODE_DIR_WORKING);
     Names := SortedEntries(ASource);
     for I := 0 to Names.Count - 1 do
-      CopyEntry(ASource + '/' + Names[I], ATarget + '/' + Names[I], False,
+      CopyEntry(JoinPath(ASource, Names[I]), JoinPath(ATarget, Names[I]), False,
         AKeepModified);
     SetPermissions(ATarget, Info.Mode);
     if AKeepModified then
@@ -957,7 +986,7 @@ begin
   for I := 0 to Names.Count - 1 do
   begin
     { An entry removed since the directory was read is left out. }
-    if StatPath(APath + '/' + Names[I], False, Info) <> 0 then
+    if StatPath(JoinPath(APath, Names[I]), False, Info) <> 0 then
       Continue;
     E.Name := Names[I];
     E.Kind := KindOf(Info.Kind);
@@ -1026,9 +1055,8 @@ begin
      (ExtractFileDrive(APath) <> '') then
     Result := APath
   else
-    Result := ExcludeTrailingPathDelimiter(GetCurrentDir()) + '/' + APath;
-  while (Length(Result) > 1) and (OrdAt(Result, Length(Result) - 1) = Ord('/')) do
-    Result := Copy(Result, 0, Length(Result) - 1);
+    Result := JoinPath(ExcludeTrailingPathDelimiter(GetCurrentDir()), APath);
+  Result := StripDelims(Result);
 end;
 
 { A name under AFilesDir (and, when AInfoDir <> '', AInfoDir with
@@ -1081,8 +1109,13 @@ end;
 function MoveToTrash(const APath: string): Boolean;
 var
   Home, Dir: string;
+  Rc: Int32;
 begin
   Result := False;
+  { The system's own trash first (the Recycle Bin on Windows). }
+  Rc := _FsMoveToTrash(AbsolutePath(APath));
+  if Rc >= 0 then
+    Exit(Rc = 1);
   Home := GetEnvironmentVariable('HOME');
   {$IFDEF DARWIN}
   if Home = '' then

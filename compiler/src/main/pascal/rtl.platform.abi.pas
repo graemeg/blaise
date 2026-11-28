@@ -93,6 +93,8 @@ function  _FsSymlink(const Target, LinkPath: string): Int32;
 function  _FsReadlink(const Path: string; Buf: Pointer; Size: Int64): Int64;
 function  _FsAccess(const Path: string; Mode: Int32): Int32;
 function  _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
+function  _FsIsHidden(const Path: string): Int32;
+function  _FsMoveToTrash(const Path: string): Int32;
 
 { Child processes with three pipes (TRtlPlatform.Proc*).  Not compiler
   builtins: stdlib's IO.Process imports them via `external name`. }
@@ -388,6 +390,16 @@ end;
 function _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
 begin
   Result := GRtlPlatform.FsSetModified(Path, Sec, NSec);
+end;
+
+function _FsIsHidden(const Path: string): Int32;
+begin
+  if GRtlPlatform.FsIsHidden(Path) then Result := 1 else Result := 0;
+end;
+
+function _FsMoveToTrash(const Path: string): Int32;
+begin
+  Result := GRtlPlatform.FsMoveToTrash(Path);
 end;
 
 function _ProcSpawn(const Exe, Args, Env, Cwd: string; UseEnv: Int32;

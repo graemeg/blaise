@@ -126,6 +126,14 @@ type
       permission. }
     function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32;
       virtual; abstract;
+    { Whether the file system marks APath hidden by an attribute (Windows'
+      FILE_ATTRIBUTE_HIDDEN); False where hiding is only a name starting
+      with '.', which IO.Files checks itself. }
+    function FsIsHidden(const APath: string): Boolean; virtual; abstract;
+    { Move APath to the system's own trash: 1 moved, 0 it could not be (the
+      file stays where it is), -1 the platform has none of its own, and
+      IO.Files uses the desktop's trash folder (freedesktop, macOS). }
+    function FsMoveToTrash(const APath: string): Int32; virtual; abstract;
 
     { Date/Time }
     function TimeNow: Int64; virtual; abstract;

@@ -27,7 +27,8 @@ unit FileSystem.Tests;
 interface
 
 uses
-  blaise.testing, SysUtils, StrUtils, Generics.Collections, DateUtils, IO.Files;
+  blaise.testing, SysUtils, StrUtils, Generics.Collections, DateUtils, IO.Files
+  {$IFDEF WINDOWS}, IO.Process{$ENDIF};
 
 type
   TFileSystemTests = class(TTestCase)
@@ -90,6 +91,9 @@ type
     procedure TestListDirectory_Utf8Names;
     { checks }
     procedure TestIsHidden;
+    procedure TestIsHidden_TrailingNativeSeparator;
+    procedure TestIsHidden_WindowsHiddenAttribute;
+    procedure TestMoveToTrash_RecycleBin;
     procedure TestPermissions_ReadableWritableExecutable;
     procedure TestPermissions_MissingRaises;
     { links }
@@ -723,6 +727,57 @@ begin
   AssertTrue('trailing slash', IsHidden(P('.config/')));
   AssertTrue('. is not hidden', not IsHidden('.'));
   AssertTrue('.. is not hidden', not IsHidden('..'));
+end;
+
+procedure TFileSystemTests.TestIsHidden_TrailingNativeSeparator;
+begin
+  AssertTrue(IsHidden(FRoot + DirectorySeparator + '.config' + DirectorySeparator));
+  AssertTrue(not IsHidden(FRoot + DirectorySeparator + 'saves' + DirectorySeparator));
+end;
+
+{ On Windows a file is hidden by its attribute, whatever its name. }
+procedure TFileSystemTests.TestIsHidden_WindowsHiddenAttribute;
+{$IFDEF WINDOWS}
+var
+  R: TProcessOutput;
+{$ENDIF}
+begin
+  WriteFile(P('shown'), 'x');
+  AssertTrue('a plain name is not hidden', not IsHidden(P('shown')));
+  {$IFDEF WINDOWS}
+  R := RunProcess(GetEnvironmentVariable('SystemRoot') + '\System32\attrib.exe',
+    ['+h', ReplaceAll(P('shown'), '/', '\')], '');
+  AssertEquals('attrib ran', 0, R.ExitCode);
+  AssertTrue('hidden by its attribute', IsHidden(P('shown')));
+  {$ENDIF}
+end;
+
+{ On Windows MoveToTrash moves to the Recycle Bin, which the shell is asked
+  about; elsewhere the TrashTo tests cover it. }
+procedure TFileSystemTests.TestMoveToTrash_RecycleBin;
+{$IFDEF WINDOWS}
+var
+  Name: string;
+  R: TProcessOutput;
+{$ENDIF}
+begin
+  {$IFDEF WINDOWS}
+  Name := 'blaise-junk-' + IntToStr(GetProcessID()) + '.txt';
+  WriteFile(P(Name), 'x');
+  AssertTrue('moved', MoveToTrash(P(Name)));
+  AssertEquals('gone from its folder', Ord(fkNone), Ord(GetFileKind(P(Name), False)));
+  AssertTrue('a missing path cannot be', not MoveToTrash(P(Name)));
+  { Namespace 10 is the Recycle Bin.  Its names may leave out a known
+    extension, so they are compared without one; the item is then emptied
+    from the bin, so that runs do not pile up there. }
+  R := RunProcess(GetEnvironmentVariable('SystemRoot') + '\System32\WindowsPowerShell\v1.0\powershell.exe',
+    ['-NoProfile', '-Command',
+     '$i = @((New-Object -ComObject Shell.Application).NameSpace(10).Items() | ' +
+     'Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) -eq ''' +
+     ChangeFileExt(Name, '') + ''' }); $i.Count; ' +
+     '$i | ForEach-Object { Remove-Item -LiteralPath $_.Path -Force }'], '');
+  AssertEquals('in the Recycle Bin: ' + R.Error, '1', Trim(R.Output));
+  {$ENDIF}
 end;
 
 procedure TFileSystemTests.TestPermissions_ReadableWritableExecutable;

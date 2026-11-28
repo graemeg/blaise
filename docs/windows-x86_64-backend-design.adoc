@@ -1698,6 +1698,17 @@ bug noted under _Open_ below; each passes alone.  In detail:
   POSIX does -- a read-only file can be deleted, a cross-volume move fails
   with `EXDEV`, symbolic links are made unprivileged -- and
   `runtime.errno.windows` maps Win32 errors to POSIX errno numbers.
+* *Trash, hidden files and separators.*  `TRtlPlatform.FsMoveToTrash`
+  moves a file to the Recycle Bin through `SHFileOperationW` (shell32
+  loaded on first use), only on a fixed local drive: a removable or network
+  drive has no Recycle Bin and the shell would delete the file for good, so
+  `IO.Files.MoveToTrash` answers False and the caller decides.  POSIX
+  returns -1 (no trash of its own), and `IO.Files` keeps the freedesktop and
+  macOS trash folders.  `TRtlPlatform.FsIsHidden` reports
+  `FILE_ATTRIBUTE_HIDDEN`; `IO.Files.IsHidden` is a name starting with '.'
+  or that.  `IO.Files` joins the paths it builds (`FindFiles`,
+  `DeleteTree`, `CopyTree`, `ListDirectory`) with `DirectorySeparator` and
+  strips either separator, keeping a drive root (`C:\`).
 * *Sockets.*  `runtime.net.windows` defines `socket` ... `poll`,
   `getaddrinfo`, `fcntl` (`FIONBIO`), `socketpair` and `pipe` (both a
   loopback TCP pair) over `ws2_32`, loaded on first use.  Sockets live in

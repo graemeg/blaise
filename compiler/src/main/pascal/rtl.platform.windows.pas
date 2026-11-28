@@ -82,6 +82,8 @@ type
     function FsReadlink(const APath: string; ABuf: Pointer; ASize: Int64): Int64; override;
     function FsAccess(const APath: string; AMode: Int32): Int32; override;
     function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32; override;
+    function FsIsHidden(const APath: string): Boolean; override;
+    function FsMoveToTrash(const APath: string): Int32; override;
     function TimeNow: Int64; override;
     function TimeLocalOffsetSecs: Int32; override;
     procedure TimeSplit(Nanos: Int64; out Year, Month, Day, Hour, Min, Sec, NSec: Int32); override;
@@ -166,6 +168,34 @@ var
   { nil until RandomBytes first loads bcrypt.  Two threads racing to load it
     get the same module and the same address, so no lock is needed. }
   GBCryptGenRandom: TBCryptGenRandom;
+
+{ ---- shell32, loaded on first use (as bcrypt, so programs that never
+  trash a file do not import it) ---- }
+
+type
+  TSHFileOperationW = function(AOp: Pointer): Int32; cdecl;
+
+const
+  FO_DELETE = 3;
+  FOF_SILENT = $0004;
+  FOF_NOCONFIRMATION = $0010;
+  FOF_ALLOWUNDO = $0040;
+  FOF_NOERRORUI = $0400;
+  { SHFILEOPSTRUCTW on x64 (natural alignment): hwnd 0, wFunc 8, pFrom 16,
+    pTo 24, fFlags 32, fAnyOperationsAborted 36, hNameMappings 40,
+    lpszProgressTitle 48. }
+  SFO_SIZE = 56;
+  SFO_FUNC = 8;
+  SFO_FROM = 16;
+  SFO_FLAGS = 32;
+  SFO_ABORTED = 36;
+  DRIVE_FIXED = 3;
+
+var
+  GSHFileOperationW: TSHFileOperationW;
+
+function W32GetDriveTypeW(ARoot: Pointer): UInt32;
+  external 'kernel32' name 'GetDriveTypeW';
 
 { ---- kernel32 ---- }
 
@@ -292,6 +322,7 @@ const
   OPEN_EXISTING = 3;
   OPEN_ALWAYS = 4;
   FILE_ATTRIBUTE_READONLY = $0001;
+  FILE_ATTRIBUTE_HIDDEN = $0002;
   FILE_ATTRIBUTE_DIRECTORY = $0010;
   FILE_ATTRIBUTE_NORMAL = $0080;
   FILE_ATTRIBUTE_REPARSE_POINT = $0400;
@@ -1726,6 +1757,78 @@ begin
   W32CloseHandle(H);
   if Result <> 0 then
     W32SetLastError(Err);
+end;
+
+function TRtlPlatformWindows.FsIsHidden(const APath: string): Boolean;
+var
+  Attrs: UInt32;
+begin
+  Attrs := PathAttributes(APath);
+  Result := (Attrs <> INVALID_FILE_ATTRIBUTES) and
+    ((Attrs and FILE_ATTRIBUTE_HIDDEN) <> 0);
+end;
+
+{ To the Recycle Bin, through the shell, quietly.  Only a fixed local drive
+  has one: elsewhere (a removable or network drive, a UNC path) the shell
+  would delete the file for good instead, so it is refused and the file is
+  left alone.  APath is absolute; '/' is taken for '\'. }
+function TRtlPlatformWindows.FsMoveToTrash(const APath: string): Int32;
+var
+  W, From, H: Pointer;
+  N, I: Int32;
+  Root: array[0..3] of UInt16;
+  Op: array[0..SFO_SIZE - 1] of Byte;
+begin
+  if PathAttributes(APath) = INVALID_FILE_ATTRIBUTES then
+    Exit(0);
+  W := WideZ(APath);
+  N := WideLen(W);
+  { the shell's paths take '\' only, and end in two NULs }
+  From := _BlaiseGetMem((Int64(N) + 2) * 2);
+  for I := 0 to N - 1 do
+  begin
+    PUInt16(From + Int64(I) * 2)^ := PUInt16(W + Int64(I) * 2)^;
+    if PUInt16(From + Int64(I) * 2)^ = Ord('/') then
+      PUInt16(From + Int64(I) * 2)^ := Ord('\');
+  end;
+  PUInt16(From + Int64(N) * 2)^ := 0;
+  PUInt16(From + Int64(N) * 2 + 2)^ := 0;
+  _BlaiseFreeMem(W);
+  Result := 0;
+  if (N < 3) or (PUInt16(From + 2)^ <> Ord(':')) then
+  begin
+    _BlaiseFreeMem(From);
+    Exit;
+  end;
+  Root[0] := PUInt16(From)^;
+  Root[1] := Ord(':');
+  Root[2] := Ord('\');
+  Root[3] := 0;
+  if W32GetDriveTypeW(@Root[0]) <> DRIVE_FIXED then
+  begin
+    _BlaiseFreeMem(From);
+    Exit;
+  end;
+  if Pointer(GSHFileOperationW) = nil then
+  begin
+    H := W32LoadLibraryA(PChar('shell32.dll'));
+    if H <> nil then
+      GSHFileOperationW := TSHFileOperationW(W32GetProcAddress(H,
+        PChar('SHFileOperationW')));
+  end;
+  if Pointer(GSHFileOperationW) <> nil then
+  begin
+    for I := 0 to SFO_SIZE - 1 do
+      Op[I] := 0;
+    PUInt32(@Op[SFO_FUNC])^ := FO_DELETE;
+    PPointer(@Op[SFO_FROM])^ := From;
+    PUInt16(@Op[SFO_FLAGS])^ := FOF_ALLOWUNDO or FOF_NOCONFIRMATION or
+      FOF_SILENT or FOF_NOERRORUI;
+    if (GSHFileOperationW(@Op[0]) = 0) and (PInt32(@Op[SFO_ABORTED])^ = 0) and
+       (PathAttributes(APath) = INVALID_FILE_ATTRIBUTES) then
+      Result := 1;
+  end;
+  _BlaiseFreeMem(From);
 end;
 
 { ================================================================== }

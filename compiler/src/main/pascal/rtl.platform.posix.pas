@@ -104,6 +104,8 @@ type
     function FsReadlink(const APath: string; ABuf: Pointer; ASize: Int64): Int64; override;
     function FsAccess(const APath: string; AMode: Int32): Int32; override;
     function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32; override;
+    function FsIsHidden(const APath: string): Boolean; override;
+    function FsMoveToTrash(const APath: string): Int32; override;
 
     { Date/Time }
     function TimeNow: Int64; override;
@@ -1172,6 +1174,19 @@ begin
   Times[1].NSec := ANSec;
   Result := libc_futimens(Fd, @Times[0]);
   libc_close(Fd);
+end;
+
+{ No hidden attribute: a name starting with '.' is hidden, which IO.Files
+  checks. }
+function TRtlPlatformPosix.FsIsHidden(const APath: string): Boolean;
+begin
+  Result := False;
+end;
+
+{ No trash of the system's own: IO.Files uses the desktop's trash folder. }
+function TRtlPlatformPosix.FsMoveToTrash(const APath: string): Int32;
+begin
+  Result := -1;
 end;
 
 { ================================================================== }

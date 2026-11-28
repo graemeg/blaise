@@ -24,7 +24,7 @@ unit IOFiles.Tests;
 interface
 
 uses
-  blaise.testing, SysUtils, Generics.Collections, IO.Files;
+  blaise.testing, SysUtils, StrUtils, Generics.Collections, IO.Files;
 
 type
   TIOFilesTests = class(TTestCase)
@@ -32,6 +32,9 @@ type
     FRoot: string;
     procedure Touch(const ARelPath: string);
     procedure SymLink(const ATarget, ARelLink: string);
+    { FRoot joined with ARelPath (written with '/') as the walker gives it
+      back: with the target's own separator. }
+    function Native(const ARelPath: string): string;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -43,6 +46,7 @@ type
     procedure TestGlob_NoMatchGivesEmptyList;
     procedure TestPredicate_ArrowLambda;
     procedure TestPredicate_ReceivesRootJoinedPath;
+    procedure TestResultsUseTheNativeSeparator;
     procedure TestEmptyDirectoryGivesEmptyList;
     procedure TestTrailingSlashOnRootIsIgnored;
     procedure TestMissingRootRaises;
@@ -76,9 +80,14 @@ begin
   CreateSymlink(ATarget, FRoot + '/' + ARelLink);
 end;
 
+function TIOFilesTests.Native(const ARelPath: string): string;
+begin
+  Result := FRoot + DirectorySeparator + ReplaceAll(ARelPath, '/', DirectorySeparator);
+end;
+
 procedure TIOFilesTests.SetUp;
 begin
-  FRoot := ExcludeTrailingPathDelimiter(GetTempDir()) + '/blaise-iofiles-' +
+  FRoot := ExcludeTrailingPathDelimiter(GetTempDir()) + DirectorySeparator + 'blaise-iofiles-' +
     IntToStr(GetProcessID());
   RemoveTree(FRoot);
   ForceDirectories(FRoot + '/sub/deeper');
@@ -104,10 +113,10 @@ begin
     depend on the order the file system happens to list them in. }
   L := FindFiles(FRoot, '*.pas');
   AssertEquals('count', 4, Int32(L.Count));
-  AssertEquals('0', FRoot + '/a.pas', L[0]);
-  AssertEquals('1', FRoot + '/b.pas', L[1]);
-  AssertEquals('2', FRoot + '/sub/c.pas', L[2]);
-  AssertEquals('3', FRoot + '/sub/deeper/d.pas', L[3]);
+  AssertEquals('0', Native('a.pas'), L[0]);
+  AssertEquals('1', Native('b.pas'), L[1]);
+  AssertEquals('2', Native('sub/c.pas'), L[2]);
+  AssertEquals('3', Native('sub/deeper/d.pas'), L[3]);
 end;
 
 procedure TIOFilesTests.TestGlob_ExcludesNonMatching;
@@ -116,7 +125,7 @@ var
 begin
   L := FindFiles(FRoot, '*.txt');
   AssertEquals('count', 1, Int32(L.Count));
-  AssertEquals('0', FRoot + '/notes.txt', L[0]);
+  AssertEquals('0', Native('notes.txt'), L[0]);
 end;
 
 procedure TIOFilesTests.TestGlob_StarMatchesEveryFile;
@@ -126,7 +135,7 @@ begin
   { Directories are walked, never returned. }
   L := FindFiles(FRoot, '*');
   AssertEquals('count', 6, Int32(L.Count));
-  AssertEquals('last', FRoot + '/z.inc', L[5]);
+  AssertEquals('last', Native('z.inc'), L[5]);
 end;
 
 procedure TIOFilesTests.TestGlob_QuestionMarkIsOneChar;
@@ -148,10 +157,10 @@ procedure TIOFilesTests.TestPredicate_ArrowLambda;
 var
   L: TList<string>;
 begin
-  L := FindFiles(FRoot, P -> Pos('/sub/', P) >= 0);
+  L := FindFiles(FRoot, P -> Pos(DirectorySeparator + 'sub' + DirectorySeparator, P) >= 0);
   AssertEquals('count', 2, Int32(L.Count));
-  AssertEquals('0', FRoot + '/sub/c.pas', L[0]);
-  AssertEquals('1', FRoot + '/sub/deeper/d.pas', L[1]);
+  AssertEquals('0', Native('sub/c.pas'), L[0]);
+  AssertEquals('1', Native('sub/deeper/d.pas'), L[1]);
 end;
 
 procedure TIOFilesTests.TestPredicate_ReceivesRootJoinedPath;
@@ -168,7 +177,22 @@ begin
     end);
   AssertEquals('none accepted', 0, Int32(L.Count));
   AssertEquals('every file offered', 6, Int32(Seen.Count));
-  AssertEquals('first', FRoot + '/a.pas', Seen[0]);
+  AssertEquals('first', Native('a.pas'), Seen[0]);
+end;
+
+{ Every path the walker gives back is joined with the target's own separator
+  ('\' on Windows), however the root was written. }
+procedure TIOFilesTests.TestResultsUseTheNativeSeparator;
+var
+  L: TList<string>;
+  I: Int;
+begin
+  L := FindFiles(FRoot + '/', '*');
+  AssertEquals('count', 6, Int32(L.Count));
+  if DirectorySeparator <> '/' then
+    for I := 0 to L.Count - 1 do
+      AssertEquals('no ''/'' in ' + L[I], -1, Int32(Pos('/', L[I])));
+  AssertEquals(Native('sub/deeper/d.pas'), L[4]);
 end;
 
 procedure TIOFilesTests.TestEmptyDirectoryGivesEmptyList;
@@ -182,7 +206,7 @@ var
 begin
   L := FindFiles(FRoot + '/', '*.txt');
   AssertEquals('count', 1, Int32(L.Count));
-  AssertEquals('0', FRoot + '/notes.txt', L[0]);
+  AssertEquals('0', Native('notes.txt'), L[0]);
 end;
 
 procedure TIOFilesTests.TestMissingRootRaises;
@@ -249,7 +273,7 @@ begin
   SymLink(FRoot + '/a.pas', 'alias.pas');
   L := FindFiles(FRoot, '*.pas');
   AssertEquals('count', 5, Int32(L.Count));
-  AssertEquals('1', FRoot + '/alias.pas', L[1]);
+  AssertEquals('1', Native('alias.pas'), L[1]);
 end;
 
 procedure TIOFilesTests.TestMatchGlob_Literal;
