@@ -227,6 +227,12 @@ type
       (the compiler rebuilt itself incrementally into a populated cache and
       lost ~880 KB of impl-only-dependency code). }
     procedure TestIncrementalRebuild_ImplOnlyUses_LinksDependency;
+    { Regression (BUG-20261128-link-only-dep-loses-link-libs): a warm build
+      must still bind the libraries an impl-only dependency declares with
+      external 'lib'.  The dependency is linked but not imported, so its
+      .bif LinkLibs were never read: a program reaching libssl through a
+      unit's implementation section (PasBuild) linked cold and failed warm. }
+    procedure TestIncrementalRebuild_ImplOnlyUses_KeepsLinkLibs;
     { Regression (BUG-20261027-warm-rebuild-arm64-backend-fieldcleanup): the
       impl-only dependency EDITED between builds must be recompiled. }
     procedure TestIncrementalRebuild_ImplOnlyDepEdited_Recompiles;
@@ -3255,6 +3261,88 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_num exit code', 0, Rc);
   AssertEquals('use_num stdout', '3.5' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_ImplOnlyUses_KeepsLinkLibs;
+const
+  { HelperU binds a library that does not exist, so the library either
+    shows in the link error (Mach-O and PE resolve libraries at link time)
+    or in the binary (ELF records a DT_NEEDED and resolves at run time). }
+  HelperSrc =
+    '''
+    unit HelperU;
+    interface
+    function HelperVal: Int;
+    implementation
+    function nope(X: Int): Int; external 'nosuchlib_blaise_xyz' name 'nope';
+    function HelperVal: Int;
+    begin
+      if ParamCount() > 5 then Result := nope(1) else Result := 42
+    end;
+    end.
+    ''';
+  MidSrc =
+    '''
+    unit MidU;
+    interface
+    function MidVal: Int;
+    implementation
+    uses HelperU;
+    function MidVal: Int;
+    begin Result := HelperVal() + 1 end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseMid;
+    uses MidU;
+    begin
+      WriteLn(MidVal())
+    end.
+    ''';
+  LibName = 'nosuchlib_blaise_xyz';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Build: Int;
+
+  function LibraryBound(): Boolean;
+  begin
+    Result := (Pos(LibName, Captured) >= 0) or
+      (FileExists(ProgBin) and (Pos(LibName, ReadFile(ProgBin)) >= 0));
+  end;
+
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  ProgPas  := FScratch + '/use_mid_lib.pas';
+  ProgBin  := FScratch + '/use_mid_lib';
+  CacheDir := FScratch + '/units-impl-lib';
+  WriteFile(FScratch + '/HelperU.pas', HelperSrc);
+  WriteFile(FScratch + '/MidU.pas', MidSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  { Build 1 compiles every unit from source; build 2 takes MidU from the
+    cache, so HelperU is reached only as a link-only dependency. }
+  for Build := 1 to 2 do
+  begin
+    if FileExists(ProgBin) then
+      DeleteFile(ProgBin);
+    RunBlaise(['--source', ProgPas, '--output', ProgBin,
+               '--unit-cache', CacheDir,
+               '--unit-path', FScratch], Captured);
+    AssertTrue('build ' + IntToStr(Build) + ' binds ' + LibName +
+      ' (out: ' + Captured + ')', LibraryBound());
+  end;
 end;
 
 procedure TSepCompileTests.TestIncrementalRebuild_ImplOnlyUses_LinksDependency;

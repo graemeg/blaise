@@ -73,6 +73,15 @@ type
       globals stay nil.  Objects[I] is non-nil when the unit also has a
       finalization section. }
     property LinkOnlyInitUnits:   TStringList read FLinkOnlyInitUnits;
+    { Libraries the impl-only dependencies bind with external 'lib' (their
+      .bif LinkLibs), one entry per (library, unit); LinkLibOwners names the
+      unit, so the caller can tell user-bound libraries from RTL-owned ones,
+      as it does for PrebuiltIfaces.  Without this a warm build that reaches libssl only
+      through a cached unit's implementation section links with no libssl
+      (BUG-20261128-link-only-dep-loses-link-libs). }
+    property LinkOnlyLibs:        TStringList read FLinkOnlyLibs;
+    { The unit each LinkOnlyLibs entry came from; parallel to LinkOnlyLibs. }
+    property LinkOnlyLibOwners:   TStringList read FLinkOnlyLibOwners;
   private
     FSearchPaths:          TStringList;  { not owned }
     FDefines:              TStringList;  { not owned — conditional symbols for each unit's lexer }
@@ -106,6 +115,8 @@ type
     FLinkOnlyInitUnits:    TStringList;  { impl-only deps with an initialization
                                            section; Objects[I] non-nil when the
                                            unit also has a finalization one }
+    FLinkOnlyLibs:         TStringList;  { (library, owning unit) pairs of }
+    FLinkOnlyLibOwners:    TStringList;  { the impl-only deps; parallel lists }
     { Sort FPrebuiltIfaces / FPrebuiltObjectPaths so a unit follows every unit
       it uses from EITHER section, so $main calls the inits in an order where
       a unit's dependencies are already initialised.  See the implementation
@@ -495,6 +506,12 @@ begin
     end;
     if FLinkOnlyObjects.IndexOf(ObjPath) < 0 then
       FLinkOnlyObjects.Add(ObjPath);
+    { Its object is linked, so the libraries it binds must be too. }
+    for I := 0 to Iface.LinkLibs.Count - 1 do
+    begin
+      FLinkOnlyLibs.Add(Iface.LinkLibs.Strings[I]);
+      FLinkOnlyLibOwners.Add(AName);
+    end;
     { An impl-only dep is LINKED but never semantically imported, so no other
       path registers its <Unit>_init.  Record it here or the object ships with
       an initialization section that is never called — the unit's globals stay
@@ -946,12 +963,16 @@ begin
   FLinkOnlyObjects.CaseSensitive := False;
   FLinkOnlySeen        := TStringList.Create();
   FLinkOnlyInitUnits   := TStringList.Create();
+  FLinkOnlyLibs        := TStringList.Create();
+  FLinkOnlyLibOwners   := TStringList.Create();
   FLinkOnlySeen.CaseSensitive := False;
 end;
 
 destructor TUnitLoader.Destroy;
 begin
   FLinkOnlySeen.Free();
+  FLinkOnlyLibOwners.Free();
+  FLinkOnlyLibs.Free();
   FLinkOnlyInitUnits.Free();
   FLinkOnlyObjects.Free();
   FPrebuiltObjectPaths.Free();

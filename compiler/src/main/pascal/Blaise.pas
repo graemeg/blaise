@@ -1967,6 +1967,18 @@ begin
             Opts.UserLinkLibs.Add(
               TUnitInterface(Loader.PrebuiltIfaces.Items[I]).LinkLibs.Strings[J]);
         end;
+    { Impl-only dependencies taken from the cache are linked but never
+      imported, so neither list above holds them: union the libraries their
+      .bif records (BUG-20261128-link-only-dep-loses-link-libs). }
+    if Loader <> nil then
+      for I := 0 to Loader.LinkOnlyLibs.Count - 1 do
+      begin
+        if Opts.LinkLibs.IndexOf(Loader.LinkOnlyLibs.Strings[I]) < 0 then
+          Opts.LinkLibs.Add(Loader.LinkOnlyLibs.Strings[I]);
+        if (not IsRTLOwnedUnit(Loader.LinkOnlyLibOwners.Strings[I])) and
+           (Opts.UserLinkLibs.IndexOf(Loader.LinkOnlyLibs.Strings[I]) < 0) then
+          Opts.UserLinkLibs.Add(Loader.LinkOnlyLibs.Strings[I]);
+      end;
     { Units compiled FROM SOURCE in this same invocation never land in
       PrebuiltIfaces (that list holds only cached-.bif ifaces), so their
       external 'lib' declarations must be unioned straight off the source
