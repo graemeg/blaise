@@ -1702,8 +1702,9 @@ function ClonePropertyDecl(ASrc: TPropertyDecl): TPropertyDecl;
 function IsBuiltinWrite(ACall: TProcCall): Boolean;
 
 { True when ACall is a call of the built-in named AName: its name matches
-  and it does not resolve to a user routine of that name
-  (ResolvesToUserRoutine).  Every check that lowers a call as a built-in by
+  and it is not a call of a user routine of that name: a nested routine
+  (ResolvesToUserRoutine), a method on the implicit Self, or a call through
+  a procedural value (BUG-20261128-x86-builtin-replaces-self-method).  Every check that lowers a call as a built-in by
   its name goes through here, so a nested routine named like a built-in is
   never silently replaced by it. }
 function IsBuiltinCall(ACall: TFuncCallExpr; const AName: string): Boolean; overload;
@@ -3596,12 +3597,15 @@ end;
 
 function IsBuiltinCall(ACall: TFuncCallExpr; const AName: string): Boolean;
 begin
-  Result := not ACall.ResolvesToUserRoutine and SameText(ACall.Name, AName);
+  Result := not ACall.ResolvesToUserRoutine and not ACall.IsImplicitSelfMethod and
+    not ACall.IsIndirectCall and SameText(ACall.Name, AName);
 end;
 
 function IsBuiltinCall(ACall: TProcCall; const AName: string): Boolean;
 begin
-  Result := not ACall.ResolvesToUserRoutine and SameText(ACall.Name, AName);
+  Result := not ACall.ResolvesToUserRoutine and not ACall.IsImplicitSelfMethod and
+    not ACall.IsIndirectCall and not ACall.IsProcFieldCall and
+    SameText(ACall.Name, AName);
 end;
 
 function IsBuiltinWrite(ACall: TProcCall): Boolean;
