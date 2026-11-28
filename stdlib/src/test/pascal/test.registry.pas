@@ -28,6 +28,7 @@ uses
   ListOps.Tests,
   Collections.Tests,
   Xml.Tests,
+  Classes.Tests,
   Contnrs.Tests,
   Base64.Tests,
   PlatformInfo.Tests,

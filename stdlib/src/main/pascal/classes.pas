@@ -20,8 +20,11 @@ unit Classes;
 //   - TStringList stores strings as ^string; ARC is emitted by the compiler
 //     for pointer-dereference writes (EmitPointerWrite). ZeroMem is used to
 //     zero-initialise newly grown string slots so no garbage is ever released.
-//   - Text property: getter = GetText (lines joined by #10, no trailing newline);
-//     setter = Clear + SplitIntoList(AText, Ord(#10), Self).
+//   - Text property: getter = GetText (each line followed by LineEnding);
+//     setter = Clear + SplitLinesIntoList(AText, Self), which ends a line at
+//     LF, CR LF or a lone CR, as FPC and Delphi do: the getter writes CR LF on
+//     Windows, and a file from another platform must load without a CR left
+//     on each line.
 //   - LoadFromFile/SaveToFile use the ReadFile/WriteFile built-ins.
 //   - TComponent: minimal owner-component pattern (Name, Owner, Components[]).
 //     Children list uses a raw ^Pointer array (same pattern as TStringList) to
@@ -262,7 +265,7 @@ type
     property Objects[Index: Int]: Pointer read GetObject write SetObject;
   end;
 
-procedure SplitIntoList(const S: string; ASep: Int; AList: TStringList);
+procedure SplitLinesIntoList(const S: string; AList: TStringList);
 
 implementation
 
@@ -387,24 +390,26 @@ begin
     Self.FOwner.RemoveComponent(Self)
 end;
 
-procedure SplitIntoList(const S: string; ASep: Int; AList: TStringList);
+procedure SplitLinesIntoList(const S: string; AList: TStringList);
 var
   I:     Int;
   Start: Int;
 begin
-  { Line-splitter for TStringList.Text / LoadFromFile.  Each segment between
-    separators is added verbatim — leading and trailing whitespace is part of
-    the line and must be preserved (standard TStringList semantics).  Trimming
-    here previously stripped indentation, which silently corrupted any
-    whitespace-significant text round-tripped through Text. }
+  { Line-splitter for TStringList.Text / LoadFromFile.  A line ends at LF,
+    CR LF or a lone CR.  Each line is added verbatim — leading and trailing
+    whitespace is part of the line and must be preserved (standard TStringList
+    semantics).  Trimming here previously stripped indentation, which silently
+    corrupted any whitespace-significant text round-tripped through Text. }
   AList.Clear();
   Start := 0;
   I     := 0;
   while I < Length(S) do
   begin
-    if OrdAt(S, I) = ASep then
+    if (OrdAt(S, I) = 10) or (OrdAt(S, I) = 13) then
     begin
       AList.Add(Copy(S, Start, I - Start));
+      if (OrdAt(S, I) = 13) and (I + 1 < Length(S)) and (OrdAt(S, I + 1) = 10) then
+        I := I + 1;
       Start := I + 1;
     end;
     I := I + 1;
@@ -916,7 +921,7 @@ end;
 procedure TStringList.SetText(AText: string);
 begin
   Self.Clear();
-  SplitIntoList(AText, Ord(#10), Self)
+  SplitLinesIntoList(AText, Self)
 end;
 
 procedure TStringList.LoadFromFile(APath: string);
