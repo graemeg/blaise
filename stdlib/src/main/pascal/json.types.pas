@@ -49,6 +49,13 @@ uses
   SysUtils, Json.Writer;
 
 type
+  { Raised by the typed accessors (Strings[], Objects[], ...) when the member
+    is missing or holds another type. }
+  EJSONTypeError = class(Exception);
+
+  TJSONArray = class;
+  TJSONObject = class;
+
   TJSONType = (jtNull, jtBoolean, jtNumber, jtString, jtArray, jtObject);
 
   TJSONData = class
@@ -73,6 +80,11 @@ type
     property AsInt64: Int64 read GetAsInt64;
     property AsFloat: Float64 read GetAsFloat;
     property AsBoolean: Boolean read GetAsBoolean;
+
+    { The node at APath below this one, or nil: member names separated by
+      '.' and array indices in brackets ('compiler.flags[0]').  An empty
+      path is this node. }
+    function FindPath(const APath: string): TJSONData;
   end;
 
   TJSONNull = class(TJSONData)
@@ -153,14 +165,26 @@ type
     procedure Clear;
     function GetItem(AIndex: Int): TJSONData;
     property Items[AIndex: Int]: TJSONData read GetItem; default;
+    { Typed element access; EJSONTypeError when the element holds another
+      type. }
+    function GetStrings(AIndex: Int): string;
+    function GetIntegers(AIndex: Int): Int64;
+    function GetBooleans(AIndex: Int): Boolean;
+    function GetObjects(AIndex: Int): TJSONObject;
+    function GetArrays(AIndex: Int): TJSONArray;
+    property Strings[AIndex: Int]: string read GetStrings;
+    property Integers[AIndex: Int]: Int64 read GetIntegers;
+    property Booleans[AIndex: Int]: Boolean read GetBooleans;
+    property Objects[AIndex: Int]: TJSONObject read GetObjects;
+    property Arrays[AIndex: Int]: TJSONArray read GetArrays;
   end;
 
   TJSONObject = class(TJSONData)
   private
     FNames:  array of string;     { parallel arrays preserve insertion order }
     FValues: array of TJSONData;  { parent owns these (strong) }
-    function IndexOfName(const AName: string): Int;
     procedure RemoveIndex(AIndex: Int);
+    function Member(const AName: string; AType: TJSONType): TJSONData;
   protected
     function GetJSONType: TJSONType; override;
     function GetCount: Int; override;
@@ -186,6 +210,20 @@ type
     property Values[AName: string]: TJSONData read GetByName; default;
     property Names[AIndex: Int]: string read GetName;
     property ItemsByIndex[AIndex: Int]: TJSONData read GetItem;
+    { The index of the member AName; -1 when there is none. }
+    function IndexOfName(const AName: string): Int;
+    { Typed member access; EJSONTypeError when AName is missing or holds
+      another type. }
+    function GetStrings(const AName: string): string;
+    function GetIntegers(const AName: string): Int64;
+    function GetBooleans(const AName: string): Boolean;
+    function GetObjects(const AName: string): TJSONObject;
+    function GetArrays(const AName: string): TJSONArray;
+    property Strings[AName: string]: string read GetStrings;
+    property Integers[AName: string]: Int64 read GetIntegers;
+    property Booleans[AName: string]: Boolean read GetBooleans;
+    property Objects[AName: string]: TJSONObject read GetObjects;
+    property Arrays[AName: string]: TJSONArray read GetArrays;
   end;
 
 { Serialise a tree.  Equivalent to AData.AsJSON / AData.FormatJSON, offered as
@@ -742,6 +780,125 @@ end;
 function FormatJSON(AData: TJSONData; AIndent: Int): string;
 begin
   Result := AData.FormatJSON(AIndent);
+end;
+
+
+{ ---- typed access and paths ---- }
+
+function TypeName(AType: TJSONType): string;
+begin
+  case AType of
+    jtNull: Result := 'null';
+    jtBoolean: Result := 'boolean';
+    jtNumber: Result := 'number';
+    jtString: Result := 'string';
+    jtArray: Result := 'array';
+  else
+    Result := 'object';
+  end;
+end;
+
+{ AData when it holds AType; raises naming AWhat otherwise. }
+function Checked(AData: TJSONData; AType: TJSONType; const AWhat: string): TJSONData;
+begin
+  if AData = nil then
+    raise EJSONTypeError.Create('JSON: no ' + AWhat);
+  if AData.JSONType <> AType then
+    raise EJSONTypeError.Create('JSON: ' + AWhat + ' is ' + TypeName(AData.JSONType) +
+      ', not ' + TypeName(AType));
+  Result := AData;
+end;
+
+function TJSONData.FindPath(const APath: string): TJSONData;
+var
+  I, Start, Index: Int;
+  Name: string;
+begin
+  Result := Self;
+  I := 0;
+  while (I < Length(APath)) and (Result <> nil) do
+  begin
+    if APath[I] = Ord('.') then
+      I := I + 1
+    else if APath[I] = Ord('[') then
+    begin
+      Start := I + 1;
+      while (I < Length(APath)) and (APath[I] <> Ord(']')) do
+        I := I + 1;
+      Index := StrToIntDef(Copy(APath, Start, I - Start), -1);
+      I := I + 1;
+      if (Result.JSONType = jtArray) and (Index >= 0) and (Index < Result.Count) then
+        Result := TJSONArray(Result).Items[Index]
+      else
+        Result := nil;
+    end
+    else
+    begin
+      Start := I;
+      while (I < Length(APath)) and (APath[I] <> Ord('.')) and (APath[I] <> Ord('[')) do
+        I := I + 1;
+      Name := Copy(APath, Start, I - Start);
+      if Result.JSONType = jtObject then
+        Result := TJSONObject(Result).Find(Name)
+      else
+        Result := nil;
+    end;
+  end;
+end;
+
+function TJSONArray.GetStrings(AIndex: Int): string;
+begin
+  Result := Checked(GetItem(AIndex), jtString, 'element ' + IntToStr(AIndex)).AsString;
+end;
+
+function TJSONArray.GetIntegers(AIndex: Int): Int64;
+begin
+  Result := Checked(GetItem(AIndex), jtNumber, 'element ' + IntToStr(AIndex)).AsInt64;
+end;
+
+function TJSONArray.GetBooleans(AIndex: Int): Boolean;
+begin
+  Result := Checked(GetItem(AIndex), jtBoolean, 'element ' + IntToStr(AIndex)).AsBoolean;
+end;
+
+function TJSONArray.GetObjects(AIndex: Int): TJSONObject;
+begin
+  Result := TJSONObject(Checked(GetItem(AIndex), jtObject, 'element ' + IntToStr(AIndex)));
+end;
+
+function TJSONArray.GetArrays(AIndex: Int): TJSONArray;
+begin
+  Result := TJSONArray(Checked(GetItem(AIndex), jtArray, 'element ' + IntToStr(AIndex)));
+end;
+
+function TJSONObject.Member(const AName: string; AType: TJSONType): TJSONData;
+begin
+  Result := Checked(Find(AName), AType, 'member "' + AName + '"');
+end;
+
+function TJSONObject.GetStrings(const AName: string): string;
+begin
+  Result := Member(AName, jtString).AsString;
+end;
+
+function TJSONObject.GetIntegers(const AName: string): Int64;
+begin
+  Result := Member(AName, jtNumber).AsInt64;
+end;
+
+function TJSONObject.GetBooleans(const AName: string): Boolean;
+begin
+  Result := Member(AName, jtBoolean).AsBoolean;
+end;
+
+function TJSONObject.GetObjects(const AName: string): TJSONObject;
+begin
+  Result := TJSONObject(Member(AName, jtObject));
+end;
+
+function TJSONObject.GetArrays(const AName: string): TJSONArray;
+begin
+  Result := TJSONArray(Member(AName, jtArray));
 end;
 
 end.

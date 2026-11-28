@@ -28,6 +28,9 @@ uses
 type
   TJsonTests = class(TTestCase)
   published
+    procedure TestTyped_MembersAndElements;
+    procedure TestTyped_WrongTypeOrMissingRaises;
+    procedure TestFindPath;
     { Json.Writer }
     procedure TestWriter_Fields;
     procedure TestWriter_Array;
@@ -293,6 +296,65 @@ begin
   AssertTrue('trailing content raises', raised);
 end;
 
+
+procedure TJsonTests.TestTyped_MembersAndElements;
+var
+  O: TJSONObject;
+begin
+  O := TJSONObject(GetJSON('{"name":"pasbuild","n":3,"ok":true,' +
+    '"compiler":{"exe":"blaise"},"paths":["a","b",{"x":1},[7]]}'));
+  AssertEquals('pasbuild', O.Strings['name']);
+  AssertEquals(Int64(3), O.Integers['n']);
+  AssertTrue(O.Booleans['ok']);
+  AssertEquals('blaise', O.Objects['compiler'].Strings['exe']);
+  AssertEquals(Int64(4), Int64(O.Arrays['paths'].Count));
+  AssertEquals('b', O.Arrays['paths'].Strings[1]);
+  AssertEquals(Int64(1), O.Arrays['paths'].Objects[2].Integers['x']);
+  AssertEquals(Int64(7), O.Arrays['paths'].Arrays[3].Integers[0]);
+  AssertEquals('public IndexOfName', Int64(1), Int64(O.IndexOfName('n')));
+  AssertEquals(Int64(-1), Int64(O.IndexOfName('absent')));
+end;
+
+procedure TJsonTests.TestTyped_WrongTypeOrMissingRaises;
+var
+  O: TJSONObject;
+  Raised: Int;
+  S: string;
+  X: TJSONData;
+begin
+  O := TJSONObject(GetJSON('{"n":3,"a":[true]}'));
+  Raised := 0;
+  try
+    S := O.Strings['n'];
+  except
+    on E: EJSONTypeError do Raised := Raised + 1;
+  end;
+  try
+    X := O.Objects['absent'];
+  except
+    on E: EJSONTypeError do Raised := Raised + 1;
+  end;
+  try
+    S := O.Arrays['a'].Strings[0];
+  except
+    on E: EJSONTypeError do Raised := Raised + 1;
+  end;
+  AssertEquals('each raises EJSONTypeError', Int64(3), Int64(Raised));
+end;
+
+procedure TJsonTests.TestFindPath;
+var
+  D: TJSONData;
+begin
+  D := GetJSON('{"a":{"b":[10,{"c":"deep"}]},"top":"t"}');
+  AssertEquals('t', D.FindPath('top').AsString);
+  AssertEquals(Int64(10), D.FindPath('a.b[0]').AsInt64);
+  AssertEquals('deep', D.FindPath('a.b[1].c').AsString);
+  AssertTrue('empty path is the node', D.FindPath('') = D);
+  AssertTrue('missing member', D.FindPath('a.x') = nil);
+  AssertTrue('index out of range', D.FindPath('a.b[5]') = nil);
+  AssertTrue('index on an object', D.FindPath('a[0]') = nil);
+end;
 
 initialization
   RegisterTest(TJsonTests);
