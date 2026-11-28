@@ -153,6 +153,17 @@ function GetEnvironmentString(AIndex: Int): string;
   are much faster, and TRandom can be seeded to repeat a sequence. }
 function SecureRandomBytes(ABuf: Pointer; ACount: Int): Boolean;
 
+{ Whether output written to AHandle reaches a terminal (a console) rather
+  than a pipe or a file: 1 for standard output, StdErr for standard error.
+  A command-line program uses it to write colours (ANSI escape sequences)
+  only where a person reads them; on Windows the console is also set to
+  interpret those sequences. }
+function IsTerminal(AHandle: Int): Boolean;
+
+{ The current user's home directory with a trailing separator: $HOME, or
+  %USERPROFILE% on Windows; '' when it is not set. }
+function GetUserDir(): string;
+
 implementation
 
 function _EnvVector: Pointer; external name '_EnvVector';
@@ -169,6 +180,24 @@ function _RandomBytes(ABuf: Pointer; ACount: Int): Int32;
 function SecureRandomBytes(ABuf: Pointer; ACount: Int): Boolean;
 begin
   Result := _RandomBytes(ABuf, ACount) = 1;
+end;
+
+function _IsTerminal(AFd: Int32): Int32; external name '_IsTerminal';
+
+function GetUserDir(): string;
+begin
+  {$IFDEF WINDOWS}
+  Result := GetEnvironmentVariable('USERPROFILE');
+  {$ELSE}
+  Result := GetEnvironmentVariable('HOME');
+  {$ENDIF}
+  if Result <> '' then
+    Result := IncludeTrailingPathDelimiter(Result);
+end;
+
+function IsTerminal(AHandle: Int): Boolean;
+begin
+  Result := (AHandle >= 0) and (AHandle <= High(Int32)) and (_IsTerminal(Int32(AHandle)) = 1);
 end;
 
 { The RTL's convert-error hook: StrToInt was handed S, which is not a whole

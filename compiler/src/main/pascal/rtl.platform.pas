@@ -134,6 +134,10 @@ type
       file stays where it is), -1 the platform has none of its own, and
       IO.Files uses the desktop's trash folder (freedesktop, macOS). }
     function FsMoveToTrash(const APath: string): Int32; virtual; abstract;
+    { Whether the descriptor AFd (1 standard output, 2 standard error) is a
+      terminal.  On Windows a console also has ANSI escape sequences
+      (colours) turned on, so a program may write them to any terminal. }
+    function IsTerminal(AFd: Int32): Boolean; virtual; abstract;
 
     { Date/Time }
     function TimeNow: Int64; virtual; abstract;

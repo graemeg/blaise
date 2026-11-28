@@ -95,6 +95,7 @@ function  _FsAccess(const Path: string; Mode: Int32): Int32;
 function  _FsSetModified(const Path: string; Sec, NSec: Int64): Int32;
 function  _FsIsHidden(const Path: string): Int32;
 function  _FsMoveToTrash(const Path: string): Int32;
+function  _IsTerminal(Fd: Int32): Int32;
 
 { Child processes with three pipes (TRtlPlatform.Proc*).  Not compiler
   builtins: stdlib's IO.Process imports them via `external name`. }
@@ -400,6 +401,11 @@ end;
 function _FsMoveToTrash(const Path: string): Int32;
 begin
   Result := GRtlPlatform.FsMoveToTrash(Path);
+end;
+
+function _IsTerminal(Fd: Int32): Int32;
+begin
+  if GRtlPlatform.IsTerminal(Fd) then Result := 1 else Result := 0;
 end;
 
 function _ProcSpawn(const Exe, Args, Env, Cwd: string; UseEnv: Int32;

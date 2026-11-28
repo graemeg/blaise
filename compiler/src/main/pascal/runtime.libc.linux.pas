@@ -44,6 +44,10 @@ function execvp(File_: PChar; Argv: Pointer): Int;
   count (_SC_NPROCESSORS_ONLN = 84), via sched_getaffinity + popcount. }
 function sysconf(Name: Int): Int64;
 
+{ isatty: 1 when Fd is a terminal, which answers the terminal-attributes
+  query (TCGETS); 0 otherwise. }
+function isatty(Fd: Int32): Int32;
+
 implementation
 
 type
@@ -231,6 +235,17 @@ begin
   end
   else
     Result := -1;
+end;
+
+
+function isatty(Fd: Int32): Int32;
+var
+  Attrs: array[0..127] of Byte;
+begin
+  if ioctl(Fd, $5401, @Attrs[0]) = 0 then
+    Result := 1
+  else
+    Result := 0;
 end;
 
 end.

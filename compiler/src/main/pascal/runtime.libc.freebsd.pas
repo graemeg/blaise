@@ -74,6 +74,10 @@ function unsetenv(Name: PChar): Int;
   purpose (tests use it only to tell threads apart). }
 function pthread_self: Int64;
 
+{ isatty: 1 when Fd is a terminal, which answers the terminal-attributes
+  query (TIOCGETA); 0 otherwise. }
+function isatty(Fd: Int32): Int32;
+
 implementation
 
 type
@@ -429,6 +433,17 @@ begin
   Id := 0;
   thr_self(@Id);
   Result := Id;
+end;
+
+
+function isatty(Fd: Int32): Int32;
+var
+  Attrs: array[0..127] of Byte;
+begin
+  if ioctl(Fd, $402C7413, @Attrs[0]) = 0 then
+    Result := 1
+  else
+    Result := 0;
 end;
 
 end.

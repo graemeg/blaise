@@ -106,6 +106,7 @@ type
     function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32; override;
     function FsIsHidden(const APath: string): Boolean; override;
     function FsMoveToTrash(const APath: string): Int32; override;
+    function IsTerminal(AFd: Int32): Boolean; override;
 
     { Date/Time }
     function TimeNow: Int64; override;
@@ -222,6 +223,7 @@ function  libc_futimens(Fd: Int32; Times: Pointer): Int32; external name 'futime
 { UTIME_OMIT for this target (rtl.platform.layout.<os>). }
 function  _UtimeOmit: Int64; external name '_UtimeOmit';
 function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       external name 'getcwd';
+function  libc_isatty(Fd: Int32): Int32;                                     external name 'isatty';
 { getdirentries(3) is the one directory-reading spelling libc provides on all
   three POSIX targets (glibc >= 2.2.5, FreeBSD, macOS); the freestanding
   syscall leaves define the same symbol, so this single binding serves the
@@ -1187,6 +1189,11 @@ end;
 function TRtlPlatformPosix.FsMoveToTrash(const APath: string): Int32;
 begin
   Result := -1;
+end;
+
+function TRtlPlatformPosix.IsTerminal(AFd: Int32): Boolean;
+begin
+  Result := (AFd >= 0) and (libc_isatty(AFd) = 1);
 end;
 
 { ================================================================== }

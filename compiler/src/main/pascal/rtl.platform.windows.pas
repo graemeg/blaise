@@ -84,6 +84,7 @@ type
     function FsSetModified(const APath: string; ASec, ANSec: Int64): Int32; override;
     function FsIsHidden(const APath: string): Boolean; override;
     function FsMoveToTrash(const APath: string): Int32; override;
+    function IsTerminal(AFd: Int32): Boolean; override;
     function TimeNow: Int64; override;
     function TimeLocalOffsetSecs: Int32; override;
     procedure TimeSplit(Nanos: Int64; out Year, Month, Day, Hour, Min, Sec, NSec: Int32); override;
@@ -196,6 +197,13 @@ var
 
 function W32GetDriveTypeW(ARoot: Pointer): UInt32;
   external 'kernel32' name 'GetDriveTypeW';
+function W32GetConsoleMode(AConsole: Pointer; AMode: Pointer): Int32;
+  external 'kernel32' name 'GetConsoleMode';
+function W32SetConsoleMode(AConsole: Pointer; AMode: UInt32): Int32;
+  external 'kernel32' name 'SetConsoleMode';
+
+const
+  ENABLE_VIRTUAL_TERMINAL_PROCESSING = $0004;
 
 { ---- kernel32 ---- }
 
@@ -1757,6 +1765,25 @@ begin
   W32CloseHandle(H);
   if Result <> 0 then
     W32SetLastError(Err);
+end;
+
+{ A console answers GetConsoleMode; a pipe or file does not.  ANSI escape
+  processing is turned on for it (Windows 10 and later), so colours written
+  as escape sequences show. }
+function TRtlPlatformWindows.IsTerminal(AFd: Int32): Boolean;
+var
+  H: Pointer;
+  Mode: UInt32;
+begin
+  if AFd < 0 then
+    Exit(False);
+  H := _WinHandleOfFd(AFd);
+  Mode := 0;
+  if (H = nil) or (W32GetConsoleMode(H, @Mode) = 0) then
+    Exit(False);
+  if (Mode and ENABLE_VIRTUAL_TERMINAL_PROCESSING) = 0 then
+    W32SetConsoleMode(H, Mode or ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+  Result := True;
 end;
 
 function TRtlPlatformWindows.FsIsHidden(const APath: string): Boolean;

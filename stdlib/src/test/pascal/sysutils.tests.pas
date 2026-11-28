@@ -16,6 +16,10 @@ uses
 type
   TSysUtilsTests = class(TTestCase)
   published
+    { IsTerminal: no handle that cannot be open is a terminal }
+    procedure TestIsTerminal_InvalidHandles;
+    { GetUserDir: the home directory, with a trailing separator }
+    procedure TestGetUserDir_IsHomeWithSeparator;
     { SecureRandomBytes: the operating system's CSPRNG }
     procedure TestSecureRandomBytes_FillsBuffer;
     procedure TestSecureRandomBytes_DiffersPerCall;
@@ -85,6 +89,28 @@ begin
   FillByte(Buf, SizeOf(Buf), 0);
   AssertTrue('zero bytes succeeds', SecureRandomBytes(@Buf[0], 0));
   AssertTrue('nothing written', AllZero(@Buf[0], 4));
+end;
+
+procedure TSysUtilsTests.TestIsTerminal_InvalidHandles;
+begin
+  AssertFalse('negative', IsTerminal(-1));
+  AssertFalse('never opened', IsTerminal(100000));
+  AssertFalse('beyond Int32', IsTerminal(Int(High(Int32)) + 1));
+end;
+
+procedure TSysUtilsTests.TestGetUserDir_IsHomeWithSeparator;
+var
+  Home: string;
+begin
+  {$IFDEF WINDOWS}
+  Home := GetEnvironmentVariable('USERPROFILE');
+  {$ELSE}
+  Home := GetEnvironmentVariable('HOME');
+  {$ENDIF}
+  if Home = '' then
+    AssertEquals('', GetUserDir())
+  else
+    AssertEquals(IncludeTrailingPathDelimiter(Home), GetUserDir());
 end;
 
 initialization
