@@ -23,6 +23,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { BUG-20261128-x86-interface-result-from-class: a method call through an
+      interface Result (returned by hidden pointer) used the pointer as Self
+      and the saved frame pointer as the itab on x86-64 }
+    procedure TestRun_MethodCallThroughInterfaceResult;
     { WriteFile fails loudly without SysUtils too: runtime error 101 naming
       the file, never a silent skip }
     procedure TestRun_WriteFile_UnwritableNoSysUtils_RuntimeError101;
@@ -5594,6 +5598,56 @@ begin
   { the harness captures stderr with stdout; ENOENT is 2 on every Unix }
   AssertRunsOnAll(Src, 'before' + LE +
     'Runtime error 101: cannot write /blaise-no-such-dir-xyz/f.txt (OS error 2)' + LE, 101);
+end;
+
+procedure TE2EMiscTests.TestRun_MethodCallThroughInterfaceResult;
+const
+  Src = '''
+    program IntfResultCall;
+    type
+      IFoo = interface
+        function Name(): string;
+        function Twice(N: Int): Int;
+      end;
+      TFoo = class(IFoo)
+        function Name(): string;
+        function Twice(N: Int): Int;
+      end;
+    function TFoo.Name(): string;
+    begin
+      Result := 'foo';
+    end;
+    function TFoo.Twice(N: Int): Int;
+    begin
+      Result := N * 2;
+    end;
+    function MakeFoo(): TFoo;
+    begin
+      Result := TFoo.Create();
+    end;
+    function FromClass(): IFoo;
+    begin
+      Result := MakeFoo();
+      WriteLn(Result.Name(), ' ', Result.Twice(21));
+    end;
+    function InTry(): IFoo;
+    begin
+      Result := nil;
+      try
+        Result := MakeFoo();
+        WriteLn(Result.Name());
+      except
+        Result := nil;
+      end;
+    end;
+    begin
+      WriteLn(FromClass().Name());
+      WriteLn(InTry().Twice(5));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'foo 42' + LE + 'foo' + LE + 'foo' + LE + '10' + LE, 0);
 end;
 
 initialization

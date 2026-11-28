@@ -5115,10 +5115,15 @@ begin
     raise ENativeCodeGenError.Create(
       'native backend: unsupported receiver expression in interface dispatch ('
       + AObjExpr.ClassName + ')')
-  else if AIsVarParam then
+  else if AIsVarParam or
+          (FSretFunc and not AIsGlobal and SameText(AObjName, 'Result')) then
   begin
     { var/out interface param receiver: the slot holds the address of the
-      caller's contiguous fat pointer — obj at +0, itab at +8. }
+      caller's contiguous fat pointer — obj at +0, itab at +8.  So does an
+      sret function's interface Result (the caller's buffer), as
+      LoadIntfIdentPair knows: read as an inline pair, the buffer's address
+      went in as Self and the saved %rbp as the itab
+      (BUG-20261128-x86-interface-result-from-class). }
     Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(AObjName)]));
     Self.Emit(#9'movq 8(%r10), %rax');
     Self.Emit(#9'movq (%r10), %r10');
