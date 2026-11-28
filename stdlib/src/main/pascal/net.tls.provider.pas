@@ -267,6 +267,76 @@ end;
 var
   GInited: Boolean;
 
+{$IFDEF WINDOWS}
+{ --- The Windows trust store ---
+  OpenSSL's default verify paths name a directory that a Windows OpenSSL
+  build has no certificates in, so a client that verifies would refuse
+  every server.  The system stores' certificates are added to the context's
+  X509_STORE instead: ROOT (the trusted roots) and CA (intermediates, for a
+  server that does not send its whole chain). }
+function c_CertOpenSystemStoreA(AProv: Pointer; ASubsystem: PChar): Pointer;
+  external 'crypt32' name 'CertOpenSystemStoreA';
+function c_CertEnumCertificatesInStore(AStore, APrevious: Pointer): Pointer;
+  external 'crypt32' name 'CertEnumCertificatesInStore';
+function c_CertCloseStore(AStore: Pointer; AFlags: UInt32): Int32;
+  external 'crypt32' name 'CertCloseStore';
+{ The length is a C long: 32 bits on Windows. }
+function c_d2i_X509(AOut: Pointer; AInput: Pointer; ALength: Int32): Pointer;
+  external 'crypto' name 'd2i_X509';
+procedure c_X509_free(ACert: Pointer);
+  external 'crypto' name 'X509_free';
+function c_X509_STORE_add_cert(AStore, ACert: Pointer): Int32;
+  external 'crypto' name 'X509_STORE_add_cert';
+function c_SSL_CTX_get_cert_store(ACtx: Pointer): Pointer;
+  external 'ssl' name 'SSL_CTX_get_cert_store';
+
+const
+  { CERT_CONTEXT (wincrypt.h) on x64: dwCertEncodingType at 0,
+    pbCertEncoded at 8, cbCertEncoded at 16. }
+  CERT_CONTEXT_ENCODED     = 8;
+  CERT_CONTEXT_ENCODED_LEN = 16;
+
+procedure AddSystemStore(AX509Store: Pointer; const AName: string);
+var
+  Store, Cert, X509, Input: Pointer;
+  EncodedField: ^Pointer;
+  LengthField: ^UInt32;
+begin
+  Store := c_CertOpenSystemStoreA(nil, PChar(AName));
+  if Store = nil then
+    Exit;
+  Cert := c_CertEnumCertificatesInStore(Store, nil);
+  while Cert <> nil do
+  begin
+    EncodedField := Cert + CERT_CONTEXT_ENCODED;
+    LengthField := Cert + CERT_CONTEXT_ENCODED_LEN;
+    { d2i_X509 advances the pointer it is given: pass a copy }
+    Input := EncodedField^;
+    X509 := c_d2i_X509(nil, @Input, Int32(LengthField^));
+    if X509 <> nil then
+    begin
+      { A certificate already present is refused; that is fine }
+      c_X509_STORE_add_cert(AX509Store, X509);
+      c_X509_free(X509);
+    end;
+    { Enumeration frees the previous context itself }
+    Cert := c_CertEnumCertificatesInStore(Store, Cert);
+  end;
+  c_CertCloseStore(Store, 0);
+end;
+
+procedure AddWindowsTrustStore(ACtx: Pointer);
+var
+  X509Store: Pointer;
+begin
+  X509Store := c_SSL_CTX_get_cert_store(ACtx);
+  if X509Store = nil then
+    Exit;
+  AddSystemStore(X509Store, 'ROOT');
+  AddSystemStore(X509Store, 'CA');
+end;
+{$ENDIF}
+
 procedure EnsureOpenSSLInit;
 begin
   if not GInited then
@@ -568,6 +638,9 @@ begin
   begin
     c_SSL_CTX_set_verify(Ctx, SSL_VERIFY_PEER, nil);
     c_SSL_CTX_set_default_verify_paths(Ctx);
+    {$IFDEF WINDOWS}
+    AddWindowsTrustStore(Ctx);
+    {$ENDIF}
   end
   else
     c_SSL_CTX_set_verify(Ctx, SSL_VERIFY_NONE, nil);
